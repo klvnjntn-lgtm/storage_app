@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String   @default("free")
+  seatLimit Int      @default(1)
+  createdAt DateTime @default(now())
+
+  users     User[]
+  products  Product[]
+  categories Category[]
+  brands    Brand[]
+  locations Location[]
+  stocks    Stock[]
+  events    Event[]
+  sessions   Session[]   // 👈 add this
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  password       String
+  role           Role         @default(USER)
+  active         Boolean      @default(true)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  events  Event[]
+}
+
+model Location {
+  id             String       @id @default(uuid())  // Fix #3: added @default
+  name           String
+  organizationId String                              // Fix #1: added org isolation
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  fromEvents     Event[]      @relation("FromLocation")
+  toEvents       Event[]      @relation("ToLocation")
+  stocks         Stock[]
+
+  @@unique([organizationId, name])                  // unique per org, not globally
+}
+
+model Category {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  products       Product[]
+
+  @@unique([organizationId, name])                  // Fix #5: scoped uniqueness
+}
+
+model Brand {
+  id             String       @id @default(uuid())  // Fix #4: added @default
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  products       Product[]
+
+  @@unique([organizationId, name])                  // unique per org, not globally
+}
+
+model Product {
+  id             String       @id @default(uuid())
+  sku            String?      @unique
+  oem            String?
+  name           String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  categoryId     String
+  category       Category     @relation(fields: [categoryId], references: [id])
+
+  brandId        String?
+  brand          Brand?       @relation(fields: [brandId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  stocks         Stock[]
+  events         Event[]
+  sessionItems   SessionItem[]
+}
+
+model Stock {
+  id             Int          @id @default(autoincrement())
+  quantity       Int          @default(0)
+
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+
+  locationId     String
+  location       Location     @relation(fields: [locationId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([productId, locationId], name: "productId_locationId")
+}
+
+enum EventType {
+  IMPORT
+  RECEIVE
+  MOVE
+  PICK
+  PACK
+  SHIP
+  ADJUSTMENT
+}
+
+model Session {
+  id             String    @id @default(cuid())
+  type           EventType
+  status         String    @default("OPEN")
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+  organizationId String                          // 👈 add this
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  items          SessionItem[]
+  events         Event[]
+}
+
+model SessionItem {
+  id        Int     @id @default(autoincrement())
+
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  quantity  Int
+
+  events    Event[]
+}
+
+model Event {
+  id             Int          @id @default(autoincrement())
+  type           EventType
+  quantity       Int
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+
+  fromLocationId String?
+  fromLocation   Location?    @relation("FromLocation", fields: [fromLocationId], references: [id])
+
+  toLocationId   String?
+  toLocation     Location?    @relation("ToLocation", fields: [toLocationId], references: [id])
+
+  sessionId      String?
+  session        Session?     @relation(fields: [sessionId], references: [id])
+
+  sessionItemId  Int?
+  sessionItem    SessionItem? @relation(fields: [sessionItemId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id])
+}
