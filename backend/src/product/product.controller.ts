@@ -58,6 +58,12 @@ export class ProductController {
     return this.productService.search(orgId, q);
   }
 
+  // Must come before ':id' — otherwise "by-barcode" gets swallowed as an id param.
+  @Get('by-barcode/:barcode')
+  findByBarcode(@CurrentOrg() orgId: string, @Param('barcode') barcode: string) {
+    return this.productService.findByBarcode(orgId, barcode);
+  }
+
   @Get(':id')
   findOne(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.productService.findOne(orgId, id);

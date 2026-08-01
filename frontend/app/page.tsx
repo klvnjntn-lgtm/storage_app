@@ -230,7 +230,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col gap-3">
             <a
-              href="https://wa.me/YOUR_NUMBER"
+              href="https://wa.me/6281372127181"
               className="flex items-center justify-between px-5 py-4 rounded-md border border-gray-300 bg-white hover:bg-gray-100 font-medium transition group"
             >
               <div className="flex items-center gap-3">
@@ -254,7 +254,7 @@ export default function LandingPage() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Email us</p>
-                  <p className="text-xs text-gray-500">hello@warehouselayer.com</p>
+                  <p className="text-xs text-gray-500">klvnjntn@gmail.com</p>
                 </div>
               </div>
               <ChevronRight size={16} className="text-gray-400 group-hover:text-black transition" />

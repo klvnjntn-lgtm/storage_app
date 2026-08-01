@@ -60,9 +60,9 @@ export default function ReferenceDataPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await apiFetch(`http://localhost:3000/${config.listPath}`, {
-        headers: authHeaders(false),
-      });
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/${config.listPath}`, {
+  headers: authHeaders(false),
+});
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -111,7 +111,7 @@ export default function ReferenceDataPage() {
 
     setSavingId(id);
     try {
-      const res = await apiFetch(`http://localhost:3000/${config.listPath}/${id}`, {
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/${config.listPath}/${id}`, {
         method: 'PATCH',
         headers: authHeaders(),
         body: JSON.stringify({ name: trimmed }),
@@ -148,7 +148,7 @@ export default function ReferenceDataPage() {
     setError('');
 
     try {
-      const res = await apiFetch(`http://localhost:3000/${config.mergePath}`, {
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/${config.mergePath}`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ sourceIds, targetId: survivorId }),

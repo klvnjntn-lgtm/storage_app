@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Barcode from 'react-barcode';
 import { ArrowLeft, Tag, Printer } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+
 type Item = {
   sku: string;
   name: string;
@@ -23,11 +24,11 @@ export default function LabelsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-return (
+  return (
     <main className="min-h-screen bg-white text-black">
 
-      {/* Header */}
-      <div className="px-6 py-5 border-b-2 border-gray-300">
+      {/* Header — hidden on print */}
+      <div className="no-print px-6 py-5 border-b-2 border-gray-300">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
@@ -76,7 +77,7 @@ return (
             >
               <p className="font-bold text-sm truncate w-full">{item.sku}</p>
               <p className="text-xs text-gray-600 mb-2 truncate w-full">{item.name}</p>
-              <Barcode value={item.sku} height={40} fontSize={12} />
+              <Barcode value={item.sku} height={30} width={1.3} fontSize={10} margin={0} />
             </div>
           ))}
         </div>
@@ -84,30 +85,57 @@ return (
 
       {/* Print-only layout */}
       <style jsx global>{`
-        @media print {
-          .no-print {
-            display: none !important;
-          }
+@media print {
+  .no-print {
+    display: none !important;
+  }
 
-          @page {
-            size: 2in 1in;
-            margin: 0;
-          }
+  main {
+    margin: 0;
+    padding: 0;
+  }
 
-          .label-grid {
-            display: block !important;
-          }
+  @page {
+    size: A4 portrait;
+    margin: 0.4in;
+  }
 
-          .label-card {
-            border: none !important;
-            border-radius: 0 !important;
-            width: 2in;
-            height: 1in;
-            page-break-after: always;
-            break-after: page;
-            display: flex !important;
-          }
-        }
+  .label-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, 2in);
+    grid-auto-rows: 1in;
+    gap: 0.15in;
+    justify-content: start;
+    align-content: start;
+  }
+
+  .label-card {
+    box-sizing: border-box;
+    border: 1px dashed #ccc !important;
+    border-radius: 0 !important;
+    width: 2in;
+    height: 1in;
+    padding: 0.05in 0.1in !important;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .label-card p {
+    margin: 0 !important;
+    line-height: 1.1;
+  }
+
+  .label-card svg {
+    max-width: 100%;
+    height: auto !important;
+  }
+}
       `}</style>
     </main>
-  );}
+  );
+}

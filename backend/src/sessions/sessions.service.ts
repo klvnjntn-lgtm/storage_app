@@ -16,35 +16,43 @@ export class SessionsService {
     });
   }
 
-  async findAll(orgId: string) {
-    return this.prisma.session.findMany({
-      where: { organizationId: orgId },                    // 🔒
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        type: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-  }
+async findAll(orgId: string) {
+  const sessions = await this.prisma.session.findMany({
+    where: { organizationId: orgId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      createdAt: true,
+      _count: { select: { items: true } },
+    },
+  });
+
+  return sessions.map(({ _count, ...rest }) => ({
+    ...rest,
+    totalItems: _count.items,
+  }));
+}
 
   async findOne(orgId: string, id: string) {
-    const session = await this.prisma.session.findFirst({
-      where: { id, organizationId: orgId },                // 🔒
-      include: {
-        events: {
-          include: {
-            fromLocation: true,
-            toLocation: true,
+  const session = await this.prisma.session.findFirst({
+    where: { id, organizationId: orgId },
+    include: {
+      items: {
+        include: {
+          product: true,
+          events: {
+            include: { fromLocation: true, toLocation: true },
           },
         },
       },
-    });
+    },
+  });
 
-    if (!session) throw new BadRequestException('Session not found');
-    return session;
-  }
+  if (!session) throw new BadRequestException('Session not found');
+  return session;
+}
 
   async addItem(
     orgId: string,

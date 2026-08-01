@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Brand, EventType } from '@prisma/client';
@@ -75,6 +76,7 @@ const events = await this.prisma.event.findMany({
       sessionId: e.session?.id ?? null,
       sessionType: e.session?.type ?? null,
       sessionStatus: e.session?.status ?? null,
+      user: e.user ?? null,
     }));
   }
 
@@ -356,4 +358,13 @@ const events = await this.prisma.event.findMany({
     });
     if (!product) throw new BadRequestException('Product not found');
   }
+// product.service.ts
+async findByBarcode(orgId: string, code: string) {
+  const product = await this.prisma.product.findFirst({
+    where: { sku: code, organizationId: orgId },
+  });
+  if (!product) throw new NotFoundException('Product not found for this code');
+  return product;
+
+}
 }

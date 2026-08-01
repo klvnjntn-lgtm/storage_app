@@ -10,6 +10,7 @@ import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ForbiddenException } from '@nestjs/common';
 import { SetSeatLimitDto } from './dto/set-seat-limit.dto';
+import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -27,12 +28,14 @@ async me(@CurrentUser() user: any) {
 }
 
   @Public()
+  @SkipLicenseCheck()
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto.organizationName, dto.email, dto.password);
   }
 
   @Public()
+  @SkipLicenseCheck()
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto.email, dto.password);
@@ -45,6 +48,7 @@ async me(@CurrentUser() user: any) {
     return this.authService.invite(user.organizationId, dto.email, dto.password, dto.role);
   }
 @Public()
+@SkipLicenseCheck()
 @Patch('org/:orgId/seats')
 setSeatLimit(
   @Param('orgId') orgId: string,

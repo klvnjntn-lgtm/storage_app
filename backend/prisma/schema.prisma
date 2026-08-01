@@ -93,6 +93,9 @@ model Product {
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
+  barcode String? 
+
+  @@unique([organizationId, barcode])
 
   stocks         Stock[]
   events         Event[]
@@ -179,4 +182,16 @@ model Event {
 
   userId    String?
   user      User?   @relation(fields: [userId], references: [id])
+}
+
+model License {
+  id           String    @id @default(uuid())
+  key          String    @unique
+  customerName String
+  branchName   String
+  domain       String?
+  status       String    @default("ACTIVE")
+  issuedAt     DateTime  @default(now())
+  expiresAt    DateTime?
+  lastCheckIn  DateTime?
 }
