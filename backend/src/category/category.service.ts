@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+const MAX_NAME_LENGTH = 100;
+
 @Injectable()
 export class CategoryService {
   constructor(private prisma: PrismaService) {}
@@ -27,6 +29,11 @@ export class CategoryService {
     if (!trimmed) {
       throw new BadRequestException('Category name is required');
     }
+    if (trimmed.length > MAX_NAME_LENGTH) {
+      throw new BadRequestException(
+        `Category name cannot exceed ${MAX_NAME_LENGTH} characters`,
+      );
+    }
 
     const existing = await this.prisma.category.findFirst({
       where: { name: { equals: trimmed, mode: 'insensitive' }, organizationId: orgId }, // 🔒
@@ -44,6 +51,11 @@ export class CategoryService {
     const trimmed = name?.trim();
     if (!trimmed) {
       throw new BadRequestException('Category name is required');
+    }
+    if (trimmed.length > MAX_NAME_LENGTH) {
+      throw new BadRequestException(
+        `Category name cannot exceed ${MAX_NAME_LENGTH} characters`,
+      );
     }
 
     const existing = await this.prisma.category.findFirst({
@@ -70,6 +82,12 @@ export class CategoryService {
     });
   }
 
+  // Unlike Location, a category merge is NOT rewriting history — a
+  // product's categoryId is its current classification, not an
+  // append-only log entry like Event.fromLocationId/toLocationId is.
+  // Repointing products to targetId and hard-deleting the source
+  // categories is correct here: there's no "this product was PRODUCE on
+  // March 3rd" record anywhere that merge would silently falsify.
   async merge(orgId: string, sourceIds: string[], targetId: string) {
     const uniqueSourceIds = Array.from(new Set(sourceIds));
 

@@ -1,9 +1,8 @@
-import { Controller, Get, Post, Body, Headers, ForbiddenException } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { LicenseService } from './license.service';
 import { SkipLicenseCheck } from './decorators/skip-license-check.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { LicenseStatusDto } from './dto/license-status.dto';
-import { CreateLicenseDto } from './dto/create-license.dto';
 
 @Controller('license')
 export class LicenseController {
@@ -20,18 +19,5 @@ export class LicenseController {
       expiresAt: state.expiresAt,
       message: state.valid ? undefined : 'License invalid or expired. Contact support to renew.',
     };
-  }
-
-  @Post('admin/create')
-  @Public()
-  @SkipLicenseCheck()
-  createLicense(
-    @Body() dto: CreateLicenseDto,
-    @Headers('x-superadmin-secret') secret: string,
-  ) {
-    if (secret !== process.env.SUPERADMIN_SECRET) {
-      throw new ForbiddenException();
-    }
-    return this.licenseService.createLicense(dto);
   }
 }

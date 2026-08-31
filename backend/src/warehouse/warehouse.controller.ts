@@ -1,66 +1,42 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
+// src/warehouse/warehouse.controller.ts
+import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { OrgGuard } from 'src/auth/guards/org.guard';
-import { CurrentOrg } from 'src/auth/decorators/org.decorator';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { OrgGuard } from '../auth/guards/org.guard';
+import { ModuleGuard } from '../auth/guards/module.guard';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModuleKey } from '@prisma/client';
 
-/**
- * JwtAuthGuard  — validates the JWT and populates req.user
- * OrgGuard      — confirms the organizationId in the token is real
- *
- * Both run on every route in this controller.
- */
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('warehouse')
 export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
-  @Get('summary')
-  summary(@CurrentOrg() orgId: string) {
-    return this.warehouseService.summary(orgId);
-  }
-
-  @Get('events')
-  events(@CurrentOrg() orgId: string) {
-    return this.warehouseService.events(orgId);
-  }
-
+  @UseGuards(ModuleGuard)
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Post('receive')
   receive(
-    @CurrentOrg() orgId: string,
+    @CurrentOrg() organizationId: string,
     @Body() body: { productId: string; qty: number; locationId?: string },
   ) {
-    return this.warehouseService.receive(
-      orgId,
-      body.productId,
-      body.qty,
-      body.locationId,
-    );
+    return this.warehouseService.receive(organizationId, body.productId, body.qty, body.locationId);
   }
 
+  @UseGuards(ModuleGuard)
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Post('move')
   move(
-    @CurrentOrg() orgId: string,
+    @CurrentOrg() organizationId: string,
     @Body()
-    body: {
-      productId: string;
-      qty: number;
-      fromLocationId: string;
-      toLocationId: string;
-    },
+    body: { productId: string; qty: number; fromLocationId: string; toLocationId: string },
   ) {
-    return this.warehouseService.move(
-      orgId,
-      body.productId,
-      body.qty,
-      body.fromLocationId,
-      body.toLocationId,
-    );
+    return this.warehouseService.move(organizationId, body.productId, body.qty, body.fromLocationId, body.toLocationId);
+  }
+
+  // Read-only, ungated — same reasoning as ProductController/SessionsController.
+  @Get('events')
+  events(@CurrentOrg() organizationId: string) {
+    return this.warehouseService.events(organizationId);
   }
 }

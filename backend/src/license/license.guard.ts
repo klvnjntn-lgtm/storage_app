@@ -21,8 +21,6 @@ export class LicenseGuard implements CanActivate {
     [context.getHandler(), context.getClass()],
   );
 
-  console.log('🔍 LicenseGuard running. skip:', skip, 'isValid:', this.licenseService.isValid());
-
   if (skip) return true;
 
   if (!this.licenseService.isValid()) {

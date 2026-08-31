@@ -14,77 +14,48 @@ const [loading, setLoading] = useState(false);
 const [error, setError] = useState('');
 
 async function handleLogin() {
-setError('');
+  setError('');
 
-
-if (!email.trim() || !password) {
-  setError('Email and password are required');
-  return;
-}
-
-setLoading(true);
-
-try {
-  const loginRes = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL}/auth/login`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: email.trim(),
-        password,
-      }),
-    },
-  );
-
-  const loginData = await loginRes.json();
-
-  console.log('LOGIN RESPONSE:', loginData);
-console.log('ACCESS TOKEN:', loginData.accessToken);
-
-  if (!loginRes.ok) {
-    throw new Error(loginData?.message || 'Login failed');
+  if (!email.trim() || !password) {
+    setError('Email and password are required');
+    return;
   }
+
+  setLoading(true);
+
+  try {
+const loginRes = await fetch('/api/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: email.trim(), password }),
+});
+
+const loginData = await loginRes.json();
+
+if (!loginRes.ok) {
+  throw new Error(loginData?.message || 'Login failed');
+}
 
 localStorage.setItem('accessToken', loginData.accessToken);
 
-console.log(
-  'Stored token:',
-  localStorage.getItem('accessToken'),
-);
+const meRes = await fetch('/api/auth/me', {
+  headers: { Authorization: `Bearer ${loginData.accessToken}` },
+});
 
-  const meRes = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL}/auth/me`,
-    {
-      headers: {
-        Authorization: `Bearer ${loginData.accessToken}`,
-      },
-    },
-  );
+if (!meRes.ok) {
+  throw new Error('Failed to load profile');
+}
 
-  if (!meRes.ok) {
-    throw new Error('Failed to load profile');
+const me = await meRes.json();
+localStorage.setItem('user', JSON.stringify(me));
+router.replace('/home');
+  } catch (err: any) {
+    console.error(err);
+    setError(err.message || 'Login failed');
+  } finally {
+    setLoading(false);
   }
-
-  const me = await meRes.json();
-
-  localStorage.setItem(
-    'user',
-    JSON.stringify(me),
-  );
-
-  router.replace('/home');
-} catch (err: any) {
-  console.error(err);
-  setError(err.message || 'Login failed');
-} finally {
-  setLoading(false);
 }
-
-}
-
 return ( <main className="min-h-screen bg-white text-black flex items-center justify-center p-6"> <div className="w-full max-w-sm space-y-6"> <header className="text-center"> <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-gray-100 mb-3"> <LogIn
            size={22}
            strokeWidth={2}

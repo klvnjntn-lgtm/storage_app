@@ -1,22 +1,18 @@
-import {
-  Injectable,
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+// src/product/product.service.ts
+import { Injectable, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Brand, EventType } from '@prisma/client';
+import { Brand, EventType, Prisma } from '@prisma/client';
+
+type Tx = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class ProductService {
+  private readonly logger = new Logger(ProductService.name);
   constructor(private prisma: PrismaService) {}
 
-  // -----------------------------
-  // FIND ONE
-  // -----------------------------
-  async findOne(orgId: string, id: string) {
+  async findOne(organizationId: string, id: string) {
     const product = await this.prisma.product.findFirst({
-      where: { id, organizationId: orgId },                // 🔒
+      where: { id, organizationId },
       include: { category: true, brand: true },
     });
 
@@ -24,12 +20,9 @@ export class ProductService {
     return product;
   }
 
-  // -----------------------------
-  // FIND ALL
-  // -----------------------------
-  async findAll(orgId: string) {
+  async findAll(organizationId: string) {
     const products = await this.prisma.product.findMany({
-      where: { organizationId: orgId },                    // 🔒
+      where: { organizationId },
       include: { category: true, brand: true, stocks: true },
     });
 
@@ -45,24 +38,20 @@ export class ProductService {
     }));
   }
 
-  // -----------------------------
-  // GET EVENTS
-  // -----------------------------
-  async getEvents(orgId: string, productId: string) {
-    // Confirm product belongs to org before returning its events
-    await this.assertProductOwnership(orgId, productId);
+  async getEvents(organizationId: string, productId: string) {
+    await this.assertProductOwnership(organizationId, productId);
 
-const events = await this.prisma.event.findMany({
-  where: { productId, organizationId: orgId },
-  orderBy: { createdAt: 'desc' },
-  include: {
-    product: { select: { name: true, sku: true } },
-    fromLocation: { select: { name: true } },
-    toLocation: { select: { name: true } },
-    session: { select: { id: true, type: true, status: true } },
-    user: { select: { email: true } },   // ← moved inside include
-  },
-});
+    const events = await this.prisma.event.findMany({
+      where: { productId, organizationId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        product: { select: { name: true, sku: true } },
+        fromLocation: { select: { name: true } },
+        toLocation: { select: { name: true } },
+        session: { select: { id: true, type: true, status: true } },
+        user: { select: { email: true } },
+      },
+    });
 
     return events.map((e) => ({
       id: e.id,
@@ -80,57 +69,94 @@ const events = await this.prisma.event.findMany({
     }));
   }
 
-  // -----------------------------
-  // CREATE
-  // -----------------------------
-  async create(
-    orgId: string,
-    data: {
-      name: string;
-      sku: string;
-      oem?: string;
-      category: string;
-      brand?: string;
-    },
-  ) {
-    const name = data.name.trim();
-    const sku = data.sku.trim();
-    const oem = data.oem?.trim() || undefined;
-    const categoryName = data.category.trim();
-    const brandName = data.brand?.trim();
+  private validateLengths(row: {
+    name: string;
+    sku: string;
+    oem?: string;
+    category: string;
+    brand?: string;
+    barcode?: string;
+  }) {
+    if (row.sku.length > 100)
+      throw new BadRequestException('SKU exceeds 100 characters');
 
-    if (!name) throw new BadRequestException('Product name is required');
-    if (!sku) throw new BadRequestException('SKU is required');
-    if (!categoryName) throw new BadRequestException('Category is required');
+    if (row.name.length > 255)
+      throw new BadRequestException('Name exceeds 255 characters');
 
-    const category = await this.findOrCreateCategory(orgId, categoryName);
-    const brand = brandName
-      ? await this.findOrCreateBrand(orgId, brandName)
-      : null;
+    if (row.category.length > 100)
+      throw new BadRequestException('Category exceeds 100 characters');
 
-    try {
-      return await this.prisma.product.create({
-        data: {
-          name,
-          sku,
-          oem,
-          categoryId: category.id,
-          brandId: brand?.id ?? null,
-          organizationId: orgId,                           // 🔒
-        },
-      });
-    } catch (err: any) {
-      if (err.code === 'P2002') {
-        throw new ConflictException(`A product with SKU "${sku}" already exists`);
-      }
-      throw err;
-    }
+    if (row.brand && row.brand.length > 100)
+      throw new BadRequestException('Brand exceeds 100 characters');
+
+    if (row.oem && row.oem.length > 100)
+      throw new BadRequestException('OEM exceeds 100 characters');
+
+    if (row.barcode && row.barcode.length > 100)
+      throw new BadRequestException('Barcode exceeds 100 characters');
   }
 
-  // -----------------------------
-  // SEARCH
-  // -----------------------------
-  async search(orgId: string, query: string) {
+async create(
+  organizationId: string,
+  data: {
+    name: string;
+    sku: string;
+    oem?: string;
+    category: string;
+    brand?: string;
+    barcode?: string;
+    sellingPrice?: number;
+    costPrice?: number;
+  },
+  tx: Tx = this.prisma,
+) {
+  const name = data.name.trim();
+  const sku = data.sku.trim();
+  const oem = data.oem?.trim() || undefined;
+  const categoryName = data.category.trim();
+  const brandName = data.brand?.trim();
+  const barcode = data.barcode?.trim() || undefined;
+
+  if (!name) throw new BadRequestException('Product name is required');
+  if (!sku) throw new BadRequestException('SKU is required');
+  if (!categoryName) throw new BadRequestException('Category is required');
+
+  if (data.sellingPrice != null && data.sellingPrice < 0) {
+    throw new BadRequestException('Selling price cannot be negative');
+  }
+  if (data.costPrice != null && data.costPrice < 0) {
+    throw new BadRequestException('Cost price cannot be negative');
+  }
+
+  this.validateLengths({ name, sku, oem, category: categoryName, brand: brandName, barcode });
+
+  const category = await this.findOrCreateCategory(organizationId, categoryName, tx);
+  const brand = brandName ? await this.findOrCreateBrand(organizationId, brandName, tx) : null;
+
+  try {
+    return await tx.product.create({
+      data: {
+        name,
+        sku,
+        oem,
+        barcode,
+        sellingPrice: data.sellingPrice ?? null,
+        costPrice: data.costPrice ?? null,
+        categoryId: category.id,
+        brandId: brand?.id ?? null,
+        organizationId,
+      },
+    });
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      throw new ConflictException(
+        `A product with SKU "${sku}"${barcode ? ` or barcode "${barcode}"` : ''} already exists`,
+      );
+    }
+    throw err;
+  }
+}
+  async search(organizationId: string, query: string) {
     const q = query.trim();
 
     if (!q) return { products: [], stocks: [], locations: [], events: [] };
@@ -142,7 +168,7 @@ const events = await this.prisma.event.findMany({
     const [products, stocks, locations, events] = await Promise.all([
       this.prisma.product.findMany({
         where: {
-          organizationId: orgId,                           // 🔒
+          organizationId,
           active: true,
           OR: [
             { name: { contains: q, mode: 'insensitive' } },
@@ -156,7 +182,7 @@ const events = await this.prisma.event.findMany({
 
       this.prisma.stock.findMany({
         where: {
-          organizationId: orgId,                           // 🔒
+          organizationId,
           OR: [
             { location: { name: { contains: q, mode: 'insensitive' } } },
             { product: { name: { contains: q, mode: 'insensitive' } } },
@@ -169,7 +195,7 @@ const events = await this.prisma.event.findMany({
 
       this.prisma.location.findMany({
         where: {
-          organizationId: orgId,                           // 🔒
+          organizationId,
           name: { contains: q, mode: 'insensitive' },
         },
         take: 20,
@@ -177,30 +203,100 @@ const events = await this.prisma.event.findMany({
 
       this.prisma.event.findMany({
         where: {
-          organizationId: orgId,                           // 🔒
+          organizationId,
           OR: [
             { product: { name: { contains: q, mode: 'insensitive' } } },
             ...(eventType ? [{ type: eventType }] : []),
           ],
         },
-        include: { product: true, fromLocation: true, toLocation: true },
+        include: {
+          product: true,
+          fromLocation: true,
+          toLocation: true,
+          session: { select: { id: true, type: true, stage: true, status: true } },
+        },
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
     ]);
 
-    return { products, stocks, locations, events };
+    return {
+      products,
+      stocks,
+      locations,
+      events: events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        quantity: e.quantity,
+        createdAt: e.createdAt,
+        productId: e.productId,
+        product: e.product,
+        from: e.fromLocation?.name ?? null,
+        to: e.toLocation?.name ?? null,
+        sessionId: e.session?.id ?? null,
+        sessionType: e.session?.type ?? null,
+        sessionStatus: e.session?.status ?? null,
+      })),
+    };
   }
 
   // -----------------------------
-  // UPDATE CATEGORY
+  // SEARCH FOR INVOICE (POS) — flat product list w/ stock across ALL locations
   // -----------------------------
-  async updateCategory(orgId: string, id: string, categoryId: string) {
-    await this.assertProductOwnership(orgId, id);
+  async searchForInvoice(organizationId: string, query: string, locationId?: string) {
+    const q = query.trim();
 
-    // Confirm the target category also belongs to this org
+    if (!q && !locationId) return [];
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        organizationId,
+        active: true,
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: 'insensitive' } },
+                { sku: { contains: q, mode: 'insensitive' } },
+                { oem: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+        ...(locationId
+          ? {
+              stocks: {
+                some: { organizationId, locationId },
+              },
+            }
+          : {}),
+      },
+      include: {
+        stocks: {
+          where: { organizationId },
+          include: { location: true },
+        },
+      },
+      take: 20,
+    });
+
+    return products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      barcode: p.barcode,
+      sellingPrice: p.sellingPrice != null ? Number(p.sellingPrice) : null,
+      stockByLocation: p.stocks.map((s) => ({
+        locationId: s.locationId,
+        locationName: s.location.name,
+        quantity: s.quantity,
+      })),
+    }));
+  }
+
+  async updateCategory(organizationId: string, id: string, categoryId: string) {
+    await this.assertProductOwnership(organizationId, id);
+
     const category = await this.prisma.category.findFirst({
-      where: { id: categoryId, organizationId: orgId },   // 🔒
+      where: { id: categoryId, organizationId },
     });
     if (!category) throw new BadRequestException('Category not found');
 
@@ -210,36 +306,32 @@ const events = await this.prisma.event.findMany({
     });
   }
 
-  // -----------------------------
-  // ARCHIVE / RESTORE
-  // -----------------------------
-  async archive(orgId: string, id: string) {
-    await this.assertProductOwnership(orgId, id);
+  async archive(organizationId: string, id: string) {
+    await this.assertProductOwnership(organizationId, id);
     return this.prisma.product.update({
       where: { id },
       data: { active: false },
     });
   }
 
-  async restore(orgId: string, id: string) {
-    await this.assertProductOwnership(orgId, id);
+  async restore(organizationId: string, id: string) {
+    await this.assertProductOwnership(organizationId, id);
     return this.prisma.product.update({
       where: { id },
       data: { active: true },
     });
   }
 
-  // -----------------------------
-  // BULK IMPORT
-  // -----------------------------
   async bulkImport(
-    orgId: string,
+    organizationId: string,
     rows: {
       name: string;
       sku: string;
       oem?: string;
       category: string;
       brand?: string;
+      sellingPrice?: number;
+      costPrice?: number;
     }[],
   ) {
     const accepted: any[] = [];
@@ -247,124 +339,179 @@ const events = await this.prisma.event.findMany({
 
     for (const row of rows) {
       try {
-        if (!row.name?.trim() || !row.category?.trim()) {
-          rejected.push({ ...row, reason: 'missing name or category' });
-          continue;
-        }
-        if (!row.sku?.trim()) {
-          rejected.push({ ...row, reason: 'missing sku' });
-          continue;
-        }
-
-        const name = row.name.trim();
-        const sku = row.sku.trim();
-        const oem = row.oem?.trim() || undefined;
-        const categoryName = row.category.trim();
-        const brandName = row.brand?.trim();
-
-        const category = await this.findOrCreateCategory(orgId, categoryName);
-        const brand: Brand | null = brandName
-          ? await this.findOrCreateBrand(orgId, brandName)
-          : null;
-
-        // Scope SKU lookup to this org — two orgs can share the same SKU
-        let product = await this.prisma.product.findFirst({
-          where: { sku, organizationId: orgId },           // 🔒
-        });
-
-        if (!product) {
-          product = await this.prisma.product.create({
-            data: {
-              name,
-              sku,
-              oem,
-              categoryId: category.id,
-              brandId: brand?.id ?? null,
-              active: true,
-              organizationId: orgId,                       // 🔒
-            },
-          });
-        } else {
-          product = await this.prisma.product.update({
-            where: { id: product.id },                     // use id not sku — sku is no longer globally unique
-            data: {
-              name,
-              oem,
-              categoryId: category.id,
-              brandId: brand?.id ?? null,
-            },
-          });
-        }
+        const { product, category, brand } = await this.resolveForImport(organizationId, row);
 
         accepted.push({
           productId: product.id,
-          name,
-          sku,
-          oem,
+          name: product.name,
+          sku: product.sku,
+          oem: row.oem?.trim() || undefined,
           category: category.name,
           brand: brand?.name ?? null,
         });
       } catch (err) {
-        rejected.push({ ...row, reason: 'system error' });
+        this.logger.error(
+          `Bulk import failed for row sku=${row.sku ?? '?'} org=${organizationId}: ${
+            err instanceof Error ? err.message : err
+          }`,
+          err instanceof Error ? err.stack : undefined,
+        );
+
+        rejected.push({
+          ...row,
+          reason: err instanceof BadRequestException ? err.message : 'system error',
+        });
       }
     }
 
     return { accepted, rejected };
   }
 
-  // -----------------------------
-  // PRIVATE HELPERS
-  // -----------------------------
+  async resolveForImport(
+    organizationId: string,
+    row: {
+      sku: string;
+      name: string;
+      category: string;
+      brand?: string;
+      sellingPrice?: number;
+      costPrice?: number;
+    },
+    tx: Tx = this.prisma,
+  ) {
+    const name = row.name?.trim();
+    const sku = row.sku?.trim();
+    const categoryName = row.category?.trim();
+    const brandName = row.brand?.trim();
 
-  // Matches by name within the org — prevents duplicates across create()
-  // and bulkImport() for the same organization.
-  private async findOrCreateCategory(orgId: string, name: string) {
+    if (!name || !categoryName) {
+      throw new BadRequestException('missing name or category');
+    }
+    if (!sku) {
+      throw new BadRequestException('missing sku');
+    }
+    if (row.sellingPrice != null && row.sellingPrice < 0) {
+      throw new BadRequestException('selling price cannot be negative');
+    }
+    if (row.costPrice != null && row.costPrice < 0) {
+      throw new BadRequestException('cost price cannot be negative');
+    }
+
+    this.validateLengths({
+      name,
+      sku,
+      category: categoryName,
+      brand: brandName,
+    });
+
+    const category = await this.findOrCreateCategory(organizationId, categoryName, tx);
+    const brand = brandName
+      ? await this.findOrCreateBrand(organizationId, brandName, tx)
+      : null;
+
+    let product = await tx.product.findFirst({
+      where: { sku, organizationId },
+    });
+
+    if (!product) {
+      product = await tx.product.create({
+        data: {
+          name,
+          sku,
+          categoryId: category.id,
+          brandId: brand?.id ?? null,
+          organizationId,
+          active: true,
+          sellingPrice: row.sellingPrice ?? null,
+          costPrice: row.costPrice ?? null,
+        },
+      });
+    } else {
+      if (!product.active) {
+        throw new BadRequestException(
+          `Product with SKU "${sku}" is archived — restore it before importing stock for it`,
+        );
+      }
+
+      product = await tx.product.update({
+        where: { id: product.id },
+        data: {
+          name,
+          categoryId: category.id,
+          brandId: brand?.id ?? null,
+          ...(row.sellingPrice !== undefined ? { sellingPrice: row.sellingPrice } : {}),
+          ...(row.costPrice !== undefined ? { costPrice: row.costPrice } : {}),
+        },
+      });
+    }
+
+    return { product, category, brand };
+  }
+
+  private async findOrCreateCategory(organizationId: string, name: string, tx: Tx = this.prisma) {
     const trimmed = name.trim();
 
-    const existing = await this.prisma.category.findFirst({
-      where: {
-        name: { equals: trimmed, mode: 'insensitive' },
-        organizationId: orgId,                             // 🔒
-      },
+    const existing = await tx.category.findFirst({
+      where: { name: { equals: trimmed, mode: 'insensitive' }, organizationId },
     });
     if (existing) return existing;
 
-    return this.prisma.category.create({
-      data: { name: trimmed, organizationId: orgId },      // 🔒
-    });
+    try {
+      return await tx.category.create({
+        data: { name: trimmed, organizationId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        const category = await tx.category.findFirst({
+          where: { name: { equals: trimmed, mode: 'insensitive' }, organizationId },
+        });
+        if (category) return category;
+      }
+      throw err;
+    }
   }
 
-  private async findOrCreateBrand(orgId: string, name: string) {
+  private async findOrCreateBrand(organizationId: string, name: string, tx: Tx = this.prisma) {
     const trimmed = name.trim();
 
-    const existing = await this.prisma.brand.findFirst({
-      where: {
-        name: { equals: trimmed, mode: 'insensitive' },
-        organizationId: orgId,                             // 🔒
-      },
+    const existing = await tx.brand.findFirst({
+      where: { name: { equals: trimmed, mode: 'insensitive' }, organizationId },
     });
     if (existing) return existing;
 
-    const id = `${orgId}_${trimmed.toLowerCase().replace(/\s+/g, '_')}`;
-    return this.prisma.brand.create({
-      data: { id, name: trimmed, organizationId: orgId },  // 🔒
-    });
+    const id = `${organizationId}_${trimmed.toLowerCase().replace(/\s+/g, '_')}`;
+
+    try {
+      return await tx.brand.create({
+        data: { id, name: trimmed, organizationId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        const brand = await tx.brand.findFirst({
+          where: { name: { equals: trimmed, mode: 'insensitive' }, organizationId },
+        });
+        if (brand) return brand;
+      }
+      throw err;
+    }
   }
 
-  private async assertProductOwnership(orgId: string, productId: string) {
+  private async assertProductOwnership(organizationId: string, productId: string) {
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, organizationId: orgId },
+      where: { id: productId, organizationId },
       select: { id: true },
     });
     if (!product) throw new BadRequestException('Product not found');
   }
-// product.service.ts
-async findByBarcode(orgId: string, code: string) {
-  const product = await this.prisma.product.findFirst({
-    where: { sku: code, organizationId: orgId },
-  });
-  if (!product) throw new NotFoundException('Product not found for this code');
-  return product;
 
-}
+  async findByBarcode(organizationId: string, code: string) {
+    const product = await this.prisma.product.findFirst({
+      where: {
+        organizationId,
+        OR: [{ barcode: code }, { sku: code }],
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found for this code');
+    return product;
+  }
 }
