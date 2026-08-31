@@ -15,7 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from 'src/auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentOrg } from 'src/auth/decorators/org.decorator';
+import { CurrentOrg } from 'src/auth/decorators/current-org.decorator';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('brands')

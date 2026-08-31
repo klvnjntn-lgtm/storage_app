@@ -1,3 +1,4 @@
+// src/warehouse/warehouse.service.ts
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ReceiveService } from '../receive/receive.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,64 +10,26 @@ export class WarehouseService {
     private readonly prisma: PrismaService,
   ) {}
 
-  // -----------------------------
-  // RECEIVE
-  // -----------------------------
   async receive(
-    orgId: string,
+    organizationId: string,
     productId: string,
     qty: number,
     locationId?: string,
   ) {
-    // Verify product belongs to this org before delegating
-    await this.assertProductOwnership(orgId, productId);
+    await this.assertProductActive(organizationId, productId);
     return this.receiveService.receive(
-  orgId,
-  productId,
-  qty,
-  locationId,
-);
-  }
-
-  // -----------------------------
-  // SUMMARY
-  // -----------------------------
-  async summary(orgId: string) {
-    const products = await this.prisma.product.findMany({
-      where: { organizationId: orgId },           // 🔒 org-scoped
-      include: {
-        category: true,
-        brand: true,
-        stocks: {
-          include: { location: true },
-        },
-        events: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
-    });
-
-    return products.map((product) => ({
-      productId: product.id,
-      sku: product.sku,
-      name: product.name,
-      category: product.category?.name ?? null,
-      brand: product.brand?.name ?? null,
-      totalStock: product.stocks.reduce((sum, s) => sum + s.quantity, 0),
-      locations: product.stocks.map((s) => ({
-        location: s.location.name,
-        qty: s.quantity,
-      })),
-      lastAction: product.events[0]?.type ?? '-',
-    }));
+      organizationId,
+      productId,
+      qty,
+      locationId,
+    );
   }
 
   // -----------------------------
   // MOVE
   // -----------------------------
   async move(
-    orgId: string,
+    organizationId: string,
     productId: string,
     qty: number,
     fromLocationId: string,
@@ -82,21 +45,24 @@ export class WarehouseService {
       throw new BadRequestException('Invalid quantity');
     }
 
-    // All existence checks are org-scoped — a product/location from another
-    // org will appear as "not found" rather than "forbidden", which avoids
-    // leaking that the resource exists at all.
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, organizationId: orgId },   // 🔒
+      where: { id: productId, organizationId },
+      select: { id: true, active: true },
     });
     if (!product) throw new BadRequestException('Product not found');
+    if (!product.active) {
+      throw new BadRequestException(
+        'Product is archived — restore it before recording stock movements',
+      );
+    }
 
     const fromLocation = await this.prisma.location.findFirst({
-      where: { id: fromLocationId, organizationId: orgId }, // 🔒
+      where: { id: fromLocationId, organizationId },
     });
     if (!fromLocation) throw new BadRequestException('Source location not found');
 
     const toLocation = await this.prisma.location.findFirst({
-      where: { id: toLocationId, organizationId: orgId },   // 🔒
+      where: { id: toLocationId, organizationId },
     });
     if (!toLocation) throw new BadRequestException('Destination location not found');
 
@@ -129,7 +95,7 @@ export class WarehouseService {
           productId,
           locationId: toLocationId,
           quantity: qty,
-          organizationId: orgId,                           // 🔒
+          organizationId,
         },
       });
 
@@ -140,7 +106,7 @@ export class WarehouseService {
           quantity: qty,
           fromLocationId,
           toLocationId,
-          organizationId: orgId,                           // 🔒
+          organizationId,
         },
       });
 
@@ -148,14 +114,11 @@ export class WarehouseService {
     });
   }
 
-  // -----------------------------
-  // EVENTS
-  // -----------------------------
-  async events(orgId: string) {
+  async events(organizationId: string) {
     return this.prisma.event.findMany({
-      where: { organizationId: orgId },                    // 🔒 org-scoped
+      where: { organizationId },
       orderBy: { createdAt: 'desc' },
-      take: 100,                                           // basic pagination guard
+      take: 100, // basic pagination guard
       include: {
         product: { select: { sku: true, name: true } },
         fromLocation: { select: { name: true } },
@@ -164,35 +127,37 @@ export class WarehouseService {
     });
   }
 
-  // -----------------------------
-  // STOCK CHECK (utility)
-  // -----------------------------
-  async getStock(orgId: string, productId: string) {
-    await this.assertProductOwnership(orgId, productId);
+  async getStock(organizationId: string, productId: string) {
+    await this.assertProductOwnership(organizationId, productId);
     return this.prisma.stock.findMany({
-  where: {
-    productId,
-    organizationId: orgId,
-  },
-  include: {
-    location: true,
-  },
-});
+      where: {
+        productId,
+        organizationId,
+      },
+      include: {
+        location: true,
+      },
+    });
   }
 
-  // -----------------------------
-  // PRIVATE HELPERS
-  // -----------------------------
-
-  /**
-   * Throws if productId doesn't belong to orgId.
-   * Returns "not found" instead of "forbidden" to avoid resource enumeration.
-   */
-  private async assertProductOwnership(orgId: string, productId: string) {
+  private async assertProductOwnership(organizationId: string, productId: string) {
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, organizationId: orgId },
+      where: { id: productId, organizationId },
       select: { id: true },
     });
     if (!product) throw new BadRequestException('Product not found');
+  }
+
+  private async assertProductActive(organizationId: string, productId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, organizationId },
+      select: { id: true, active: true },
+    });
+    if (!product) throw new BadRequestException('Product not found');
+    if (!product.active) {
+      throw new BadRequestException(
+        'Product is archived — restore it before recording stock movements',
+      );
+    }
   }
 }

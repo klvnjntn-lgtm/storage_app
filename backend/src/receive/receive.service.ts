@@ -1,3 +1,4 @@
+// src/receive/receive.service.ts
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -5,80 +6,82 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ReceiveService {
   constructor(private prisma: PrismaService) {}
 
+  // -----------------------------
+  // RECEIVE (count-only)
+  // Stock is set by Import — this only logs what was physically
+  // counted. A mismatch against the imported quantity is a
+  // discrepancy for a human to resolve (e.g. via StockService.adjust),
+  // not something this endpoint corrects automatically.
+  // -----------------------------
   async receive(
-    orgId: string,
+    organizationId: string,
     productId: string,
     qty: number,
     locationId?: string,
+    sessionId?: string,
+    userId?: string,
   ) {
-    // -----------------------------
-    // 1. VALIDATE
-    // -----------------------------
     if (!qty || qty <= 0) {
       throw new BadRequestException('Invalid quantity');
     }
 
-    // org-scoped product check
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, organizationId: orgId },  // 🔒
+      where: { id: productId, organizationId },
     });
 
     if (!product) {
       throw new BadRequestException('Product not found');
     }
 
-    // -----------------------------
-    // 2. RESOLVE TARGET LOCATION
-    // Caller can pass a locationId; if omitted, fall back to the
-    // org's "RECEIVED" location. Both must belong to this org.
-    // -----------------------------
-    let targetLocationId: string;
+    let session: { id: string; status: string } | null = null;
 
-    if (locationId) {
-      const location = await this.prisma.location.findFirst({
-        where: { id: locationId, organizationId: orgId },  // 🔒
+    if (sessionId) {
+      session = await this.prisma.session.findFirst({
+        where: { id: sessionId, organizationId },
+        select: { id: true, status: true },
       });
 
-      if (!location) {
-        throw new BadRequestException('Location not found');
+      if (!session) {
+        throw new BadRequestException('Session not found');
       }
 
-      targetLocationId = location.id;
-    } else {
-      const receivedLocation = await this.prisma.location.findFirst({
-        where: { name: 'RECEIVED', organizationId: orgId },  // 🔒
-      });
-
-      if (!receivedLocation) {
+      if (session.status === 'COMPLETED') {
         throw new BadRequestException(
-          'No location provided and no RECEIVED location configured for this organization',
+          'Session is completed — reopen it before adding items',
         );
       }
-
-      targetLocationId = receivedLocation.id;
     }
 
-    // -----------------------------
-    // 3. UPSERT STOCK + LOG EVENT (atomic)
-    // -----------------------------
+    if (!locationId) {
+      throw new BadRequestException('Location is required');
+    }
+
+    const location = await this.prisma.location.findFirst({
+      where: {
+        id: locationId,
+        organizationId,
+      },
+    });
+
+    if (!location) {
+      throw new BadRequestException('Location not found');
+    }
+
+    const targetLocationId = location.id;
+
     return this.prisma.$transaction(async (tx) => {
-      await tx.stock.upsert({
-        where: {
-          productId_locationId: {
+      let sessionItemId: number | undefined;
+
+      if (session) {
+        const item = await tx.sessionItem.create({
+          data: {
+            sessionId: session.id,
             productId,
-            locationId: targetLocationId,
+            quantity: qty,
           },
-        },
-        update: {
-          quantity: { increment: qty },
-        },
-        create: {
-          productId,
-          locationId: targetLocationId,
-          quantity: qty,
-          organizationId: orgId,                            // 🔒
-        },
-      });
+        });
+        sessionItemId = item.id;
+      }
 
       await tx.event.create({
         data: {
@@ -86,7 +89,13 @@ export class ReceiveService {
           type: 'RECEIVE',
           quantity: qty,
           toLocationId: targetLocationId,
-          organizationId: orgId,                            // 🔒
+          sessionId: session?.id,
+          sessionItemId,
+          userId,
+          organizationId,
+          metadata: {
+            note: 'receiving count — stock set by import, not this scan',
+          },
         },
       });
 
@@ -95,6 +104,7 @@ export class ReceiveService {
         productId,
         qty,
         locationId: targetLocationId,
+        sessionId: session?.id,
       };
     });
   }

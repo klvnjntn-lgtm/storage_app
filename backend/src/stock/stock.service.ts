@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { Prisma, EventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { Brand } from '@prisma/client';
+import { ProductService } from '../product/product.service'; // adjust path if different
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 
 function slugify(value: string): string {
@@ -11,9 +12,77 @@ function slugify(value: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+export enum ImportMode {
+  REPLACE = 'REPLACE',
+  INCREMENT = 'INCREMENT',
+}
+
+// A SALE stock movement must be caused by exactly one document: either an
+// Invoice or a Sales Order, never both, never neither. An ADJUSTMENT (as
+// used by InvoiceService.voidInvoice's stock reversal) is tied to an
+// invoice. The `never` fields are what enforce the mutual exclusion —
+// `type` alone doesn't discriminate InvoiceSaleContext from
+// SalesOrderSaleContext, since both carry EventType.SALE.
+type InvoiceSaleContext = {
+  type: typeof EventType.SALE;
+  invoiceId: string;
+  salesOrderId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
+type SalesOrderSaleContext = {
+  type: typeof EventType.SALE;
+  salesOrderId: string;
+  invoiceId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
+type InvoiceAdjustmentContext = {
+  type: typeof EventType.ADJUSTMENT;
+  invoiceId: string;
+  salesOrderId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+type SalesOrderAdjustmentContext = {
+  type: typeof EventType.ADJUSTMENT;
+  salesOrderId: string;
+  invoiceId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
+type PurchaseOrderReceiptContext = {
+  type: typeof EventType.RECEIVE;
+  invoiceId?: never;
+  salesOrderId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
+// A RETURNS stock movement — customer goods coming back after a
+// DeliveryOrder has shipped (DeliveryOrderService.recordReturn). Only
+// ties to a SalesOrder today, since Delivery Orders are sales-order-
+// scoped; add an InvoiceReturnContext alongside this, same shape, if an
+// invoice-side returns flow is ever built.
+type SalesOrderReturnContext = {
+  type: typeof EventType.RETURNS;
+  salesOrderId: string;
+  invoiceId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
+export type StockMovementContext =
+  | InvoiceSaleContext
+  | SalesOrderSaleContext
+  | InvoiceAdjustmentContext
+  | SalesOrderAdjustmentContext
+  | PurchaseOrderReceiptContext
+  | SalesOrderReturnContext; // NEW
+
 @Injectable()
 export class StockService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private productService: ProductService,
+  ) {}
 
   // -----------------------------
   // INCREASE
@@ -23,24 +92,47 @@ export class StockService {
     productId: string,
     locationId: string,
     qty: number,
+    userId?: string,
+    context?: StockMovementContext,
+    tx?: Prisma.TransactionClient,
   ) {
-    await this.assertProductOwnership(orgId, productId);
-    await this.assertLocationOwnership(orgId, locationId);
+    if (qty <= 0) throw new BadRequestException('Invalid qty');
 
-    return this.prisma.stock.upsert({
-      where: {
-        productId_locationId: { productId, locationId },
-      },
-      update: {
-        quantity: { increment: qty },
-      },
-      create: {
-        productId,
-        locationId,
-        quantity: qty,
-        organizationId: orgId,                              // 🔒
-      },
-    });
+    const run = async (client: Prisma.TransactionClient) => {
+      await this.assertProductActive(orgId, productId, client);
+      await this.assertLocationOwnership(orgId, locationId, client);
+
+      const updated = await client.stock.upsert({
+        where: { productId_locationId: { productId, locationId } },
+        update: { quantity: { increment: qty } },
+        create: {
+          productId,
+          locationId,
+          quantity: qty,
+          organizationId: orgId,                              // 🔒
+        },
+      });
+
+      if (context?.type) {
+        await client.event.create({
+          data: {
+            type: context.type,
+            productId,
+            toLocationId: locationId,
+            quantity: qty,
+            userId: userId ?? null,
+            organizationId: orgId,                            // 🔒
+            invoiceId: context.invoiceId,
+            salesOrderId: context.salesOrderId,
+            metadata: context.metadata ?? {},
+          },
+        });
+      }
+
+      return updated;
+    };
+
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   // -----------------------------
@@ -51,15 +143,19 @@ export class StockService {
     productId: string,
     locationId: string,
     qty: number,
+    userId: string,
+    context: StockMovementContext,
+    tx?: Prisma.TransactionClient,
   ) {
     if (qty <= 0) throw new BadRequestException('Invalid qty');
 
-    await this.assertProductOwnership(orgId, productId);
-    await this.assertLocationOwnership(orgId, locationId);
+    const run = async (client: Prisma.TransactionClient) => {
+      await this.assertProductActive(orgId, productId, client);
+      await this.assertLocationOwnership(orgId, locationId, client);
 
-    // Re-check stock inside a transaction to prevent concurrent over-decrement
-    return this.prisma.$transaction(async (tx) => {
-      const stock = await tx.stock.findUnique({
+      // Re-check stock inside the transaction to prevent concurrent
+      // over-decrement, regardless of whose transaction this is.
+      const stock = await client.stock.findUnique({
         where: {
           productId_locationId: { productId, locationId },
         },
@@ -69,11 +165,29 @@ export class StockService {
         throw new BadRequestException('Insufficient stock');
       }
 
-      return tx.stock.update({
+      const updated = await client.stock.update({
         where: { productId_locationId: { productId, locationId } },
         data: { quantity: { decrement: qty } },
       });
-    });
+
+      await client.event.create({
+        data: {
+          type: context.type,
+          productId,
+          fromLocationId: locationId,
+          quantity: -qty,
+          userId,
+          organizationId: orgId,                            // 🔒
+          invoiceId: context.invoiceId,
+          salesOrderId: context.salesOrderId,
+          metadata: context.metadata ?? {},
+        },
+      });
+
+      return updated;
+    };
+
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   // -----------------------------
@@ -91,11 +205,14 @@ export class StockService {
       throw new BadRequestException('Invalid quantity');
     }
 
-    await this.assertProductOwnership(orgId, productId);
-    await this.assertLocationOwnership(orgId, locationId);
+    if (!reason?.trim()) {
+      throw new BadRequestException('Reason is required');
+    }
 
     return this.prisma.$transaction(async (tx) => {
-      // For negative deltas, verify we have enough stock first
+      await this.assertProductActive(orgId, productId, tx);
+      await this.assertLocationOwnership(orgId, locationId, tx);
+
       if (qtyDelta < 0) {
         const stock = await tx.stock.findUnique({
           where: { productId_locationId: { productId, locationId } },
@@ -123,9 +240,9 @@ export class StockService {
           productId,
           toLocationId: locationId,
           quantity: qtyDelta,
-          userId, 
+          userId,
           organizationId: orgId,                            // 🔒
-          metadata: { reason },
+          metadata: { reason: reason.trim() },
         },
       });
 
@@ -145,6 +262,7 @@ export class StockService {
   async import(
     orgId: string,
     userId: string,
+    mode: ImportMode,
     rows: {
       sku: string;
       name: string;
@@ -152,6 +270,8 @@ export class StockService {
       brand?: string;
       location: string;
       qty: number;
+      sellingPrice?: number;
+      costPrice?: number;
     }[],
   ) {
     const accepted: any[] = [];
@@ -170,72 +290,18 @@ export class StockService {
         }
 
         const result = await this.prisma.$transaction(async (tx) => {
-          // 1. CATEGORY — scoped to org, unique per org
-          const categoryId = slugify(row.category);
+          const { product } = await this.productService.resolveForImport(
+            orgId,
+            row,
+            tx,
+          );
 
-          let category = await tx.category.findFirst({
-            where: { id: categoryId, organizationId: orgId },   // 🔒
-          });
+          // Import creates products/locations on the fly, so there's no
+          // pre-existing product/location to assert against here — the
+          // active/ownership checks apply to increase/decrease/adjust,
+          // where the product and location must already exist.
 
-          if (!category) {
-            category = await tx.category.create({
-              data: {
-                id: categoryId,
-                name: row.category,
-                organizationId: orgId,                           // 🔒
-              },
-            });
-          }
-
-          // 2. BRAND — scoped to org
-          let brand: Brand | null = null;
-
-          if (row.brand?.trim()) {
-            const brandId = slugify(row.brand);
-
-            brand = await tx.brand.findFirst({
-              where: { id: brandId, organizationId: orgId },     // 🔒
-            });
-
-            if (!brand) {
-              brand = await tx.brand.create({
-                data: {
-                  id: brandId,
-                  name: row.brand,
-                  organizationId: orgId,                         // 🔒
-                },
-              });
-            }
-          }
-
-          // 3. PRODUCT — scoped to org
-          let product = await tx.product.findFirst({
-            where: { sku: row.sku, organizationId: orgId },      // 🔒
-          });
-
-          if (!product) {
-            product = await tx.product.create({
-              data: {
-                sku: row.sku,
-                name: row.name,
-                categoryId: category.id,
-                brandId: brand?.id ?? null,
-                organizationId: orgId,                           // 🔒
-              },
-            });
-          } else {
-            product = await tx.product.update({
-              where: { id: product.id },
-              data: {
-                name: row.name,
-                categoryId: category.id,
-                brandId: brand?.id ?? null,
-              },
-            });
-          }
-
-          // 4. LOCATION — scoped to org
-          const locationId = slugify(row.location);
+          const locationId = `${orgId}_${slugify(row.location)}`;
 
           let location = await tx.location.findFirst({
             where: { id: locationId, organizationId: orgId },    // 🔒
@@ -246,12 +312,22 @@ export class StockService {
               data: {
                 id: locationId,
                 name: row.location,
-                organizationId: orgId,                           // 🔒
+                organizationId: orgId,                            // 🔒
               },
             });
           }
 
-          // 5. STOCK UPSERT
+          const existingStock = await tx.stock.findUnique({
+            where: {
+              productId_locationId: {
+                productId: product.id,
+                locationId: location.id,
+              },
+            },
+          });
+          const beforeQty = existingStock?.quantity ?? 0;
+          const afterQty = mode === ImportMode.REPLACE ? row.qty : beforeQty + row.qty;
+
           await tx.stock.upsert({
             where: {
               productId_locationId: {
@@ -259,7 +335,10 @@ export class StockService {
                 locationId: location.id,
               },
             },
-            update: { quantity: { increment: row.qty } },
+            update:
+              mode === ImportMode.REPLACE
+                ? { quantity: row.qty }
+                : { quantity: { increment: row.qty } },
             create: {
               productId: product.id,
               locationId: location.id,
@@ -268,19 +347,20 @@ export class StockService {
             },
           });
 
-          // 6. EVENT
           await tx.event.create({
             data: {
-              type: 'IMPORT',
+              type: mode === ImportMode.REPLACE ? 'IMPORT_REPLACE' : 'IMPORT_INCREMENT',
               productId: product.id,
               toLocationId: location.id,
-              quantity: row.qty,
+              quantity: afterQty - beforeQty,
               userId,
               organizationId: orgId,                             // 🔒
               metadata: {
                 sku: row.sku,
                 category: row.category,
                 brand: row.brand ?? null,
+                beforeQty,
+                afterQty,
               },
             },
           });
@@ -328,8 +408,32 @@ export class StockService {
     if (!product) throw new BadRequestException('Product not found');
   }
 
-  private async assertLocationOwnership(orgId: string, locationId: string) {
-    const location = await this.prisma.location.findFirst({
+  // Now accepts the active Prisma client (tx or this.prisma), so when a
+  // caller passes `tx`, this check runs inside the same transaction
+  // instead of on a separate connection outside it.
+  private async assertProductActive(
+    orgId: string,
+    productId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const product = await client.product.findFirst({
+      where: { id: productId, organizationId: orgId },
+      select: { id: true, active: true },
+    });
+    if (!product) throw new BadRequestException('Product not found');
+    if (!product.active) {
+      throw new BadRequestException(
+        'Product is archived — restore it before recording stock movements',
+      );
+    }
+  }
+
+  private async assertLocationOwnership(
+    orgId: string,
+    locationId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const location = await client.location.findFirst({
       where: { id: locationId, organizationId: orgId },
       select: { id: true },
     });

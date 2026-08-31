@@ -1,0 +1,6 @@
+-- AlterEnum
+ALTER TYPE "ModuleKey" ADD VALUE 'WAREHOUSE_OPS';
+
+-- AlterTable
+ALTER TABLE "Invoice" ALTER COLUMN "subtotal" SET DEFAULT 0,
+ALTER COLUMN "total" SET DEFAULT 0;
