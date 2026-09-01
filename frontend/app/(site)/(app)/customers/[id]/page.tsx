@@ -271,7 +271,7 @@ export default function CustomerDetailPage() {
               {vehicles.map((v) => (
                 <div
                   key={v.id}
-                  onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
+                  onClick={() => router.push(`/vehicles/${v.id}`)}
                   className="flex items-center gap-3 border-2 border-gray-300 rounded-md p-3 cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors"
                 >
                   <Car size={18} strokeWidth={2} className="text-gray-500 shrink-0" />

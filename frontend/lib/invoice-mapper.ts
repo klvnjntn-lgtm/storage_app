@@ -18,6 +18,8 @@ export type InvoicePrintView = {
   bankName: string | null;
   bankAccountNumber: string | null;
   bankAccountName: string | null;
+  salesOrderId: string | null; // NEW — gates the Convert-to-DO button
+  deliveryOrders: { id: string; doNumber: string | null; status: string }[]; // NEW
 
   locationName: string;
   locationAddress: string | null;

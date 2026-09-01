@@ -63,11 +63,14 @@ function statusStyle(status: DeliveryOrderStatus) {
 export function DeliveryOrdersPanel({
   salesOrderId,
   locationId,
+  status,
   items,
   onChanged,
 }: {
   salesOrderId: string;
   locationId: string;
+    status: 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED'; // NEW
+
   items: DeliverableSourceItem[];
   onChanged: () => void;
 }) {

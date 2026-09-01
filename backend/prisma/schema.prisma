@@ -709,7 +709,6 @@ model DeliveryOrder {
   id              String              @id @default(uuid())
   doNumber        String?
   organizationId  String
-  salesOrderId    String
   sessionId       String? // the pack session this was generated from
   locationId      String?
   status          DeliveryOrderStatus @default(PACKED)
@@ -729,19 +728,21 @@ model DeliveryOrder {
   notes            String?
 
   organization Organization        @relation(fields: [organizationId], references: [id])
-  salesOrder   SalesOrder          @relation(fields: [salesOrderId], references: [id])
+  salesOrderId String?       // CHANGED: was required — now optional
+  salesOrder   SalesOrder?   @relation(fields: [salesOrderId], references: [id])
   session      Session?            @relation(fields: [sessionId], references: [id])
   location     Location?           @relation(fields: [locationId], references: [id])
   user         User?               @relation(fields: [userId], references: [id])
   customer     Customer?           @relation(fields: [customerId, organizationId], references: [id, organizationId])
   items        DeliveryOrderItem[]
+  invoiceId    String?       @unique   // NEW
+  invoice      Invoice?      @relation(fields: [invoiceId], references: [id])
 
   @@unique([organizationId, doNumber])
 }
 model DeliveryOrderItem {
   id               String  @id @default(uuid())
   deliveryOrderId  String
-  salesOrderItemId String // THE link — remaining qty = SalesOrderItem.quantity - sum(this)
   returnedQuantity Decimal @default(0)
 
   // Denormalized snapshot for print stability (matches how InvoiceItem
@@ -754,10 +755,13 @@ model DeliveryOrderItem {
   locationId  String?
 
   deliveryOrder  DeliveryOrder  @relation(fields: [deliveryOrderId], references: [id])
-  salesOrderItem SalesOrderItem @relation(fields: [salesOrderItemId], references: [id])
+  salesOrderItemId String?          // CHANGED: was required — now optional
+  salesOrderItem    SalesOrderItem? @relation(fields: [salesOrderItemId], references: [id])
   product        Product?       @relation(fields: [productId], references: [id])
   location       Location?      @relation(fields: [locationId], references: [id])
   invoiceItems   InvoiceItem[] // reverse of InvoiceItem.deliveryOrderItem
+    invoiceItemId     String?
+
 }
 enum DiscountType {
   FIXED
@@ -767,6 +771,8 @@ model Invoice {
   id             String                 @id @default(uuid())
   invoiceNumber  String?
   organizationId String
+    deliveryOrders DeliveryOrder[]    // NEW reverse relation
+
   locationId     String?
   format         InvoiceFormat
   status         InvoiceStatus          @default(DRAFT)

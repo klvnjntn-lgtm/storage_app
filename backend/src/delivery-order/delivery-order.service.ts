@@ -7,6 +7,7 @@ import { StockService } from '../stock/stock.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { DeliveryOrderStatus, SalesOrderStatus, EventType, Prisma } from '@prisma/client';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
+
 import puppeteer from 'puppeteer';
 
 export type DeliveryOrderPrintView = {
@@ -19,6 +20,7 @@ export type DeliveryOrderPrintView = {
   businessAddress: string | null;
   businessPhone: string | null;
   businessLogoUrl: string | null;
+  invoiceNumber: string | null;
 
   locationName: string;
   locationAddress: string | null;
@@ -158,10 +160,19 @@ export class DeliveryOrderService {
   }
 
   // The physical departure event. This is the ONLY place stock is
-  // decremented for a WAREHOUSE_OPS sales order's fulfillment — neither
+  // decremented for a delivery order's fulfillment — neither
   // SalesOrder.confirm() nor DeliveryOrder.create() touch stock (see
   // sales-order.service.ts for why: confirm is a commercial commitment,
   // create is a planned delivery, not proof anything left the building).
+  //
+  // Whether stock actually needs decrementing here is a per-delivery-order
+  // fact, not an org-wide setting: a delivery order created from a
+  // warehouse pack session (sessionId set) already had its stock moved at
+  // pick time — decrementing again here would double it. A delivery order
+  // created directly off a sales order with no session behind it has NOT
+  // had stock touched yet, and needs it decremented here regardless of
+  // whether the organization also uses warehouse pick/pack sessions for
+  // other orders.
   //
   // Idempotency: the status flip to SHIPPED is done as an atomic
   // updateMany guarded on status === PACKED, as the FIRST statement
@@ -180,11 +191,16 @@ export class DeliveryOrderService {
       throw new BadRequestException('Only a packed delivery order can be shipped');
     }
 
-    const missingLocation = deliveryOrder.items.find((item) => item.productId && !item.locationId);
-    if (missingLocation) {
-      throw new BadRequestException(
-        `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
-      );
+    const salesOrderId = deliveryOrder.salesOrderId; // narrowed once, reused below
+    const shouldDecreaseStock = !deliveryOrder.sessionId && !!salesOrderId;
+
+    if (shouldDecreaseStock) {
+      const missingLocation = deliveryOrder.items.find((item) => item.productId && !item.locationId);
+      if (missingLocation) {
+        throw new BadRequestException(
+          `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
+        );
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -196,21 +212,15 @@ export class DeliveryOrderService {
         throw new BadRequestException('This delivery order has already been shipped or is no longer packed');
       }
 
-      for (const item of deliveryOrder.items) {
-        if (!item.productId || !item.locationId) continue;
-        await this.stockService.decrease(
-          organizationId,
-          item.productId,
-          item.locationId,
-          Number(item.quantity),
-          userId,
-          {
-            type: EventType.SALE,
-            salesOrderId: deliveryOrder.salesOrderId,
-            metadata: { deliveryOrderId: deliveryOrder.id },
-          },
-          tx,
-        );
+      if (shouldDecreaseStock && salesOrderId) {
+        for (const item of deliveryOrder.items) {
+          if (!item.productId || !item.locationId) continue;
+          await this.stockService.decrease(
+            organizationId, item.productId, item.locationId, Number(item.quantity), userId,
+            { type: EventType.SALE, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id } },
+            tx,
+          );
+        }
       }
 
       return tx.deliveryOrder.findUniqueOrThrow({ where: { id } });
@@ -256,13 +266,16 @@ export class DeliveryOrderService {
 
     return this.prisma.$transaction(async (tx) => {
       for (const item of deliveryOrder.items) {
+        if (!item.salesOrderItemId) continue; // invoice-sourced item, no SO line to release
         await tx.salesOrderItem.update({
           where: { id: item.salesOrderItemId },
           data: { deliveredQuantity: { decrement: item.quantity } },
         });
       }
       const cancelled = await tx.deliveryOrder.update({ where: { id }, data: { status: DeliveryOrderStatus.CANCELLED } });
-      await this.salesOrderService.recomputeDeliveryStatus(organizationId, deliveryOrder.salesOrderId, tx);
+      if (deliveryOrder.salesOrderId) {
+        await this.salesOrderService.recomputeDeliveryStatus(organizationId, deliveryOrder.salesOrderId, tx);
+      }
       return cancelled;
     });
   }
@@ -311,6 +324,14 @@ export class DeliveryOrderService {
       }
     }
 
+    const salesOrderId = deliveryOrder.salesOrderId;
+    const invoiceId = deliveryOrder.invoiceId;
+    if (!salesOrderId && !invoiceId) {
+      // Should be unreachable — every DO is created with exactly one of
+      // these — but fail loudly rather than silently mis-tagging the event.
+      throw new BadRequestException('This delivery order has no originating sales order or invoice');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       for (const line of items) {
         const doItem = itemsById.get(line.deliveryOrderItemId)!;
@@ -320,10 +341,12 @@ export class DeliveryOrderService {
           data: { returnedQuantity: { increment: line.quantity } },
         });
 
-        await tx.salesOrderItem.update({
-          where: { id: doItem.salesOrderItemId },
-          data: { deliveredQuantity: { decrement: line.quantity } },
-        });
+        if (doItem.salesOrderItemId) {
+          await tx.salesOrderItem.update({
+            where: { id: doItem.salesOrderItemId },
+            data: { deliveredQuantity: { decrement: line.quantity } },
+          });
+        }
 
         if (doItem.productId && doItem.locationId) {
           await this.stockService.increase(
@@ -332,18 +355,18 @@ export class DeliveryOrderService {
             doItem.locationId,
             line.quantity,
             userId,
-            {
-              type: EventType.RETURNS,
-              salesOrderId: deliveryOrder.salesOrderId,
-              metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null },
-            },
+            salesOrderId
+              ? { type: EventType.RETURNS, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null } }
+              : { type: EventType.RETURNS, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null } },
             tx,
           );
         }
       }
 
       const updated = await this.recomputeReturnStatus(organizationId, id, tx);
-      await this.salesOrderService.recomputeDeliveryStatus(organizationId, deliveryOrder.salesOrderId, tx);
+      if (salesOrderId) {
+        await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrderId, tx);
+      }
       return updated;
     });
   }
@@ -385,29 +408,36 @@ export class DeliveryOrderService {
     return tx.deliveryOrder.update({ where: { id: deliveryOrderId }, data: { status: newStatus } });
   }
 
-async list(organizationId: string, filters: { salesOrderId?: string; status?: DeliveryOrderStatus; page?: number; pageSize?: number }) {
-  const page = filters.page && filters.page > 0 ? filters.page : 1;
-  const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
+  async list(organizationId: string, filters: { salesOrderId?: string; status?: DeliveryOrderStatus; page?: number; pageSize?: number }) {
+    const page = filters.page && filters.page > 0 ? filters.page : 1;
+    const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
 
-  const where: Prisma.DeliveryOrderWhereInput = {
-    organizationId,
-    ...(filters.salesOrderId ? { salesOrderId: filters.salesOrderId } : {}),
-    ...(filters.status ? { status: filters.status } : {}),
-  };
+    const where: Prisma.DeliveryOrderWhereInput = {
+      organizationId,
+      ...(filters.salesOrderId ? { salesOrderId: filters.salesOrderId } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+    };
 
-  const [data, total] = await this.prisma.$transaction([
-    this.prisma.deliveryOrder.findMany({
-      where, include: { items: true, salesOrder: { select: { orderNumber: true, customerName: true } } },
-      orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
-    }),
-    this.prisma.deliveryOrder.count({ where }),
-  ]);
-  return { data, total, page, pageSize };
-}
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.deliveryOrder.findMany({
+        where, include: { items: true, salesOrder: { select: { orderNumber: true, customerName: true } } },
+        orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
+      }),
+      this.prisma.deliveryOrder.count({ where }),
+    ]);
+    return { data, total, page, pageSize };
+  }
+
   async getOne(organizationId: string, id: string) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
-      include: { items: { include: { product: true } }, salesOrder: true, session: true, location: true },
+      include: {
+        items: { include: { product: true } },
+        salesOrder: true,
+        session: true,
+        location: true,
+        invoice: { select: { id: true, invoiceNumber: true } },
+      },
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
     return deliveryOrder;
@@ -427,6 +457,7 @@ async list(organizationId: string, filters: { salesOrderId?: string; status?: De
         organization: { select: { name: true, legalName: true, address: true, phone: true, logoUrl: true } },
         location: { select: { name: true, address: true } },
         salesOrder: { select: { orderNumber: true } },
+        invoice: { select: { invoiceNumber: true } },
         items: { include: { product: { select: { name: true } } } },
       },
     });
@@ -445,6 +476,7 @@ async list(organizationId: string, filters: { salesOrderId?: string; status?: De
       businessAddress: deliveryOrder.organization.address,
       businessPhone: deliveryOrder.organization.phone,
       businessLogoUrl: deliveryOrder.organization.logoUrl,
+      invoiceNumber: deliveryOrder.invoice?.invoiceNumber ?? null,
 
       locationName: deliveryOrder.location?.name ?? '',
       locationAddress: deliveryOrder.location?.address ?? null,
@@ -502,5 +534,76 @@ async list(organizationId: string, filters: { salesOrderId?: string; status?: De
 
   verifyPrintToken(token: string, deliveryOrderId: string) {
     return this.printTokenService.verifyDocumentToken(token, 'delivery-order', deliveryOrderId);
+  }
+
+  async createFromInvoice(organizationId: string, userId: string, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+      include: {
+        items: { include: { product: { select: { name: true } } } },
+        customer: true,
+        deliveryOrders: { select: { id: true } },
+      },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    if (invoice.salesOrderId) {
+      throw new BadRequestException(
+        'This invoice originated from a sales order — create the delivery order from the sales order instead',
+      );
+    }
+    if (invoice.status !== 'ISSUED') {
+      throw new BadRequestException('Only an issued invoice can be converted to a delivery order');
+    }
+    if (invoice.deliveryOrders.length > 0) {
+      throw new BadRequestException('This invoice has already been converted to a delivery order');
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const year = new Date().getFullYear();
+        const count = await tx.deliveryOrder.count({
+          where: { organizationId, doNumber: { not: null }, createdAt: { gte: new Date(`${year}-01-01`) } },
+        });
+        const doNumber = await this.numbering.next({ prefix: 'DO', count, year });
+
+        return tx.deliveryOrder.create({
+          data: {
+            organizationId,
+            invoiceId: invoice.id,
+            salesOrderId: null,
+            locationId: invoice.locationId,
+            userId,
+            doNumber,
+            status: DeliveryOrderStatus.PACKED,
+            customerId: invoice.customerId,
+            customerName: invoice.customer?.name ?? invoice.customerName,
+            customerAddress: invoice.customer?.address ?? null,
+            customerPhone: invoice.customer?.phone ?? null,
+            customerPoNumber: invoice.customerPoNumber,
+            deliveryAddress: invoice.customer?.address ?? null,
+            notes: null,
+            items: {
+              create: invoice.items.map((item) => ({
+                salesOrderItemId: null,
+                invoiceItemId: String(item.id), // InvoiceItem.id is a numeric autoincrement column
+                productId: item.productId,
+                productName: item.product?.name ?? item.description ?? 'Service',
+                quantity: item.quantity,
+                unit: item.unit,
+                locationId: item.locationId,
+              })),
+            },
+          },
+          include: { items: true },
+        });
+      });
+    } catch (err) {
+      // Race backstop, same pattern as SalesOrderService.createFromQuotation
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestException('This invoice has already been converted to a delivery order');
+      }
+      throw err;
+    }
   }
 }

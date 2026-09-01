@@ -217,6 +217,12 @@ export function CartPanel({
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
   const showInvoiceInfoFields = format === 'A5' || format === 'A4';
 
+  // A5 keeps a structured Customer object via CustomerPicker; every other
+  // format (A4 included) uses the plain free-text name field. Missing-customer
+  // validation therefore has to check whichever of the two is actually in play.
+  const missingRequiredCustomer =
+    customerNameRequired && (format === 'A5' ? !customer : !customerName.trim());
+
   return (
     <div className="border-2 border-gray-300 rounded-md p-4 h-fit">
       {cartLines.length > 0 ? (
@@ -260,12 +266,22 @@ export function CartPanel({
           hasError={customerNameRequired && !customer}
         />
       ) : (
-        <input
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-          placeholder="Customer name (optional)"
-          className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-3 outline-none focus:border-black"
-        />
+        <div className="mb-3">
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder={customerNameRequired ? 'Customer name' : 'Customer name (optional)'}
+            className={`w-full border-2 rounded-md p-2 text-sm outline-none focus:border-black ${
+              customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-gray-300'
+            }`}
+          />
+          {customerNameRequired && !customerName.trim() && (
+            <p className="flex items-start gap-1.5 text-xs text-red-600 mt-1.5">
+              <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
+              Customer name is required.
+            </p>
+          )}
+        </div>
       )}
 
       {showInvoiceInfoFields && (
@@ -711,7 +727,7 @@ export function CartPanel({
         disabled={
           nothingToInvoice ||
           printing ||
-          (customerNameRequired && !customer) ||
+          missingRequiredCustomer ||
           hasEmptyServicePrice ||
           hasEmptyServiceDescription
         }

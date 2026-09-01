@@ -119,39 +119,29 @@ export default function EditIssuedInvoicePage() {
             .map((t: { taxRateId: string | null }) => t.taxRateId)
             .filter((id: string | null): id is string => !!id);
 
-          if (item.productId) {
-            const locationId = item.locationId ?? invoice.locationId;
-            const locationName = item.location?.name ?? invoice.location?.name ?? '';
-            const key = `${item.productId}__${locationId}`;
-            restoredCart[key] = {
-              product: {
-                id: item.productId,
-                name: item.product?.name ?? '',
-                sku: item.product?.sku ?? null,
-                unit: item.product?.unit ?? item.unit ?? null,
-                barcode: item.product?.barcode ?? null,
-                sellingPrice: Number(item.unitPrice),
-                // Empty on purpose — stock isn't refetched for restored
-                // lines, so stockAtLineLocation() below treats this as
-                // "unknown" and doesn't cap the quantity stepper.
-                stockByLocation: [],
-              },
-              quantity: item.quantity,
-              unitPrice: Number(item.unitPrice),
-              locationId,
-              unit: item.unit ?? null,
-              locationName,
-              taxRateIds,
-            };
-          } else {
-            serviceCounterRef.current += 1;
-            restoredServices.push({
-              key: `svc_${serviceCounterRef.current}_${Date.now()}`,
-              description: item.description ?? '',
-              unitPrice: Number(item.unitPrice),
-              unit: item.unit ?? null,
-              taxRateIds,
-            });
+if (item.productId) {
+  const locationId = item.locationId ?? invoice.locationId;
+  const locationName = item.location?.name ?? invoice.location?.name ?? '';
+  const key = `${item.productId}__${locationId}`;
+  restoredCart[key] = {
+    product: {
+      id: item.productId,
+      name: item.product?.name ?? '',
+      sku: item.product?.sku ?? '',
+      unit: item.product?.unit ?? '',
+      barcode: item.product?.barcode ?? '',
+      sellingPrice: Number(item.unitPrice ?? 0),
+      stockByLocation: [],
+    },
+    quantity: item.quantity,
+    unitPrice: Number(item.unitPrice),
+    locationId,
+    unit: item.unit ?? null,
+    locationName,
+    discountType: item.discountType ?? 'PERCENTAGE',
+    discountValue: Number(item.discountValue ?? 0),
+    taxRateIds,
+  };
           }
         }
         setCart(restoredCart);
@@ -208,43 +198,44 @@ export default function EditIssuedInvoicePage() {
     return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
   }
 
-  function addToCart(product: ProductSearchResult) {
-    setError('');
-    let target;
-    if (locationFilter) {
-      target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
-      if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
-        return;
-      }
-    } else {
-      target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
-      if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" has no stock at any location.`);
-        return;
-      }
+function addToCart(product: ProductSearchResult) {
+  setError('');
+  let target;
+  if (locationFilter) {
+    target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
+    if (!target || target.quantity <= 0) {
+      setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
+      return;
     }
-    const resolvedTarget = target;
-    const key = cartKey(product.id, resolvedTarget.locationId);
-    setCart((prev) => {
-      const existing = prev[key];
-      const nextQty = (existing?.quantity ?? 0) + 1;
-      const defaultRate = taxRates.find((r) => r.isDefault);
-      return {
-        ...prev,
-        [key]: {
-          product,
-          unit: existing?.unit ?? product.unit ?? null,
-          quantity: nextQty,
-          unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
-          locationId: resolvedTarget.locationId,
-          locationName: resolvedTarget.locationName,
-          taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
-        },
-      };
-    });
+  } else {
+    target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
+    if (!target || target.quantity <= 0) {
+      setError(`"${product.name}" has no stock at any location.`);
+      return;
+    }
   }
-
+  const resolvedTarget = target;
+  const key = cartKey(product.id, resolvedTarget.locationId);
+  setCart((prev) => {
+    const existing = prev[key];
+    const nextQty = (existing?.quantity ?? 0) + 1;
+    const defaultRate = taxRates.find((r) => r.isDefault);
+    return {
+      ...prev,
+      [key]: {
+        product,
+        unit: existing?.unit ?? product.unit ?? null,
+        quantity: nextQty,
+        unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
+        locationId: resolvedTarget.locationId,
+        locationName: resolvedTarget.locationName,
+        discountType: existing?.discountType ?? 'PERCENTAGE',
+        discountValue: existing?.discountValue ?? 0,
+        taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
+      },
+    };
+  });
+}
   function changeQty(key: string, delta: number) {
     setCart((prev) => {
       const line = prev[key];
@@ -292,18 +283,26 @@ export default function EditIssuedInvoicePage() {
     });
   }
 
-  function addService() {
-    serviceCounterRef.current += 1;
-    const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
-    const defaultRate = taxRates.find((r) => r.isDefault);
-    setServices((prev) => [
-      ...prev,
-      { key, description: '', unitPrice: null,unit: null, taxRateIds: defaultRate ? [defaultRate.id] : [] },
-    ]);
-  }
+function addService() {
+  serviceCounterRef.current += 1;
+  const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
+  const defaultRate = taxRates.find((r) => r.isDefault);
+  setServices((prev) => [
+    ...prev,
+    {
+      key,
+      description: '',
+      unitPrice: null,
+      unit: null,
+      discountType: 'PERCENTAGE',
+      discountValue: 0,
+      taxRateIds: defaultRate ? [defaultRate.id] : [],
+    },
+  ]);
+}
 function changeServiceUnit(key: string, value: string) {
   setServices((prev) =>
-    prev.map((s) => (s.key === key ? { ...s, unit: value.trim() || null } : s)),
+    prev.map((s) => (s.key === key ? { ...s, unit: value === '' ? null : value } : s)),
   );
 }
   function changeServiceDescription(key: string, value: string) {

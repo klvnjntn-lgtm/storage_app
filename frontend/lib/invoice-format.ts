@@ -16,7 +16,7 @@ export const PAGE_CSS: Record<string, string> = {
   A5: '@page { size: A5 landscape; margin: 12mm; }',
   A4: '@page { size: A4; margin: 0mm; }',
 };
-
+export const RECEIPT_CONTENT_WIDTH_MM = 80 - 4 * 2; // 72
 export const IS_RECEIPT_FORMAT = (format: string) =>
   format === 'THERMAL_58' || format === 'RECEIPT';
 

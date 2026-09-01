@@ -205,22 +205,33 @@ export default function DeliveryOrderDetailPage() {
                   {order.status}
                 </span>
               </div>
-              <p className="text-xs text-gray-500">
-                {order.customerName ?? 'No customer'} · {order.location?.name ?? '—'}
-                {order.salesOrder?.orderNumber && (
-                  <>
-                    {' '}
-                    · SO{' '}
-                    <button
-                      className="underline font-medium"
-                      onClick={() => router.push(`/sales/orders/${order.salesOrderId}`)}
-                    >
-                      {order.salesOrder.orderNumber}
-                    </button>
-                  </>
-                )}
-              </p>
-            </div>
+<p className="text-xs text-gray-500">
+  {order.customerName ?? 'No customer'} · {order.location?.name ?? '—'}
+  {order.salesOrder?.orderNumber && (
+    <>
+      {' '}
+      · SO{' '}
+      <button
+        className="underline font-medium"
+        onClick={() => router.push(`/sales/orders/${order.salesOrderId}`)}
+      >
+        {order.salesOrder.orderNumber}
+      </button>
+    </>
+  )}
+  {order.invoice?.invoiceNumber && (
+    <>
+      {' '}
+      · Invoice{' '}
+      <button
+        className="underline font-medium"
+        onClick={() => router.push(`/sales/invoices/${order.invoiceId}`)}
+      >
+        {order.invoice.invoiceNumber}
+      </button>
+    </>
+  )}
+</p>            </div>
 
             <div className="flex flex-wrap gap-2">
               {order.status === 'PACKED' && (

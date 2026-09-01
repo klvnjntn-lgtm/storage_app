@@ -74,12 +74,12 @@ export type DeliveryOrderListFilters = {
 };
 
 // ---- detail page ---------------------------------------------------------
-
 export type DeliveryOrderDetail = {
   id: string;
   doNumber: string | null;
   status: DeliveryOrderStatus;
-  salesOrderId: string;
+  salesOrderId: string | null; // CHANGED: was required, now optional (invoice-sourced DOs have none)
+  invoiceId: string | null; // NEW
   customerName: string | null;
   customerAddress: string | null;
   customerPhone: string | null;
@@ -92,8 +92,9 @@ export type DeliveryOrderDetail = {
   receivedBy: string | null;
   signedAt: string | null;
   salesOrder: { orderNumber: string | null } | null;
+  invoice: { invoiceNumber: string | null } | null; // NEW
   location: { name: string | null } | null;
-    invoices: { id: string; invoiceNumber: string | null; status: string }[]; // ADD THIS
+  invoices: { id: string; invoiceNumber: string | null; status: string }[];
 
   items: {
     id: string;
@@ -124,6 +125,7 @@ export type DeliveryOrderPrintView = {
   businessAddress: string | null;
   businessPhone: string | null;
   businessLogoUrl: string | null;
+  invoiceNumber: string | null; // NEW
 
   locationName: string;
   locationAddress: string | null;

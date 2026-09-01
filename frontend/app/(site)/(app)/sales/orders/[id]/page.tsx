@@ -361,6 +361,7 @@ export default function SalesOrderDetailPage() {
     salesOrderId={order.id}
     locationId={order.locationId}
     items={order.items}
+    status={order.status}
     onChanged={load}
           />
         )}

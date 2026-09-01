@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { ArrowLeft, Receipt, Printer, Wallet, Bell, X, Download, Pencil, History, AlertCircle, Ban } from 'lucide-react';
+import { ArrowLeft, Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, AlertCircle, Ban } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useHasModule } from '@/lib/useHasModule';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
@@ -106,7 +106,7 @@ export default function InvoiceDetailPage() {
   // (and now previews) this invoice on A4 paper without changing
   // invoice.format in the DB.
   const [printFormat, setPrintFormat] = useState<InvoiceFormat>('RECEIPT');
-
+const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -179,7 +179,26 @@ export default function InvoiceDetailPage() {
       setReminderSaving(false);
     }
   }
-
+async function handleConvertToDeliveryOrder() {
+  if (!invoice) return;
+  setActionLoading('convert-do');
+  setError(null);
+  try {
+    const res = await apiFetch(`/delivery-orders/from-invoice/${invoice.id}`, { method: 'POST' });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(body?.message ?? `Request failed (${res.status})`);
+      return;
+    }
+    if (body?.id) {
+      router.push(`/sales/delivery-orders/${body.id}`);
+    }
+  } catch {
+    setError('Could not reach the server.');
+  } finally {
+    setActionLoading(null);
+  }
+}
   async function handleDownloadPdf() {
     if (!invoice) return;
     setPdfGenerating(true);
@@ -289,15 +308,26 @@ export default function InvoiceDetailPage() {
                   </button>
                 )}
 
-              {invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
-                <button
-                  onClick={() => setVoidDialogOpen(true)}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
-                >
-                  <Ban size={16} strokeWidth={2} />
-                  Void
-                </button>
-              )}
+{invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
+  <button
+    onClick={() => setVoidDialogOpen(true)}
+    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
+  >
+    <Ban size={16} strokeWidth={2} />
+    Void
+  </button>
+)}
+
+{invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.deliveryOrders.length === 0 && (
+  <button
+    disabled={actionLoading === 'convert-do'}
+    onClick={handleConvertToDeliveryOrder}
+    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 h-fit disabled:opacity-50"
+  >
+    <Truck size={16} strokeWidth={2} />
+    {actionLoading === 'convert-do' ? 'Converting...' : 'Convert to Delivery Order'}
+  </button>
+)}
 
               {balanceDue > 0 && invoice.status !== 'VOID' && (
                 <button
