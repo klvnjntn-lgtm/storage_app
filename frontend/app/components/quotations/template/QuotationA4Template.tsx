@@ -9,8 +9,6 @@ import { parseCalendarDate } from '@/lib/dates';
 export function QuotationA4Template({ quotation }: { quotation: QuotationView }) {
   const hasBankDetails = !!quotation.bankName && !!quotation.bankAccountNumber;
   const logoUrl = resolveUploadUrl(quotation.businessLogoUrl);
-  const hasItemDiscounts = quotation.items.some((i) => i.itemDiscount > 0); // NEW
-  const hasItemTax = quotation.items.some((i) => i.itemTaxAmount > 0); // NEW
 
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
@@ -62,45 +60,44 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
         </div>
       )}
 
-      {/* Items */}
+      {/* Items — Discount/Tax columns always render, even when every
+          item is zero, so the table shape stays consistent across
+          quotations. */}
       <table className="w-full border-collapse mt-6">
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Item</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Qty</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Price</th>
-            {hasItemDiscounts && (
-              <th className="text-right border-b-2 border-gray-300 py-2 text-black">Discount</th>
-            )}
-            {hasItemTax && (
-              <th className="text-right border-b-2 border-gray-300 py-2 text-black">Tax</th>
-            )}
-            <th className="text-right border-b-2 border-gray-300 py-2 text-black">Total</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">Item</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Qty</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Price</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Discount</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Tax</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">Total</th>
           </tr>
         </thead>
 
-<tbody>
-  {quotation.items.map((item, index) => (
-    <tr key={`${item.productName}-${index}`}>
-      <td className="border-b border-gray-100 py-2 text-black">{item.productName}</td>
-      <td className="border-b border-gray-100 py-2 text-black">
-        {item.quantity}{item.unit ? ` ${item.unit}` : ''}
-      </td>
-      <td className="border-b border-gray-100 py-2 text-black">{formatIDR(item.unitPrice)}</td>
-      {hasItemDiscounts && (
-        <td className="border-b border-gray-100 py-2 text-right text-black">
-          {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
-        </td>
-      )}
-      {hasItemTax && (
-        <td className="border-b border-gray-100 py-2 text-right text-black">
-          {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-        </td>
-      )}
-      <td className="border-b border-gray-100 py-2 text-right text-black">{formatIDR(item.itemTotal)}</td>
-    </tr>
-  ))}
-</tbody>
+        <tbody>
+          {quotation.items.map((item, index) => (
+            <tr key={`${item.productName}-${index}`}>
+              <td className="border-b border-gray-100 py-2 pr-3 text-black">{item.productName}</td>
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+                {item.quantity}
+                {item.unit && <span className="text-gray-400 text-xs ml-1">{item.unit}</span>}
+              </td>
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+                {formatIDR(item.unitPrice)}
+              </td>
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+                {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
+              </td>
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
+              </td>
+              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
+                {formatIDR(item.itemTotal)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
       </table>
 
       {/* Totals */}

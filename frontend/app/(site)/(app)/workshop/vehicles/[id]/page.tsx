@@ -118,6 +118,16 @@ function itemsToShow(
   return { lines: ordered.slice(0, ITEMS_SUMMARY_MAX), overflow: ordered.length - ITEMS_SUMMARY_MAX };
 }
 
+// Whether an invoice matches the search query — checked against the
+// invoice number itself (e.g. "ATL-20002") OR any of its item labels
+// (product name / service description). Either one is enough to match.
+function invoiceMatchesSearch(inv: VehicleInvoice, q: string): boolean {
+  if (!q) return true;
+  const invoiceNumberMatch = inv.invoiceNumber?.toLowerCase().includes(q) ?? false;
+  if (invoiceNumberMatch) return true;
+  return inv.items.some((item) => itemLabel(item).toLowerCase().includes(q));
+}
+
 export default function VehicleDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -128,9 +138,9 @@ export default function VehicleDetailPage() {
 
   // Filters — pared down from the invoice-list style filters (date range
   // + status + payment + financial totals) to just what a "what's been
-  // done to this car" view actually needs: a parts/services text search
-  // and a year filter. Payment/financial detail now lives inside each
-  // invoice, not on this page.
+  // done to this car" view actually needs: a parts/services/invoice#
+  // text search and a year filter. Payment/financial detail now lives
+  // inside each invoice, not on this page.
   const [yearFilter, setYearFilter] = useState<'ALL' | string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'ISSUED'>('ALL');
   const [itemSearch, setItemSearch] = useState('');
@@ -198,15 +208,14 @@ export default function VehicleDetailPage() {
     });
   }, [vehicle, statusFilter, yearFilter]);
 
-  // Parts/services search — matches if ANY item on the invoice has a
-  // product name or service description containing the query. Applied
-  // last, on top of the status/year filters above.
+  // Text search — matches if the invoice number itself contains the query
+  // (e.g. "ATL-20002") OR any item on the invoice has a product name /
+  // service description containing it. Applied last, on top of the
+  // status/year filters above.
   const visibleInvoices = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
     if (!q) return statusAndYearFiltered;
-    return statusAndYearFiltered.filter((inv) =>
-      inv.items.some((item) => itemLabel(item).toLowerCase().includes(q)),
-    );
+    return statusAndYearFiltered.filter((inv) => invoiceMatchesSearch(inv, q));
   }, [statusAndYearFiltered, itemSearch]);
 
   // Any filter change invalidates the current page — land back on page 1
@@ -323,14 +332,15 @@ export default function VehicleDetailPage() {
 
             {/* Search + year + status — deliberately lightweight now that
                 payment/date-range filtering and financial totals live on
-                the invoice itself, not here. */}
+                the invoice itself, not here. Search covers both invoice
+                number and parts/services text. */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
               <div className="relative flex-1 sm:max-w-sm">
                 <Search size={14} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
-                  placeholder="Search parts/services..."
+                  placeholder="Search invoice #, parts/services..."
                   className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
                 />
               </div>

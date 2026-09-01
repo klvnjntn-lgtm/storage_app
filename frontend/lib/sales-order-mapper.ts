@@ -35,6 +35,7 @@ export type SalesOrderPrintView = {
 
   confirmedAt: string | null;
   createdAt: string;
+  invoiceNumber: string | null; // NEW — populated when this DO came from a direct Invoice instead
 
   taxes: { name: string; percentage: number; amount: number }[];
   items: {

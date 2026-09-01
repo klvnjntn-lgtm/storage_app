@@ -135,6 +135,8 @@ export function mapDeliveryOrderToDetail(raw: any): DeliveryOrderDetail {
     doNumber: raw.doNumber,
     status: raw.status,
     salesOrderId: raw.salesOrderId,
+        invoiceId: raw.invoiceId ?? null, // NEW
+
     customerName: raw.customerName ?? null,
     customerAddress: raw.customerAddress ?? null,
     customerPhone: raw.customerPhone ?? null,
@@ -146,6 +148,8 @@ export function mapDeliveryOrderToDetail(raw: any): DeliveryOrderDetail {
     deliveredBy: raw.deliveredBy ?? null,
     receivedBy: raw.receivedBy ?? null,
     signedAt: raw.signedAt ?? null,
+        invoice: raw.invoice ? { invoiceNumber: raw.invoice.invoiceNumber } : null, // NEW
+
     salesOrder: raw.salesOrder ? { orderNumber: raw.salesOrder.orderNumber } : null,
     location: raw.location ? { name: raw.location.name } : null,
     // Needed so the detail page can hide "Convert to Invoice" once this
@@ -181,6 +185,7 @@ export type DeliveryOrderView = {
   };
   location: { name: string; address: string | null };
   salesOrderNumber: string | null;
+  invoiceNumber: string | null; // NEW
   customer: {
     name: string | null;
     address: string | null;
@@ -212,6 +217,7 @@ export function toDeliveryOrderView(raw: DeliveryOrderPrintView): DeliveryOrderV
     },
     location: { name: raw.locationName, address: raw.locationAddress },
     salesOrderNumber: raw.salesOrderNumber,
+    invoiceNumber: raw.invoiceNumber, // NEW
     customer: {
       name: raw.customerName,
       address: raw.customerAddress,

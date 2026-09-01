@@ -4,13 +4,13 @@ import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { resolveUploadUrl } from '@/lib/assets';
 import { parseCalendarDate } from '@/lib/dates';
+import { RECEIPT_CONTENT_WIDTH_MM } from '@/lib/invoice-format';
 
 export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
   const logoUrl = resolveUploadUrl(invoice.businessLogoUrl);
 
   return (
-    <div className="w-[76mm] font-mono text-xs leading-relaxed text-black bg-white">
-      {/* Business header */}
+<div style={{ width: `${RECEIPT_CONTENT_WIDTH_MM}mm` }} className="font-mono text-xs leading-relaxed text-black bg-white">      {/* Business header */}
       <div className="text-center">
         {logoUrl && (
           // eslint-disable-next-line @next/next/no-img-element

@@ -21,9 +21,6 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
 
   const billTo = invoice.billingAddress ?? invoice.customerAddress;
 
-  const hasItemDiscounts = invoice.items.some((item) => item.itemDiscount > 0);
-  const hasItemTax = invoice.items.some((item) => item.itemTaxAmount > 0);
-
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
       {/* Business identity + invoice meta */}
@@ -159,82 +156,54 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       )}
 
       {/* Items */}
+      {/* Items — Discount/Tax columns always render, matching the
+          Quotation/Sales Order templates. */}
       <table className="w-full border-collapse mt-6">
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">
-              Item
-            </th>
-
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">
-              Qty
-            </th>
-
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">
-              Unit
-            </th>
-
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">
-              Price
-            </th>
-
-            {hasItemDiscounts && (
-              <th className="text-right border-b-2 border-gray-300 py-2 text-black">
-                Disc.
-              </th>
-            )}
-
-            {hasItemTax && (
-              <th className="text-right border-b-2 border-gray-300 py-2 text-black">
-                Tax
-              </th>
-            )}
-
-            <th className="text-right border-b-2 border-gray-300 py-2 text-black">
-              Total
-            </th>
+            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">Item</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Qty</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Price</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Discount</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Tax</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">Total</th>
           </tr>
         </thead>
 
         <tbody>
           {invoice.items.map((item) => (
             <tr key={item.id}>
-              <td className="border-b border-gray-100 py-2 text-black">
+              <td className="border-b border-gray-100 py-2 pr-3 text-black break-words">
                 {item.productName}
               </td>
 
-              <td className="border-b border-gray-100 py-2 text-black">
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
                 {item.quantity}
+                {item.unit && (
+                  <span className="text-gray-400 text-xs ml-1">{item.unit}</span>
+                )}
               </td>
 
-              <td className="border-b border-gray-100 py-2 text-black">
-                {item.unit ?? '—'}
-              </td>
-
-              <td className="border-b border-gray-100 py-2 text-black">
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
                 {formatIDR(item.unitPrice)}
               </td>
 
-              {hasItemDiscounts && (
-                <td className="border-b border-gray-100 py-2 text-right text-gray-600">
-                  {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
-                </td>
-              )}
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+                {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
+              </td>
 
-              {hasItemTax && (
-                <td className="border-b border-gray-100 py-2 text-right text-gray-600">
-                  {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-                </td>
-              )}
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
+              </td>
 
-              <td className="border-b border-gray-100 py-2 text-right font-medium text-black">
+              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
                 {formatIDR(item.itemTotal)}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-
+      
       {/* Totals */}
       <div className="ml-auto w-1/2 mt-4">
         <div className="flex justify-between py-1 text-black">

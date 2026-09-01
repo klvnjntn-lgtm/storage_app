@@ -34,6 +34,8 @@ import { SalesQuotationService } from '../sales-quotation/sales-quotation.servic
 export type InvoicePrintView = {
   id: string;
   format: string;
+  salesOrderId: string | null;        // NEW
+  deliveryOrders: { id: string; doNumber: string | null; status: string }[]; // NEW
 
   invoiceNumber: string | null;
   status: string;
@@ -141,6 +143,8 @@ const invoiceDetailInclude = {
     },
   },
   taxes: { select: { name: true, percentage: true, amount: true } },
+    deliveryOrders: { select: { id: true, doNumber: true, status: true } }, // NEW
+
 } satisfies Prisma.InvoiceInclude;
 
 @Injectable()
@@ -706,6 +710,8 @@ async getRevenueReport(
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
       format: invoice.format,
+    salesOrderId: invoice.salesOrderId, // NEW
+    deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })), // NEW
 
       vehicleId: invoice.vehicleId ?? null,
       businessAddress: invoice.organization.address,

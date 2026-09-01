@@ -1,5 +1,4 @@
 // components/invoices/templates/A5Template.tsx
-import { Fragment } from 'react';
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
@@ -91,54 +90,55 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
         </div>
       )}
 
-      {/* Items — each line is a main row (name / qty / price / total),
-          plus an optional compact sub-row underneath showing per-item
-          discount/tax when either is non-zero. Avoids adding two more
-          narrow columns to a page that doesn't have room for them. */}
+      {/* Items — Discount/Tax columns always render, matching the
+          Sales Order template's table style. */}
+      {/* Items — Discount/Tax columns always render, same shape as A4. */}
       <table className="w-full border-collapse mt-3">
         <thead>
           <tr>
-            <th className="text-left border-b border-gray-300 py-1 text-black">Item</th>
-            <th className="text-left border-b border-gray-300 py-1 text-black w-16">Qty</th>
-            <th className="text-left border-b border-gray-300 py-1 text-black w-24">Price</th>
-            <th className="text-right border-b border-gray-300 py-1 text-black w-28">Total</th>
+            <th className="text-left border-b border-gray-300 py-1 pr-2 text-black">Item</th>
+            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">Qty</th>
+            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">Price</th>
+            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">Discount</th>
+            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">Tax</th>
+            <th className="text-right border-b border-gray-300 py-1 pl-2 text-black">Total</th>
           </tr>
         </thead>
+
         <tbody>
-          {invoice.items.map((item) => {
-            const hasBreakdown = item.itemDiscount > 0 || item.itemTaxAmount > 0;
-            return (
-              <Fragment key={item.id}>
-                <tr>
-                  <td className={`text-black pt-1 ${hasBreakdown ? '' : 'border-b border-gray-100 pb-1'}`}>
-                    {item.productName}
-                  </td>
-                  <td className={`text-black pt-1 ${hasBreakdown ? '' : 'border-b border-gray-100 pb-1'}`}>
-                    {item.quantity}
-                  </td>
-                  <td className={`text-black pt-1 ${hasBreakdown ? '' : 'border-b border-gray-100 pb-1'}`}>
-                    {formatIDR(item.unitPrice)}
-                  </td>
-                  <td className={`text-right text-black pt-1 ${hasBreakdown ? '' : 'border-b border-gray-100 pb-1'}`}>
-                    {formatIDR(item.itemTotal)}
-                  </td>
-                </tr>
-                {hasBreakdown && (
-                  <tr>
-                    <td colSpan={4} className="border-b border-gray-100 pb-1 text-[9px] text-gray-500">
-                      {item.itemDiscount > 0 && (
-                        <span className="mr-3">Disc: -{formatIDR(item.itemDiscount)}</span>
-                      )}
-                      {item.itemTaxAmount > 0 && <span>Tax: +{formatIDR(item.itemTaxAmount)}</span>}
-                    </td>
-                  </tr>
+          {invoice.items.map((item) => (
+            <tr key={item.id}>
+              <td className="border-b border-gray-100 py-1 pr-2 text-black break-words">
+                {item.productName}
+              </td>
+
+              <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">
+                {item.quantity}
+                {item.unit && (
+                  <span className="text-gray-400 text-[10px] ml-1">{item.unit}</span>
                 )}
-              </Fragment>
-            );
-          })}
+              </td>
+
+              <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">
+                {formatIDR(item.unitPrice)}
+              </td>
+
+              <td className="border-b border-gray-100 py-1 px-2 text-right text-gray-600 whitespace-nowrap">
+                {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
+              </td>
+
+              <td className="border-b border-gray-100 py-1 px-2 text-right text-gray-600 whitespace-nowrap">
+                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
+              </td>
+
+              <td className="border-b border-gray-100 py-1 pl-2 text-right font-medium text-black whitespace-nowrap">
+                {formatIDR(item.itemTotal)}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
-
+      
       <div className="mt-2 flex justify-between gap-6">
         <p className="text-[10px] italic text-gray-600 max-w-[60%] self-end">
           Terbilang: {terbilang(invoice.total)}

@@ -63,42 +63,47 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
       )}
 
       {/* Items */}
+      {/* Items */}
       <table className="w-full border-collapse mt-6">
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Item</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Qty</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Price</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Discount</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Tax</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 text-black">Total</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">Item</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Qty</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Price</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Discount</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Tax</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">Total</th>
           </tr>
         </thead>
 
         <tbody>
           {order.items.map((item, index) => (
             <tr key={`${item.productName}-${index}`}>
-              <td className="border-b border-gray-100 py-2 text-black">
+              <td className="border-b border-gray-100 py-2 pr-3 text-black">
                 {item.productName}
                 {item.sku && <span className="text-gray-400 text-xs ml-1">({item.sku})</span>}
               </td>
-              <td className="border-b border-gray-100 py-2 text-black">
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
                 {item.quantity}
                 {item.unit && <span className="text-gray-400 text-xs ml-1">{item.unit}</span>}
               </td>
-              <td className="border-b border-gray-100 py-2 text-black">{formatIDR(item.unitPrice)}</td>
-              <td className="border-b border-gray-100 py-2 text-gray-600">
+              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+                {formatIDR(item.unitPrice)}
+              </td>
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
-              <td className="border-b border-gray-100 py-2 text-gray-600">
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
                 {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
               </td>
-              <td className="border-b border-gray-100 py-2 text-right text-black">{formatIDR(item.itemTotal)}</td>
+              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
+                {formatIDR(item.itemTotal)}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-
+      
       {/* Totals */}
       <div className="ml-auto w-1/2 mt-4">
         <div className="flex justify-between py-1 text-black">

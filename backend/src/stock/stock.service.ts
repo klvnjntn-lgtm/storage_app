@@ -68,6 +68,12 @@ type SalesOrderReturnContext = {
   invoiceId?: never;
   metadata?: Prisma.InputJsonObject;
 };
+type InvoiceReturnContext = { // NEW
+  type: typeof EventType.RETURNS;
+  invoiceId: string;
+  salesOrderId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
 
 export type StockMovementContext =
   | InvoiceSaleContext
@@ -75,8 +81,8 @@ export type StockMovementContext =
   | InvoiceAdjustmentContext
   | SalesOrderAdjustmentContext
   | PurchaseOrderReceiptContext
-  | SalesOrderReturnContext; // NEW
-
+  | SalesOrderReturnContext // NEW
+  | InvoiceReturnContext; // NEW
 @Injectable()
 export class StockService {
   constructor(

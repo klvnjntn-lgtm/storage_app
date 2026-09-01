@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: waresys-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  firebird:
+    image: dimenziokft/firebird:2.5.9-sc
+    container_name: waresys-firebird
+    restart: unless-stopped
+
+    environment:
+      ISC_PASSWORD: ${FIREBIRD_PASSWORD}
+
+    volumes:
+      - firebird_data:/firebird/data
+      - /home/kelvi/warehouse-layer/gdb-imports:/tmp/gdb-imports
+
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: waresys-backend
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      firebird:
+        condition: service_started
+
+    environment:
+      NODE_ENV: production
+
+      DATABASE_URL: ${DATABASE_URL}
+
+      SUPERADMIN_SECRET: ${SUPERADMIN_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+
+      LICENSE_FINGERPRINT: ${LICENSE_FINGERPRINT}
+      LICENSE_KEY: ${LICENSE_KEY}
+
+      KEYGEN_ACCOUNT_ID: ${KEYGEN_ACCOUNT_ID}
+      KEYGEN_TOKEN: ${KEYGEN_TOKEN}
+
+      PRINT_TOKEN_SECRET: ${PRINT_TOKEN_SECRET}
+
+      FRONTEND_URL: ${FRONTEND_URL}
+      HOST_MACHINE_GUID: ${HOST_MACHINE_GUID}
+
+      LICENSE_STATE_FILE: ${LICENSE_STATE_FILE}
+
+      FIREBIRD_HOST: firebird
+      FIREBIRD_PORT: 3050
+      FIREBIRD_USER: ${FIREBIRD_USER}
+      FIREBIRD_PASSWORD: ${FIREBIRD_PASSWORD}
+
+      FIREBIRD_LEGACY_HOST: firebird
+      FIREBIRD_LEGACY_PORT: 3050
+      FIREBIRD_LEGACY_USER: ${FIREBIRD_LEGACY_USER}
+      FIREBIRD_LEGACY_PASSWORD: ${FIREBIRD_LEGACY_PASSWORD}
+
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+      - ./gdb-imports:/tmp/gdb-imports
+
+    ports:
+      - "3000:3000"
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+      args:
+        BACKEND_URL: http://backend:3000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+
+    container_name: waresys-frontend
+    restart: unless-stopped
+
+    depends_on:
+      - backend
+
+    ports:
+      - "3001:3000"
+
+
+volumes:
+  postgres_data:
+  backend_data:
+  backend_uploads:
+  firebird_data:
+  gdb_imports:

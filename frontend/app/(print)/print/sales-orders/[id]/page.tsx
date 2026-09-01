@@ -2,7 +2,7 @@
 // through a mapper, same as invoice/quotation, instead of trusting the
 // fetch response's types at face value.
 import { SalesOrderA4Template } from '@/app/components/sales-orders/template/SalesOrderA4Template';
-import { SalesOrderPrintView, toSalesOrderView } from '@/lib/sales-order.mapper';
+import { SalesOrderPrintView, toSalesOrderView } from '@/lib/sales-order-mapper';
 
 async function getPrintData(id: string, token: string): Promise<SalesOrderPrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;

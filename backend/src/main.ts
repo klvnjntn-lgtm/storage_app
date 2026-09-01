@@ -10,9 +10,9 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [
-      'http://localhost:3003',
-      'http://192.168.1.4:3003',
-      'http://192.168.1.13:3003',
+      'http://localhost:3000',
+      'http://192.168.1.4:3000',
+      'http://192.168.1.13:3000',
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
