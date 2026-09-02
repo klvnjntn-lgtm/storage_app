@@ -49,4 +49,11 @@ listAll(@CurrentOrg() orgId: string, @Query('q') q?: string) {
   remove(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.vehiclesService.remove(orgId, id);
   }
+  @Get('customers/:customerId/vehicles')
+listByCustomer(
+  @CurrentOrg() orgId: string,
+  @Param('customerId') customerId: string,
+) {
+  return this.vehiclesService.listByCustomer(orgId, customerId);
+}
 }

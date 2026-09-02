@@ -217,11 +217,13 @@ export function CartPanel({
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
   const showInvoiceInfoFields = format === 'A5' || format === 'A4';
 
-  // A5 keeps a structured Customer object via CustomerPicker; every other
-  // format (A4 included) uses the plain free-text name field. Missing-customer
-  // validation therefore has to check whichever of the two is actually in play.
+  // A5 and A4 both keep a structured Customer object via CustomerPicker
+  // (both send customerId + optional vehicleId to the backend); RECEIPT
+  // and THERMAL_58 use the plain free-text name field instead. Missing-
+  // customer validation has to check whichever of the two is in play.
+  const usesStructuredCustomer = format === 'A5' || format === 'A4';
   const missingRequiredCustomer =
-    customerNameRequired && (format === 'A5' ? !customer : !customerName.trim());
+    customerNameRequired && (usesStructuredCustomer ? !customer : !customerName.trim());
 
   return (
     <div className="border-2 border-gray-300 rounded-md p-4 h-fit">
@@ -259,7 +261,7 @@ export function CartPanel({
         />
       </div>
 
-      {format === 'A5' ? (
+      {usesStructuredCustomer ? (
         <CustomerPicker
           value={customer}
           onChange={setCustomer}
@@ -342,7 +344,7 @@ export function CartPanel({
         </div>
       )}
 
-      {format === 'A5' && hasWorkshopRms && customer && (
+      {usesStructuredCustomer && hasWorkshopRms && customer && (
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 block">Vehicle (optional)</label>
           <select

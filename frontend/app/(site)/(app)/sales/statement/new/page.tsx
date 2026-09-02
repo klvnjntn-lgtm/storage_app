@@ -74,7 +74,7 @@ export default function NewStatementPage() {
     setSearching(true);
     const handle = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ search: query.trim() });
+const params = new URLSearchParams({ q: query.trim() });
         const res = await apiFetch(`/customers?${params}`);
         if (res.ok && !cancelled) setResults(await res.json());
       } finally {
