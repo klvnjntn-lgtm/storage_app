@@ -225,7 +225,7 @@ function NewInvoicePage() {
   }, []);
 
   useEffect(() => {
-    if (!hasWorkshopRms || format !== 'A5' || !customer) {
+  if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !customer) {
       setCustomerVehicles([]);
       vehiclesFetchedForRef.current = null;
       return;
@@ -735,11 +735,11 @@ function NewInvoicePage() {
     return [...productItems, ...serviceItems];
   }
 
-  function buildCustomerFields() {
-    return format === 'A5'
-      ? { customerId: customer?.id, customerName: undefined, vehicleId: vehicleId ?? undefined }
-      : { customerId: undefined, customerName: customerName.trim() || undefined, vehicleId: undefined };
-  }
+function buildCustomerFields() {
+  return format === 'A5' || format === 'A4'
+    ? { customerId: customer?.id, customerName: undefined, vehicleId: vehicleId ?? undefined }
+    : { customerId: undefined, customerName: customerName.trim() || undefined, vehicleId: undefined };
+}
   function buildInvoiceInfoFields() {
     if (!customerNameRequired) return {};
     return {
@@ -748,11 +748,12 @@ function NewInvoicePage() {
       notes: notes.trim() || undefined,
     };
   }
-  function buildOdometerField() {
-    if (!hasWorkshopRms || format !== 'A5' || !vehicleId || !odometer.trim()) return {};
-    const parsed = Number(odometer);
-    return Number.isFinite(parsed) ? { odometer: parsed } : {};
-  }
+// 3. buildOdometerField — was: format !== 'A5'
+function buildOdometerField() {
+  if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !vehicleId || !odometer.trim()) return {};
+  const parsed = Number(odometer);
+  return Number.isFinite(parsed) ? { odometer: parsed } : {};
+}
 
   function adoptDraftId(id: string) {
     loadedDraftIdRef.current = id;
