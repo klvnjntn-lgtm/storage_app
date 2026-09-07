@@ -30,9 +30,6 @@ const INVOICE_POS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = [
   'legalName',
   'npwp',
   'logoUrl',
-  'bankName',
-  'bankAccountNumber',
-  'bankAccountName',
   'taxEnabled',
 ];
 

@@ -7,10 +7,11 @@ import { DeliveryOrderController } from './delivery-order.controller';
 import { StockModule } from 'src/stock/stock.module';
 import { PrintModule } from 'src/common/print/print.module';
 import { OrganizationModulesModule } from 'src/organization-module/organization-modules.module';
+import { DeliveryOrderPrintController } from './delivery-order-print.controller';
 
 @Module({
   imports: [PrismaModule, SharedDocumentsModule, SalesOrderModule, StockModule, PrintModule, OrganizationModulesModule],
-  controllers: [DeliveryOrderController],
+  controllers: [DeliveryOrderController, DeliveryOrderPrintController],
   providers: [DeliveryOrderService],
   exports: [DeliveryOrderService],
 })

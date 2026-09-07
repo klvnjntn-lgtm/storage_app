@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res } from '@nestjs/common';
 import { DeliveryOrderStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -6,6 +6,8 @@ import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { DeliveryOrderService } from './delivery-order.service';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { RecordDeliveryOrderReturnDto } from './dto/delivery-order-return.dto';
+import { RecordDeliveryOrderProofDto } from './dto/delivery-order-proof.dto'; // adjust path/name to your actual DTO
+import type { Response } from 'express';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('delivery-orders')
@@ -37,9 +39,47 @@ export class DeliveryOrderController {
     return this.deliveryOrderService.getOne(organizationId, id);
   }
 
+  // Authenticated JSON print view — the browser fetches this to render
+  // <DeliveryOrderA4Template> client-side. Distinct from the unguarded
+  // print/delivery-orders/:id controller (Puppeteer, token-authed) and
+  // from :id/pdf below (binary download).
+  @Get(':id/print')
+  getPrintView(@CurrentOrg() organizationId: string, @Param('id') id: string) {
+    return this.deliveryOrderService.getPrintView(organizationId, id);
+  }
+
+  @Get(':id/pdf')
+  async downloadPdf(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.deliveryOrderService.renderPdf(organizationId, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="delivery-order.pdf"',
+    });
+    res.send(pdf);
+  }
+
   @Post(':id/ship')
   ship(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
     return this.deliveryOrderService.ship(organizationId, id, req.user.sub);
+  }
+
+  // Was implemented on the service but never wired up — the frontend's
+  // "Save signature" button was 404ing the same way print was.
+  @Patch(':id/proof-of-delivery')
+  recordProofOfDelivery(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Body() dto: RecordDeliveryOrderProofDto,
+  ) {
+    return this.deliveryOrderService.recordProofOfDelivery(organizationId, id, {
+      deliveredBy: dto.deliveredBy,
+      receivedBy: dto.receivedBy,
+      signedAt: dto.signedAt ? new Date(dto.signedAt) : undefined,
+    });
   }
 
   @Post(':id/return')

@@ -134,7 +134,9 @@ export class CreateDraftInvoiceDto {
   @IsOptional()
   @IsDateString()
   invoiceDate?: string;
-
+@IsOptional()
+@IsString()
+bankAccountId?: string | null;
   // REMOVED: top-level discountType/discountValue. Discount is now
   // per-item only (InvoiceLineInput.discountType/discountValue) —
   // keeping both a document-level and per-item discount input risked
@@ -182,7 +184,9 @@ export class UpdateDraftInvoiceDto {
   @IsOptional()
   @IsString()
   customerId?: string;
-
+@IsOptional()
+@IsString()
+bankAccountId?: string | null;
   @IsOptional()
   @IsInt()
   @Min(0)

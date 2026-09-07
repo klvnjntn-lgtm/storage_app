@@ -3,8 +3,15 @@ import { randomUUID } from 'crypto';
 import { unlink } from 'fs/promises';
 import Firebird = require('node-firebird');
 import { PrismaService } from '../prisma/prisma.service';
-import { InvoiceFormat, InvoiceStatus, PaymentStatus } from '@prisma/client';
+import {
+  DocumentType,
+  InvoiceFormat,
+  InvoiceStatus,
+  PaymentStatus,
+  PurchaseOrderStatus,
+} from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
+import { detectInvoiceNumberFormat } from '../shared/documents/invoice-number-format.util';
 // ---------------------------------------------------------------------------
 // Firebird helpers (promisified — node-firebird is callback-based)
 // ---------------------------------------------------------------------------
@@ -69,7 +76,7 @@ function detach(db: Firebird.Database): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Vehicle description parsing (Batam "BP" plates + KM/BERIKUTNYA readings
+// Vehicle description parsing (Indonesian plates + KM/BERIKUTNYA readings
 // embedded in ARINV.DESCRIPTION)
 //
 // Example: "# BP 1279 YI DH TERIOS KM: 87.919 BERIKUTNYA: 92.919 · ABE Mandiri"
@@ -85,9 +92,12 @@ function detach(db: Firebird.Database): Promise<void> {
 // Invoice.nextServiceKm in the Prisma schema.
 // ---------------------------------------------------------------------------
 
-// BP + 1-4 digits + 1-3 letters, with optional space/dot/dash separators,
-// anchored so it doesn't match mid-word and doesn't swallow trailing chars.
-const PLATE_REGEX = /\bBP[\s.\-]{0,3}(\d{1,4})[\s.\-]{0,3}([A-Z]{1,3})(?![A-Z0-9])/i;
+// Any Indonesian region code (1-2 letters) + 1-4 digits + 1-3 letters, with
+// optional space/dot/dash separators, anchored so it doesn't match mid-word
+// and doesn't swallow trailing chars. Generalized from a hardcoded "BP" so
+// plates from other regions (B, D, L, N, ...) are also detected — Batam was
+// never the only region these GDBs could contain data for.
+const PLATE_REGEX = /\b([A-Z]{1,2})[\s.\-]{0,3}(\d{1,4})[\s.\-]{0,3}([A-Z]{1,3})(?![A-Z0-9])/i;
 const KM_REGEX = /\bKM\s*[:.]?\s*([\d.,]+)/i;
 const NEXT_KM_REGEX = /\bBERIKUTNYA\s*[:.]?\s*([\d.,]+)/i;
 const SEGMENT_SEPARATOR_REGEX = /[·|]/;
@@ -117,6 +127,12 @@ function parseKmValue(raw: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+// Normalizes a plate for stable matching regardless of spacing/separators
+// ("BP 1279 YI" / "BP.1279.YI" -> "BP1279YI"). Used for Vehicle.plateNormalized.
+function normalizePlate(plate: string): string {
+  return plate.replace(/[\s.\-]/g, '').toUpperCase();
+}
+
 function parseVehicleDescription(description: string | null | undefined): ParsedVehicleDescription {
   const empty: ParsedVehicleDescription = {
     plate: null,
@@ -127,7 +143,7 @@ function parseVehicleDescription(description: string | null | undefined): Parsed
   };
   if (!description) return empty;
 
-  // 1. Plate — same extraction behavior as before this change.
+  // 1. Plate — region code + digits + letters.
   const plateMatch = PLATE_REGEX.exec(description);
   if (!plateMatch) {
     // No plate -> this description isn't about a vehicle at all; don't
@@ -135,9 +151,10 @@ function parseVehicleDescription(description: string | null | undefined): Parsed
     return empty;
   }
 
-  const digits = plateMatch[1];
-  const letters = plateMatch[2].toUpperCase();
-  const plate = `BP ${digits} ${letters}`;
+  const region = plateMatch[1].toUpperCase();
+  const digits = plateMatch[2];
+  const letters = plateMatch[3].toUpperCase();
+  const plate = `${region} ${digits} ${letters}`;
 
   let working =
     description.slice(0, plateMatch.index) +
@@ -324,6 +341,36 @@ interface TempFileEntry {
   firebirdPassword?: string;
 }
 
+// ---------------------------------------------------------------------------
+// PO / PODET row shapes (module scope so importPurchaseOrders' helper types
+// can reference them without re-declaring inline)
+// ---------------------------------------------------------------------------
+
+interface PoHeaderRow {
+  POID: number;
+  PONO: string | null;
+  VENDORID: number | null;
+  PODATE: Date | null;
+  EXPECTED: Date | null;
+  PROCEED: number | boolean | null;
+  CLOSED: number | boolean | null;
+  POAMOUNT: number | null;
+  DESCRIPTION: string | null;
+}
+
+interface PoDetRow {
+  POID: number;
+  SEQ: number;
+  ITEMNO: string;
+  ITEMOVDESC: string | null;
+  QUANTITY: number | null;
+  QTYRECV: number | null;
+  UNITPRICE: number | null;
+  ITEMUNIT: string | null;
+  UNITRATIO: number | null;
+  ITEMDISCPC: number | null;
+}
+
 @Injectable()
 export class GdbImportService {
   constructor(private readonly prisma: PrismaService,     
@@ -401,6 +448,34 @@ export class GdbImportService {
         `,
       );
 
+      // Purchase Order counts — best-effort. Not every GDB has a PO
+      // module enabled, so a missing PO/PODET table shouldn't fail the
+      // whole preview; it just means purchaseOrderCount comes back null
+      // and the UI can hide that option.
+      let purchaseOrderCount: number | null = null;
+      let vendorCount: number | null = null;
+      try {
+        const [poCount] = await fbQuery<{ CNT: number }>(
+          fbDb,
+          `SELECT COUNT(*) AS CNT FROM PO`,
+        );
+        purchaseOrderCount = poCount.CNT;
+
+        const [vCount] = await fbQuery<{ CNT: number }>(
+          fbDb,
+          `
+          SELECT COUNT(DISTINCT pd.ID) AS CNT
+          FROM PERSONDATA pd
+          JOIN PO p ON p.VENDORID = pd.ID
+          `,
+        );
+        vendorCount = vCount.CNT;
+      } catch (err: any) {
+        console.log('[Firebird] PO tables not available in this database', {
+          message: err?.message,
+        });
+      }
+
       const entry = this.tempFiles.get(token);
       if (entry) {
         entry.firebirdPort = port;
@@ -413,6 +488,8 @@ export class GdbImportService {
         itemCount: test.CNT,
         invoiceCount: invoiceCount.CNT,
         customerCount: customerCount.CNT,
+        purchaseOrderCount,
+        vendorCount,
       };
     } finally {
       await detach(fbDb);
@@ -422,7 +499,8 @@ export class GdbImportService {
   // -------------------------------------------------------------------------
   // Confirm: run the actual import. `target` picks how much gets written —
   // warehouse customers only need Products (+ Stock); invoicing/POS
-  // customers need Products + Stock + Customers + Invoices.
+  // customers need Products + Stock + Customers + Invoices; customers who
+  // also use Purchasing need Suppliers + Purchase Orders on top of that.
   // -------------------------------------------------------------------------
 // Called before confirmImport, so the UI can show "map these warehouses"
 // with real counts before committing anything.
@@ -499,7 +577,7 @@ async saveWarehouseMapping(
   async confirmImport(
     token: string,
     organizationId: string,
-    target: 'products_only' | 'full_invoices',
+    target: 'products_only' | 'full_invoices' | 'full_invoices_and_purchase_orders',
     invoiceFormat: InvoiceFormat = InvoiceFormat.A4,
   ) {
     const dbPath = this.getPathOrThrow(token);
@@ -531,7 +609,24 @@ async saveWarehouseMapping(
       const customerIdMap = await this.importCustomers(fbDb, organizationId);
       const invoiceResult = await this.importInvoices(fbDb, organizationId, customerIdMap, invoiceFormat);
 
-      return { items: itemResult, stock: stockResult, invoices: invoiceResult };
+      if (target !== 'full_invoices_and_purchase_orders') {
+        return { items: itemResult, stock: stockResult, invoices: invoiceResult };
+      }
+
+      const supplierIdMap = await this.importSuppliers(fbDb, organizationId);
+      const purchaseOrderResult = await this.importPurchaseOrders(
+        fbDb,
+        organizationId,
+        supplierIdMap,
+        productIdBySku,
+      );
+
+      return {
+        items: itemResult,
+        stock: stockResult,
+        invoices: invoiceResult,
+        purchaseOrders: purchaseOrderResult,
+      };
     } finally {
       await detach(fbDb);
       await this.cleanupToken(token);
@@ -817,6 +912,426 @@ private async importStock(
   }
 
   // -------------------------------------------------------------------------
+  // PERSONDATA -> Supplier (only rows referenced by PO.VENDORID)
+  //
+  // Unlike importCustomers, this matches on a stable Supplier.externalId
+  // (Accurate PERSONDATA.ID), NOT on name. Vendor display names in Accurate
+  // data are inconsistent enough ("PT ABC" / "PT. ABC" / "ABC") that
+  // name-matching would silently fork one real vendor into several
+  // Suppliers across re-imports — externalId avoids that entirely.
+  // -------------------------------------------------------------------------
+
+  private async importSuppliers(
+    fbDb: Firebird.Database,
+    organizationId: string,
+  ): Promise<Map<number, string>> {
+    const rows = await fbQuery<{
+      ID: number;
+      NAME: string;
+      PHONE: string | null;
+      ADDRESSLINE1: string | null;
+      ADDRESSLINE2: string | null;
+    }>(
+      fbDb,
+      `
+      SELECT DISTINCT pd.ID AS ID, pd.NAME AS NAME, pd.PHONE AS PHONE,
+             pd.ADDRESSLINE1 AS ADDRESSLINE1, pd.ADDRESSLINE2 AS ADDRESSLINE2
+      FROM PERSONDATA pd
+      JOIN PO p ON p.VENDORID = pd.ID
+      `,
+    );
+
+    // Clean + dedupe by Accurate PERSONDATA.ID (the match key here, not name).
+    const byExternalId = new Map<
+      string,
+      { name: string; phone: string | null; address: string | null }
+    >();
+    for (const row of rows) {
+      const name = row.NAME?.trim();
+      if (!name || row.ID == null) continue;
+      const address = [row.ADDRESSLINE1, row.ADDRESSLINE2].filter(Boolean).join(', ') || null;
+      byExternalId.set(String(row.ID), { name, phone: row.PHONE?.trim() || null, address });
+    }
+    const externalIds = [...byExternalId.keys()];
+
+    // One query for every existing supplier by externalId, instead of one
+    // findFirst per row.
+    const existingSuppliers = await this.prisma.supplier.findMany({
+      where: { organizationId, externalId: { in: externalIds } },
+      select: { id: true, externalId: true },
+    });
+    const existingByExternalId = new Map(
+      existingSuppliers.filter((s) => s.externalId != null).map((s) => [s.externalId as string, s]),
+    );
+
+    const toCreate: {
+      organizationId: string;
+      externalId: string;
+      name: string;
+      phone: string | null;
+      address: string | null;
+    }[] = [];
+    const toUpdate: { id: string; name: string; phone: string | null; address: string | null }[] = [];
+
+    for (const [externalId, info] of byExternalId) {
+      const existing = existingByExternalId.get(externalId);
+      if (existing) {
+        toUpdate.push({ id: existing.id, name: info.name, phone: info.phone, address: info.address });
+      } else {
+        toCreate.push({ organizationId, externalId, name: info.name, phone: info.phone, address: info.address });
+      }
+    }
+
+    if (toCreate.length > 0) {
+      await this.prisma.supplier.createMany({ data: toCreate, skipDuplicates: true });
+    }
+
+    const UPDATE_CHUNK_SIZE = 50;
+    for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
+      const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map((u) =>
+          this.prisma.supplier.update({
+            where: { id: u.id },
+            data: { name: u.name, phone: u.phone, address: u.address },
+          }),
+        ),
+      );
+    }
+
+    // createMany doesn't return created rows, so re-fetch the complete
+    // externalId -> id map (pre-existing + just-created).
+    const allSuppliers = await this.prisma.supplier.findMany({
+      where: { organizationId, externalId: { in: externalIds } },
+      select: { id: true, externalId: true },
+    });
+    const idByFbId = new Map<number, string>();
+    for (const s of allSuppliers) {
+      if (s.externalId != null) idByFbId.set(Number(s.externalId), s.id);
+    }
+
+    console.log('[GdbImport] importSuppliers done', { created: toCreate.length, updated: toUpdate.length });
+
+    return idByFbId;
+  }
+
+  // -------------------------------------------------------------------------
+  // PO + PODET -> PurchaseOrder + PurchaseOrderItem
+  //
+  // Idempotency: matched on PurchaseOrder.externalId (Accurate PO.POID),
+  // NOT on poNumber. poNumber is set from Accurate PONO for display/
+  // reconciliation, but PONO is explicitly untrusted as an identity key —
+  // see duplicatePoNumberWarnings below.
+  //
+  // Line items are matched on (purchaseOrderId, externalSeq) via upsert,
+  // never delete-then-recreate — a line may already have real
+  // GoodsReceiptItem rows pointing at it via FK, and deleting it would
+  // either throw (FK constraint) or orphan receiving history.
+  //
+  // KNOWN APPROXIMATIONS (surfaced in the return value, not hidden):
+  //  - taxAmount is backed out as POAMOUNT - subtotal (TAX1ID/TAX2ID/
+  //    INCLUSIVETAX have no equivalent in our single-taxRate PO model).
+  //  - CLOSED = true always maps to FULLY_RECEIVED, even if received
+  //    quantity is less than ordered — flagged via
+  //    closedButNotFullyReceivedWarnings rather than silently misreporting
+  //    quantities or inventing a new status value.
+  //  - QTYRECV is preserved as PurchaseOrderItem.importedReceivedQuantity —
+  //    a purely historical figure with NO real GoodsReceipt behind it (see
+  //    GoodsReceiptService.receivedQuantitiesByPoItem, which folds this in).
+  //    QTYRECV > QUANTITY in the source data is preserved as-is, not
+  //    clamped, with a warning.
+  // -------------------------------------------------------------------------
+
+  private async importPurchaseOrders(
+    fbDb: Firebird.Database,
+    organizationId: string,
+    supplierIdByFbId: Map<number, string>,
+    productIdBySku: Map<string, string>,
+  ) {
+    const headers = await fbQuery<PoHeaderRow>(
+      fbDb,
+      `
+      SELECT
+        P.POID AS POID, P.PONO AS PONO, P.VENDORID AS VENDORID,
+        P.PODATE AS PODATE, P.EXPECTED AS EXPECTED, P.PROCEED AS PROCEED,
+        P.CLOSED AS CLOSED, P.POAMOUNT AS POAMOUNT, P.DESCRIPTION AS DESCRIPTION
+      FROM PO P
+      ORDER BY P.POID
+      `,
+    );
+
+    const lines = await fbQuery<PoDetRow>(
+      fbDb,
+      `
+      SELECT
+        D.POID AS POID, D.SEQ AS SEQ, D.ITEMNO AS ITEMNO, D.ITEMOVDESC AS ITEMOVDESC,
+        D.QUANTITY AS QUANTITY, D.QTYRECV AS QTYRECV, D.UNITPRICE AS UNITPRICE,
+        D.ITEMUNIT AS ITEMUNIT, D.UNITRATIO AS UNITRATIO, D.ITEMDISCPC AS ITEMDISCPC
+      FROM PODET D
+      ORDER BY D.POID, D.SEQ
+      `,
+    );
+
+    const linesByPoId = new Map<number, PoDetRow[]>();
+    for (const line of lines) {
+      const arr = linesByPoId.get(line.POID) ?? [];
+      arr.push(line);
+      linesByPoId.set(line.POID, arr);
+    }
+
+    // One query for every already-imported PO by externalId, instead of one
+    // findFirst per header row.
+    const externalIds = headers.map((h) => String(h.POID));
+    const existingByExternalId = new Map<string, { id: string; poNumber: string | null }>();
+    const LOOKUP_CHUNK = 5000;
+    for (let i = 0; i < externalIds.length; i += LOOKUP_CHUNK) {
+      const chunk = externalIds.slice(i, i + LOOKUP_CHUNK);
+      const rows = await this.prisma.purchaseOrder.findMany({
+        where: { organizationId, externalId: { in: chunk } },
+        select: { id: true, externalId: true, poNumber: true },
+      });
+      for (const r of rows) {
+        if (r.externalId) existingByExternalId.set(r.externalId, { id: r.id, poNumber: r.poNumber });
+      }
+    }
+
+    // Guard @@unique([organizationId, poNumber]) against PONO collisions —
+    // either within this file, or against a PO number that already exists
+    // for a different PO. Never silently overwrite a historical document
+    // number; on conflict, suffix with the Accurate POID and report it.
+    const candidatePoNumbers = [
+      ...new Set(headers.map((h) => h.PONO?.trim()).filter((n): n is string => !!n)),
+    ];
+    const poNumberOwner = new Map<string, string>(); // poNumber -> owning externalId
+    if (candidatePoNumbers.length > 0) {
+      const existingByPoNumber = await this.prisma.purchaseOrder.findMany({
+        where: { organizationId, poNumber: { in: candidatePoNumbers } },
+        select: { poNumber: true, externalId: true },
+      });
+      for (const row of existingByPoNumber) {
+        if (row.poNumber) poNumberOwner.set(row.poNumber, row.externalId ?? '__non_import__');
+      }
+    }
+
+    const duplicatePoNumberWarnings: string[] = [];
+    const resolvePoNumber = (raw: string | null, externalId: string): string | null => {
+      const candidate = raw?.trim() || null;
+      if (!candidate) return null;
+      const owner = poNumberOwner.get(candidate);
+      if (!owner || owner === externalId) {
+        poNumberOwner.set(candidate, externalId);
+        return candidate;
+      }
+      const suffixed = `${candidate}-ACC${externalId}`;
+      duplicatePoNumberWarnings.push(
+        `PONO "${candidate}" already used by another purchase order — POID ${externalId} imported as "${suffixed}"`,
+      );
+      poNumberOwner.set(suffixed, externalId);
+      return suffixed;
+    };
+
+    let created = 0;
+    let updated = 0;
+    const errors: string[] = [];
+    const missingSupplierWarnings: string[] = [];
+    const closedButNotFullyReceivedWarnings: string[] = [];
+    const overReceivedWarnings: string[] = [];
+
+    const CONCURRENCY = 10;
+
+    for (let i = 0; i < headers.length; i += CONCURRENCY) {
+      const chunk = headers.slice(i, i + CONCURRENCY);
+
+      await Promise.all(
+        chunk.map(async (header) => {
+          const externalId = String(header.POID);
+
+          try {
+            const itemRows = linesByPoId.get(header.POID) ?? [];
+
+            interface BuiltLine {
+              externalSeq: number;
+              productId: string | null;
+              description: string | null;
+              quantity: string;
+              unitCost: string;
+              lineTotal: string;
+              unit: string | null;
+              unitRatio: string | null;
+              discountPercentage: string | null;
+              importedReceivedQuantity: string;
+              quantityNum: number;
+              receivedNum: number;
+            }
+
+            const itemsData: BuiltLine[] = itemRows.map((line) => {
+              const quantity = num(line.QUANTITY);
+              const unitPrice = num(line.UNITPRICE);
+              const discPc = line.ITEMDISCPC != null ? Number(line.ITEMDISCPC) : 0;
+              const lineTotal = Math.round(quantity * unitPrice * (1 - discPc / 100) * 100) / 100;
+              const receivedQty = num(line.QTYRECV);
+
+              if (receivedQty > quantity) {
+                overReceivedWarnings.push(
+                  `PO ${externalId} SEQ ${line.SEQ}: QTYRECV (${receivedQty}) exceeds QUANTITY (${quantity}) — preserved as-is`,
+                );
+              }
+
+              const sku = line.ITEMNO?.trim();
+              const productId = sku ? productIdBySku.get(sku) ?? null : null;
+
+              return {
+                externalSeq: line.SEQ,
+                productId,
+                description: productId
+                  ? line.ITEMOVDESC?.trim() || null
+                  : `Unmapped Accurate SKU: ${sku ?? '(none)'}`,
+                quantity: quantity.toString(),
+                unitCost: unitPrice.toString(),
+                lineTotal: lineTotal.toString(),
+                unit: line.ITEMUNIT?.trim() || null,
+                unitRatio: line.UNITRATIO != null ? line.UNITRATIO.toString() : null,
+                discountPercentage: discPc ? discPc.toString() : null,
+                importedReceivedQuantity: receivedQty.toString(),
+                quantityNum: quantity,
+                receivedNum: receivedQty,
+              };
+            });
+
+            const subtotal = itemsData.reduce((sum, it) => sum + Number(it.lineTotal), 0);
+            const poAmount = num(header.POAMOUNT);
+            const taxAmount = Math.max(0, Math.round((poAmount - subtotal) * 100) / 100);
+
+            const supplierId = header.VENDORID != null ? supplierIdByFbId.get(header.VENDORID) ?? null : null;
+            if (header.VENDORID != null && !supplierId) {
+              missingSupplierWarnings.push(
+                `PO ${externalId}: VENDORID ${header.VENDORID} has no matching Supplier`,
+              );
+            }
+
+            const fullyReceivedByQty =
+              itemsData.length > 0 && itemsData.every((it) => it.receivedNum >= it.quantityNum);
+            const anyReceived = itemsData.some((it) => it.receivedNum > 0);
+            const isClosed = !!header.CLOSED;
+
+            let status: PurchaseOrderStatus;
+            if (isClosed) {
+              status = PurchaseOrderStatus.FULLY_RECEIVED;
+              if (!fullyReceivedByQty) {
+                closedButNotFullyReceivedWarnings.push(
+                  `PO ${externalId}: CLOSED in Accurate but received < ordered — imported as FULLY_RECEIVED per closed-PO convention`,
+                );
+              }
+            } else if (fullyReceivedByQty) {
+              status = PurchaseOrderStatus.FULLY_RECEIVED;
+            } else if (anyReceived) {
+              status = PurchaseOrderStatus.PARTIALLY_RECEIVED;
+            } else if (header.PROCEED) {
+              status = PurchaseOrderStatus.SENT;
+            } else {
+              status = PurchaseOrderStatus.DRAFT;
+            }
+
+            const existing = existingByExternalId.get(externalId);
+            const poNumber = resolvePoNumber(header.PONO, externalId);
+
+            await this.prisma.$transaction(async (tx) => {
+              let purchaseOrderId: string;
+
+              if (existing) {
+                await tx.purchaseOrder.update({
+                  where: { id: existing.id },
+                  data: {
+                    poNumber: poNumber ?? existing.poNumber,
+                    supplierId,
+                    orderDate: header.PODATE ?? undefined,
+                    expectedDate: header.EXPECTED ?? undefined,
+                    notes: header.DESCRIPTION ?? null,
+                    subtotal: subtotal.toString(),
+                    taxAmount: taxAmount.toString(),
+                    total: poAmount.toString(),
+                    status,
+                  },
+                });
+                purchaseOrderId = existing.id;
+              } else {
+                const createdPo = await tx.purchaseOrder.create({
+                  data: {
+                    organizationId,
+                    externalId,
+                    poNumber,
+                    supplierId,
+                    orderDate: header.PODATE ?? undefined,
+                    expectedDate: header.EXPECTED ?? undefined,
+                    notes: header.DESCRIPTION ?? null,
+                    subtotal: subtotal.toString(),
+                    taxAmount: taxAmount.toString(),
+                    total: poAmount.toString(),
+                    status,
+                  },
+                });
+                purchaseOrderId = createdPo.id;
+              }
+
+              // Upsert each line by (purchaseOrderId, externalSeq) — never
+              // delete+recreate; see class-level comment above.
+              for (const item of itemsData) {
+                const data = {
+                  productId: item.productId,
+                  description: item.description,
+                  quantity: item.quantity,
+                  unitCost: item.unitCost,
+                  lineTotal: item.lineTotal,
+                  unit: item.unit,
+                  unitRatio: item.unitRatio,
+                  discountPercentage: item.discountPercentage,
+                  importedReceivedQuantity: item.importedReceivedQuantity,
+                };
+
+                await tx.purchaseOrderItem.upsert({
+                  where: {
+                    purchaseOrderId_externalSeq: {
+                      purchaseOrderId,
+                      externalSeq: item.externalSeq,
+                    },
+                  },
+                  create: { purchaseOrderId, externalSeq: item.externalSeq, ...data },
+                  update: data,
+                });
+              }
+            });
+
+            if (existing) {
+              updated++;
+            } else {
+              created++;
+            }
+          } catch (err: any) {
+            errors.push(`PO ${externalId}: ${err.message}`);
+          }
+        }),
+      );
+
+      console.log('[GdbImport] importPurchaseOrders progress', {
+        processed: Math.min(i + CONCURRENCY, headers.length),
+        total: headers.length,
+      });
+    }
+
+    console.log('[GdbImport] importPurchaseOrders done', { created, updated, errors: errors.length });
+
+    return {
+      created,
+      updated,
+      errors,
+      missingSupplierWarnings,
+      duplicatePoNumberWarnings,
+      closedButNotFullyReceivedWarnings,
+      overReceivedWarnings,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // ARINV + ARINVDET -> Invoice + InvoiceItem
   //
   // KNOWN APPROXIMATIONS (surfaced in the return value, not hidden):
@@ -876,6 +1391,46 @@ private async importStock(
       ORDER BY inv.ARINVOICEID
       `,
     );
+
+    // -----------------------------------------------------------------
+    // Continue the customer's existing Accurate numbering (e.g.
+    // "ATL - 59886") instead of starting our own count-based scheme from
+    // zero. Never moves the stored number BACKWARDS — a re-import of the
+    // same/older GDB export must not undo numbers the app has already
+    // issued since the first import. Runs on every import (including
+    // re-imports) since it's idempotent by design — see
+    // detectInvoiceNumberFormat / the compare-and-swap updateMany below.
+    // -----------------------------------------------------------------
+    const detectedSequence = detectInvoiceNumberFormat(headers.map((h) => h.EXTERNAL_INVOICE_NO));
+    if (detectedSequence) {
+      const existingSeq = await this.prisma.documentSequence.findUnique({
+        where: { organizationId_documentType: { organizationId, documentType: DocumentType.INVOICE } },
+      });
+
+      if (!existingSeq) {
+        await this.prisma.documentSequence.create({
+          data: {
+            organizationId,
+            documentType: DocumentType.INVOICE,
+            prefix: detectedSequence.prefix,
+            lastNumber: detectedSequence.lastNumber,
+          },
+        });
+      } else if (detectedSequence.lastNumber > existingSeq.lastNumber) {
+        // Compare-and-swap: only apply if nothing (e.g. a concurrently
+        // created invoice) has already pushed lastNumber past this value.
+        await this.prisma.documentSequence.updateMany({
+          where: { id: existingSeq.id, lastNumber: { lt: detectedSequence.lastNumber } },
+          data: { lastNumber: detectedSequence.lastNumber, prefix: detectedSequence.prefix },
+        });
+      }
+
+      console.log('[GdbImport] invoice sequence detected', {
+        organizationId,
+        prefix: detectedSequence.prefix,
+        lastNumber: detectedSequence.lastNumber,
+      });
+    }
 
     const lines = await fbQuery<{
       ARINVOICEID: number;
@@ -1137,7 +1692,7 @@ private async importStock(
       fractionalQuantityWarnings,
       discountIgnoredWarnings,
       invoicesScannedForVehicles: headers.length,
-      vehicles: vehicleStats, // { descriptionsWithBp, vehiclesDetected, vehiclesCreated, duplicateVehicleRefsSkipped, ambiguousBpWarnings }
+      vehicles: vehicleStats, // { descriptionsWithPlate, vehiclesDetected, vehiclesCreated, duplicateVehicleRefsSkipped, ambiguousPlateWarnings }
       vehicleOdometerCacheUpdated,
     };
   }
@@ -1170,22 +1725,23 @@ private async importStock(
     interface Candidate {
       customerId: string;
       plate: string;
+      plateNormalized: string;
       vehicleModel: string | null;
     }
 
     const candidatesByKey = new Map<string, Candidate>(); // `${customerId}::${plate}`
     const vehicleKeyByInvoiceId = new Map<number, string>();
 
-    let descriptionsWithBp = 0;
+    let descriptionsWithPlate = 0;
     let vehiclesDetected = 0;
-    const ambiguousBpWarnings: string[] = [];
+    const ambiguousPlateWarnings: string[] = [];
 
     for (const header of headers) {
       const desc = header.DESCRIPTION;
       if (!desc) continue;
 
-      const hasBp = /BP/i.test(desc);
-      if (hasBp) descriptionsWithBp++;
+      const hasPlate = PLATE_REGEX.test(desc);
+      if (hasPlate) descriptionsWithPlate++;
 
       const parsed = parsedByInvoiceId.get(header.ARINVOICEID);
       if (!parsed || !parsed.plate) {
@@ -1198,7 +1754,7 @@ private async importStock(
         header.CUSTOMERID != null ? customerIdMap.get(header.CUSTOMERID) ?? null : null;
 
       if (!prismaCustomerId) {
-        ambiguousBpWarnings.push(
+        ambiguousPlateWarnings.push(
           `Invoice ${header.EXTERNAL_INVOICE_NO}: plate "${parsed.plate}" detected but invoice has no mapped customer — vehicle not created`,
         );
         continue;
@@ -1212,6 +1768,7 @@ private async importStock(
         candidatesByKey.set(key, {
           customerId: prismaCustomerId,
           plate: parsed.plate,
+          plateNormalized: normalizePlate(parsed.plate),
           vehicleModel: parsed.vehicleModel,
         });
       } else if (!existing.vehicleModel && parsed.vehicleModel) {
@@ -1227,11 +1784,11 @@ private async importStock(
       return {
         vehicleIdByInvoiceId: new Map<number, string>(),
         stats: {
-          descriptionsWithBp,
+          descriptionsWithPlate,
           vehiclesDetected: 0,
           vehiclesCreated: 0,
           duplicateVehicleRefsSkipped: 0,
-          ambiguousBpWarnings,
+          ambiguousPlateWarnings,
         },
       };
     }
@@ -1257,6 +1814,7 @@ private async importStock(
         organizationId,
         customerId: c.customerId,
         plateNumber: c.plate,
+        plateNormalized: c.plateNormalized,
         vehicleModel: c.vehicleModel ?? '',
       }));
 
@@ -1305,11 +1863,11 @@ private async importStock(
     return {
       vehicleIdByInvoiceId,
       stats: {
-        descriptionsWithBp,
+        descriptionsWithPlate,
         vehiclesDetected,
         vehiclesCreated: toCreate.length,
         duplicateVehicleRefsSkipped: candidates.length - toCreate.length,
-        ambiguousBpWarnings,
+        ambiguousPlateWarnings,
       },
     };
   }

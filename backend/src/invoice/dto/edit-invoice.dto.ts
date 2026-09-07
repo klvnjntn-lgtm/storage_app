@@ -75,6 +75,9 @@ export class EditIssuedInvoiceDto {
   items: EditInvoiceItemDto[];
 
   @IsOptional()
+  @IsString()
+  bankAccountId?: string | null;
+  @IsOptional()
   @IsInt()
   @Min(0)
   odometer?: number;

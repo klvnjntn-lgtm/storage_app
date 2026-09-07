@@ -10,6 +10,7 @@ import { SessionsModule } from 'src/sessions/sessions.module';
 import { SharedDocumentsModule } from 'src/shared/documents/shared-documents.module';
 import { SalesQuotationModule } from 'src/sales-quotation/sales-quotation.module';
 import { PrintModule } from 'src/common/print/print.module';
+import { BankAccountResolverService } from 'src/bank-accounts/bank-account-resolver.service';
 
 @Module({
   imports: [
@@ -18,11 +19,12 @@ import { PrintModule } from 'src/common/print/print.module';
     GuardsModule,
     SalesQuotationModule,
     SharedDocumentsModule,
+    InvoiceModule,
     OrganizationModulesModule,
     SessionsModule,
     PrintModule,
   ],
   controllers: [InvoiceController, InvoicePrintController],
-  providers: [InvoiceService],
+  providers: [InvoiceService, BankAccountResolverService],
 })
 export class InvoiceModule {}
