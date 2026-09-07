@@ -1,8 +1,8 @@
-// app/(app)/sales/invoices/new/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Receipt, PackageCheck, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -11,6 +11,7 @@ import { ProductSearch } from '@/app/components/invoices/ProductSearch';
 import { CartPanel } from '@/app/components/invoices/CartPanel';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import {
+  BankAccount,
   CartLine,
   Customer,
   DiscountType,
@@ -21,19 +22,30 @@ import {
   ServiceLine,
   TaxRate,
 } from '@/app/components/invoices/types';
+import { PAGE_CSS } from '@/lib/invoice-format';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const SEARCH_DEBOUNCE_MS = 300;
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 
+// Sentinel used in the bank-account <select>: distinct from a real
+// account id, means "explicitly no bank details on this document" (sent
+// to the backend as bankAccountId: null). The empty string '' is the
+// other sentinel — "untouched", meaning don't send the field at all and
+// let the backend fall back to the org's current default account. Once a
+// draft has been loaded from the server, its bankAccountId is already a
+// resolved value (a real id or null), so '' never reappears for a loaded
+// draft — see loadDraftById below.
+const NO_BANK_ACCOUNT = '__none__';
+
 type RawTaxRate = TaxRate & { archivedAt: string | null };
+type RawBankAccount = BankAccount & { archivedAt: string | null };
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-// Computes the discount amount for one line given its subtotal and the
-// line's own discount settings. FIXED is clamped to the subtotal so a
-// mistyped discount can never push a line negative.
 function lineDiscountAmount(
   lineSubtotal: number,
   discountType: DiscountType | null,
@@ -44,12 +56,6 @@ function lineDiscountAmount(
   return 0;
 }
 
-// Mirrors buildItemsPayload()'s service filter exactly. If this gate is
-// looser (e.g. just checks services.length), autosave fires while a
-// service line is still incomplete, buildItemsPayload() drops it, and a
-// draft gets created/PATCHed with items: [] even though something is
-// visibly in the cart. Services only ever reach the payload when
-// WORKSHOP_RMS is enabled, so this must gate on that too.
 function hasSaveableContent(
   cart: Record<string, CartLine>,
   services: ServiceLine[],
@@ -61,12 +67,6 @@ function hasSaveableContent(
   );
 }
 
-// Extracts a usable message from a failed apiFetch response. The backend's
-// BadRequestException (e.g. the odometer floor-check) comes back as JSON
-// like {"message": "...", "statusCode": 400} — reading the body with
-// .text() and dumping it straight into the error box would show the user
-// that raw JSON blob instead of the actual message. Falls back to
-// statusText/status if the body isn't JSON at all.
 async function extractErrorMessage(res: Response): Promise<string> {
   try {
     const data = await res.json();
@@ -110,6 +110,12 @@ function NewInvoicePage() {
 
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
+  // Bank account picker. '' = untouched (backend uses org default),
+  // NO_BANK_ACCOUNT = explicit "no bank details", otherwise a real
+  // OrganizationBankAccount id.
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [bankAccountId, setBankAccountId] = useState<string>('');
+
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(urlDraftId);
   const skipAutosaveRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,15 +125,11 @@ function NewInvoicePage() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
-  // --- Invoice date (business date printed on the document) ---
-  const [invoiceDate, setInvoiceDate] = useState(''); // yyyy-mm-dd
-
-  // --- Due date (A5/A4 invoice-info field) ---
-  const [dueDate, setDueDate] = useState(''); // yyyy-mm-dd
+  const [invoiceDate, setInvoiceDate] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [customerPoNumber, setCustomerPoNumber] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [notes, setNotes] = useState('');
-  // --- WORKSHOP_RMS: vehicle (optional) ---
   const [vehicleId, setVehicleId] = useState<string | null>(initialVehicleId);
   const [customerVehicles, setCustomerVehicles] = useState <
     { id: string; plateNumber: string; vehicleModel: string; odometer?: number | null }[]
@@ -135,14 +137,11 @@ function NewInvoicePage() {
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const vehiclesFetchedForRef = useRef<string | null>(null);
 
-  // --- WORKSHOP_RMS: odometer reading for the selected vehicle ---
   const [odometer, setOdometer] = useState('');
 
-  // --- WORKSHOP_RMS: service lines ---
   const [services, setServices] = useState<ServiceLine[]>([]);
   const serviceCounterRef = useRef(0);
 
-  // --- WORKSHOP_RMS: reminder ---
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderNote, setReminderNote] = useState('');
   const [reminderDueDate, setReminderDueDate] = useState('');
@@ -169,7 +168,7 @@ function NewInvoicePage() {
     formatRef.current = format;
     printDataRef.current = printData;
     servicesRef.current = services;
-    }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -206,6 +205,26 @@ function NewInvoicePage() {
   }, []);
 
   useEffect(() => {
+    async function loadBankAccounts() {
+      const res = await apiFetch('/organization/bank-accounts');
+      if (!res.ok) return;
+      const accounts: RawBankAccount[] = await res.json();
+      setBankAccounts(
+        accounts
+          .filter((a) => !a.archivedAt)
+          .map((a) => ({
+            id: a.id,
+            bankName: a.bankName,
+            accountNumber: a.accountNumber,
+            accountName: a.accountName,
+            isDefault: a.isDefault,
+          })),
+      );
+    }
+    loadBankAccounts();
+  }, []);
+
+  useEffect(() => {
     if (!initialCustomerId) return;
     (async () => {
       const res = await apiFetch(`/customers/${initialCustomerId}`);
@@ -225,7 +244,7 @@ function NewInvoicePage() {
   }, []);
 
   useEffect(() => {
-  if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !customer) {
+    if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !customer) {
       setCustomerVehicles([]);
       vehiclesFetchedForRef.current = null;
       return;
@@ -294,8 +313,7 @@ function NewInvoicePage() {
     setQuery('');
     setResults([]);
     setCurrentDraftId(null);
-    setDueDate('');
-    setInvoiceDate('');
+    setBankAccountId('');
   }
 
   async function loadDraftById(id: string) {
@@ -312,12 +330,14 @@ function NewInvoicePage() {
     setCustomer(draft.customer ?? null);
     setVehicleId(draft.vehicleId ?? null);
     setOdometer(draft.odometer != null ? String(draft.odometer) : '');
-    setDueDate(draft.dueDate ? String(draft.dueDate).slice(0, 10) : '');
-    setInvoiceDate(draft.invoiceDate ? String(draft.invoiceDate).slice(0, 10) : '');
+    // A loaded draft's bank selection is already resolved server-side
+    // (createDraft always resolves at create time) — so this is either a
+    // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
+    setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
 
     const restoredCart: Record<string, CartLine> = {};
     for (const item of draft.items) {
-      if (!item.productId) continue; // service line — not restored into the cart UI yet
+      if (!item.productId) continue;
       const locationId = item.locationId ?? draft.locationId;
       const locationName = item.location?.name ?? draft.location?.name ?? '';
       const key = `${item.productId}__${locationId}`;
@@ -339,7 +359,6 @@ function NewInvoicePage() {
         taxRateIds: (item.taxes ?? [])
           .map((t: { taxRateId: string | null }) => t.taxRateId)
           .filter((id: string | null): id is string => !!id),
-        // NEW — restore per-line discount from the saved draft
         discountType: item.discountType ?? null,
         discountValue: item.discountValue != null ? Number(item.discountValue) : null,
       };
@@ -437,7 +456,6 @@ function NewInvoicePage() {
           locationId: resolvedTarget.locationId,
           locationName: resolvedTarget.locationName,
           taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
-          // NEW — preserve an already-set discount when the same line is re-added
           discountType: existing?.discountType ?? null,
           discountValue: existing?.discountValue ?? null,
         },
@@ -494,8 +512,6 @@ function NewInvoicePage() {
     });
   }
 
-  // NEW — per-line discount setter. discountType === null clears the
-  // discount entirely (back to "None" in the UI).
   function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
     setCart((prev) => {
       const line = prev[key];
@@ -519,9 +535,6 @@ function NewInvoicePage() {
     );
   }
 
-  // NEW — "apply to all" shortcuts. Tax stays modeled per-line internally
-  // (as agreed) — this just fans one toggle out to every existing line
-  // instead of making the user click each checkbox individually.
   function applyTaxToAllLines(taxRateId: string, checked: boolean) {
     setCart((prev) => {
       const next = { ...prev };
@@ -554,7 +567,6 @@ function NewInvoicePage() {
     setServices((prev) => prev.map((s) => ({ ...s, discountType, discountValue: discountType ? value : null })));
   }
 
-  // --- service line handlers (WORKSHOP_RMS) ---
   function addService() {
     serviceCounterRef.current += 1;
     const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
@@ -611,7 +623,6 @@ function NewInvoicePage() {
     );
   }
 
-  // --- reminder handlers (WORKSHOP_RMS) ---
   function pickReminderPreset(months: number) {
     const d = new Date();
     d.setMonth(d.getMonth() + months);
@@ -649,8 +660,6 @@ function NewInvoicePage() {
     }
   }
 
-  // Tax is computed on the post-discount (net) amount, not the raw
-  // subtotal — otherwise a 100% discounted line would still carry tax.
   const cartLines = Object.entries(cart).map(([key, line]) => {
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
@@ -689,9 +698,6 @@ function NewInvoicePage() {
     };
   });
 
-  // NEW — discount is now the real sum of per-line discounts instead of a
-  // hardcoded 0. `total` below already did `subtotal - discount + taxAmount`,
-  // so it starts reflecting real discounts as soon as this changes.
   const subtotal =
     cartLines.reduce((sum, line) => sum + line.lineSubtotal, 0) +
     serviceLinesWithTotals.reduce((sum, s) => sum + s.lineSubtotal, 0);
@@ -714,7 +720,6 @@ function NewInvoicePage() {
       locationId: line.locationId,
       unitPrice: line.unitPrice,
       taxRateIds: line.taxRateIds,
-      // NEW
       discountType: line.discountType ?? undefined,
       discountValue: line.discountValue ?? undefined,
     }));
@@ -727,7 +732,6 @@ function NewInvoicePage() {
             unitPrice: s.unitPrice as number,
             unit: s.unit ?? undefined,
             taxRateIds: s.taxRateIds,
-            // NEW
             discountType: s.discountType ?? undefined,
             discountValue: s.discountValue ?? undefined,
           }))
@@ -735,11 +739,12 @@ function NewInvoicePage() {
     return [...productItems, ...serviceItems];
   }
 
-function buildCustomerFields() {
-  return format === 'A5' || format === 'A4'
-    ? { customerId: customer?.id, customerName: undefined, vehicleId: vehicleId ?? undefined }
-    : { customerId: undefined, customerName: customerName.trim() || undefined, vehicleId: undefined };
-}
+  function buildCustomerFields() {
+    return format === 'A5' || format === 'A4'
+      ? { customerId: customer?.id, customerName: undefined, vehicleId: vehicleId ?? undefined }
+      : { customerId: undefined, customerName: customerName.trim() || undefined, vehicleId: undefined };
+  }
+
   function buildInvoiceInfoFields() {
     if (!customerNameRequired) return {};
     return {
@@ -748,12 +753,21 @@ function buildCustomerFields() {
       notes: notes.trim() || undefined,
     };
   }
-// 3. buildOdometerField — was: format !== 'A5'
-function buildOdometerField() {
-  if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !vehicleId || !odometer.trim()) return {};
-  const parsed = Number(odometer);
-  return Number.isFinite(parsed) ? { odometer: parsed } : {};
-}
+
+  function buildOdometerField() {
+    if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !vehicleId || !odometer.trim()) return {};
+    const parsed = Number(odometer);
+    return Number.isFinite(parsed) ? { odometer: parsed } : {};
+  }
+
+  // '' (untouched) omits the field entirely, letting the backend resolve
+  // to the org's current default. NO_BANK_ACCOUNT sends an explicit null
+  // (no bank details on this document). Anything else is a chosen
+  // account id.
+  function buildBankAccountField() {
+    if (bankAccountId === '') return {};
+    return { bankAccountId: bankAccountId === NO_BANK_ACCOUNT ? null : bankAccountId };
+  }
 
   function adoptDraftId(id: string) {
     loadedDraftIdRef.current = id;
@@ -775,6 +789,7 @@ function buildOdometerField() {
             ...buildCustomerFields(),
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
+            ...buildBankAccountField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -789,6 +804,7 @@ function buildOdometerField() {
             ...buildCustomerFields(),
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
+            ...buildBankAccountField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -825,7 +841,8 @@ function buildOdometerField() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId]);
+
   useEffect(() => {
     return () => {
       if (
@@ -865,6 +882,7 @@ function buildOdometerField() {
             ...buildCustomerFields(),
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
+            ...buildBankAccountField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -882,6 +900,7 @@ function buildOdometerField() {
             ...buildCustomerFields(),
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
+            ...buildBankAccountField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -904,10 +923,6 @@ function buildOdometerField() {
 
       await submitStagedReminder();
 
-      // RECEIPT/THERMAL_58 keep the instant on-screen print preview and
-      // reset this form for the next sale. A5/A4 behave like the
-      // quotation flow — go to the invoice's own detail page, where
-      // print/PDF/status actions live, instead of staying on this form.
       if (format !== 'RECEIPT' && format !== 'THERMAL_58') {
         router.push(`/sales/invoices/${invoiceId}`);
         return;
@@ -969,7 +984,7 @@ function buildOdometerField() {
         dueDate: issued.dueDate ?? null,
         paymentTerms: issued.paymentTerms ?? null,
         notes: issued.notes ?? null,
-            } as InvoiceView);
+      } as InvoiceView);
     } catch (e: any) {
       console.error(e);
       setError(e.message || 'Could not create invoice');
@@ -995,8 +1010,7 @@ function buildOdometerField() {
       setVehicleId(null);
       setOdometer('');
       setServices([]);
-      setDueDate('');
-      setInvoiceDate('');
+      setBankAccountId('');
       setReminderOpen(false);
       setReminderNote('');
       setReminderDueDate('');
@@ -1012,30 +1026,42 @@ function buildOdometerField() {
   }, [printData]);
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #print-area, #print-area * { visibility: visible; }
-          #print-area { position: absolute; top: 0; left: 0; }
-        }
-      `}</style>
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+<style>{`
+  ${PAGE_CSS[format] ?? PAGE_CSS.A4}
+  @media print {
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area { position: absolute; top: 0; left: 0; }
+  }
+`}</style>
 
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales/invoices')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Receipt size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Receipt size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">New Invoice</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  New Invoice
+                </h1>
                 <p className="text-xs text-gray-500 truncate">Search items, create and print an invoice</p>
               </div>
             </div>
@@ -1043,12 +1069,12 @@ function buildOdometerField() {
             <div className="flex items-center gap-2 justify-between sm:justify-end">
               <button
                 onClick={() => router.push('/sales/invoices')}
-                className="text-sm px-2 sm:px-3 py-2 rounded-md text-gray-600 hover:text-black hover:bg-gray-100 active:bg-gray-200 shrink-0"
+                className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
                 History
               </button>
 
-              <div className="flex items-center bg-gray-100 rounded-md p-1 text-sm font-medium overflow-x-auto">
+              <div className="flex items-center bg-blue-600/5 border border-blue-500/15 rounded-lg p-1 text-sm font-medium overflow-x-auto">
                 {(
                   [
                     { value: 'THERMAL_58', label: '58mm' },
@@ -1061,7 +1087,7 @@ function buildOdometerField() {
                     key={opt.value}
                     onClick={() => setFormat(opt.value)}
                     className={`px-3 py-1.5 rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                      format === opt.value ? 'bg-white shadow-sm text-black' : 'text-gray-500 hover:text-black'
+                      format === opt.value ? 'bg-white shadow-sm text-blue-700' : 'text-gray-500 hover:text-blue-700'
                     }`}
                   >
                     {opt.label}
@@ -1176,6 +1202,13 @@ function buildOdometerField() {
             onChangeServiceDescription={changeServiceDescription}
             onChangeServicePrice={changeServicePrice}
             onToggleServiceTaxRate={toggleServiceTaxRate}
+            // Bank-account picker. CartPanel needs to render a <select>
+            // using these and call onChangeBankAccountId with '',
+            // NO_BANK_ACCOUNT-equivalent, or a chosen id.
+            bankAccounts={bankAccounts}
+            bankAccountId={bankAccountId}
+            onChangeBankAccountId={setBankAccountId}
+            noBankAccountValue={NO_BANK_ACCOUNT}
           />
         </div>
       </div>
@@ -1183,7 +1216,7 @@ function buildOdometerField() {
       {!printData && totalLineCount > 0 && (
         <button
           onClick={scrollToCart}
-          className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-black text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(0,0,0,0.15)]"
+          className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-blue-700 text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(37,99,235,0.25)]"
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />

@@ -3,9 +3,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Building2, Search, Plus, Pencil, Trash2, Power, PowerOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Supplier } from '@/app/components/suppliers/types';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -111,33 +114,76 @@ async function toggleActive(supplier: Supplier) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /customers, /vehicles/search, and /inventory/stock. Search +
+          status filter now live here too, same as those pages. */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/purchasing')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Building2 size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Building2 size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">Suppliers</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  Suppliers
+                </h1>
                 <p className="text-xs text-gray-500 truncate">Manage suppliers for purchasing</p>
               </div>
             </div>
 
             <button
               onClick={() => router.push('/purchasing/suppliers/new')}
-              className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 shrink-0"
+              className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
               New Supplier
             </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* Search — command-palette style matching /vehicles/search, /customers, /inventory/stock */}
+            <div className="group relative flex items-center gap-3 flex-1 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+              <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name, phone, or email..."
+                className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+              />
+            </div>
+
+            <div className="flex items-center bg-white border border-blue-500/20 rounded-md p-1 text-sm font-medium shadow-sm shrink-0">
+              {(['active', 'inactive', 'all'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-md capitalize transition-colors ${
+                    statusFilter === s ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-blue-700'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -147,42 +193,15 @@ async function toggleActive(supplier: Supplier) {
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search size={16} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, phone, or email..."
-              className="w-full border-2 border-gray-300 focus:border-black rounded-md pl-9 pr-3 py-2 text-sm outline-none"
-            />
-          </div>
-
-          <div className="flex items-center bg-gray-100 rounded-md p-1 text-sm font-medium">
-            {(['active', 'inactive', 'all'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={`px-3 py-1.5 rounded-md capitalize transition-colors ${
-                  statusFilter === s ? 'bg-white shadow-sm text-black' : 'text-gray-500 hover:text-black'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {loading ? (
           <p className="text-sm text-gray-500 py-8 text-center">Loading...</p>
         ) : suppliers.length === 0 ? (
           <p className="text-sm text-gray-500 py-8 text-center">No suppliers found.</p>
         ) : (
-          <div className="border-2 border-gray-200 rounded-md overflow-hidden">
+          <div className="border-2 border-gray-200 rounded-md overflow-hidden bg-white">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b-2 border-gray-200">
+                <thead className="bg-blue-50/60 border-b-2 border-gray-200">
                   <tr>
                     <th className="text-left font-semibold px-4 py-2.5">Name</th>
                     <th className="text-left font-semibold px-4 py-2.5 hidden sm:table-cell">Contact</th>
@@ -194,7 +213,7 @@ async function toggleActive(supplier: Supplier) {
                 </thead>
                 <tbody>
                   {suppliers.map((s) => (
-                    <tr key={s.id} className="border-b border-gray-100 last:border-0">
+                    <tr key={s.id} className="border-b border-gray-100 last:border-0 hover:bg-blue-50/40 transition-colors">
                       <td className="px-4 py-2.5 font-medium">{s.name}</td>
                       <td className="px-4 py-2.5 text-gray-600 hidden sm:table-cell">{s.contactName ?? '—'}</td>
                       <td className="px-4 py-2.5 text-gray-600 hidden md:table-cell">{s.phone ?? '—'}</td>
@@ -213,7 +232,7 @@ async function toggleActive(supplier: Supplier) {
                           <button
                             title="Edit"
                             onClick={() => router.push(`/purchasing/suppliers/${s.id}/edit`)}
-                            className="p-1.5 rounded-md text-gray-600 hover:text-black hover:bg-gray-100"
+                            className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50"
                           >
                             <Pencil size={15} strokeWidth={2} />
                           </button>
@@ -221,7 +240,7 @@ async function toggleActive(supplier: Supplier) {
                             title={s.isActive ? 'Deactivate' : 'Reactivate'}
                             disabled={actionId === s.id}
                             onClick={() => toggleActive(s)}
-                            className="p-1.5 rounded-md text-gray-600 hover:text-black hover:bg-gray-100 disabled:opacity-50"
+                            className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50"
                           >
                             {s.isActive ? (
                               <PowerOff size={15} strokeWidth={2} />
@@ -256,14 +275,14 @@ async function toggleActive(supplier: Supplier) {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40"
+                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40 hover:bg-blue-50"
               >
                 Prev
               </button>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40"
+                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40 hover:bg-blue-50"
               >
                 Next
               </button>

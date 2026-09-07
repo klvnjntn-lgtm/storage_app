@@ -77,7 +77,7 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
       <button
         onClick={() => (open ? setOpen(false) : setOpen(true))}
         aria-label="Notifications"
-        className="fixed bottom-5 right-5 z-40 w-11 h-11 rounded-full bg-gray-900 text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
+        className="fixed bottom-5 right-5 z-40 w-11 h-11 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-all"
       >
         <Bell size={18} strokeWidth={2} />
         {count > 0 && (
@@ -90,22 +90,30 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
       {/* Backdrop on mobile so tapping outside closes it */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/10 z-40 md:hidden"
+          className="fixed inset-0 bg-blue-950/10 z-40 md:hidden"
           onClick={() => setOpen(false)}
         />
       )}
 
       {/* Panel */}
       <div
-        className={`fixed top-0 right-0 h-full w-[85vw] max-w-[320px] bg-white border-l-2 border-gray-300 z-50 shadow-xl transition-transform duration-200 ease-out ${
+        className={`fixed top-0 right-0 h-full w-[85vw] max-w-[320px] z-50 shadow-xl transition-transform duration-200 ease-out border-l border-blue-500/15 ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
+        style={{
+          backgroundColor: '#f8fafc',
+          backgroundImage:
+            'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          backgroundSize: '24px 24px',
+        }}
         onMouseEnter={openPanel}
         onMouseLeave={scheduleClose}
       >
-        <div className="h-full flex flex-col p-4 overflow-y-auto pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <div className="h-full flex flex-col p-4 overflow-y-auto pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white/60 backdrop-blur-sm">
           <div className="flex items-center gap-2 mb-4">
-            <Bell size={18} strokeWidth={2} className="text-gray-700" />
+            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Bell size={15} strokeWidth={2} className="text-blue-700" />
+            </span>
             <span className="font-semibold text-sm">Reminders</span>
           </div>
 
@@ -123,10 +131,10 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
                     setOpen(false);
                     router.push(`/workshop/vehicles/${r.vehicle.id}`);
                   }}
-                  className="text-left border-2 border-gray-200 rounded-md p-2.5 hover:border-gray-400 transition-colors"
+                  className="text-left border border-blue-500/15 rounded-xl p-2.5 bg-white shadow-sm hover:border-blue-500/40 hover:bg-blue-50/40 transition-colors"
                 >
                   <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                    <Car size={13} strokeWidth={2} className="text-gray-500 shrink-0" />
+                    <Car size={13} strokeWidth={2} className="text-blue-600/60 shrink-0" />
                     <span className="text-xs font-semibold">{r.vehicle.plateNumber}</span>
                     <span className={`text-[11px] px-1.5 py-0.5 rounded-md border font-medium ${label.cls}`}>
                       {label.text}
@@ -143,7 +151,7 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
               setOpen(false);
               router.push('/workshop/reminders');
             }}
-            className="mt-4 w-full text-xs px-3 py-2 rounded-md border-2 border-gray-300 font-semibold hover:bg-gray-50"
+            className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-blue-500/20 text-blue-700 font-semibold bg-white hover:bg-blue-50 transition-colors"
           >
             View all reminders
           </button>

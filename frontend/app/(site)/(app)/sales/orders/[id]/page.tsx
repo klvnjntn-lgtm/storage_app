@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -16,6 +17,8 @@ import { parseCalendarDate } from '@/lib/dates';
 import { SalesOrderA4Template } from '@/app/components/sales-orders/template/SalesOrderA4Template';
 import { SalesOrderPrintView, toSalesOrderView } from '@/lib/sales-order-mapper';
 import { DeliveryOrdersPanel } from '@/app/components/sales-orders/DeliveryOrdersPanel';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type SalesOrderStatus = 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED';
 
@@ -251,11 +254,11 @@ export default function SalesOrderDetailPage() {
         }
       `}</style>
 
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 border-b-2 border-gray-300 print:hidden">
-        <div className="max-w-3xl mx-auto">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
+        <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales/orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to sales orders
@@ -264,7 +267,7 @@ export default function SalesOrderDetailPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center flex-wrap gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold">
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
                   {order.orderNumber ?? 'Unissued draft'}
                 </h1>
                 <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(order.status)}`}>
@@ -282,7 +285,7 @@ export default function SalesOrderDetailPage() {
                 <>
                   <button
                     onClick={() => router.push(`/sales/orders/new?draftId=${order.id}`)}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
                     Edit
@@ -290,7 +293,7 @@ export default function SalesOrderDetailPage() {
                   <button
                     disabled={actionLoading === 'confirm'}
                     onClick={handleConfirm}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <CheckCircle2 size={14} strokeWidth={2} />
                     Confirm
@@ -310,7 +313,7 @@ export default function SalesOrderDetailPage() {
                 <button
                   disabled={actionLoading === 'convert-invoice'}
                   onClick={handleConvertToInvoice}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                 >
                   <FileText size={14} strokeWidth={2} />
                   Convert to Invoice
@@ -322,14 +325,14 @@ export default function SalesOrderDetailPage() {
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? 'Generating...' : 'Download PDF'}
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
                     Print
@@ -352,7 +355,7 @@ export default function SalesOrderDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}

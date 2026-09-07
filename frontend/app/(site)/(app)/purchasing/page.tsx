@@ -28,21 +28,31 @@ export default function PurchasingHome() {
   const router = useRouter();
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-6 py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
           </button>
 
-          <div className="flex items-center gap-2">
-            <Package size={20} strokeWidth={2} className="text-gray-700" />
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Package size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div>
-              <h1 className="text-2xl font-bold">Purchasing</h1>
+              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>Purchasing</h1>
               <p className="text-xs text-gray-500">
                 Manage suppliers and purchase orders
               </p>

@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   Users,
@@ -16,6 +17,15 @@ import {
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import Pagination from '@/app/components/Pagination';
+import { useSortableData } from '@/lib/hooks/useSortableData';
+import SortableTh from '@/app/components/SortableTh';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
+
+// Columns the (desktop) table can be sorted by. Address is deliberately
+// excluded — same reasoning as Stock/Purchase Orders: it's free text
+// people scan rather than a value with a meaningful order.
+type SortKey = 'name' | 'phone';
 
 type EditState = {
   id: string | null; // null = creating new
@@ -67,8 +77,24 @@ export default function CustomersPage() {
     setPage(1);
   }, [query]);
 
-  const totalItems = customers.length;
-  const pagedCustomers = customers.slice((page - 1) * pageSize, page * pageSize);
+  // The whole result set is loaded client-side (no server pagination here,
+  // unlike Purchase Orders), so — same as Stock — sorting applies across
+  // the full list, not just the current page, and pagination slices the
+  // already-sorted array below.
+  const { sorted: sortedCustomers, sort, toggleSort } = useSortableData<Customer, SortKey>(
+    customers,
+    {
+      name: (c) => c.name,
+      phone: (c) => c.phone ?? '',
+    },
+  );
+
+  const totalItems = sortedCustomers.length;
+  const pagedCustomers = sortedCustomers.slice((page - 1) * pageSize, page * pageSize);
+
+  function cellHighlight(key: SortKey) {
+    return sort?.key === key ? 'bg-blue-50/70' : '';
+  }
 
   function openCreate() {
     setError('');
@@ -132,58 +158,77 @@ export default function CustomersPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /labels, /vehicles/search, and /inventory/stock. Search bar now
+          lives here too, same as those pages. */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Hub
           </button>
 
-          <div className="flex justify-between items-center flex-wrap gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Users size={22} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex justify-between items-center flex-wrap gap-3 mb-4">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Users size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">Customers</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  Customers
+                </h1>
                 <p className="text-xs text-gray-500 truncate">Customer records used on A5 invoices</p>
               </div>
             </div>
 
             <button
               onClick={openCreate}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 shrink-0"
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
               <span className="hidden xs:inline">New Customer</span>
               <span className="xs:hidden">New</span>
             </button>
           </div>
+
+          {/* Search — command-palette style matching /vehicles/search, /labels, /inventory/stock */}
+          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+            <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name or phone..."
+              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+            />
+          </div>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
-        <div className="relative mb-4 sm:max-w-sm">
-          <Search size={14} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name or phone..."
-            className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
-          />
-        </div>
-
         {/* Mobile: stacked cards. A 4-column table just gets crushed and
             clips the address/name text on narrow screens, so below sm we
-            drop the table entirely and show one card per customer instead. */}
+            drop the table entirely and show one card per customer instead.
+            No sort control here (there's no header row to attach one to)
+            — the cards reflect whatever sort was last set on the desktop
+            table, defaulting to server order. */}
         <div className="sm:hidden flex flex-col gap-2">
           {pagedCustomers.map((c) => (
             <div
               key={c.id}
               onClick={() => router.push(`/customers/${c.id}`)}
-              className="border-2 border-gray-300 rounded-md p-3 cursor-pointer active:bg-gray-100"
+              className="border-2 border-gray-300 rounded-md p-3 cursor-pointer bg-white active:bg-blue-50/60"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -198,7 +243,7 @@ export default function CustomersPage() {
                 >
                   <button
                     onClick={() => openEdit(c)}
-                    className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100"
+                    className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-blue-50 hover:border-blue-500/40"
                   >
                     <Pencil size={14} strokeWidth={2} />
                   </button>
@@ -219,24 +264,36 @@ export default function CustomersPage() {
           ))}
 
           {!loading && customers.length === 0 && (
-            <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md">
+            <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
               No customers found
             </div>
           )}
           {loading && (
-            <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md">
+            <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
               Loading...
             </div>
           )}
         </div>
 
-        {/* Tablet/desktop: original table */}
-        <div className="hidden sm:block border-2 border-gray-300 rounded-md overflow-hidden">
+        {/* Tablet/desktop: original table, now with sortable Name/Phone columns */}
+        <div className="hidden sm:block border-2 border-gray-300 rounded-md overflow-hidden bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-gray-100 border-b-2 border-gray-300">
+            <thead className="bg-blue-50/60 border-b-2 border-gray-300">
               <tr>
-                <th className="text-left px-4 py-3 font-semibold">Name</th>
-                <th className="text-left px-4 py-3 font-semibold">Phone</th>
+                <SortableTh<SortKey>
+                  label="Name"
+                  columnKey="name"
+                  activeKey={sort?.key ?? null}
+                  direction={sort?.direction ?? null}
+                  onSort={toggleSort}
+                />
+                <SortableTh<SortKey>
+                  label="Phone"
+                  columnKey="phone"
+                  activeKey={sort?.key ?? null}
+                  direction={sort?.direction ?? null}
+                  onSort={toggleSort}
+                />
                 <th className="text-left px-4 py-3 font-semibold">Address</th>
                 <th className="text-right px-4 py-3 font-semibold">Actions</th>
               </tr>
@@ -246,16 +303,16 @@ export default function CustomersPage() {
                 <tr
                   key={c.id}
                   onClick={() => router.push(`/customers/${c.id}`)}
-                  className={`border-t border-gray-300 cursor-pointer hover:bg-gray-100 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+                  className={`border-t border-gray-300 cursor-pointer hover:bg-blue-50 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
                 >
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{c.phone ?? '—'}</td>
+                  <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{c.name}</td>
+                  <td className={`px-4 py-3 text-gray-600 ${cellHighlight('phone')}`}>{c.phone ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600 truncate max-w-xs">{c.address ?? '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => openEdit(c)}
-                        className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100"
+                        className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-blue-50 hover:border-blue-500/40"
                       >
                         <Pencil size={13} strokeWidth={2} />
                       </button>
@@ -299,7 +356,7 @@ export default function CustomersPage() {
           <div className="bg-white rounded-md border-2 border-gray-300 w-full max-w-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{editing.id ? 'Edit customer' : 'New customer'}</h2>
-              <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-black">
+              <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
                 <X size={18} strokeWidth={2} />
               </button>
             </div>
@@ -310,25 +367,25 @@ export default function CustomersPage() {
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                 placeholder="Name"
                 autoFocus
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.companyName}
                 onChange={(e) => setEditing({ ...editing, companyName: e.target.value })}
                 placeholder="Company name (optional)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.phone}
                 onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
                 placeholder="Phone (optional)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.address}
                 onChange={(e) => setEditing({ ...editing, address: e.target.value })}
                 placeholder="Address (optional)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
             </div>
 
@@ -337,7 +394,7 @@ export default function CustomersPage() {
             <button
               onClick={save}
               disabled={saving}
-              className="w-full mt-4 flex items-center justify-center gap-2 bg-black text-white rounded-md p-2.5 text-sm font-semibold disabled:bg-gray-300"
+              className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2.5 text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
             >
               <Check size={16} strokeWidth={2} />
               {saving ? 'Saving...' : editing.id ? 'Save changes' : 'Create customer'}

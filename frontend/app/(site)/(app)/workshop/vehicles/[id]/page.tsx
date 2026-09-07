@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   Car,
@@ -20,6 +21,8 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { parseCalendarDate } from '@/lib/dates';
 import Pagination from '@/app/components/Pagination';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type VehicleInvoiceItem = {
   id: string;
@@ -248,22 +251,34 @@ export default function VehicleDetailPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => (vehicle ? router.push(`/customers/${vehicle.customer.id}`) : router.push('/customers'))}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md max-w-full"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md max-w-full transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} className="shrink-0" />
             <span className="truncate">Back to {vehicle?.customer.name ?? 'Customer'}</span>
           </button>
 
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Car size={22} strokeWidth={2} className="text-gray-700 shrink-0" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Car size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">{vehicle?.plateNumber ?? 'Vehicle'}</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  {vehicle?.plateNumber ?? 'Vehicle'}
+                </h1>
                 {vehicle && (
                   <p className="text-xs text-gray-500">
                     {vehicle.vehicleModel} · {vehicle.customer.name}
@@ -281,7 +296,7 @@ export default function VehicleDetailPage() {
                     `/sales/invoices/new?customerId=${vehicle.customer.id}&vehicleId=${vehicle.id}`,
                   )
                 }
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 shrink-0"
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
               >
                 <Plus size={16} strokeWidth={2} />
                 New invoice
@@ -301,14 +316,14 @@ export default function VehicleDetailPage() {
           <>
             {/* Service stats — lifetime, unaffected by filters below */}
             <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
-              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0">
+              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <Wrench size={11} strokeWidth={2} />
                   Total visits
                 </p>
                 <p className="font-bold text-sm sm:text-base">{serviceStats.totalVisits}</p>
               </div>
-              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0">
+              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <CalendarCheck size={11} strokeWidth={2} />
                   Last service
@@ -317,7 +332,7 @@ export default function VehicleDetailPage() {
                   {serviceStats.lastServiceDate ? serviceStats.lastServiceDate.toLocaleDateString('id-ID') : '—'}
                 </p>
               </div>
-              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0">
+              <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <Gauge size={11} strokeWidth={2} />
                   Latest odometer
@@ -341,14 +356,14 @@ export default function VehicleDetailPage() {
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
                   placeholder="Search invoice #, parts/services..."
-                  className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
+                  className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-blue-500"
                 />
               </div>
 
               <select
                 value={yearFilter}
                 onChange={(e) => setYearFilter(e.target.value)}
-                className="border-2 border-gray-300 rounded-md px-3 py-2.5 sm:py-2 text-sm font-semibold outline-none focus:border-black bg-white shrink-0"
+                className="border-2 border-gray-300 rounded-md px-3 py-2.5 sm:py-2 text-sm font-semibold outline-none focus:border-blue-500 bg-white shrink-0"
               >
                 <option value="ALL">All years</option>
                 {availableYears.map((y) => (
@@ -363,10 +378,10 @@ export default function VehicleDetailPage() {
                   <button
                     key={s}
                     onClick={() => setStatusFilter(s)}
-                    className={`text-xs px-3 py-2.5 sm:py-2 rounded-md border-2 font-semibold whitespace-nowrap shrink-0 ${
+                    className={`text-xs px-3 py-2.5 sm:py-2 rounded-md border-2 font-semibold whitespace-nowrap shrink-0 transition-colors ${
                       statusFilter === s
-                        ? 'bg-black text-white border-black'
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-gray-300 text-gray-600 hover:bg-blue-50 hover:border-blue-500/40'
                     }`}
                   >
                     {s === 'ALL' ? 'All' : s === 'DRAFT' ? 'Active drafts' : 'Issued'}
@@ -387,10 +402,10 @@ export default function VehicleDetailPage() {
                   <div
                     key={inv.id}
                     onClick={() => openInvoice(inv)}
-                    className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer transition-colors ${
+                    className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer bg-white transition-colors ${
                       overdue
                         ? 'border-red-300 bg-red-50/40 hover:border-red-400 hover:bg-red-50 active:bg-red-100'
-                        : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100'
+                        : 'border-gray-300 hover:border-blue-500/40 hover:bg-blue-50/40 active:bg-blue-100/60'
                     }`}
                   >
                     {/* Row 1 — date, invoice number, minimal status flags.

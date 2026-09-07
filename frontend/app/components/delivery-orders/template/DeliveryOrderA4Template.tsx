@@ -1,14 +1,17 @@
 // app/components/delivery-orders/template/DeliveryOrderA4Template.tsx
 import type { DeliveryOrderView } from '@/lib/delivery-orders-mapper';
+import { resolveUploadUrl } from '@/lib/assets';
 
 export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView }) {
+  const logoUrl = resolveUploadUrl(order.business.logoUrl);
+
   return (
     <div className="bg-white text-black text-sm" style={{ width: '210mm', minHeight: '297mm', padding: '15mm' }}>
       <div className="flex items-start justify-between pb-4 border-b-2 border-black">
         <div className="flex items-center gap-3">
-          {order.business.logoUrl && (
+          {logoUrl && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={order.business.logoUrl} alt="" className="h-14 w-14 object-contain" />
+            <img src={logoUrl} alt="" className="h-14 w-14 object-contain" />
           )}
           <div>
             <p className="font-bold text-lg">{order.business.legalName ?? order.business.name}</p>
@@ -26,7 +29,13 @@ export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView })
 
       {/* Facts bar — Delivery Date is shippedAt (null until ship()), kept
           distinct from the order's createdAt so it isn't mistaken for the
-          date goods actually left the warehouse. */}
+          date goods actually left the warehouse.
+          NOTE: shippedAt/createdAt are real instants (not pure calendar
+          dates like a quotation's quotationDate/validUntil), so they are
+          deliberately NOT run through parseCalendarDate — new Date(...)
+          + toLocaleDateString() is the correct local-day conversion for
+          an actual timestamp. See lib/dates.ts for why calendar-only
+          fields need different handling. */}
       <div className="grid grid-cols-3 gap-4 py-4 border-b border-gray-200">
         <div>
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Delivery Date</p>

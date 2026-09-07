@@ -1,4 +1,3 @@
-// components/shared/LineDiscountControl.tsx
 'use client';
 
 import { DiscountType } from '@/app/components/invoices/types';
@@ -16,7 +15,7 @@ export function LineDiscountControl({
   onChange: (discountType: DiscountType | null, rawValue?: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5 pl-0.5">
+    <div className="flex items-center gap-1.5 pl-0.5 flex-wrap">
       <span className="text-[11px] text-gray-400 shrink-0">Discount</span>
       <select
         value={discountType ?? ''}
@@ -24,7 +23,7 @@ export function LineDiscountControl({
           const next = (e.target.value || null) as DiscountType | null;
           onChange(next, next ? String(discountValue ?? 0) : undefined);
         }}
-        className="text-[11px] border border-gray-300 rounded-md px-1 py-0.5 outline-none"
+        className="text-[11px] border border-blue-500/20 rounded-md px-1 py-0.5 outline-none focus:border-blue-500/50"
       >
         <option value="">None</option>
         <option value="PERCENTAGE">%</option>
@@ -36,7 +35,7 @@ export function LineDiscountControl({
           min={0}
           value={discountValue ?? ''}
           onChange={(e) => onChange(discountType, e.target.value)}
-          className="w-16 text-[11px] border border-gray-300 rounded-md px-1 py-0.5 outline-none"
+          className="w-16 text-[11px] border border-blue-500/20 rounded-md px-1 py-0.5 outline-none focus:border-blue-500/50"
         />
       )}
       {discountAmount > 0 && (

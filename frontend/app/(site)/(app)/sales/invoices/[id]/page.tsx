@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, AlertCircle, Ban } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 import { useHasModule } from '@/lib/useHasModule';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
 import { VoidInvoiceDialog } from '@/app/components/invoices/VoidInvoiceDialog';
@@ -11,7 +14,7 @@ import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePri
 import { InvoiceFormat } from '@/app/components/invoices/types';
 import { InvoicePrintView, toInvoiceView } from '@/lib/invoice-mapper';
 import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
-
+import { PAGE_CSS, MARGIN_MM } from '@/lib/invoice-format';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 type InvoiceActivityEventType = 'CREATED' | 'ISSUED' | 'EDITED' | 'PAYMENT_RECORDED' | 'MARKED_PAID' | 'VOIDED';
@@ -229,34 +232,37 @@ async function handleConvertToDeliveryOrder() {
 
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #print-area, #print-area * { visibility: visible; }
-          #print-area {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-          }
-        }
-      `}</style>
+<style>{`
+  ${PAGE_CSS[printFormat] ?? PAGE_CSS.A4}
+  @media print {
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+    }
+  }
+`}</style>
 
-      <div className="px-6 py-5 border-b-2 border-gray-300 bg-white print:hidden">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-3">
           <div>
             <button
               onClick={() => router.push('/sales/invoices')}
-              className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
             >
               <ArrowLeft size={16} strokeWidth={2} />
               Back to Invoices
             </button>
 
-            <div className="flex items-center gap-2">
-              <Receipt size={22} strokeWidth={2} className="text-gray-700" />
+            <div className="flex items-center gap-2.5">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Receipt size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div>
-                <h1 className="text-2xl font-bold">
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
                   {invoice?.invoiceNumber ?? 'Invoice'}
                 </h1>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -301,7 +307,7 @@ async function handleConvertToDeliveryOrder() {
                 !hasWarehouseOps && (
                   <button
                     onClick={() => router.push(`/sales/invoices/${invoice.id}/edit`)}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 h-fit"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
                   >
                     <Pencil size={16} strokeWidth={2} />
                     Edit
@@ -322,7 +328,7 @@ async function handleConvertToDeliveryOrder() {
   <button
     disabled={actionLoading === 'convert-do'}
     onClick={handleConvertToDeliveryOrder}
-    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 h-fit disabled:opacity-50"
+    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit disabled:opacity-50 transition-colors"
   >
     <Truck size={16} strokeWidth={2} />
     {actionLoading === 'convert-do' ? 'Converting...' : 'Convert to Delivery Order'}
@@ -332,7 +338,7 @@ async function handleConvertToDeliveryOrder() {
               {balanceDue > 0 && invoice.status !== 'VOID' && (
                 <button
                   onClick={() => setPaymentDialogOpen(true)}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 h-fit"
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
                 >
                   <Wallet size={16} strokeWidth={2} />
                   Record payment
@@ -341,14 +347,14 @@ async function handleConvertToDeliveryOrder() {
               <button
                 onClick={handleDownloadPdf}
                 disabled={pdfGenerating}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 h-fit disabled:opacity-50"
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit disabled:opacity-50 transition-colors"
               >
                 <Download size={16} strokeWidth={2} />
                 {pdfGenerating ? 'Generating...' : 'Download PDF'}
               </button>
               <button
                 onClick={() => window.print()}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 h-fit"
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit transition-colors"
               >
                 <Printer size={16} strokeWidth={2} />
                 Print
@@ -387,7 +393,7 @@ async function handleConvertToDeliveryOrder() {
                 {!reminderOpen ? (
                   <button
                     onClick={() => setReminderOpen(true)}
-                    className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-black"
+                    className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-blue-700 transition-colors"
                   >
                     <Bell size={14} strokeWidth={2} />
                     Set a reminder for {invoice.vehiclePlateNumber} · {invoice.vehicleModel}
@@ -399,7 +405,7 @@ async function handleConvertToDeliveryOrder() {
                         <Bell size={12} strokeWidth={2} />
                         Reminder for {invoice.vehiclePlateNumber} · {invoice.vehicleModel}
                       </span>
-                      <button onClick={() => setReminderOpen(false)} className="text-gray-400 hover:text-black">
+                      <button onClick={() => setReminderOpen(false)} className="text-gray-400 hover:text-blue-700">
                         <X size={14} strokeWidth={2} />
                       </button>
                     </div>
@@ -409,7 +415,7 @@ async function handleConvertToDeliveryOrder() {
                       onChange={(e) => setReminderNote(e.target.value)}
                       placeholder="e.g. Needs another oil change"
                       rows={2}
-                      className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none mb-2"
+                      className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 resize-none mb-2"
                     />
 
                     <div className="flex flex-wrap gap-1.5 mb-2">
@@ -422,7 +428,7 @@ async function handleConvertToDeliveryOrder() {
                         <button
                           key={preset.months}
                           onClick={() => pickReminderPreset(preset.months)}
-                          className="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+                          className="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50 hover:text-blue-700 transition-colors"
                         >
                           {preset.label}
                         </button>
@@ -433,7 +439,7 @@ async function handleConvertToDeliveryOrder() {
                       type="date"
                       value={reminderDueDate}
                       onChange={(e) => setReminderDueDate(e.target.value)}
-                      className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black mb-2"
+                      className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-2"
                     />
 
                     {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
@@ -442,7 +448,7 @@ async function handleConvertToDeliveryOrder() {
                     <button
                       onClick={saveReminder}
                       disabled={reminderSaving || !reminderNote.trim() || !reminderDueDate}
-                      className="w-full flex items-center justify-center gap-2 bg-black text-white rounded-md p-2 text-xs font-semibold disabled:bg-gray-300"
+                      className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2 text-xs font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
                     >
                       {reminderSaving ? 'Saving...' : 'Save reminder'}
                     </button>
@@ -515,17 +521,20 @@ async function handleConvertToDeliveryOrder() {
           overflow-x-auto keeps wider formats (A4/A5) from forcing
           horizontal scroll on the whole page on narrow viewports. */}
 {invoice && (
-  <div className="py-8 px-4 overflow-x-auto print:p-0 print:overflow-visible">
-    <div className="mx-auto w-fit">
-      <div className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none">
-        <InvoicePrintArea
-          format={printFormat}
-          invoice={toInvoiceView(invoice)}
-          alwaysVisible
-        />
-      </div>
+<div className="py-8 px-4 overflow-x-auto print:p-0 print:overflow-visible">
+  <div className="mx-auto w-fit">
+    <div
+      style={{ padding: `${MARGIN_MM[printFormat] ?? 0}mm` }}
+      className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none print:p-0"
+    >
+      <InvoicePrintArea
+        format={printFormat}
+        invoice={toInvoiceView(invoice)}
+        alwaysVisible
+      />
     </div>
   </div>
+</div>
 )}
 
       {invoice && paymentDialogOpen && (

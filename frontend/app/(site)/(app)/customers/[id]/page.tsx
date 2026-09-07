@@ -3,10 +3,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, User, Car, Plus, X, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useHasModule } from '@/lib/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
@@ -165,23 +168,37 @@ export default function CustomerDetailPage() {
   );
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-6 py-5 border-b-2 border-gray-300">
-                <div className="max-w-5xl mx-auto">  
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /customers, /vehicles/search, and /inventory/stock */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+        <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/customers')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Customers
           </button>
 
-          <div className="flex items-center gap-2">
-            <User size={22} strokeWidth={2} className="text-gray-700" />
-            <div>
-              <h1 className="text-2xl font-bold">{customer?.name ?? 'Customer'}</h1>
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <User size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                {customer?.name ?? 'Customer'}
+              </h1>
               {customer && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500 truncate">
                   {customer.companyName ? `${customer.companyName} · ` : ''}
                   {customer.phone ?? '—'} {customer.address ? `· ${customer.address}` : ''}
                 </p>
@@ -191,7 +208,7 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-            <div className="max-w-5xl mx-auto p-6">   
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
@@ -206,7 +223,7 @@ export default function CustomerDetailPage() {
                   setVehicleError('');
                   setAddingVehicle(true);
                 }}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-black text-white font-semibold hover:bg-gray-800"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
               >
                 <Plus size={13} strokeWidth={2} />
                 Add vehicle
@@ -214,10 +231,10 @@ export default function CustomerDetailPage() {
             </div>
 
             {addingVehicle && (
-              <div className="border-2 border-gray-300 rounded-md p-3 mb-3">
+              <div className="border-2 border-gray-300 rounded-md p-3 mb-3 bg-white">
                 <div className="flex items-center justify-between mb-2.5">
                   <span className="text-xs font-semibold text-gray-500">New vehicle</span>
-                  <button onClick={() => setAddingVehicle(false)} className="text-gray-400 hover:text-black">
+                  <button onClick={() => setAddingVehicle(false)} className="text-gray-400 hover:text-blue-700">
                     <X size={15} strokeWidth={2} />
                   </button>
                 </div>
@@ -227,19 +244,19 @@ export default function CustomerDetailPage() {
                     onChange={(e) => setNewVehicle({ ...newVehicle, plateNumber: e.target.value })}
                     placeholder="Plate number"
                     autoFocus
-                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.vehicleModel}
                     onChange={(e) => setNewVehicle({ ...newVehicle, vehicleModel: e.target.value })}
                     placeholder="Car (make / model)"
-                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.vin}
                     onChange={(e) => setNewVehicle({ ...newVehicle, vin: e.target.value })}
                     placeholder="VIN (optional)"
-                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.odometer}
@@ -247,14 +264,14 @@ export default function CustomerDetailPage() {
                     placeholder="Odometer (optional)"
                     type="number"
                     inputMode="numeric"
-                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                 </div>
                 {vehicleError && <p className="text-xs text-red-600 mt-2">{vehicleError}</p>}
                 <button
                   onClick={saveVehicle}
                   disabled={vehicleSaving}
-                  className="w-full mt-3 flex items-center justify-center gap-2 bg-black text-white rounded-md p-2 text-sm font-semibold disabled:bg-gray-300"
+                  className="w-full mt-3 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2 text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
                 >
                   <Check size={15} strokeWidth={2} />
                   {vehicleSaving ? 'Saving...' : 'Add vehicle'}
@@ -271,8 +288,8 @@ export default function CustomerDetailPage() {
               {vehicles.map((v) => (
                 <div
                   key={v.id}
-                  onClick={() => router.push(`/vehicles/${v.id}`)}
-                  className="flex items-center gap-3 border-2 border-gray-300 rounded-md p-3 cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors"
+                  onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
+                  className="flex items-center gap-3 border-2 border-gray-300 rounded-md p-3 cursor-pointer bg-white hover:border-blue-500/40 hover:bg-blue-50/40 transition-colors"
                 >
                   <Car size={18} strokeWidth={2} className="text-gray-500 shrink-0" />
                   <div className="min-w-0 flex-1">
@@ -291,15 +308,15 @@ export default function CustomerDetailPage() {
         {customer && !hasWorkshopRms && totals && (
           <>
             <div className="grid grid-cols-3 gap-3 mb-6">
-              <div className="border-2 border-gray-300 rounded-md p-3">
+              <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
                 <p className="text-xs text-gray-500">Total invoiced</p>
                 <p className="font-bold">{formatIDR(totals.total)}</p>
               </div>
-              <div className="border-2 border-gray-300 rounded-md p-3">
+              <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
                 <p className="text-xs text-gray-500">Total paid</p>
                 <p className="font-bold text-green-700">{formatIDR(totals.paid)}</p>
               </div>
-              <div className="border-2 border-gray-300 rounded-md p-3">
+              <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
                 <p className="text-xs text-gray-500">Outstanding</p>
                 <p className="font-bold text-red-700">{formatIDR(totals.outstanding)}</p>
               </div>
@@ -316,7 +333,7 @@ export default function CustomerDetailPage() {
                 <div
                   key={inv.id}
                   onClick={() => router.push(`/sales/invoices/${inv.id}`)}
-                  className="flex items-center justify-between border-2 border-gray-300 rounded-md p-3 cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors"
+                  className="flex items-center justify-between border-2 border-gray-300 rounded-md p-3 cursor-pointer bg-white hover:border-blue-500/40 hover:bg-blue-50/40 transition-colors"
                 >
                   <div>
                     <div className="flex items-center gap-2">

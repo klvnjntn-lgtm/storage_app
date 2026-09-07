@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, Percent } from 'lucide-react';
+import { Space_Grotesk } from 'next/font/google';
+import { ArrowLeft, Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, Percent, Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
 
@@ -17,21 +20,30 @@ type ModuleStatus = {
 type BusinessDetails = {
   legalName: string | null;
   npwp: string | null;
-  address: string | null;   // ← add
-  phone: string | null;     // ← add
+  address: string | null;
+  phone: string | null;
   logoUrl: string | null;
-  bankName: string | null;
-  bankAccountNumber: string | null;
-  bankAccountName: string | null;
 };
 
-// A row from GET /organization/tax-rates. Settings now manages a list of
+// A row from GET /organization/tax-rates. Settings manages a list of
 // these (add / set default / remove) instead of a single Yes/No default —
-// this same list is what populates the per-item tax picker on invoice/new.
+// this same list populates the per-item tax picker on invoice/new.
 type OrgTaxRate = {
   id: string;
   name: string;
   percentage: number;
+  isDefault: boolean;
+  archivedAt: string | null;
+};
+
+// A row from GET /organization/bank-accounts. Same list/default/archive
+// shape as OrgTaxRate — whichever account is flagged isDefault is what
+// prints on invoices; any number of accounts, any one (or none) default.
+type OrgBankAccount = {
+  id: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
   isDefault: boolean;
   archivedAt: string | null;
 };
@@ -59,6 +71,17 @@ export default function SettingsPage() {
   const [newTaxPercentage, setNewTaxPercentage] = useState('');
   const [savingTaxId, setSavingTaxId] = useState<string | 'new' | null>(null);
   const [taxError, setTaxError] = useState('');
+
+  // Bank accounts — same list/default/archive CRUD, on
+  // /organization/bank-accounts. Whichever account is isDefault prints
+  // on invoices; the rest exist for staff/customers who need to know
+  // where else they can transfer.
+  const [bankAccounts, setBankAccounts] = useState<OrgBankAccount[] | null>(null);
+  const [newBankName, setNewBankName] = useState('');
+  const [newAccountNumber, setNewAccountNumber] = useState('');
+  const [newAccountName, setNewAccountName] = useState('');
+  const [savingBankId, setSavingBankId] = useState<string | 'new' | null>(null);
+  const [bankError, setBankError] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -91,12 +114,8 @@ export default function SettingsPage() {
           legalName: data.legalName ?? null,
           npwp: data.npwp ?? null,
           logoUrl: data.logoUrl ?? null,
-                address: data.address ?? null,   // ← add
-      phone: data.phone ?? null,       // ← add
-
-          bankName: data.bankName ?? null,
-          bankAccountNumber: data.bankAccountNumber ?? null,
-          bankAccountName: data.bankAccountName ?? null,
+          address: data.address ?? null,
+          phone: data.phone ?? null,
         };
         setBusiness(details);
         setBusinessForm(details);
@@ -112,6 +131,11 @@ export default function SettingsPage() {
       .then((res) => res.json())
       .then((data: OrgTaxRate[]) => setTaxRates(data.filter((t) => !t.archivedAt)))
       .catch(() => setError('Could not load tax rates'));
+
+    apiFetch('/organization/bank-accounts')
+      .then((res) => res.json())
+      .then((data: OrgBankAccount[]) => setBankAccounts(data.filter((b) => !b.archivedAt)))
+      .catch(() => setError('Could not load bank accounts'));
   }, [authLoading, profile]);
 
   async function saveFulfillmentMode(newMode: FulfillmentMode) {
@@ -246,6 +270,83 @@ export default function SettingsPage() {
     }
   }
 
+  async function addBankAccount() {
+    setBankError('');
+    const bankName = newBankName.trim();
+    const accountNumber = newAccountNumber.trim();
+    const accountName = newAccountName.trim();
+
+    if (!bankName || !accountNumber || !accountName) {
+      setBankError('Fill in bank name, account number, and account holder name');
+      return;
+    }
+
+    setSavingBankId('new');
+    try {
+      const res = await apiFetch('/organization/bank-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bankName, accountNumber, accountName }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setBankError(data?.message || 'Failed to add bank account');
+        return;
+      }
+      setBankAccounts((prev) => [...(prev ?? []), data]);
+      setNewBankName('');
+      setNewAccountNumber('');
+      setNewAccountName('');
+    } finally {
+      setSavingBankId(null);
+    }
+  }
+
+  // Same both-directions behavior as setDefaultTaxRate: true promotes this
+  // account (clearing the flag on every other account); false just unsets
+  // this one, leaving the list with no default at all.
+  async function setDefaultBankAccount(id: string, isDefault: boolean) {
+    setBankError('');
+    setSavingBankId(id);
+    try {
+      const res = await apiFetch(`/organization/bank-accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDefault }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setBankError(data?.message || (isDefault ? 'Failed to set default' : 'Failed to unset default'));
+        return;
+      }
+      setBankAccounts(
+        (prev) =>
+          prev?.map((b) => {
+            if (b.id === id) return { ...b, isDefault };
+            return isDefault ? { ...b, isDefault: false } : b;
+          }) ?? prev,
+      );
+    } finally {
+      setSavingBankId(null);
+    }
+  }
+
+  async function archiveBankAccount(id: string) {
+    setBankError('');
+    setSavingBankId(id);
+    try {
+      const res = await apiFetch(`/organization/bank-accounts/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setBankError(data?.message || 'Failed to remove bank account');
+        return;
+      }
+      setBankAccounts((prev) => prev?.filter((b) => b.id !== id) ?? prev);
+    } finally {
+      setSavingBankId(null);
+    }
+  }
+
   async function uploadLogo(file: File) {
     setUploadingLogo(true);
     try {
@@ -273,12 +374,8 @@ export default function SettingsPage() {
           legalName: businessForm.legalName || undefined,
           npwp: businessForm.npwp || undefined,
           logoUrl: businessForm.logoUrl || undefined,
-                  address: businessForm.address || undefined,   // ← add
-        phone: businessForm.phone || undefined,        // ← add
-
-          bankName: businessForm.bankName || undefined,
-          bankAccountNumber: businessForm.bankAccountNumber || undefined,
-          bankAccountName: businessForm.bankAccountName || undefined,
+          address: businessForm.address || undefined,
+          phone: businessForm.phone || undefined,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -306,20 +403,32 @@ export default function SettingsPage() {
   const loaded = fulfillmentMode !== null && posPricingEnabled !== null && modules !== null;
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Scanner Hub
           </button>
-          <div className="flex items-center gap-2 min-w-0">
-            <SettingsIcon size={22} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <SettingsIcon size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold truncate">Settings</h1>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Settings
+              </h1>
               <p className="text-xs text-gray-500 truncate">Organization-wide warehouse settings</p>
             </div>
           </div>
@@ -328,13 +437,13 @@ export default function SettingsPage() {
 
       <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5 sm:space-y-6">
         {error && (
-          <div className="bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+          <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
             {error}
           </div>
         )}
 
         {(saved || businessSaved) && (
-          <div className="flex items-center gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
             <CheckCircle2 size={18} strokeWidth={2} />
             Settings saved
           </div>
@@ -342,32 +451,33 @@ export default function SettingsPage() {
 
         {/* Business identity — for invoices. Shown whenever INVOICE_POS is purchased. */}
         {hasInvoicePos && business && (
-          <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-3">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div>
               <h2 className="font-bold">Business Identity</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Shown on printed invoices — logo, legal name, NPWP, and bank details for customers paying by transfer.
+                Shown on printed invoices — logo, legal name, NPWP, and address. Bank details for
+                customers paying by transfer live in the Bank Accounts section below.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="w-14 h-14 rounded-md border-2 border-gray-200 flex items-center justify-center overflow-hidden shrink-0 bg-gray-50">
+              <div className="w-14 h-14 rounded-lg border border-blue-500/15 flex items-center justify-center overflow-hidden shrink-0 bg-blue-50/40">
                 {businessForm.logoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-src={
-  businessForm.logoUrl?.startsWith('http')
-    ? businessForm.logoUrl
-    : `/api${businessForm.logoUrl}`
-}
+                    src={
+                      businessForm.logoUrl?.startsWith('http')
+                        ? businessForm.logoUrl
+                        : `/api${businessForm.logoUrl}`
+                    }
                     alt="Logo"
                     className="w-full h-full object-contain"
                   />
                 ) : (
-                  <ImageIcon size={20} className="text-gray-300" />
+                  <ImageIcon size={20} className="text-blue-300" />
                 )}
               </div>
-              <label className="text-xs px-3 py-2 rounded-md border-2 border-gray-300 text-gray-600 hover:bg-gray-50 cursor-pointer font-medium">
+              <label className="text-xs px-3 py-2 rounded-md border border-blue-500/20 text-blue-700 hover:bg-blue-50 cursor-pointer font-medium transition-colors">
                 {uploadingLogo ? 'Uploading...' : 'Upload logo'}
                 <input
                   type="file"
@@ -378,58 +488,127 @@ src={
               </label>
             </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-  <input
-    value={businessForm.legalName ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, legalName: e.target.value }))}
-    placeholder="Legal business name (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-  />
-  <input
-    value={businessForm.npwp ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, npwp: e.target.value }))}
-    placeholder="NPWP (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-  />
-  <input
-    value={businessForm.address ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, address: e.target.value }))}
-    placeholder="Business address (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black sm:col-span-2"
-  />
-  <input
-    value={businessForm.phone ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, phone: e.target.value }))}
-    placeholder="Business phone (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-  />
-  <input
-    value={businessForm.bankName ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, bankName: e.target.value }))}
-    placeholder="Bank name (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-  />
-  <input
-    value={businessForm.bankAccountNumber ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, bankAccountNumber: e.target.value }))}
-    placeholder="Bank account number (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-  />
-  <input
-    value={businessForm.bankAccountName ?? ''}
-    onChange={(e) => setBusinessForm((f) => ({ ...f, bankAccountName: e.target.value }))}
-    placeholder="Bank account holder name (optional)"
-    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black sm:col-span-2"
-  />
-</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <input
+                value={businessForm.legalName ?? ''}
+                onChange={(e) => setBusinessForm((f) => ({ ...f, legalName: e.target.value }))}
+                placeholder="Legal business name (optional)"
+                className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
+              />
+              <input
+                value={businessForm.npwp ?? ''}
+                onChange={(e) => setBusinessForm((f) => ({ ...f, npwp: e.target.value }))}
+                placeholder="NPWP (optional)"
+                className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
+              />
+              <input
+                value={businessForm.address ?? ''}
+                onChange={(e) => setBusinessForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="Business address (optional)"
+                className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all sm:col-span-2"
+              />
+              <input
+                value={businessForm.phone ?? ''}
+                onChange={(e) => setBusinessForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="Business phone (optional)"
+                className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
+              />
+            </div>
             <button
               type="button"
               onClick={saveBusinessDetails}
               disabled={savingBusiness}
-              className="text-sm px-4 py-2 rounded-md bg-black text-white font-semibold disabled:bg-gray-300"
+              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
             >
               {savingBusiness ? 'Saving...' : 'Save business details'}
             </button>
+          </section>
+        )}
+
+        {/* Bank Accounts — full list, not a single set of fields. Whichever
+            account is marked "Default" here is what prints on invoices for
+            customers paying by transfer; a rate can also have no default
+            set at all — "Unset default" clears the flag without promoting
+            anything else. Same shape as Tax Rates below. */}
+        {hasInvoicePos && (
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <Landmark size={16} strokeWidth={2} className="text-blue-700" />
+              <h2 className="font-bold">Bank Accounts</h2>
+            </div>
+            <p className="text-sm text-gray-600 max-w-md">
+              Add every account you accept transfers into. The one marked Default is what shows on
+              printed invoices.
+            </p>
+
+            {bankError && <p className="text-xs text-red-700">{bankError}</p>}
+
+            <div className="flex flex-col divide-y divide-blue-500/10">
+              {bankAccounts?.map((account) => (
+                <div key={account.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2.5">
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium">{account.bankName}</span>
+                    <span className="text-sm text-gray-500 ml-2">{account.accountNumber}</span>
+                    <span className="text-sm text-gray-500 ml-2">({account.accountName})</span>
+                    {account.isDefault && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 font-medium ml-2">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultBankAccount(account.id, !account.isDefault)}
+                      disabled={savingBankId === account.id}
+                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {account.isDefault ? 'Unset default' : 'Set default'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => archiveBankAccount(account.id)}
+                      disabled={savingBankId === account.id}
+                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {bankAccounts?.length === 0 && (
+                <p className="text-sm text-gray-400 py-2">No bank accounts yet.</p>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <input
+                value={newBankName}
+                onChange={(e) => setNewBankName(e.target.value)}
+                placeholder="Bank name"
+                className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
+              />
+              <input
+                value={newAccountNumber}
+                onChange={(e) => setNewAccountNumber(e.target.value)}
+                placeholder="Account number"
+                className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
+              />
+              <input
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                placeholder="Account holder name"
+                className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
+              />
+              <button
+                type="button"
+                onClick={addBankAccount}
+                disabled={savingBankId === 'new'}
+                className="text-sm px-4 py-2.5 sm:py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 whitespace-nowrap transition-colors"
+              >
+                {savingBankId === 'new' ? 'Adding...' : 'Add account'}
+              </button>
+            </div>
           </section>
         )}
 
@@ -440,9 +619,9 @@ src={
             at all — "Unset default" clears the flag without promoting
             anything else. */}
         {hasInvoicePos && (
-          <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-3">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div className="flex items-center gap-2">
-              <Percent size={16} strokeWidth={2} className="text-gray-700" />
+              <Percent size={16} strokeWidth={2} className="text-blue-700" />
               <h2 className="font-bold">Tax Rates</h2>
             </div>
             <p className="text-sm text-gray-600 max-w-md">
@@ -452,20 +631,14 @@ src={
 
             {taxError && <p className="text-xs text-red-700">{taxError}</p>}
 
-            {/* Each row used to be one `flex justify-between` line — fine on
-                desktop, but on a narrow phone a longer tax name plus the
-                Default badge plus two buttons has nowhere to go and either
-                overflows or crushes the buttons. Below sm it now stacks:
-                name/badge on their own line, buttons on the next, full width
-                and easy to tap. */}
-            <div className="flex flex-col divide-y divide-gray-200">
+            <div className="flex flex-col divide-y divide-blue-500/10">
               {taxRates?.map((rate) => (
                 <div key={rate.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2.5">
                   <div className="min-w-0">
                     <span className="text-sm font-medium">{rate.name}</span>
                     <span className="text-sm text-gray-500 ml-2">{rate.percentage}%</span>
                     {rate.isDefault && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 font-medium ml-2">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 font-medium ml-2">
                         Default
                       </span>
                     )}
@@ -475,7 +648,7 @@ src={
                       type="button"
                       onClick={() => setDefaultTaxRate(rate.id, !rate.isDefault)}
                       disabled={savingTaxId === rate.id}
-                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-gray-300 text-gray-600 hover:border-black disabled:opacity-50"
+                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {rate.isDefault ? 'Unset default' : 'Set default'}
                     </button>
@@ -483,7 +656,7 @@ src={
                       type="button"
                       onClick={() => archiveTaxRate(rate.id)}
                       disabled={savingTaxId === rate.id}
-                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-gray-300 text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
+                      className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50 transition-colors"
                     >
                       Remove
                     </button>
@@ -500,7 +673,7 @@ src={
                 value={newTaxName}
                 onChange={(e) => setNewTaxName(e.target.value)}
                 placeholder="Tax name (e.g. PPN)"
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm outline-none focus:border-black flex-1 min-w-0"
+                className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
               />
               <div className="relative">
                 <input
@@ -508,7 +681,7 @@ src={
                   onChange={(e) => setNewTaxPercentage(e.target.value)}
                   placeholder="11"
                   inputMode="decimal"
-                  className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 pr-7 text-sm outline-none focus:border-black w-full sm:w-24"
+                  className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 pr-7 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all w-full sm:w-24"
                 />
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
                   %
@@ -518,7 +691,7 @@ src={
                 type="button"
                 onClick={addTaxRate}
                 disabled={savingTaxId === 'new'}
-                className="text-sm px-4 py-2.5 sm:py-2 rounded-md bg-black text-white font-semibold disabled:bg-gray-300"
+                className="text-sm px-4 py-2.5 sm:py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
               >
                 {savingTaxId === 'new' ? 'Adding...' : 'Add tax rate'}
               </button>
@@ -528,9 +701,9 @@ src={
 
         {/* POS Pricing */}
         {hasInvoicePos && (
-          <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-3">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div className="flex items-center gap-2">
-              <Tag size={16} strokeWidth={2} className="text-gray-700" />
+              <Tag size={16} strokeWidth={2} className="text-blue-700" />
               <h2 className="font-bold">Invoice Pricing</h2>
             </div>
             <p className="text-sm text-gray-600 max-w-md">
@@ -542,16 +715,16 @@ src={
                 type="button"
                 disabled={saving || !loaded}
                 onClick={() => savePosPricingEnabled(true)}
-                className={`flex-1 text-left border-2 rounded-md p-3 transition disabled:opacity-50 ${
+                className={`flex-1 text-left border rounded-xl p-3 transition-colors disabled:opacity-50 ${
                   posPricingEnabled === true
-                    ? 'border-black bg-gray-50'
-                    : 'border-gray-300 hover:border-gray-400'
+                    ? 'border-blue-500/50 bg-blue-50/60'
+                    : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                      posPricingEnabled === true ? 'border-black bg-black' : 'border-gray-400'
+                      posPricingEnabled === true ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
                   <span className="font-semibold text-sm">Custom Price</span>
@@ -565,16 +738,16 @@ src={
                 type="button"
                 disabled={saving || !loaded}
                 onClick={() => savePosPricingEnabled(false)}
-                className={`flex-1 text-left border-2 rounded-md p-3 transition disabled:opacity-50 ${
+                className={`flex-1 text-left border rounded-xl p-3 transition-colors disabled:opacity-50 ${
                   posPricingEnabled === false
-                    ? 'border-black bg-gray-50'
-                    : 'border-gray-300 hover:border-gray-400'
+                    ? 'border-blue-500/50 bg-blue-50/60'
+                    : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                      posPricingEnabled === false ? 'border-black bg-black' : 'border-gray-400'
+                      posPricingEnabled === false ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
                   <span className="font-semibold text-sm">Database / Import Price</span>
@@ -589,7 +762,7 @@ src={
 
         {/* Fulfillment Workflow */}
         {hasWarehouseOps && (
-          <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-3">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div>
               <h2 className="font-bold">Fulfillment Workflow</h2>
               <p className="text-sm text-gray-600 mt-1">
@@ -602,16 +775,16 @@ src={
                 type="button"
                 disabled={saving || !loaded}
                 onClick={() => saveFulfillmentMode('PICK_PACK_SHIP')}
-                className={`flex-1 text-left border-2 rounded-md p-3 transition disabled:opacity-50 ${
+                className={`flex-1 text-left border rounded-xl p-3 transition-colors disabled:opacity-50 ${
                   fulfillmentMode === 'PICK_PACK_SHIP'
-                    ? 'border-black bg-gray-50'
-                    : 'border-gray-300 hover:border-gray-400'
+                    ? 'border-blue-500/50 bg-blue-50/60'
+                    : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                      fulfillmentMode === 'PICK_PACK_SHIP' ? 'border-black bg-black' : 'border-gray-400'
+                      fulfillmentMode === 'PICK_PACK_SHIP' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
                   <span className="font-semibold text-sm">Pick → Pack → Ship</span>
@@ -625,16 +798,16 @@ src={
                 type="button"
                 disabled={saving || !loaded}
                 onClick={() => saveFulfillmentMode('PICK_SHIP')}
-                className={`flex-1 text-left border-2 rounded-md p-3 transition disabled:opacity-50 ${
+                className={`flex-1 text-left border rounded-xl p-3 transition-colors disabled:opacity-50 ${
                   fulfillmentMode === 'PICK_SHIP'
-                    ? 'border-black bg-gray-50'
-                    : 'border-gray-300 hover:border-gray-400'
+                    ? 'border-blue-500/50 bg-blue-50/60'
+                    : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                      fulfillmentMode === 'PICK_SHIP' ? 'border-black bg-black' : 'border-gray-400'
+                      fulfillmentMode === 'PICK_SHIP' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
                   <span className="font-semibold text-sm">Pick → Ship</span>
@@ -653,7 +826,7 @@ src={
         )}
 
         {loaded && !hasWarehouseOps && !hasInvoicePos && (
-          <div className="text-sm text-gray-500 border-2 border-dashed border-gray-300 rounded-md p-5 text-center">
+          <div className="text-sm text-gray-500 border border-dashed border-blue-500/25 rounded-xl p-5 text-center bg-white/60">
             No optional modules are active on this organization yet.
           </div>
         )}

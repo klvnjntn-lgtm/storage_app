@@ -3,6 +3,7 @@
 import { useRef, useState, } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   UploadCloud,
@@ -13,6 +14,9 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import React from 'react'
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
+
 // Shape of a row as it comes straight out of the sheet, before we coerce
 // qty/sellingPrice/costPrice into numbers. Cells can be strings, numbers,
 // or missing — Row (below) is the post-parse shape and shouldn't be used
@@ -285,22 +289,34 @@ export default function ImportPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
 
       {/* Header */}
-      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+      <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Scanner Hub
           </button>
-          <div className="flex items-center gap-2 min-w-0">
-            <UploadCloud size={22} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <UploadCloud size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold truncate">Stock Import</h1>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Stock Import
+              </h1>
               <p className="text-xs text-gray-500 truncate">Upload a stock sheet (SKU, qty, location)</p>
             </div>
           </div>
@@ -313,7 +329,7 @@ export default function ImportPage() {
         {/* IMPORT RESULT */}
         {importResult && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
                 Import complete — {importResult.accepted} added, {importResult.rejected.length} failed.
@@ -327,8 +343,8 @@ export default function ImportPage() {
             </div>
 
             {importResult.rejected.length > 0 && (
-              <div className="border-2 border-red-300 rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-red-50 border-b-2 border-red-300 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+              <div className="border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
                   {importResult.rejected.length} row{importResult.rejected.length === 1 ? '' : 's'} could not be added
                 </div>
@@ -337,7 +353,7 @@ export default function ImportPage() {
                     overflow-hidden. */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[420px]">
-                    <thead className="bg-gray-100 border-b border-gray-300">
+                    <thead className="bg-blue-50/60 border-b border-blue-500/15">
                       <tr>
                         <th className="text-left px-3 py-2 font-semibold">SKU</th>
                         <th className="text-left px-3 py-2 font-semibold">Name</th>
@@ -348,7 +364,7 @@ export default function ImportPage() {
                       {importResult.rejected.map((r, i) => (
                         <tr
                           key={i}
-                          className={`border-t border-gray-300 ${i % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+                          className={`border-t border-blue-500/10 ${i % 2 === 1 ? 'bg-blue-50/20' : 'bg-white'}`}
                         >
                           <td className="px-3 py-2 font-medium">{r.sku || '-'}</td>
                           <td className="px-3 py-2">{r.name || '-'}</td>
@@ -364,14 +380,14 @@ export default function ImportPage() {
         )}
 
         {importError && (
-          <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
             <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
             {importError}
           </div>
         )}
 
         {/* IMPORT MODE */}
-        <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-3">
+        <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
           <label className="block text-xs font-semibold text-gray-600">
             Import mode — choose one
           </label>
@@ -380,16 +396,16 @@ export default function ImportPage() {
             <button
               type="button"
               onClick={() => setMode('REPLACE')}
-              className={`flex-1 text-left border-2 rounded-md p-3 transition ${
+              className={`flex-1 text-left border rounded-xl p-3 transition-colors ${
                 mode === 'REPLACE'
-                  ? 'border-black bg-gray-50'
-                  : 'border-gray-300 hover:border-gray-400'
+                  ? 'border-blue-500/50 bg-blue-50/60'
+                  : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
               }`}
             >
               <div className="flex items-center gap-2">
                 <span
                   className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                    mode === 'REPLACE' ? 'border-black bg-black' : 'border-gray-400'
+                    mode === 'REPLACE' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                   }`}
                 />
                 <span className="font-semibold text-sm">Replace existing quantities</span>
@@ -402,16 +418,16 @@ export default function ImportPage() {
             <button
               type="button"
               onClick={() => setMode('INCREMENT')}
-              className={`flex-1 text-left border-2 rounded-md p-3 transition ${
+              className={`flex-1 text-left border rounded-xl p-3 transition-colors ${
                 mode === 'INCREMENT'
-                  ? 'border-black bg-gray-50'
-                  : 'border-gray-300 hover:border-gray-400'
+                  ? 'border-blue-500/50 bg-blue-50/60'
+                  : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
               }`}
             >
               <div className="flex items-center gap-2">
                 <span
                   className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
-                    mode === 'INCREMENT' ? 'border-black bg-black' : 'border-gray-400'
+                    mode === 'INCREMENT' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                   }`}
                 />
                 <span className="font-semibold text-sm">Add to existing quantities</span>
@@ -424,7 +440,7 @@ export default function ImportPage() {
         </section>
 
         {/* UPLOAD SECTION */}
-        <section className="border-2 border-gray-300 rounded-md p-4 sm:p-5 space-y-4">
+        <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -435,13 +451,13 @@ export default function ImportPage() {
                 type="file"
                 accept=".xlsx,.xls"
                 onChange={handleFileUpload}
-                className="text-sm w-full file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-2 file:border-gray-300 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-gray-100"
+                className="text-sm w-full file:mr-3 file:px-3 file:py-2 file:rounded-md file:border file:border-blue-500/20 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-blue-50"
               />
             </div>
 
             <button
               onClick={handleDownloadTemplate}
-              className="flex items-center justify-center gap-1.5 text-sm font-semibold border-2 border-gray-300 rounded-md px-3 py-2.5 sm:py-2 hover:bg-gray-100 shrink-0"
+              className="flex items-center justify-center gap-1.5 text-sm font-semibold border border-blue-500/20 text-blue-700 rounded-lg px-3 py-2.5 sm:py-2 hover:bg-blue-50 shrink-0 transition-colors"
             >
               <Download size={16} strokeWidth={2} />
               Download template
@@ -449,7 +465,7 @@ export default function ImportPage() {
           </div>
 
           {columnError && (
-            <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
               <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
               {columnError}
             </div>
@@ -472,7 +488,7 @@ export default function ImportPage() {
 
               <div className="flex items-center gap-2 flex-wrap">
                 {blankLocationCount > 0 && (
-                  <span className="text-xs px-2 py-1 rounded-md bg-gray-100 border border-gray-300 text-gray-600">
+                  <span className="text-xs px-2 py-1 rounded-md bg-blue-50 border border-blue-500/20 text-blue-700">
                     {blankLocationCount} will import as Unassigned
                   </span>
                 )}
@@ -480,7 +496,7 @@ export default function ImportPage() {
                 {invalidCount > 0 && (
                   <button
                     onClick={removeInvalidRows}
-                    className="text-xs px-2 py-1 rounded-md border-2 border-red-300 text-red-700 hover:bg-red-50 font-semibold"
+                    className="text-xs px-2 py-1 rounded-md border border-red-300 text-red-700 hover:bg-red-50 font-semibold transition-colors"
                   >
                     Remove {invalidCount} invalid row{invalidCount === 1 ? '' : 's'}
                   </button>
@@ -489,19 +505,19 @@ export default function ImportPage() {
             </div>
 
             {invalidCount > 0 ? (
-              <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                 {invalidCount} row{invalidCount === 1 ? '' : 's'} need attention — see the highlighted reason under each row below, or remove them.
               </div>
             ) : (
-              <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-300 text-blue-800 rounded-md p-3 text-sm">
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-3 text-sm">
                 <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
                 {fileName} — all {rows.length} row{rows.length === 1 ? '' : 's'} ready to import
               </div>
             )}
 
             {rows.length > 0 && invalidCount === 0 && !mode && (
-              <div className="flex items-start gap-2 bg-yellow-50 border-2 border-yellow-300 text-yellow-800 rounded-md p-3 text-sm">
+              <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                 Pick an import mode above before importing.
               </div>
@@ -517,13 +533,13 @@ export default function ImportPage() {
                 const valid = rowError === null;
                 const blankLocation = !r.location?.toString().trim();
                 const fieldClass =
-                  'w-full border border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black bg-white';
+                  'w-full border border-blue-500/20 rounded-md p-2 text-sm outline-none focus:border-blue-500/50 bg-white';
 
                 return (
                   <div
                     key={i}
-                    className={`border-2 rounded-md p-3 ${
-                      !valid ? 'bg-red-50 border-red-300' : 'border-gray-300'
+                    className={`border rounded-xl p-3 shadow-sm ${
+                      !valid ? 'bg-red-50 border-red-300' : 'border-blue-500/15 bg-white'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
@@ -537,7 +553,7 @@ export default function ImportPage() {
                       </div>
                       <button
                         onClick={() => removeRow(i)}
-                        className="shrink-0 mt-5 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-600"
+                        className="shrink-0 mt-5 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-600 transition-colors"
                         title="Remove row"
                       >
                         <Trash2 size={16} strokeWidth={2} />
@@ -626,9 +642,9 @@ export default function ImportPage() {
             </div>
 
             {/* Tablet/desktop: original spreadsheet-style table */}
-            <div className="hidden sm:block border-2 border-gray-300 rounded-md overflow-hidden overflow-x-auto">
+            <div className="hidden sm:block border border-blue-500/15 rounded-xl overflow-hidden overflow-x-auto bg-white shadow-sm">
               <table className="w-full text-sm">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                <thead className="bg-blue-50/60 border-b border-blue-500/15">
                   <tr>
                     <th className="text-left px-3 py-2 font-semibold">SKU</th>
                     <th className="text-left px-3 py-2 font-semibold">Name</th>
@@ -657,36 +673,36 @@ export default function ImportPage() {
                       // "unique key prop" warning.
                       <React.Fragment key={i}>
                         <tr
-                          className={`border-t border-gray-300 ${
-                            !valid ? 'bg-red-50' : i % 2 === 1 ? 'bg-gray-50' : 'bg-white'
+                          className={`border-t border-blue-500/10 ${
+                            !valid ? 'bg-red-50' : i % 2 === 1 ? 'bg-blue-50/20' : 'bg-white'
                           }`}
                         >
                           <td className="px-1 py-1">
                             <input
                               value={r.sku}
                               onChange={(e) => updateRow(i, 'sku', e.target.value)}
-                              className="w-full bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none font-medium"
+                              className="w-full bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none font-medium"
                             />
                           </td>
                           <td className="px-1 py-1">
                             <input
                               value={r.name}
                               onChange={(e) => updateRow(i, 'name', e.target.value)}
-                              className="w-full bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none"
+                              className="w-full bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none"
                             />
                           </td>
                           <td className="px-1 py-1">
                             <input
                               value={r.category}
                               onChange={(e) => updateRow(i, 'category', e.target.value)}
-                              className="w-full bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none"
+                              className="w-full bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none"
                             />
                           </td>
                           <td className="px-1 py-1">
                             <input
                               value={r.brand ?? ''}
                               onChange={(e) => updateRow(i, 'brand', e.target.value)}
-                              className="w-full bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none text-gray-600"
+                              className="w-full bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none text-gray-600"
                             />
                           </td>
                           <td className="px-1 py-1">
@@ -696,8 +712,8 @@ export default function ImportPage() {
                               placeholder="Unassigned"
                               className={`w-full bg-transparent border rounded px-2 py-1 text-sm outline-none ${
                                 blankLocation
-                                  ? 'border-gray-300 text-gray-400 italic'
-                                  : 'border-transparent focus:border-gray-400 focus:bg-white'
+                                  ? 'border-blue-500/20 text-gray-400 italic'
+                                  : 'border-transparent focus:border-blue-500/40 focus:bg-white'
                               }`}
                             />
                           </td>
@@ -706,7 +722,7 @@ export default function ImportPage() {
                               type="number"
                               value={r.qty}
                               onChange={(e) => updateRow(i, 'qty', e.target.value)}
-                              className="w-20 bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none font-bold"
+                              className="w-20 bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none font-bold"
                             />
                           </td>
                           <td className="px-1 py-1">
@@ -715,7 +731,7 @@ export default function ImportPage() {
                               value={r.sellingPrice ?? ''}
                               placeholder="—"
                               onChange={(e) => updateRow(i, 'sellingPrice', e.target.value)}
-                              className="w-24 bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none"
+                              className="w-24 bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none"
                             />
                           </td>
                           <td className="px-1 py-1">
@@ -724,13 +740,13 @@ export default function ImportPage() {
                               value={r.costPrice ?? ''}
                               placeholder="—"
                               onChange={(e) => updateRow(i, 'costPrice', e.target.value)}
-                              className="w-24 bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1 text-sm outline-none text-gray-600"
+                              className="w-24 bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none text-gray-600"
                             />
                           </td>
                           <td className="px-2 py-1 text-center">
                             <button
                               onClick={() => removeRow(i)}
-                              className="text-gray-400 hover:text-red-600"
+                              className="text-gray-400 hover:text-red-600 transition-colors"
                               title="Remove row"
                             >
                               <Trash2 size={16} strokeWidth={2} />
@@ -755,7 +771,7 @@ export default function ImportPage() {
               <button
                 onClick={handleImport}
                 disabled={!canImport}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-black text-white rounded-md font-semibold hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <UploadCloud size={18} strokeWidth={2} />
                 {loading ? 'Importing...' : `Import ${rows.length} Row${rows.length === 1 ? '' : 's'}`}

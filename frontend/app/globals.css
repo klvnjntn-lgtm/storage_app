@@ -28,6 +28,14 @@
   }
 }
 
+html {
+  /* Always reserve space for the vertical scrollbar so content height
+     changes (e.g. a dropdown opening/closing) never toggle the scrollbar
+     on/off — that toggle was shrinking/growing the viewport width and
+     causing the page to visibly bounce/reflow. */
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, ClipboardList, Trash2, Plus } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -11,6 +12,8 @@ import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker'
 import { Supplier } from '@/app/components/suppliers/types';
 import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from '@/app/components/purchase-orders/types';
 import { useHasModule } from '@/lib/useHasModule';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -264,19 +267,31 @@ export default function PurchaseOrderFormPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/purchasing/purchase-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
-          <div className="flex items-center gap-2">
-            <ClipboardList size={20} strokeWidth={2} className="text-gray-700" />
-            <h1 className="text-xl sm:text-2xl font-bold">{editId ? 'Edit Purchase Order' : 'New Purchase Order'}</h1>
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
+            <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
+              {editId ? 'Edit Purchase Order' : 'New Purchase Order'}
+            </h1>
           </div>
         </div>
       </div>
@@ -288,9 +303,9 @@ export default function PurchaseOrderFormPage() {
           {cartLines.length === 0 && newProductLineTotals.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">No items yet — search above to add products.</p>
           ) : (
-            <div className="border-2 border-gray-200 rounded-md overflow-hidden">
+            <div className="border-2 border-gray-200 rounded-md overflow-hidden bg-white">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b-2 border-gray-200">
+                <thead className="bg-blue-50/60 border-b-2 border-gray-200">
                   <tr>
                     <th className="text-left font-semibold px-3 py-2">Item</th>
                     <th className="text-right font-semibold px-3 py-2 w-20">Qty</th>
@@ -312,7 +327,7 @@ export default function PurchaseOrderFormPage() {
                           min={1}
                           value={l.quantity}
                           onChange={(e) => changeQty(l.product.id, e.target.value)}
-                          className="w-16 text-right border-2 border-gray-300 focus:border-black rounded-md px-2 py-1 text-sm outline-none"
+                          className="w-16 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -321,7 +336,7 @@ export default function PurchaseOrderFormPage() {
                           min={0}
                           value={l.unitCost}
                           onChange={(e) => changeUnitCost(l.product.id, e.target.value)}
-                          className="w-28 text-right border-2 border-gray-300 focus:border-black rounded-md px-2 py-1 text-sm outline-none"
+                          className="w-28 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
@@ -342,7 +357,7 @@ export default function PurchaseOrderFormPage() {
                             value={l.name}
                             onChange={(e) => updateNewProductLine(l.key, { name: e.target.value })}
                             className={`w-full border-2 rounded-md px-2 py-1 text-sm outline-none ${
-                              l.name.trim() ? 'border-gray-300 focus:border-black' : 'border-red-300 focus:border-red-500'
+                              l.name.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
                             }`}
                           />
                           <div className="flex gap-1">
@@ -352,7 +367,7 @@ export default function PurchaseOrderFormPage() {
                               value={l.sku}
                               onChange={(e) => updateNewProductLine(l.key, { sku: e.target.value })}
                               className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
-                                l.sku.trim() ? 'border-gray-300 focus:border-black' : 'border-red-300 focus:border-red-500'
+                                l.sku.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
                               }`}
                             />
                             <input
@@ -361,7 +376,7 @@ export default function PurchaseOrderFormPage() {
                               value={l.category}
                               onChange={(e) => updateNewProductLine(l.key, { category: e.target.value })}
                               className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
-                                l.category.trim() ? 'border-gray-300 focus:border-black' : 'border-red-300 focus:border-red-500'
+                                l.category.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
                               }`}
                             />
                           </div>
@@ -379,7 +394,7 @@ export default function PurchaseOrderFormPage() {
                               quantity: Number.isFinite(parsed) && parsed > 0 ? parsed : l.quantity,
                             });
                           }}
-                          className="w-16 text-right border-2 border-gray-300 focus:border-black rounded-md px-2 py-1 text-sm outline-none"
+                          className="w-16 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -393,7 +408,7 @@ export default function PurchaseOrderFormPage() {
                               unitCost: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
                             });
                           }}
-                          className="w-28 text-right border-2 border-gray-300 focus:border-black rounded-md px-2 py-1 text-sm outline-none"
+                          className="w-28 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
@@ -411,7 +426,7 @@ export default function PurchaseOrderFormPage() {
 
           <button
             onClick={addNewProductLine}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-dashed border-gray-300 text-gray-600 hover:border-black hover:text-black"
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-dashed border-gray-300 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 hover:bg-blue-50/40 transition-colors"
           >
             <Plus size={14} strokeWidth={2} />
             Add new product
@@ -434,7 +449,7 @@ export default function PurchaseOrderFormPage() {
               <select
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                className="w-full border-2 border-gray-300 focus:border-black rounded-md px-3 py-2 text-sm outline-none"
+                className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
               >
                 <option value="">Select location...</option>
                 {locations.map((loc) => (
@@ -451,7 +466,7 @@ export default function PurchaseOrderFormPage() {
             <select
               value={taxRateId ?? ''}
               onChange={(e) => setTaxRateId(e.target.value || null)}
-              className="w-full border-2 border-gray-300 focus:border-black rounded-md px-3 py-2 text-sm outline-none"
+              className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
             >
               <option value="">None</option>
               {taxRates.map((r) => (
@@ -469,7 +484,7 @@ export default function PurchaseOrderFormPage() {
               min={0}
               value={discountAmount}
               onChange={(e) => setDiscountAmount(e.target.value)}
-              className="w-full border-2 border-gray-300 focus:border-black rounded-md px-3 py-2 text-sm outline-none"
+              className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
             />
           </div>
 
@@ -495,7 +510,7 @@ export default function PurchaseOrderFormPage() {
           <button
             onClick={handleSave}
             disabled={saving || itemCount === 0}
-            className="w-full bg-black text-white font-semibold px-4 py-2.5 rounded-md hover:bg-gray-800 disabled:opacity-50"
+            className="w-full bg-blue-600 text-white font-semibold px-4 py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             {saving ? 'Saving...' : editId ? 'Save Changes' : 'Save Draft'}
           </button>

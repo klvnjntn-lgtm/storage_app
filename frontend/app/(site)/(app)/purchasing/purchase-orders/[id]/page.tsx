@@ -3,10 +3,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Send, XCircle, Printer, Download, Pencil, ClipboardList } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { PurchaseOrderTemplate } from '@/app/components/purchase-orders/templates/PurchaseOrderTemplate';
 import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/purchase-orders/types';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 function statusBadgeClasses(status: string) {
   switch (status) {
@@ -145,11 +148,11 @@ export default function PurchaseOrderDetailPage() {
         }
       `}</style>
 
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 border-b-2 border-gray-300 print:hidden">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-3xl mx-auto">
           <button
             onClick={() => router.push('/purchasing/purchase-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to purchase orders
@@ -157,8 +160,10 @@ export default function PurchaseOrderDetailPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-                <ClipboardList size={20} strokeWidth={2} className="text-gray-700" />
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2`}>
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                  <ClipboardList size={16} strokeWidth={2} className="text-blue-700" />
+                </span>
                 {po.poNumber ?? 'Unissued draft'}
               </h1>
               <p className="text-xs text-gray-500">
@@ -176,7 +181,7 @@ export default function PurchaseOrderDetailPage() {
                 <>
                   <button
                     onClick={() => router.push(`/purchasing/purchase-orders/new?id=${po.id}`)}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
                     Edit
@@ -184,7 +189,7 @@ export default function PurchaseOrderDetailPage() {
                   <button
                     disabled={actionLoading === 'send'}
                     onClick={handleSend}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Send size={14} strokeWidth={2} />
                     Send
@@ -208,14 +213,14 @@ export default function PurchaseOrderDetailPage() {
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? 'Generating...' : 'Download PDF'}
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
                     Print

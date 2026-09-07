@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   Receipt,
@@ -18,6 +19,8 @@ import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
 import DateRangePicker from '@/app/components/DateRangePicker';
 import Pagination from '@/app/components/Pagination';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
@@ -260,31 +263,43 @@ export default function InvoicesPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      {/* Header — now matches the Statement page's header style */}
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-6 py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — matches Vehicle History Lookup's blue-outline + backdrop-blur treatment */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 transition-colors -ml-1 py-1 px-1 active:bg-blue-50 rounded-md"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2">
-              <Receipt size={20} strokeWidth={2} className="text-gray-700" />
-              <div>
-                <h1 className="text-2xl font-bold">Invoices</h1>
-                <p className="text-xs text-gray-500">History and active drafts</p>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Receipt size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
+              <div className="min-w-0">
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  Invoices
+                </h1>
+                <p className="text-xs text-gray-500 truncate">History and active drafts</p>
               </div>
             </div>
 
             <div className="flex gap-2">
               <button
                 onClick={() => router.push('/sales/statement/new')}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100"
+                className="flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
               >
                 <FileText size={16} strokeWidth={2} />
                 Generate Statement
@@ -292,7 +307,7 @@ export default function InvoicesPage() {
 
               <button
                 onClick={() => router.push(`/sales/invoices/new?new=${Date.now()}`)}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800"
+                className="flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 active:bg-blue-800 shadow-sm transition-colors"
               >
                 <Plus size={16} strokeWidth={2} />
                 New Invoice
@@ -307,27 +322,23 @@ export default function InvoicesPage() {
             instead of three stacked, independently-scrolling pill rows.
             Each group gets a small caption so it reads as "Date / Status /
             Payment" rather than one undifferentiated wall of buttons. */}
-        <div className="border-2 border-gray-200 rounded-lg p-3 sm:p-4 mb-4 bg-gray-50/60">
+        <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 mb-4 bg-white shadow-sm">
           {/* Search — invoice number or customer name. Its own row since
               it's the most-reached-for filter and free text doesn't pair
               well visually with the pill groups below it. */}
-          <div className="relative mb-3">
-            <Search
-              size={15}
-              strokeWidth={2}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-            />
+          <div className="group relative flex items-center gap-2 mb-3 rounded-lg border border-blue-500/20 bg-white px-3 py-2 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+            <Search size={15} strokeWidth={2} className="text-blue-600/60 shrink-0" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by invoice number or customer name"
-              className="w-full text-sm pl-8 pr-8 py-2 rounded-md border-2 border-gray-300 bg-white placeholder:text-gray-400 focus:outline-none focus:border-black"
+              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black p-0.5"
+                className="text-gray-400 hover:text-blue-700 p-0.5 shrink-0"
                 aria-label="Clear search"
               >
                 <X size={14} strokeWidth={2.5} />
@@ -338,7 +349,7 @@ export default function InvoicesPage() {
           <div className="grid sm:grid-cols-[auto_1fr_1fr] gap-x-6 gap-y-3">
             {/* Date range */}
             <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
                 Date range
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -356,10 +367,10 @@ export default function InvoicesPage() {
                       <button
                         key={opt.value}
                         onClick={() => setDateField(opt.value)}
-                        className={`text-xs px-2.5 py-1.5 rounded-md border font-semibold whitespace-nowrap ${
+                        className={`text-xs px-2.5 py-1.5 rounded-md border font-semibold whitespace-nowrap transition-colors ${
                           dateField === opt.value
-                            ? 'bg-gray-800 text-white border-gray-800'
-                            : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                         }`}
                       >
                         {opt.label}
@@ -372,7 +383,7 @@ export default function InvoicesPage() {
 
             {/* Status */}
             <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
                 Status
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -380,10 +391,10 @@ export default function InvoicesPage() {
                   <button
                     key={opt.value}
                     onClick={() => setStatusFilter(opt.value)}
-                    className={`text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap ${
+                    className={`text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap transition-colors ${
                       statusFilter === opt.value
-                        ? 'bg-black text-white border-black'
-                        : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                     }`}
                   >
                     {opt.label}
@@ -394,7 +405,7 @@ export default function InvoicesPage() {
 
             {/* Payment */}
             <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
                 Payment
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -402,14 +413,14 @@ export default function InvoicesPage() {
                   <button
                     key={opt.value}
                     onClick={() => setPaymentFilter(opt.value)}
-                    className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap ${
+                    className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap transition-colors ${
                       paymentFilter === opt.value
                         ? opt.value === 'OVERDUE'
                           ? 'bg-red-600 text-white border-red-600'
-                          : 'bg-black text-white border-black'
+                          : 'bg-blue-600 text-white border-blue-600'
                         : opt.value === 'OVERDUE'
                         ? 'border-red-300 text-red-700 bg-white hover:bg-red-50'
-                        : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
+                        : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                     }`}
                   >
                     {opt.value === 'OVERDUE' && <AlertCircle size={12} strokeWidth={2} />}
@@ -424,7 +435,7 @@ export default function InvoicesPage() {
           {/* Contextual note + clear-all, only shown when relevant so the
               bar stays quiet by default. */}
           {(hasDateRange && dateField === 'invoice') || activeFilterCount > 0 ? (
-            <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200">
+            <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-blue-500/10">
               <p className="text-xs text-gray-400">
                 {hasDateRange && dateField === 'invoice'
                   ? 'Showing invoices by the date printed on the document — this can differ from when an invoice was actually issued if it was backdated.'
@@ -433,7 +444,7 @@ export default function InvoicesPage() {
               {activeFilterCount > 0 && (
                 <button
                   onClick={clearFilters}
-                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-black shrink-0"
+                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors"
                 >
                   <X size={12} strokeWidth={2.5} />
                   Clear filters
@@ -445,7 +456,7 @@ export default function InvoicesPage() {
 
         {/* Error / loading / empty states */}
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
             {error}
           </p>
         )}
@@ -471,10 +482,10 @@ export default function InvoicesPage() {
                     router.push(`/sales/invoices/${inv.id}`);
                   }
                 }}
-                className={`border-2 rounded-md p-3 cursor-pointer transition-colors ${
+                className={`border rounded-xl p-3 cursor-pointer transition-colors shadow-sm ${
                   overdue
                     ? 'border-red-300 bg-red-50/40 hover:border-red-400 hover:bg-red-50 active:bg-red-100'
-                    : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100'
+                    : 'border-blue-500/15 bg-white hover:border-blue-500/35 hover:bg-blue-50/40 active:bg-blue-50'
                 }`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -518,14 +529,14 @@ export default function InvoicesPage() {
                       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => router.push(`/sales/invoices/new?draftId=${inv.id}`)}
-                          className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-gray-100 active:bg-gray-200"
+                          className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 active:bg-blue-100 transition-colors"
                         >
                           <RotateCcw size={13} strokeWidth={2} />
                           Resume
                         </button>
                         <button
                           onClick={() => discardDraft(inv.id)}
-                          className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-red-50 active:bg-red-100 hover:border-red-300 text-red-600"
+                          className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-blue-500/20 hover:bg-red-50 active:bg-red-100 hover:border-red-300 text-red-600 transition-colors"
                         >
                           <Trash2 size={13} strokeWidth={2} />
                           Discard

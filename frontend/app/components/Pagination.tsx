@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 type Props = {
   page: number;
@@ -65,28 +66,29 @@ export default function Pagination({
   if (totalItems === 0) return null;
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-1">
       <p className="text-sm text-gray-400 tabular-nums order-2 sm:order-1">
-        {from}–{to} <span className="text-gray-300">of</span> {totalItems}
+        <span className="font-semibold text-gray-600">{from}–{to}</span>{' '}
+        <span className="text-gray-300">of</span> {totalItems}
       </p>
 
       <div className="flex items-center gap-3 sm:gap-4 order-1 sm:order-2 self-center sm:self-auto">
         {totalPages > 1 && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 rounded-full border border-blue-500/15 bg-white p-1 shadow-sm">
             <button
               onClick={() => onPageChange(page - 1)}
               disabled={page === 1}
-              className="h-9 px-3.5 flex items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-900 hover:text-white hover:border-gray-900 active:scale-95 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none disabled:hover:bg-white disabled:hover:text-gray-600"
+              className="h-8 w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-blue-600 hover:text-white active:scale-95 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none disabled:hover:bg-transparent disabled:hover:text-gray-500"
               aria-label="Previous page"
             >
-              Prev
+              <ChevronLeft size={16} strokeWidth={2.5} />
             </button>
 
-            <div ref={trackRef} className="relative flex items-center gap-0.5 px-0.5">
+            <div ref={trackRef} className="relative flex items-center gap-0.5">
               {/* Sliding highlight */}
               {indicator && (
                 <div
-                  className="absolute top-0 h-9 rounded-full bg-gray-900 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                  className="absolute top-0 h-8 rounded-full bg-blue-600 shadow-sm transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
                   style={{ left: indicator.left, width: indicator.width }}
                   aria-hidden
                 />
@@ -96,7 +98,7 @@ export default function Pagination({
                 p === '…' ? (
                   <span
                     key={`ellipsis-${i}`}
-                    className="relative w-9 h-9 flex items-center justify-center text-sm text-gray-300 select-none"
+                    className="relative w-8 h-8 flex items-center justify-center text-sm text-gray-300 select-none"
                   >
                     ⋯
                   </span>
@@ -108,8 +110,8 @@ export default function Pagination({
                     }}
                     onClick={() => onPageChange(p)}
                     aria-current={p === page ? 'page' : undefined}
-                    className={`relative w-9 h-9 flex items-center justify-center rounded-full text-sm tabular-nums font-medium transition-all duration-200 hover:scale-110 active:scale-95 ${
-                      p === page ? 'text-white' : 'text-gray-500 hover:text-gray-900'
+                    className={`relative w-8 h-8 flex items-center justify-center rounded-full text-sm tabular-nums font-semibold transition-all duration-200 hover:scale-110 active:scale-95 ${
+                      p === page ? 'text-white' : 'text-gray-500 hover:text-blue-700'
                     }`}
                   >
                     {p}
@@ -121,23 +123,23 @@ export default function Pagination({
             <button
               onClick={() => onPageChange(page + 1)}
               disabled={page === totalPages}
-              className="h-9 px-3.5 flex items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-900 hover:text-white hover:border-gray-900 active:scale-95 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none disabled:hover:bg-white disabled:hover:text-gray-600"
+              className="h-8 w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-blue-600 hover:text-white active:scale-95 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none disabled:hover:bg-transparent disabled:hover:text-gray-500"
               aria-label="Next page"
             >
-              Next
+              <ChevronRight size={16} strokeWidth={2.5} />
             </button>
           </div>
         )}
 
         {onPageSizeChange && (
           <>
-            {totalPages > 1 && <span className="h-4 w-px bg-gray-200" aria-hidden />}
+            {totalPages > 1 && <span className="h-4 w-px bg-blue-500/15" aria-hidden />}
             <label className="flex items-center gap-1.5 text-sm text-gray-400">
               <span className="hidden sm:inline">Show</span>
               <select
                 value={pageSize}
                 onChange={(e) => onPageSizeChange(Number(e.target.value))}
-                className="bg-transparent text-gray-600 font-medium focus:outline-none cursor-pointer -ml-0.5 py-1"
+                className="bg-transparent text-gray-600 font-medium focus:outline-none cursor-pointer -ml-0.5 py-1 rounded-md hover:text-blue-700 transition-colors"
               >
                 {pageSizeOptions.map((n) => (
                   <option key={n} value={n}>
