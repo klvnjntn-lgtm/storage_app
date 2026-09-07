@@ -1,4 +1,3 @@
-// components/sales-orders/SalesOrderCartPanel.tsx
 'use client';
 
 import { Minus, Plus, Trash2, Send, AlertCircle, MapPin, Pencil, Percent, Wrench, X } from 'lucide-react';
@@ -101,10 +100,10 @@ export function SalesOrderCartPanel({
   const nothingToOrder = cartLines.length === 0 && services.length === 0;
 
   return (
-    <div className="border-2 border-gray-300 rounded-md p-4 h-fit">
+    <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
-          <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0" />
+          <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
             <span>
               Priced from <strong>{distinctLocationNames[0]}</strong>
@@ -131,7 +130,7 @@ export function SalesOrderCartPanel({
             value={customerPoNumber}
             onChange={(e) => setCustomerPoNumber(e.target.value)}
             placeholder="Optional"
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
         <div>
@@ -140,7 +139,7 @@ export function SalesOrderCartPanel({
             type="date"
             value={orderDate}
             onChange={(e) => setOrderDate(e.target.value)}
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
       </div>
@@ -159,23 +158,26 @@ export function SalesOrderCartPanel({
         </div>
       )}
 
-      <div className="flex flex-col divide-y divide-gray-200 mt-3">
+      <div className="flex flex-col divide-y divide-blue-500/10 mt-3">
         {cartLines.map((line) => {
           const editing = editingPriceKey === line.key;
           const available = stockAtLineLocation(line);
           return (
             <div key={line.key} className="flex flex-col gap-2 py-2.5">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate">{line.product.name}</p>
+                  {/* FIX — was `truncate`; long product names now wrap
+                      instead of forcing a single line that could widen
+                      the panel. */}
+                  <p className="text-sm break-words leading-snug">{line.product.name}</p>
                   <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
 
-                  <div className="flex items-center gap-2 mt-1.5">
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {editing ? (
-                      <div className="flex items-center gap-1 bg-white border-2 border-black rounded-md pl-2 pr-1 py-1">
+                      <div className="flex items-center gap-1 bg-white border-2 border-blue-600 rounded-md pl-2 pr-1 py-1">
                         <span className="text-xs text-gray-400">Rp</span>
                         <input
                           type="number"
@@ -197,7 +199,7 @@ export function SalesOrderCartPanel({
                           e.stopPropagation();
                           setEditingPriceKey(line.key);
                         }}
-                        className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50 transition-colors"
+                        className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50 transition-colors"
                       >
                         <Pencil size={10} strokeWidth={2} className="text-gray-400" />
                         {formatIDR(line.unitPrice)}
@@ -213,7 +215,7 @@ export function SalesOrderCartPanel({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => changeQty(line.key, -1)}
-                    className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100"
+                    className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60"
                   >
                     <Minus size={14} strokeWidth={2} />
                   </button>
@@ -221,7 +223,7 @@ export function SalesOrderCartPanel({
                   <button
                     onClick={() => changeQty(line.key, 1)}
                     disabled={line.quantity >= available}
-                    className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={14} strokeWidth={2} />
                   </button>
@@ -258,7 +260,7 @@ export function SalesOrderCartPanel({
                           type="checkbox"
                           checked={checked}
                           onChange={() => onToggleLineTaxRate(line.key, rate.id)}
-                          className="w-3.5 h-3.5 accent-black"
+                          className="w-3.5 h-3.5 accent-blue-600"
                         />
                         {rate.name} ({rate.percentage}%)
                       </label>
@@ -277,15 +279,15 @@ export function SalesOrderCartPanel({
       {/* Services — a free-text line item alongside stocked products, same
           as quotations. The backend prices these via the same
           LineItemPricingService, keyed by description instead of productId. */}
-      <div className="mt-3 pt-3 border-t-2 border-gray-200">
+      <div className="mt-3 pt-3 border-t border-blue-500/15">
         <div className="flex items-center justify-between mb-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-            <Wrench size={12} strokeWidth={2} />
+            <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
             Services
           </span>
           <button
             onClick={onAddService}
-            className="text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+            className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
           >
             + Add service
           </button>
@@ -297,7 +299,7 @@ export function SalesOrderCartPanel({
           </p>
         )}
 
-        <div className="flex flex-col divide-y divide-gray-200">
+        <div className="flex flex-col divide-y divide-blue-500/10">
           {services.map((line) => {
             const priceMissing = line.unitPrice === null;
             return (
@@ -308,7 +310,7 @@ export function SalesOrderCartPanel({
                     onChange={(e) => onChangeServiceDescription(line.key, e.target.value)}
                     placeholder="Describe the service or work being ordered"
                     rows={2}
-                    className="flex-1 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
+                    className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                   />
                   <button
                     onClick={() => onRemoveService(line.key)}
@@ -318,10 +320,10 @@ export function SalesOrderCartPanel({
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <div
                     className={`flex items-center gap-1 border-2 rounded-md pl-2 pr-1 py-1 ${
-                      priceMissing ? 'border-red-300' : 'border-gray-300'
+                      priceMissing ? 'border-red-300' : 'border-blue-500/20'
                     }`}
                   >
                     <span className="text-xs text-gray-400">Rp</span>
@@ -341,7 +343,7 @@ export function SalesOrderCartPanel({
                     value={line.unit ?? ''}
                     onChange={(e) => onChangeServiceUnit(line.key, e.target.value)}
                     placeholder="Unit (optional)"
-                    className="w-28 border-2 border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:border-black"
+                    className="w-28 border border-blue-500/20 rounded-lg px-2 py-1 text-xs outline-none focus:border-blue-500/50"
                   />
                 </div>
 
@@ -369,7 +371,7 @@ export function SalesOrderCartPanel({
                             type="checkbox"
                             checked={checked}
                             onChange={() => onToggleServiceTaxRate(line.key, rate.id)}
-                            className="w-3.5 h-3.5 accent-black"
+                            className="w-3.5 h-3.5 accent-blue-600"
                           />
                           {rate.name} ({rate.percentage}%)
                         </label>
@@ -386,7 +388,7 @@ export function SalesOrderCartPanel({
         </div>
       </div>
 
-      <div className="border-t-2 border-gray-300 mt-3 pt-3 space-y-1">
+      <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
           <span>Subtotal</span>
           <span>{formatIDR(subtotal)}</span>
@@ -412,7 +414,7 @@ export function SalesOrderCartPanel({
       <button
         onClick={onSubmit}
         disabled={nothingToOrder || saving || !customer || hasEmptyServicePrice || hasEmptyServiceDescription}
-        className="w-full mt-4 flex items-center justify-center gap-2 bg-black text-white rounded-md p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed"
+        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
         <Send size={16} strokeWidth={2} />
         {saving ? 'Saving...' : 'Save Sales Order'}

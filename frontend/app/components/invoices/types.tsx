@@ -6,7 +6,7 @@ export type ProductSearchResult = {
   sku: string | null;
   barcode: string | null;
   sellingPrice: number | null;
-  unit: string | null; // Product.unit, pre-filled onto the cart line when added
+  unit: string | null;
   stockByLocation: StockAtLocation[];
 };
 
@@ -16,12 +16,12 @@ export type CartLine = {
   product: ProductSearchResult;
   quantity: number;
   unitPrice: number;
-  unit: string | null; // line-level override; defaults from product.unit at add-to-cart time
+  unit: string | null;
   locationId: string;
   locationName: string;
   taxRateIds: string[];
-  discountType: DiscountType | null; // NEW
-  discountValue: number | null;      // NEW — meaning depends on discountType (percent or Rp)
+  discountType: DiscountType | null;
+  discountValue: number | null;
 };
 
 export type LocationOption = { id: string; name: string };
@@ -45,23 +45,19 @@ export type Vehicle = {
 };
 
 export type ServiceLine = {
-  key: string;             // local id, not a server id until saved
+  key: string;
   description: string;
-  unitPrice: number | null; // null = blank / not yet entered — the whole point of the rule
+  unitPrice: number | null;
   taxRateIds: string[];
   unit: string | null;
-  discountType: DiscountType | null; // NEW
-  discountValue: number | null;      // NEW
+  discountType: DiscountType | null;
+  discountValue: number | null;
 };
 
 export type InvoiceFormat = 'THERMAL_58' | 'RECEIPT' | 'A5' | 'A4';
 
 export type PaymentStatus = 'PAID' | 'UNPAID' | 'PARTIAL';
 
-// A selectable OrganizationTaxRate preset, as returned by GET /tax-rates.
-// isDefault marks the org's Settings-page default rate (pre-selected on a
-// brand new invoice); archivedAt is present on the raw API shape but the
-// invoice/new page filters archived rates out before they ever reach here.
 export type TaxRate = {
   id: string;
   name: string;
@@ -69,9 +65,19 @@ export type TaxRate = {
   isDefault?: boolean;
 };
 
-// A tax line as actually applied to an invoice — snapshotted at issue time,
-// so it stays accurate even if the underlying OrganizationTaxRate is later
-// edited or archived.
+// A selectable OrganizationBankAccount, as returned by
+// GET /organization/bank-accounts. isDefault marks the org's Settings-page
+// default account; archivedAt is present on the raw API shape but the
+// invoice/new and quotations/new pages filter archived accounts out
+// before they ever reach this type.
+export type BankAccount = {
+  id: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  isDefault?: boolean;
+};
+
 export type AppliedTax = {
   name: string;
   percentage: number;
@@ -86,8 +92,6 @@ export type InvoiceView = {
   customerName: string | null;
   customerPhone: string | null;
   customerAddress: string | null;
-  // Distinct "Bill to" address. Templates should prefer this over
-  // customerAddress; falls back to customerAddress when unset.
   billingAddress: string | null;
   customerNpwp: string | null;
   customerPoNumber: string | null;
@@ -102,9 +106,6 @@ export type InvoiceView = {
     quantity: number;
     unit: string | null;
     unitPrice: number;
-    // Per-item discount, tax, and final total, computed by the backend
-    // (LineItemPricingService). Templates must render these as-is and
-    // never recompute them from unitPrice/quantity.
     itemDiscount: number;
     itemTaxAmount: number;
     itemTotal: number;
@@ -146,7 +147,6 @@ export type InvoiceView = {
   notes: string | null;
 };
 
-// app/components/invoices/types.ts — add:
 export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'DELETED';
 
 export type Reminder = {
@@ -165,8 +165,6 @@ export type Reminder = {
   };
 };
 
-// ---- customer statement (GET /invoices/statement) ----------------------
-// Mirrors InvoiceService.getCustomerStatement's response shape exactly.
 export type StatementLine = {
   id: string;
   invoiceNumber: string | null;

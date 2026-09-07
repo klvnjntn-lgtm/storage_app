@@ -1,14 +1,15 @@
-// app/(app)/sales/quotations/new/page.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
 import { QuotationCartPanel } from '@/app/components/quotations/QuotationCartPanel';
 import {
+  BankAccount,
   CartLine,
   Customer,
   DiscountType,
@@ -18,16 +19,21 @@ import {
   TaxRate,
 } from '@/app/components/quotations/types';
 
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
+
 const SEARCH_DEBOUNCE_MS = 300;
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+
+// See invoices/new/page.tsx for the full rationale: '' = untouched (let
+// the backend fall back to the org's current default bank account),
+// NO_BANK_ACCOUNT = explicit "no bank details" (sent as bankAccountId:
+// null), anything else = a chosen OrganizationBankAccount id.
+const NO_BANK_ACCOUNT = '__none__';
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-// Computes the discount amount for one line given its subtotal and the
-// line's own discount settings. FIXED is clamped to the subtotal so a
-// mistyped discount can never push a line negative.
 function lineDiscountAmount(
   lineSubtotal: number,
   discountType: DiscountType | null,
@@ -38,12 +44,6 @@ function lineDiscountAmount(
   return 0;
 }
 
-// A service line only becomes a real item once it has both a description
-// and a price — buildPayload() filters on exactly that (unitPrice !== null).
-// This gate has to match that filter exactly: if it's looser (e.g. treats
-// a bare description as "saveable"), autosave fires while the service is
-// still incomplete, buildPayload() drops it, and a DRAFT gets created (or
-// PATCHed) with items: [] even though something is visibly in the cart.
 function hasSaveableContent(cart: Record<string, CartLine>, services: ServiceLine[]): boolean {
   return (
     Object.keys(cart).length > 0 ||
@@ -58,28 +58,24 @@ export default function QuotationFormPage() {
 
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
-  // Governs whether staff can type a custom price per line, or must use
-  // each product's catalog sellingPrice. Same org-level flag the invoice
-  // module reads (Settings → Invoice Pricing) — LineItemPricingService
-  // ignores any submitted unitPrice when this is false, so the cart's
-  // price box only makes sense to show when it's true.
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean>(false);
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [validUntil, setValidUntil] = useState('');
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
-  // --- product search (mirrors invoices/new) ---
+  // Bank account picker — see NO_BANK_ACCOUNT comment above.
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [bankAccountId, setBankAccountId] = useState<string>('');
+
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProductSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
-  // --- cart ---
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [editingPriceKey, setEditingPriceKey] = useState<string | null>(null);
 
-  // --- free-text service lines ---
   const [services, setServices] = useState<ServiceLine[]>([]);
   const serviceCounterRef = useRef(0);
 
@@ -104,20 +100,23 @@ export default function QuotationFormPage() {
   const customerRef = useRef(customer);
   const validUntilRef = useRef(validUntil);
   const termsAndConditionsRef = useRef(termsAndConditions);
+  const bankAccountIdRef = useRef(bankAccountId);
   useEffect(() => {
     cartRef.current = cart;
     servicesRef.current = services;
     customerRef.current = customer;
     validUntilRef.current = validUntil;
     termsAndConditionsRef.current = termsAndConditions;
-  }, [cart, services, customer, validUntil, termsAndConditions]);
+    bankAccountIdRef.current = bankAccountId;
+  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId]);
 
   useEffect(() => {
     (async () => {
-      const [locRes, taxRes, settingsRes] = await Promise.all([
+      const [locRes, taxRes, settingsRes, bankRes] = await Promise.all([
         apiFetch('/locations'),
         apiFetch('/organization/tax-rates'),
         apiFetch('/organization/settings'),
+        apiFetch('/organization/bank-accounts'),
       ]);
       if (locRes.ok) {
         const data: LocationOption[] = await locRes.json();
@@ -140,6 +139,20 @@ export default function QuotationFormPage() {
         const settings = await settingsRes.json();
         setPosPricingEnabled(!!settings.posPricingEnabled);
       }
+      if (bankRes.ok) {
+        const accounts = await bankRes.json();
+        setBankAccounts(
+          accounts
+            .filter((a: any) => !a.archivedAt)
+            .map((a: any) => ({
+              id: a.id,
+              bankName: a.bankName,
+              accountNumber: a.accountNumber,
+              accountName: a.accountName,
+              isDefault: !!a.isDefault,
+            })),
+        );
+      }
     })();
   }, [urlDraftId]);
 
@@ -152,6 +165,7 @@ export default function QuotationFormPage() {
     setQuery('');
     setResults([]);
     setCurrentDraftId(null);
+    setBankAccountId('');
   }
 
   async function loadDraftById(id: string) {
@@ -162,6 +176,10 @@ export default function QuotationFormPage() {
       setCustomer(q.customer ? { id: q.customerId, ...q.customer } : null);
       setValidUntil(q.validUntil ? q.validUntil.slice(0, 10) : '');
       setTermsAndConditions(q.termsAndConditions ?? '');
+      // Same reasoning as invoices/new: a loaded quotation's bank
+      // selection is already resolved server-side, so it's a real id or
+      // NO_BANK_ACCOUNT, never the '' "untouched" state.
+      setBankAccountId(q.bankAccountId ?? NO_BANK_ACCOUNT);
 
       const restoredCart: Record<string, CartLine> = {};
       const restoredServices: ServiceLine[] = [];
@@ -361,8 +379,6 @@ export default function QuotationFormPage() {
     });
   }
 
-  // Per-line discount setter. discountType === null clears the
-  // discount entirely (back to "None" in the UI).
   function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
     setCart((prev) => {
       const line = prev[key];
@@ -386,9 +402,6 @@ export default function QuotationFormPage() {
     );
   }
 
-  // "Apply to all" shortcuts. Tax stays modeled per-line internally
-  // (as agreed) — this just fans one toggle out to every existing line
-  // instead of making the user click each checkbox individually.
   function applyTaxToAllLines(taxRateId: string, checked: boolean) {
     setCart((prev) => {
       const next = { ...prev };
@@ -475,8 +488,6 @@ export default function QuotationFormPage() {
     );
   }
 
-  // Tax is computed on the post-discount (net) amount, not the raw
-  // subtotal — otherwise a 100% discounted line would still carry tax.
   const cartLines = Object.entries(cart).map(([key, line]) => {
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
@@ -532,6 +543,14 @@ export default function QuotationFormPage() {
   const total = round2(subtotal - discount + taxAmount);
   const totalLineCount = cartLines.length + serviceLinesWithTotals.length;
 
+  // '' (untouched) omits bankAccountId from the payload entirely, so the
+  // backend resolves to the org's current default. NO_BANK_ACCOUNT sends
+  // an explicit null. Anything else is a chosen account id.
+  function buildBankAccountField() {
+    if (bankAccountId === '') return {};
+    return { bankAccountId: bankAccountId === NO_BANK_ACCOUNT ? null : bankAccountId };
+  }
+
   function buildPayload() {
     const productItems = cartLines.map((line) => ({
       productId: line.product.id,
@@ -561,6 +580,7 @@ export default function QuotationFormPage() {
       customerName: customer?.name,
       validUntil: validUntil || undefined,
       termsAndConditions: termsAndConditions.trim() || undefined,
+      ...buildBankAccountField(),
       items: [...productItems, ...serviceItems],
     };
   }
@@ -619,7 +639,7 @@ export default function QuotationFormPage() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, services, customer, validUntil, termsAndConditions]);
+  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId]);
 
   useEffect(() => {
     return () => {
@@ -675,29 +695,45 @@ export default function QuotationFormPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-white text-black p-6">
+      <main
+        className="min-h-screen text-black p-6"
+        style={{
+          backgroundColor: '#f8fafc',
+          backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          backgroundSize: '24px 24px',
+        }}
+      >
         <p className="text-sm text-gray-500">Loading...</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales/quotations')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <FileText size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <FileText size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
                   {currentDraftId ? 'Edit Quotation Draft' : 'New Quotation'}
                 </h1>
                 <p className="text-xs text-gray-500 truncate">Search items, build and save a quotation</p>
@@ -707,12 +743,12 @@ export default function QuotationFormPage() {
             <div className="flex items-center gap-2 justify-between sm:justify-end">
               <button
                 onClick={() => router.push('/sales/quotations')}
-                className="text-sm px-2 sm:px-3 py-2 rounded-md text-gray-600 hover:text-black hover:bg-gray-100 active:bg-gray-200 shrink-0"
+                className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
                 History
               </button>
 
-              <span className="text-sm px-3 py-1.5 rounded-md bg-gray-100 text-gray-500 font-medium">
+              <span className="text-sm px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-600/20 text-blue-700 font-medium">
                 A4
               </span>
             </div>
@@ -770,6 +806,11 @@ export default function QuotationFormPage() {
             onChangeServicePrice={changeServicePrice}
             onRemoveService={removeService}
             onToggleServiceTaxRate={toggleServiceTaxRate}
+            // Bank-account picker, same shape as invoices/new.
+            bankAccounts={bankAccounts}
+            bankAccountId={bankAccountId}
+            onChangeBankAccountId={setBankAccountId}
+            noBankAccountValue={NO_BANK_ACCOUNT}
           />
         </div>
       </div>
@@ -777,7 +818,7 @@ export default function QuotationFormPage() {
       {totalLineCount > 0 && (
         <button
           onClick={scrollToCart}
-          className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-black text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(0,0,0,0.15)]"
+          className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-blue-700 text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(37,99,235,0.25)]"
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />

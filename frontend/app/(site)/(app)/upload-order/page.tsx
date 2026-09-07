@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   UploadCloud,
@@ -11,6 +12,8 @@ import {
   Database,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // ─────────────────────────────────────────────────────────────
 // Shared types
@@ -53,9 +56,16 @@ type GdbPreviewResponse = {
   itemCount: number;
   invoiceCount: number;
   customerCount: number;
+  // NEW — null when this GDB has no PO module data at all (preview() wraps
+  // that lookup in a try/catch and falls back to null rather than failing
+  // the whole preview).
+  purchaseOrderCount: number | null;
+  vendorCount: number | null;
 };
 
-type GdbImportTarget = 'products_only' | 'full_invoices';
+// NEW — was 'products_only' | 'full_invoices'. Matches the controller's
+// GdbImportTarget exactly; keep these in sync if a target is ever added.
+type GdbImportTarget = 'products_only' | 'full_invoices' | 'full_invoices_and_purchase_orders';
 
 type GdbImportResult = {
   items: { created: number; updated: number };
@@ -65,6 +75,16 @@ type GdbImportResult = {
     errors: string[];
     fractionalQuantityWarnings: string[];
     discountIgnoredWarnings: string[];
+  };
+  // NEW
+  purchaseOrders?: {
+    created: number;
+    updated: number;
+    errors: string[];
+    missingSupplierWarnings: string[];
+    duplicatePoNumberWarnings: string[];
+    closedButNotFullyReceivedWarnings: string[];
+    overReceivedWarnings: string[];
   };
 };
 
@@ -346,23 +366,34 @@ export default function ImportOrdersPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
       {/* Header */}
-      <div className="px-6 py-5 border-b-2 border-gray-300">
+      <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Scanner Hub
           </button>
-          <div className="flex items-center gap-2">
-            <PlugZap size={22} strokeWidth={2} className="text-gray-700" />
-            <div>
-              <h1 className="text-2xl font-bold">Order Import</h1>
-              <p className="text-xs text-gray-500">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <PlugZap size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Order Import
+              </h1>
+              <p className="text-xs text-gray-500 truncate">
                 Import invoices/orders from a CSV file or an Accurate Desktop .GDB database
               </p>
             </div>
@@ -372,10 +403,10 @@ export default function ImportOrdersPage() {
           <div className="flex gap-2 mt-4">
             <button
               onClick={() => handleModeChange('csv')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold border-2 ${
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                 mode === 'csv'
-                  ? 'bg-black text-white border-black'
-                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-100'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-gray-600 border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/35'
               }`}
             >
               <UploadCloud size={16} strokeWidth={2} />
@@ -383,10 +414,10 @@ export default function ImportOrdersPage() {
             </button>
             <button
               onClick={() => handleModeChange('gdb')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold border-2 ${
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                 mode === 'gdb'
-                  ? 'bg-black text-white border-black'
-                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-100'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-gray-600 border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/35'
               }`}
             >
               <Database size={16} strokeWidth={2} />
@@ -396,12 +427,12 @@ export default function ImportOrdersPage() {
         </div>
       </div>
 
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5 sm:space-y-6">
 
         {/* ═══════════════════════ CSV RESULT ═══════════════════════ */}
         {mode === 'csv' && csvResult && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
                 Import complete — {csvResult.created} order{csvResult.created === 1 ? '' : 's'} created,{' '}
@@ -410,8 +441,8 @@ export default function ImportOrdersPage() {
             </div>
 
             {csvResult.errors.length > 0 && (
-              <div className="border-2 border-red-300 rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-red-50 border-b-2 border-red-300 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+              <div className="border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
                   {csvResult.errors.length} row{csvResult.errors.length === 1 ? '' : 's'} skipped
                 </div>
@@ -428,7 +459,7 @@ export default function ImportOrdersPage() {
         {/* ═══════════════════════ CSV FLOW ═══════════════════════ */}
         {mode === 'csv' && (
           <>
-            <section className="border-2 border-gray-300 rounded-md p-5 space-y-3">
+            <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
               <label className="block text-xs font-semibold text-gray-600">
                 Connection — which system is this file from?
               </label>
@@ -445,7 +476,7 @@ export default function ImportOrdersPage() {
                       setFileName('');
                       if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
-                    className="flex-1 border-2 border-gray-300 rounded-md px-3 py-2 text-sm font-medium"
+                    className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm font-medium outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                   >
                     {connections.length === 0 && <option value="">No connections yet</option>}
                     {connections.map((c) => (
@@ -457,17 +488,17 @@ export default function ImportOrdersPage() {
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-gray-100">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-blue-500/10">
                 <input
                   value={newProviderName}
                   onChange={(e) => setNewProviderName(e.target.value)}
                   placeholder="e.g. accurate_desktop_csv"
-                  className="flex-1 border-2 border-gray-300 rounded-md px-3 py-2 text-sm"
+                  className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                 />
                 <button
                   onClick={handleCreateConnection}
                   disabled={!newProviderName.trim() || creatingConnection}
-                  className="px-4 py-2 border-2 border-gray-300 rounded-md text-sm font-semibold hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-4 py-2 border border-blue-500/20 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {creatingConnection ? 'Adding...' : 'New connection'}
                 </button>
@@ -478,7 +509,7 @@ export default function ImportOrdersPage() {
               </p>
             </section>
 
-            <section className="border-2 border-gray-300 rounded-md p-5 space-y-4">
+            <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
                   Invoice / order file
@@ -489,7 +520,7 @@ export default function ImportOrdersPage() {
                   accept=".csv"
                   disabled={!connectionId || uploading}
                   onChange={handleCsvFileUpload}
-                  className="text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-2 file:border-gray-300 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-gray-100 disabled:opacity-40"
+                  className="text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border file:border-blue-500/20 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-blue-50 disabled:opacity-40"
                 />
               </div>
 
@@ -500,7 +531,7 @@ export default function ImportOrdersPage() {
               {uploading && <p className="text-sm text-gray-500">Reading file...</p>}
 
               {uploadError && (
-                <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                   <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                   {uploadError}
                 </div>
@@ -509,7 +540,7 @@ export default function ImportOrdersPage() {
 
             {csvPreview && (
               <section className="space-y-4">
-                <div className="border-2 border-gray-300 rounded-md p-5 space-y-3">
+                <div className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
                   <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                     Match columns
                   </h2>
@@ -530,7 +561,7 @@ export default function ImportOrdersPage() {
                           onChange={(e) =>
                             setMapping((prev) => ({ ...prev, [field.key]: e.target.value }))
                           }
-                          className="w-full border-2 border-gray-300 rounded-md px-3 py-2 text-sm"
+                          className="w-full border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                         >
                           <option value="">— not mapped —</option>
                           {csvPreview.headers.map((h) => (
@@ -542,16 +573,16 @@ export default function ImportOrdersPage() {
                   </div>
 
                   {!mappingComplete && (
-                    <div className="flex items-start gap-2 bg-yellow-50 border-2 border-yellow-300 text-yellow-800 rounded-md p-3 text-sm">
+                    <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-3 text-sm">
                       <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                       Invoice/Order Number, SKU, and Quantity are required before importing.
                     </div>
                   )}
                 </div>
 
-                <div className="border-2 border-gray-300 rounded-md overflow-hidden overflow-x-auto">
+                <div className="border border-blue-500/15 rounded-xl overflow-hidden overflow-x-auto bg-white shadow-sm">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                    <thead className="bg-blue-50/60 border-b border-blue-500/15">
                       <tr>
                         <th className="text-left px-3 py-2 font-semibold">Invoice #</th>
                         <th className="text-left px-3 py-2 font-semibold">SKU</th>
@@ -563,7 +594,7 @@ export default function ImportOrdersPage() {
                       {csvPreview.preview.map((row, i) => (
                         <tr
                           key={i}
-                          className={`border-t border-gray-300 ${i % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+                          className={`border-t border-blue-500/10 ${i % 2 === 1 ? 'bg-blue-50/20' : 'bg-white'}`}
                         >
                           <td className="px-3 py-2 font-medium">
                             {mapping.externalRef ? row[mapping.externalRef] : '—'}
@@ -577,13 +608,13 @@ export default function ImportOrdersPage() {
                       ))}
                     </tbody>
                   </table>
-                  <p className="text-xs text-gray-500 px-3 py-2 bg-gray-50 border-t border-gray-300">
+                  <p className="text-xs text-gray-500 px-3 py-2 bg-blue-50/40 border-t border-blue-500/10">
                     Showing first {csvPreview.preview.length} of {csvPreview.totalRows} rows
                   </p>
                 </div>
 
                 {confirmError && (
-                  <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+                  <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                     <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                     {confirmError}
                   </div>
@@ -593,7 +624,7 @@ export default function ImportOrdersPage() {
                   <button
                     onClick={handleCsvConfirm}
                     disabled={!mappingComplete || confirming}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-md font-semibold hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <UploadCloud size={18} strokeWidth={2} />
                     {confirming ? 'Importing...' : `Import ${csvPreview.totalRows} Row${csvPreview.totalRows === 1 ? '' : 's'}`}
@@ -607,20 +638,22 @@ export default function ImportOrdersPage() {
         {/* ═══════════════════════ GDB RESULT ═══════════════════════ */}
         {mode === 'gdb' && gdbResult && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
                 Import complete — {gdbResult.items.created} product{gdbResult.items.created === 1 ? '' : 's'} created,{' '}
                 {gdbResult.items.updated} updated
                 {gdbResult.invoices &&
                   `, ${gdbResult.invoices.created} invoice${gdbResult.invoices.created === 1 ? '' : 's'} created, ${gdbResult.invoices.skipped} skipped (already imported)`}
+                {gdbResult.purchaseOrders &&
+                  `, ${gdbResult.purchaseOrders.created} purchase order${gdbResult.purchaseOrders.created === 1 ? '' : 's'} created, ${gdbResult.purchaseOrders.updated} updated`}
                 .
               </span>
             </div>
 
             {gdbResult.invoices && gdbResult.invoices.fractionalQuantityWarnings.length > 0 && (
-              <div className="border-2 border-yellow-300 rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-yellow-50 border-b-2 border-yellow-300 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
                   {gdbResult.invoices.fractionalQuantityWarnings.length} quantity rounded — review
                 </div>
@@ -633,8 +666,8 @@ export default function ImportOrdersPage() {
             )}
 
             {gdbResult.invoices && gdbResult.invoices.discountIgnoredWarnings.length > 0 && (
-              <div className="border-2 border-yellow-300 rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-yellow-50 border-b-2 border-yellow-300 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
                   {gdbResult.invoices.discountIgnoredWarnings.length} line discount(s) not applied — review
                 </div>
@@ -647,8 +680,8 @@ export default function ImportOrdersPage() {
             )}
 
             {gdbResult.invoices && gdbResult.invoices.errors.length > 0 && (
-              <div className="border-2 border-red-300 rounded-md overflow-hidden">
-                <div className="px-3 py-2 bg-red-50 border-b-2 border-red-300 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+              <div className="border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
                   {gdbResult.invoices.errors.length} invoice{gdbResult.invoices.errors.length === 1 ? '' : 's'} failed
                 </div>
@@ -659,12 +692,83 @@ export default function ImportOrdersPage() {
                 </ul>
               </div>
             )}
+
+            {/* NEW — Purchase Order import warnings/errors, same pattern as invoices above */}
+            {gdbResult.purchaseOrders && gdbResult.purchaseOrders.missingSupplierWarnings.length > 0 && (
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {gdbResult.purchaseOrders.missingSupplierWarnings.length} PO{gdbResult.purchaseOrders.missingSupplierWarnings.length === 1 ? '' : 's'} with unmatched vendor — review
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseOrders.missingSupplierWarnings.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseOrders && gdbResult.purchaseOrders.duplicatePoNumberWarnings.length > 0 && (
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {gdbResult.purchaseOrders.duplicatePoNumberWarnings.length} duplicate PO number{gdbResult.purchaseOrders.duplicatePoNumberWarnings.length === 1 ? '' : 's'} — renumbered
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseOrders.duplicatePoNumberWarnings.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseOrders && gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length > 0 && (
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length} closed PO{gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length === 1 ? '' : 's'} with partial receiving — review
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseOrders && gdbResult.purchaseOrders.overReceivedWarnings.length > 0 && (
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {gdbResult.purchaseOrders.overReceivedWarnings.length} line{gdbResult.purchaseOrders.overReceivedWarnings.length === 1 ? '' : 's'} received more than ordered — review
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseOrders.overReceivedWarnings.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseOrders && gdbResult.purchaseOrders.errors.length > 0 && (
+              <div className="border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {gdbResult.purchaseOrders.errors.length} purchase order{gdbResult.purchaseOrders.errors.length === 1 ? '' : 's'} failed
+                </div>
+                <ul className="text-sm divide-y divide-gray-200">
+                  {gdbResult.purchaseOrders.errors.map((e, i) => (
+                    <li key={i} className="px-3 py-2 text-red-700">{e}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
         {/* ═══════════════════════ GDB FLOW ═══════════════════════ */}
         {mode === 'gdb' && !gdbPreview && !gdbResult && (
-          <section className="border-2 border-gray-300 rounded-md p-5 space-y-4">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">
                 Accurate .GDB file
@@ -675,14 +779,14 @@ export default function ImportOrdersPage() {
                 accept=".gdb"
                 disabled={uploading}
                 onChange={handleGdbFileUpload}
-                className="text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border-2 file:border-gray-300 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-gray-100 disabled:opacity-40"
+                className="text-sm file:mr-3 file:px-3 file:py-2 file:rounded-md file:border file:border-blue-500/20 file:bg-white file:font-semibold file:cursor-pointer hover:file:bg-blue-50 disabled:opacity-40"
               />
             </div>
 
             {uploading && <p className="text-sm text-gray-500">Reading database file…</p>}
 
             {uploadError && (
-              <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                 {uploadError}
               </div>
@@ -691,25 +795,34 @@ export default function ImportOrdersPage() {
         )}
 
         {mode === 'gdb' && gdbPreview && (
-          <section className="border-2 border-gray-300 rounded-md p-5 space-y-4">
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
             <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
               Confirm import
             </h2>
             <p className="text-xs text-gray-500">
               {fileName} — found <strong>{gdbPreview.itemCount}</strong> items,{' '}
-              <strong>{gdbPreview.customerCount}</strong> customers, and{' '}
-              <strong>{gdbPreview.invoiceCount}</strong> invoices.
+              <strong>{gdbPreview.customerCount}</strong> customers,{' '}
+              <strong>{gdbPreview.invoiceCount}</strong> invoices
+              {gdbPreview.purchaseOrderCount != null && (
+                <>
+                  , and <strong>{gdbPreview.purchaseOrderCount}</strong> purchase orders
+                  {gdbPreview.vendorCount != null && (
+                    <> from <strong>{gdbPreview.vendorCount}</strong> vendors</>
+                  )}
+                </>
+              )}
+              .
             </p>
 
-            <fieldset className="space-y-2 pt-2 border-t border-gray-100">
+            <fieldset className="space-y-2 pt-2 border-t border-blue-500/10">
               <legend className="text-xs font-semibold text-gray-600 mb-1">
                 What does this customer need?
               </legend>
 
-              <label className="flex items-start gap-2 border-2 border-gray-300 rounded-md p-3 cursor-pointer has-[:checked]:border-black">
+              <label className="flex items-start gap-2 border border-blue-500/15 rounded-xl p-3 cursor-pointer has-[:checked]:border-blue-500/50 has-[:checked]:bg-blue-50/60 transition-colors">
                 <input
                   type="radio"
-                  className="mt-1"
+                  className="mt-1 accent-blue-600"
                   checked={gdbTarget === 'products_only'}
                   onChange={() => setGdbTarget('products_only')}
                 />
@@ -721,10 +834,10 @@ export default function ImportOrdersPage() {
                 </span>
               </label>
 
-              <label className="flex items-start gap-2 border-2 border-gray-300 rounded-md p-3 cursor-pointer has-[:checked]:border-black">
+              <label className="flex items-start gap-2 border border-blue-500/15 rounded-xl p-3 cursor-pointer has-[:checked]:border-blue-500/50 has-[:checked]:bg-blue-50/60 transition-colors">
                 <input
                   type="radio"
-                  className="mt-1"
+                  className="mt-1 accent-blue-600"
                   checked={gdbTarget === 'full_invoices'}
                   onChange={() => setGdbTarget('full_invoices')}
                 />
@@ -735,10 +848,36 @@ export default function ImportOrdersPage() {
                   </span>
                 </span>
               </label>
+
+              {/* NEW — third target, only worth offering when this GDB actually
+                  has PO data; a file with no PO module would just show 0/0
+                  every time otherwise. */}
+              <label
+                className={`flex items-start gap-2 border border-blue-500/15 rounded-xl p-3 has-[:checked]:border-blue-500/50 has-[:checked]:bg-blue-50/60 transition-colors ${
+                  gdbPreview.purchaseOrderCount ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="mt-1 accent-blue-600"
+                  disabled={!gdbPreview.purchaseOrderCount}
+                  checked={gdbTarget === 'full_invoices_and_purchase_orders'}
+                  onChange={() => setGdbTarget('full_invoices_and_purchase_orders')}
+                />
+                <span>
+                  <span className="block text-sm font-semibold">
+                    Products + Customers + Invoices + Purchase Orders
+                  </span>
+                  <span className="block text-xs text-gray-500">
+                    Also imports vendors and historical purchase orders, including receiving history.
+                    {!gdbPreview.purchaseOrderCount && ' No purchase order data found in this file.'}
+                  </span>
+                </span>
+              </label>
             </fieldset>
 
             {confirmError && (
-              <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
                 {confirmError}
               </div>
@@ -748,7 +887,7 @@ export default function ImportOrdersPage() {
               <button
                 onClick={handleGdbConfirm}
                 disabled={confirming}
-                className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-md font-semibold hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <UploadCloud size={18} strokeWidth={2} />
                 {confirming ? 'Importing…' : 'Confirm import'}

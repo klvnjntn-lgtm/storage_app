@@ -2,11 +2,14 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import Barcode from 'react-barcode';
 import { ArrowLeft, Tag, Printer, Minus, Plus, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import PrintLabels from '@/app/components/PrintLabels';
 import Pagination from '@/app/components/Pagination';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Item = {
   sku: string;
@@ -30,7 +33,7 @@ const LabelCard = memo(function LabelCard({
   onPrint: (item: Item) => void;
 }) {
   return (
-    <div className="border-2 border-gray-300 rounded-lg p-3 sm:p-4 flex flex-col items-center gap-2.5 sm:gap-3 hover:border-gray-400 transition-colors">
+    <div className="border-2 border-gray-300 rounded-lg p-3 sm:p-4 flex flex-col items-center gap-2.5 sm:gap-3 bg-white hover:border-blue-500/40 hover:shadow-sm transition-colors">
       <div className="text-center w-full">
         <p className="font-bold text-sm truncate w-full">{item.sku}</p>
         <p className="text-xs text-gray-600 mb-2 truncate w-full">{item.name}</p>
@@ -74,7 +77,7 @@ const LabelCard = memo(function LabelCard({
 
         <button
           onClick={() => onPrint(item)}
-          className="w-full flex items-center justify-center gap-1.5 bg-black text-white px-2 py-2 sm:py-1.5 rounded-md text-xs font-semibold hover:bg-gray-800 active:scale-[0.98] transition-transform"
+          className="w-full flex items-center justify-center gap-1.5 bg-blue-600 text-white px-2 py-2 sm:py-1.5 rounded-md text-xs font-semibold hover:bg-blue-700 active:scale-[0.98] transition-transform"
         >
           <Printer size={14} strokeWidth={2} />
           Print {quantity > 1 ? `×${quantity}` : ''}
@@ -172,23 +175,36 @@ export default function LabelsPage() {
   const printAll = () => triggerPrint(buildPrintList(filteredItems));
 
   return (
-    <main className="min-h-screen bg-white text-black">
-
-      {/* Header — hidden on print, sticky so search/"Print All" stay reachable while scrolling the grid */}
-      <div className="no-print sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — hidden on print, sticky so search/"Print All" stay reachable
+          while scrolling the grid. Blue-outline + backdrop-blur treatment to
+          match /vehicles/search. */}
+      <div className="no-print sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Tag size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <Tag size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold truncate">Product Labels</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  Product Labels
+                </h1>
                 <p className="text-xs text-gray-500 truncate">
                   {filteredItems.length} label{filteredItems.length === 1 ? '' : 's'}
                   {query ? ` matching "${query}"` : ' ready to print'}
@@ -199,36 +215,32 @@ export default function LabelsPage() {
             <button
               onClick={printAll}
               disabled={filteredItems.length === 0}
-              className="flex items-center justify-center gap-2 bg-black text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-gray-800 active:bg-gray-900 w-full sm:w-auto disabled:opacity-40 disabled:hover:bg-black"
+              className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-blue-700 active:bg-blue-800 w-full sm:w-auto disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
             >
               <Printer size={18} strokeWidth={2} />
               Print All{query ? ' Matches' : ''}
             </button>
           </div>
 
-          {/* Search / filter — styled to match ProductSearch's search bar:
-              uppercase icon+label row above the input, same border/focus treatment */}
+          {/* Search / filter — command-palette style matching
+              /vehicles/search's search bar: outlined, focus glow. */}
           <div className="mt-3 sm:mt-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
-              <Search size={14} strokeWidth={2} />
-              Search labels
-            </div>
-
-            <div className="relative">
+            <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+              <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by SKU or name..."
                 aria-label="Search labels by SKU or name"
-                className="w-full border-2 border-gray-300 rounded-md p-3 text-base sm:text-sm outline-none focus:border-black"
+                className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
               {query && (
                 <button
                   type="button"
                   onClick={() => setQuery('')}
                   aria-label="Clear search"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black p-1"
+                  className="text-gray-400 hover:text-blue-700 p-1 shrink-0 transition-colors"
                 >
                   <X size={14} strokeWidth={2.5} />
                 </button>
@@ -249,7 +261,9 @@ export default function LabelsPage() {
         )}
 
         {!loading && items.length > 0 && filteredItems.length === 0 && (
-          <p className="text-gray-500 text-sm">No labels match "{query}".</p>
+          <p className="text-sm text-gray-500 bg-white border-2 border-gray-200 rounded-md p-4 text-center">
+            No labels match &quot;{query}&quot;
+          </p>
         )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
@@ -269,7 +283,7 @@ export default function LabelsPage() {
       {/* Sticky footer bar keeps pagination reachable and visible instead of
           trailing off at the bottom of a long/short grid */}
       {!loading && filteredItems.length > 0 && (
-        <div className="no-print sticky bottom-0 z-10 bg-white/95 backdrop-blur border-t border-gray-200 px-4 sm:px-6 py-3">
+        <div className="no-print sticky bottom-0 z-10 bg-white/80 backdrop-blur-md border-t border-blue-500/15 px-4 sm:px-6 py-3">
           <div className="max-w-5xl mx-auto">
             <Pagination
               page={page}

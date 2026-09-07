@@ -1,4 +1,3 @@
-// components/invoices/CustomerPicker.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -102,9 +101,9 @@ export function CustomerPicker({
 
   if (value) {
     return (
-      <div className="flex items-center justify-between gap-2 border-2 border-gray-300 rounded-md p-2.5 mb-3">
+      <div className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg bg-blue-600/5 p-2.5 mb-3">
         <div className="flex items-center gap-2 min-w-0">
-          <User size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
+          <User size={14} strokeWidth={2} className="text-blue-600/70 shrink-0" />
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{value.name}</p>
             {value.phone && <p className="text-xs text-gray-500 truncate">{value.phone}</p>}
@@ -112,7 +111,7 @@ export function CustomerPicker({
         </div>
         <button
           onClick={() => onChange(null)}
-          className="text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 shrink-0"
+          className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-blue-700 hover:bg-white shrink-0 transition-colors"
         >
           Change
         </button>
@@ -124,11 +123,11 @@ export function CustomerPicker({
     <div className="relative mb-3" ref={containerRef}>
       <div
         onClick={() => setOpen(true)}
-        className={`flex items-center gap-2 border-2 rounded-md p-2.5 cursor-text ${
-          hasError ? 'border-amber-400' : 'border-gray-300'
+        className={`flex items-center gap-2 border rounded-lg p-2.5 cursor-text bg-white transition-colors ${
+          hasError ? 'border-amber-400' : 'border-blue-500/20 focus-within:border-blue-500/50'
         }`}
       >
-        <Search size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
+        <Search size={14} strokeWidth={2} className="text-blue-600/70 shrink-0" />
         <input
           value={query}
           onChange={(e) => {
@@ -137,17 +136,17 @@ export function CustomerPicker({
           }}
           onFocus={() => setOpen(true)}
           placeholder="Search customer by name or phone..."
-          className="w-full text-sm outline-none"
+          className="w-full text-sm outline-none bg-transparent"
         />
       </div>
 
       {open && (
-        <div className="absolute left-0 right-0 z-10 mt-1.5 bg-white border-2 border-gray-200 rounded-md shadow-lg overflow-hidden">
+        <div className="absolute left-0 right-0 z-10 mt-1.5 bg-white border border-blue-500/20 rounded-xl shadow-lg overflow-hidden">
           {quickAddOpen ? (
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">New customer</p>
-                <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-black">
+                <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-blue-700">
                   <X size={14} strokeWidth={2} />
                 </button>
               </div>
@@ -156,31 +155,31 @@ export function CustomerPicker({
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Name"
                 autoFocus
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newPhone}
                 onChange={(e) => setNewPhone(e.target.value)}
                 placeholder="Phone (optional)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newAddress}
                 onChange={(e) => setNewAddress(e.target.value)}
                 placeholder="Address (optional)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newNpwp}
                 onChange={(e) => setNewNpwp(e.target.value)}
                 placeholder="NPWP (optional, for B2B tax invoices)"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               {saveError && <p className="text-xs text-red-600 mb-2">{saveError}</p>}
               <button
                 onClick={submitQuickAdd}
                 disabled={saving}
-                className="w-full flex items-center justify-center gap-1.5 bg-black text-white rounded-md p-2 text-sm font-semibold disabled:bg-gray-300"
+                className="w-full flex items-center justify-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-sm font-semibold disabled:bg-gray-300 transition-colors"
               >
                 <Check size={14} strokeWidth={2} />
                 {saving ? 'Saving...' : 'Add & select'}
@@ -203,7 +202,7 @@ export function CustomerPicker({
                       setOpen(false);
                       setQuery('');
                     }}
-                    className="w-full flex flex-col items-start px-3 py-2 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                    className="w-full flex flex-col items-start px-3 py-2 text-left hover:bg-blue-50/60 border-b border-gray-100 last:border-b-0"
                   >
                     <span className="text-sm font-medium">{c.name}</span>
                     {c.phone && <span className="text-xs text-gray-500">{c.phone}</span>}
@@ -212,7 +211,7 @@ export function CustomerPicker({
               </div>
               <button
                 onClick={openQuickAdd}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-gray-50 border-t-2 border-gray-100 font-medium"
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-blue-700 hover:bg-blue-50/60 border-t border-blue-500/15 font-medium"
               >
                 <UserPlus size={14} strokeWidth={2} />
                 {query.trim() ? `Add "${query.trim()}" as new customer` : 'Add new customer'}

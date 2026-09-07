@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   TrendingUp,
@@ -14,6 +15,8 @@ import {
   Wallet,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type InvoiceReportRow = {
   id: string;
@@ -154,22 +157,35 @@ export default function ReportsPage() {
   }, [sortedRows, page]);
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      {/* Header — sticky on mobile so filters stay reachable while scrolling */}
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /labels, /vehicles/search, and /inventory/stock */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
-          <div className="flex items-center gap-2">
-            <TrendingUp size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <TrendingUp size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold truncate">Sales Report</h1>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Sales Report
+              </h1>
               <p className="text-xs text-gray-500 truncate">Revenue, cost, and profit for issued invoices</p>
             </div>
           </div>
@@ -196,7 +212,7 @@ export default function ReportsPage() {
                 type="date"
                 value={from}
                 onChange={(e) => setFrom(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto"
+                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
               />
             </div>
 
@@ -206,7 +222,7 @@ export default function ReportsPage() {
                 type="date"
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto"
+                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
               />
             </div>
           </div>
@@ -216,7 +232,7 @@ export default function ReportsPage() {
               <button
                 key={p.label}
                 onClick={() => applyPreset(p.days)}
-                className="text-xs px-3 py-2.5 sm:py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-gray-50 active:bg-gray-100"
+                className="text-xs px-3 py-2.5 sm:py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-blue-50 hover:border-blue-500/40 hover:text-blue-700 active:bg-blue-100 transition-colors"
               >
                 {p.label}
               </button>
@@ -236,7 +252,7 @@ export default function ReportsPage() {
           <>
             {/* Summary cards — 2-up grid even on the smallest phones so the numbers stay scannable at a glance */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
-              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4">
+              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <DollarSign size={13} strokeWidth={2} className="shrink-0" />
                   <span className="truncate">Revenue</span>
@@ -252,7 +268,7 @@ export default function ReportsPage() {
                   copy of the "Collection disclosure" banner that already
                   appears, correctly, full-width below this grid. Restored
                   to the same plain stat-card shape as its siblings. */}
-              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4">
+              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <Wallet size={13} strokeWidth={2} className="shrink-0" />
                   <span className="truncate">Paid to date ({collectionRate.toFixed(0)}%)</span>
@@ -263,7 +279,7 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4">
+              <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <PackageSearch size={13} strokeWidth={2} className="shrink-0" />
                   <span className="truncate">Cost of Goods</span>
@@ -325,7 +341,7 @@ export default function ReportsPage() {
                     <div
                       key={row.id}
                       onClick={() => router.push(`/sales/invoices/${row.id}`)}
-                      className="border-2 border-gray-300 rounded-md p-3 cursor-pointer hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                      className="border-2 border-gray-300 rounded-md p-3 cursor-pointer bg-white hover:border-blue-500/40 hover:bg-blue-50/40 active:bg-blue-100/60 transition-colors"
                     >
                       <div className="flex items-baseline justify-between gap-2 mb-2 sm:mb-0">
                         <span className="font-semibold truncate">{row.invoiceNumber ?? row.id}</span>
@@ -415,7 +431,7 @@ export default function ReportsPage() {
                     <button
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                       disabled={page === 1}
-                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
+                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
                     >
                       Prev
                     </button>
@@ -425,7 +441,7 @@ export default function ReportsPage() {
                     <button
                       onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                       disabled={page === totalPages}
-                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
+                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
                     >
                       Next
                     </button>

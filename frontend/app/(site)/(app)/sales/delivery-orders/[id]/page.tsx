@@ -3,11 +3,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Truck, Ban, Printer, Download, PackageCheck, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/template/DeliveryOrderA4Template';
 import { toDeliveryOrderView, type DeliveryOrderView } from '@/lib/delivery-orders-mapper';
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 function statusStyle(status: string) {
   switch (status) {
@@ -187,11 +190,11 @@ export default function DeliveryOrderDetailPage() {
         }
       `}</style>
 
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 border-b-2 border-gray-300 print:hidden">
-        <div className="max-w-3xl mx-auto">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
+        <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales/delivery-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to delivery orders
@@ -200,38 +203,39 @@ export default function DeliveryOrderDetailPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold">{order.doNumber ?? order.id}</h1>
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>{order.doNumber ?? order.id}</h1>
                 <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(order.status)}`}>
                   {order.status}
                 </span>
               </div>
-<p className="text-xs text-gray-500">
-  {order.customerName ?? 'No customer'} · {order.location?.name ?? '—'}
-  {order.salesOrder?.orderNumber && (
-    <>
-      {' '}
-      · SO{' '}
-      <button
-        className="underline font-medium"
-        onClick={() => router.push(`/sales/orders/${order.salesOrderId}`)}
-      >
-        {order.salesOrder.orderNumber}
-      </button>
-    </>
-  )}
-  {order.invoice?.invoiceNumber && (
-    <>
-      {' '}
-      · Invoice{' '}
-      <button
-        className="underline font-medium"
-        onClick={() => router.push(`/sales/invoices/${order.invoiceId}`)}
-      >
-        {order.invoice.invoiceNumber}
-      </button>
-    </>
-  )}
-</p>            </div>
+              <p className="text-xs text-gray-500">
+                {order.customerName ?? 'No customer'} · {order.location?.name ?? '—'}
+                {order.salesOrder?.orderNumber && (
+                  <>
+                    {' '}
+                    · SO{' '}
+                    <button
+                      className="underline font-medium"
+                      onClick={() => router.push(`/sales/orders/${order.salesOrderId}`)}
+                    >
+                      {order.salesOrder.orderNumber}
+                    </button>
+                  </>
+                )}
+                {order.invoice?.invoiceNumber && (
+                  <>
+                    {' '}
+                    · Invoice{' '}
+                    <button
+                      className="underline font-medium"
+                      onClick={() => router.push(`/sales/invoices/${order.invoiceId}`)}
+                    >
+                      {order.invoice.invoiceNumber}
+                    </button>
+                  </>
+                )}
+              </p>
+            </div>
 
             <div className="flex flex-wrap gap-2">
               {order.status === 'PACKED' && (
@@ -239,7 +243,7 @@ export default function DeliveryOrderDetailPage() {
                   <button
                     disabled={actionLoading === 'ship'}
                     onClick={handleShip}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Truck size={14} strokeWidth={2} />
                     Mark Shipped
@@ -255,11 +259,11 @@ export default function DeliveryOrderDetailPage() {
                 </>
               )}
 
-              {order.status === 'SHIPPED' && order.invoices.length === 0 && (
+              {order.status === 'SHIPPED' && !order.invoice && (
                 <button
                   disabled={actionLoading === 'convert-invoice'}
                   onClick={handleConvertToInvoice}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                 >
                   <FileText size={14} strokeWidth={2} />
                   Convert to Invoice
@@ -271,14 +275,14 @@ export default function DeliveryOrderDetailPage() {
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-black font-semibold hover:bg-gray-100 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? 'Generating...' : 'Download PDF'}
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800"
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
                     Print
@@ -290,26 +294,15 @@ export default function DeliveryOrderDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
 
-        {order.invoices.length > 0 && (
-          <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
-            <p className="font-semibold text-purple-900 mb-1">Converted documents</p>
-            {order.invoices.map((inv) => (
-              <p key={inv.id}>
-                Invoice{' '}
-                <button
-                  className="underline font-medium"
-                  onClick={() => router.push(`/sales/invoices/${inv.id}`)}
-                >
-                  {inv.invoiceNumber ?? inv.id}
-                </button>{' '}
-                — {inv.status}
-              </p>
-            ))}
+        {order.invoice && (
+          <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3">
+            <p className="font-semibold text-purple-900 mb-1">Converted from invoice</p>
+            <p>{order.invoice.invoiceNumber}</p>
           </div>
         )}
 
@@ -324,19 +317,19 @@ export default function DeliveryOrderDetailPage() {
                 value={deliveredBy}
                 onChange={(e) => setDeliveredBy(e.target.value)}
                 placeholder="Delivered by"
-                className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-black"
+                className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-blue-500"
               />
               <input
                 value={receivedBy}
                 onChange={(e) => setReceivedBy(e.target.value)}
                 placeholder="Received by"
-                className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-black"
+                className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-blue-500"
               />
             </div>
             <button
               disabled={actionLoading === 'proof' || (!deliveredBy.trim() && !receivedBy.trim())}
               onClick={handleRecordProof}
-              className="text-sm px-3 py-2 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
+              className="text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               Save signature
             </button>

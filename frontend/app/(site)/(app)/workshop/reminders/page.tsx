@@ -3,9 +3,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Bell, Check, Clock, Trash2, Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const DUE_SOON_DAYS = 7;
 
@@ -139,14 +142,14 @@ export default function RemindersPage() {
     const isSnoozing = snoozingId === r.id;
 
     return (
-      <div className="border-2 border-gray-300 rounded-md p-3">
+      <div className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm">
         <div
           onClick={() => router.push(`/workshop/vehicles/${r.vehicle.id}`)}
           className="flex items-start justify-between gap-3 cursor-pointer"
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <Car size={14} strokeWidth={2} className="text-gray-500 shrink-0" />
+              <Car size={14} strokeWidth={2} className="text-blue-600/60 shrink-0" />
               <span className="font-semibold">{r.vehicle.plateNumber} · {r.vehicle.vehicleModel}</span>
               <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${toneStyle(due.tone)}`}>
                 {due.label}
@@ -162,7 +165,7 @@ export default function RemindersPage() {
                 onClick={() => complete(r.id)}
                 disabled={busyId === r.id}
                 title="Mark complete"
-                className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-green-50 hover:border-green-300 text-green-700 disabled:opacity-40"
+                className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-green-50 hover:border-green-300 text-green-700 disabled:opacity-40 transition-colors"
               >
                 <Check size={14} strokeWidth={2} />
               </button>
@@ -172,7 +175,7 @@ export default function RemindersPage() {
                   setSnoozeDate('');
                 }}
                 title="Snooze"
-                className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-amber-50 hover:border-amber-300 text-amber-700"
+                className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-amber-50 hover:border-amber-300 text-amber-700 transition-colors"
               >
                 <Clock size={14} strokeWidth={2} />
               </button>
@@ -180,7 +183,7 @@ export default function RemindersPage() {
                 onClick={() => remove(r.id)}
                 disabled={busyId === r.id}
                 title="Delete"
-                className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 disabled:opacity-40"
+                className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 disabled:opacity-40 transition-colors"
               >
                 <Trash2 size={14} strokeWidth={2} />
               </button>
@@ -191,7 +194,7 @@ export default function RemindersPage() {
         {isSnoozing && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-2"
+            className="mt-3 pt-3 border-t border-blue-500/10 flex flex-wrap items-center gap-2"
           >
             {[
               { label: '+1 day', days: 1 },
@@ -202,7 +205,7 @@ export default function RemindersPage() {
               <button
                 key={p.days}
                 onClick={() => snoozePreset(p.days)}
-                className="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+                className="text-xs px-2.5 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50 transition-colors"
               >
                 {p.label}
               </button>
@@ -211,12 +214,12 @@ export default function RemindersPage() {
               type="date"
               value={snoozeDate}
               onChange={(e) => setSnoozeDate(e.target.value)}
-              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-black"
+              className="border border-blue-500/20 rounded-md p-1.5 text-xs outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
             />
             <button
               onClick={() => snooze(r.id, snoozeDate)}
               disabled={!snoozeDate || busyId === r.id}
-              className="text-xs px-3 py-1.5 rounded-md bg-black text-white font-semibold disabled:bg-gray-300"
+              className="text-xs px-3 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
             >
               Snooze
             </button>
@@ -243,31 +246,43 @@ export default function RemindersPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-6 py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Hub
           </button>
 
-          <div className="flex items-center gap-2">
-            <Bell size={22} strokeWidth={2} className="text-gray-700" />
-            <div>
-              <h1 className="text-2xl font-bold">Reminders</h1>
-              <p className="text-xs text-gray-500">Follow-ups for vehicles — oil changes, checkups, and the like</p>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Bell size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Reminders
+              </h1>
+              <p className="text-xs text-gray-500 truncate">Follow-ups for vehicles — oil changes, checkups, and the like</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-6">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">{error}</p>
         )}
 
         {!loading && reminders.length === 0 && !error && (

@@ -1,11 +1,11 @@
-// components/invoices/CartPanel.tsx
 'use client';
 
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays } from 'lucide-react';
-import { CartLine, Customer, DiscountType, InvoiceFormat, ServiceLine, TaxRate } from './types';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark } from 'lucide-react';
+import { BankAccount, CartLine, Customer, DiscountType, InvoiceFormat, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
+import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -30,53 +30,6 @@ function isDueDateBeforeInvoiceDate(dueDate?: string, invoiceDate?: string): boo
   const reference = invoiceDate ? new Date(invoiceDate + 'T00:00:00') : new Date();
   reference.setHours(0, 0, 0, 0);
   return picked < reference;
-}
-
-// Small per-line discount control — a None/%/Rp select plus a value input
-// when a type is chosen. Shared shape between product lines and service
-// lines below; kept inline (not its own component) since it needs the
-// line's key threaded through two different change handlers depending on
-// which list it's rendered in.
-function LineDiscountControl({
-  discountType,
-  discountValue,
-  discountAmount,
-  onChange,
-}: {
-  discountType: DiscountType | null;
-  discountValue: number | null;
-  discountAmount: number;
-  onChange: (discountType: DiscountType | null, rawValue?: string) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 pl-0.5">
-      <span className="text-[11px] text-gray-400 shrink-0">Discount</span>
-      <select
-        value={discountType ?? ''}
-        onChange={(e) => {
-          const next = (e.target.value || null) as DiscountType | null;
-          onChange(next, next ? String(discountValue ?? 0) : undefined);
-        }}
-        className="text-[11px] border border-gray-300 rounded-md px-1 py-0.5 outline-none"
-      >
-        <option value="">None</option>
-        <option value="PERCENTAGE">%</option>
-        <option value="FIXED">Rp</option>
-      </select>
-      {discountType && (
-        <input
-          type="number"
-          min={0}
-          value={discountValue ?? ''}
-          onChange={(e) => onChange(discountType, e.target.value)}
-          className="w-16 text-[11px] border border-gray-300 rounded-md px-1 py-0.5 outline-none"
-        />
-      )}
-      {discountAmount > 0 && (
-        <span className="text-[11px] text-gray-400">−{formatIDR(discountAmount)}</span>
-      )}
-    </div>
-  );
 }
 
 export function CartPanel({
@@ -144,6 +97,10 @@ export function CartPanel({
   onChangeServicePrice,
   onRemoveService,
   onToggleServiceTaxRate,
+  bankAccounts,
+  bankAccountId,
+  onChangeBankAccountId,
+  noBankAccountValue,
 }: {
   format: InvoiceFormat;
   cartLines: CartLineWithTotals[];
@@ -210,6 +167,13 @@ export function CartPanel({
   onChangeServicePrice?: (key: string, raw: string) => void;
   onRemoveService?: (key: string) => void;
   onToggleServiceTaxRate?: (key: string, taxRateId: string) => void;
+  // Bank-account picker. bankAccountId is '' (untouched -> backend uses
+  // the org's current default), noBankAccountValue (explicit "no bank
+  // details" -> sent as bankAccountId: null), or a real account id.
+  bankAccounts: BankAccount[];
+  bankAccountId: string;
+  onChangeBankAccountId: (id: string) => void;
+  noBankAccountValue: string;
 }) {
   const svc = services ?? [];
   const hasEmptyServicePrice = svc.some((s) => s.unitPrice === null);
@@ -217,19 +181,15 @@ export function CartPanel({
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
   const showInvoiceInfoFields = format === 'A5' || format === 'A4';
 
-  // A5 and A4 both keep a structured Customer object via CustomerPicker
-  // (both send customerId + optional vehicleId to the backend); RECEIPT
-  // and THERMAL_58 use the plain free-text name field instead. Missing-
-  // customer validation has to check whichever of the two is in play.
   const usesStructuredCustomer = format === 'A5' || format === 'A4';
   const missingRequiredCustomer =
     customerNameRequired && (usesStructuredCustomer ? !customer : !customerName.trim());
 
   return (
-    <div className="border-2 border-gray-300 rounded-md p-4 h-fit">
+    <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
-          <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0" />
+          <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
             <span>
               This invoice deducts from <strong>{distinctLocationNames[0]}</strong>
@@ -249,7 +209,7 @@ export function CartPanel({
 
       <div className="mb-3">
         <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-          <CalendarDays size={12} strokeWidth={2} />
+          <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
           Invoice date
         </label>
         <input
@@ -257,7 +217,7 @@ export function CartPanel({
           value={invoiceDate ?? ''}
           onChange={(e) => onChangeInvoiceDate?.(e.target.value)}
           placeholder="Today"
-          className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+          className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
         />
       </div>
 
@@ -273,8 +233,8 @@ export function CartPanel({
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             placeholder={customerNameRequired ? 'Customer name' : 'Customer name (optional)'}
-            className={`w-full border-2 rounded-md p-2 text-sm outline-none focus:border-black ${
-              customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-gray-300'
+            className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
+              customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
             }`}
           />
           {customerNameRequired && !customerName.trim() && (
@@ -289,14 +249,14 @@ export function CartPanel({
       {showInvoiceInfoFields && (
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <CalendarClock size={12} strokeWidth={2} />
+            <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
             Due date (optional)
           </label>
           <input
             type="date"
             value={dueDate ?? ''}
             onChange={(e) => onChangeDueDate?.(e.target.value)}
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
           {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
@@ -314,7 +274,7 @@ export function CartPanel({
             value={customerPoNumber ?? ''}
             onChange={(e) => onChangeCustomerPoNumber?.(e.target.value)}
             placeholder="Customer's reference number"
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
       )}
@@ -326,8 +286,34 @@ export function CartPanel({
             value={paymentTerms ?? ''}
             onChange={(e) => onChangePaymentTerms?.(e.target.value)}
             placeholder="e.g. Net 30, Due on receipt"
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
+        </div>
+      )}
+
+      {/* Bank account picker. Only shown on A5/A4, matching the formats
+          whose print templates actually render a "Payment to" bank block
+          (see hasBankDetails in A4Template/A5Template). */}
+      {showInvoiceInfoFields && bankAccounts.length > 0 && (
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
+            Bank account (optional)
+          </label>
+          <select
+            value={bankAccountId}
+            onChange={(e) => onChangeBankAccountId(e.target.value)}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          >
+            <option value="">Default bank account</option>
+            <option value={noBankAccountValue}>No bank details on this invoice</option>
+            {bankAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.bankName} — {a.accountNumber}
+                {a.isDefault ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -339,7 +325,7 @@ export function CartPanel({
             onChange={(e) => onChangeNotes?.(e.target.value)}
             rows={2}
             placeholder="Printed on the invoice"
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
           />
         </div>
       )}
@@ -350,7 +336,7 @@ export function CartPanel({
           <select
             value={vehicleId ?? ''}
             onChange={(e) => onSelectVehicle?.(e.target.value || null)}
-            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           >
             <option value="">
               {vehiclesLoading ? 'Loading vehicles...' : 'No vehicle — general invoice'}
@@ -376,7 +362,7 @@ export function CartPanel({
                 value={odometer ?? ''}
                 onChange={(e) => onChangeOdometer?.(e.target.value)}
                 placeholder="Current odometer reading"
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
             </div>
           )}
@@ -386,19 +372,19 @@ export function CartPanel({
               {!reminderOpen ? (
                 <button
                   onClick={onToggleReminderOpen}
-                  className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-black underline"
+                  className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-800 underline"
                 >
                   <Bell size={12} strokeWidth={2} />
                   Set a reminder for this vehicle
                 </button>
               ) : (
-                <div className="border-2 border-gray-300 rounded-md p-3 mt-1">
+                <div className="border border-blue-500/20 rounded-xl p-3 mt-1">
                   <div className="flex items-center justify-between mb-2">
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                      <Bell size={12} strokeWidth={2} />
+                      <Bell size={12} strokeWidth={2} className="text-blue-600/70" />
                       Reminder
                     </span>
-                    <button onClick={onToggleReminderOpen} className="text-gray-400 hover:text-black">
+                    <button onClick={onToggleReminderOpen} className="text-gray-400 hover:text-blue-700">
                       <X size={14} strokeWidth={2} />
                     </button>
                   </div>
@@ -408,7 +394,7 @@ export function CartPanel({
                     onChange={(e) => onChangeReminderNote?.(e.target.value)}
                     placeholder="e.g. Needs another oil change"
                     rows={2}
-                    className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none mb-2"
+                    className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 resize-none mb-2"
                   />
 
                   <div className="flex flex-wrap gap-1.5 mb-2">
@@ -421,7 +407,7 @@ export function CartPanel({
                       <button
                         key={preset.months}
                         onClick={() => onPickReminderPreset?.(preset.months)}
-                        className="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+                        className="text-xs px-2.5 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
                       >
                         {preset.label}
                       </button>
@@ -432,7 +418,7 @@ export function CartPanel({
                     type="date"
                     value={reminderDueDate ?? ''}
                     onChange={(e) => onChangeReminderDueDate?.(e.target.value)}
-                    className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black mb-2"
+                    className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 mb-2"
                   />
 
                   {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
@@ -444,7 +430,7 @@ export function CartPanel({
                   <button
                     onClick={onSaveReminder}
                     disabled={reminderSaving || reminderSaved || !reminderNote?.trim() || !reminderDueDate}
-                    className="w-full flex items-center justify-center gap-2 bg-black text-white rounded-md p-2 text-xs font-semibold disabled:bg-gray-300"
+                    className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-xs font-semibold disabled:bg-gray-300 transition-colors"
                   >
                     {reminderSaving ? 'Saving...' : reminderStaged ? 'Update reminder' : 'Set reminder'}
                   </button>
@@ -467,25 +453,28 @@ export function CartPanel({
         />
       )}
 
-      <div className="flex flex-col divide-y divide-gray-200">
+      <div className="flex flex-col divide-y divide-blue-500/10">
         {cartLines.map((line) => {
           const available = stockAtLineLocation(line);
           const editing = editingPriceKey === line.key;
           const priceEditable = posModeEnabled;
           return (
             <div key={line.key} className="flex flex-col gap-2 py-2.5">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate">{line.product.name}</p>
+                  {/* FIX — was `truncate`; long product names now wrap
+                      instead of forcing a single line that could widen
+                      the panel. */}
+                  <p className="text-sm break-words leading-snug">{line.product.name}</p>
                   <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
 
-                  <div className="flex items-center gap-2 mt-1.5">
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {priceEditable ? (
                       editing ? (
-                        <div className="flex items-center gap-1 bg-white border-2 border-black rounded-md pl-2 pr-1 py-1">
+                        <div className="flex items-center gap-1 bg-white border-2 border-blue-600 rounded-md pl-2 pr-1 py-1">
                           <span className="text-xs text-gray-400">Rp</span>
                           <input
                             type="number"
@@ -507,7 +496,7 @@ export function CartPanel({
                             e.stopPropagation();
                             setEditingPriceKey(line.key);
                           }}
-                          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50 transition-colors"
+                          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50 transition-colors"
                         >
                           <Pencil size={10} strokeWidth={2} className="text-gray-400" />
                           {formatIDR(line.unitPrice)}
@@ -517,7 +506,7 @@ export function CartPanel({
                       <span className="text-xs text-gray-500">{formatIDR(line.unitPrice)}</span>
                     )}
                     <span className="text-xs text-gray-400">
-                       {line.quantity}
+                      × {line.quantity}
                       {line.unit ? ` ${line.unit}` : ''} ={' '}
                       <span className="font-medium text-gray-700">{formatIDR(line.lineSubtotal)}</span>
                     </span>
@@ -526,7 +515,7 @@ export function CartPanel({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => changeQty(line.key, -1)}
-                    className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100"
+                    className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60"
                   >
                     <Minus size={14} strokeWidth={2} />
                   </button>
@@ -534,7 +523,7 @@ export function CartPanel({
                   <button
                     onClick={() => changeQty(line.key, 1)}
                     disabled={!posModeEnabled && line.quantity >= available}
-                    className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={14} strokeWidth={2} />
                   </button>
@@ -571,7 +560,7 @@ export function CartPanel({
                           type="checkbox"
                           checked={checked}
                           onChange={() => onToggleLineTaxRate(line.key, rate.id)}
-                          className="w-3.5 h-3.5 accent-black"
+                          className="w-3.5 h-3.5 accent-blue-600"
                         />
                         {rate.name} ({rate.percentage}%)
                       </label>
@@ -590,15 +579,15 @@ export function CartPanel({
       </div>
 
       {hasWorkshopRms && (
-        <div className="mt-3 pt-3 border-t-2 border-gray-200">
+        <div className="mt-3 pt-3 border-t border-blue-500/15">
           <div className="flex items-center justify-between mb-2">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-              <Wrench size={12} strokeWidth={2} />
+              <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
               Services
             </span>
             <button
               onClick={onAddService}
-              className="text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+              className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
             >
               + Add service
             </button>
@@ -608,7 +597,7 @@ export function CartPanel({
             <p className="text-xs text-gray-400 mb-2">No services added — this invoice can be product-only, service-only, or both.</p>
           )}
 
-          <div className="flex flex-col divide-y divide-gray-200">
+          <div className="flex flex-col divide-y divide-blue-500/10">
             {svc.map((line) => {
               const priceMissing = line.unitPrice === null;
               return (
@@ -619,7 +608,7 @@ export function CartPanel({
                       onChange={(e) => onChangeServiceDescription?.(line.key, e.target.value)}
                       placeholder="What service was done? (e.g. Oil change, brake pad replacement)"
                       rows={2}
-                      className="flex-1 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
+                      className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                     />
                     <button
                       onClick={() => onRemoveService?.(line.key)}
@@ -629,10 +618,10 @@ export function CartPanel({
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div
                       className={`flex items-center gap-1 border-2 rounded-md pl-2 pr-1 py-1 ${
-                        priceMissing ? 'border-red-300' : 'border-gray-300'
+                        priceMissing ? 'border-red-300' : 'border-blue-500/20'
                       }`}
                     >
                       <span className="text-xs text-gray-400">Rp</span>
@@ -653,7 +642,7 @@ export function CartPanel({
                       value={line.unit ?? ''}
                       onChange={(e) => onChangeServiceUnit?.(line.key, e.target.value)}
                       placeholder="Unit (optional)"
-                      className="w-28 border-2 border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:border-black"
+                      className="w-28 border border-blue-500/20 rounded-lg px-2 py-1 text-xs outline-none focus:border-blue-500/50"
                     />
                   </div>
 
@@ -681,7 +670,7 @@ export function CartPanel({
                               type="checkbox"
                               checked={checked}
                               onChange={() => onToggleServiceTaxRate?.(line.key, rate.id)}
-                              className="w-3.5 h-3.5 accent-black"
+                              className="w-3.5 h-3.5 accent-blue-600"
                             />
                             {rate.name} ({rate.percentage}%)
                           </label>
@@ -701,7 +690,7 @@ export function CartPanel({
         </div>
       )}
 
-      <div className="border-t-2 border-gray-300 mt-3 pt-3 space-y-1">
+      <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
           <span>Subtotal</span>
           <span>{formatIDR(subtotal)}</span>
@@ -733,7 +722,7 @@ export function CartPanel({
           hasEmptyServicePrice ||
           hasEmptyServiceDescription
         }
-        className="w-full mt-4 flex items-center justify-center gap-2 bg-black text-white rounded-md p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed"
+        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
         <Printer size={16} strokeWidth={2} />
         {printing ? 'Printing...' : 'Create & Print Invoice'}

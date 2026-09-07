@@ -1,4 +1,3 @@
-// components/invoices/ProductSearch.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -44,17 +43,17 @@ export function ProductSearch({
     <div>
       <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
         <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">
-          <Search size={14} strokeWidth={2} />
+          <Search size={14} strokeWidth={2} className="text-blue-600/70" />
           Search item
         </div>
 
         <div className="relative" ref={locationDropdownRef}>
           <button
             onClick={() => setLocationDropdownOpen((v) => !v)}
-            className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 sm:py-1.5 rounded-md border-2 transition-colors ${
+            className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 sm:py-1.5 rounded-lg border transition-colors ${
               locationFilter
-                ? 'border-black bg-black text-white'
-                : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:text-black'
+                ? 'border-blue-600/30 bg-blue-600/10 text-blue-700'
+                : 'border-blue-500/20 text-gray-500 hover:border-blue-500/40 hover:text-blue-700'
             }`}
           >
             <MapPin size={12} strokeWidth={2} />
@@ -67,17 +66,19 @@ export function ProductSearch({
           </button>
 
           {locationDropdownOpen && (
-            <div className="absolute right-0 z-10 mt-1.5 w-56 max-w-[calc(100vw-2rem)] bg-white border-2 border-gray-200 rounded-md shadow-lg overflow-hidden">
+            <div className="absolute right-0 z-10 mt-1.5 w-56 max-w-[calc(100vw-2rem)] bg-white border border-blue-500/20 rounded-xl shadow-lg overflow-hidden">
               <button
                 onClick={() => {
                   setLocationDropdownOpen(false);
                   onSelectLocationFilter(null);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-gray-50 active:bg-gray-100 border-b border-gray-100"
+                className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50 border-b border-gray-100"
               >
-                <MapPinOff size={14} strokeWidth={2} className="text-gray-400" />
-                <span className={!locationFilter ? 'font-semibold' : 'text-gray-700'}>All locations</span>
-                {!locationFilter && <Check size={14} strokeWidth={2.5} className="ml-auto text-black" />}
+                <MapPinOff size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
+                <span className={!locationFilter ? 'font-semibold text-blue-700' : 'text-gray-700'}>
+                  All locations
+                </span>
+                {!locationFilter && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
               </button>
 
               <div className="max-h-64 overflow-y-auto">
@@ -91,11 +92,13 @@ export function ProductSearch({
                         setLocationDropdownOpen(false);
                         onSelectLocationFilter(selected ? null : loc);
                       }}
-                      className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-gray-50 active:bg-gray-100"
+                      className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50"
                     >
-                      <MapPin size={14} strokeWidth={2} className={selected ? 'text-black' : 'text-gray-400'} />
-                      <span className={selected ? 'font-semibold' : 'text-gray-700'}>{loc.name}</span>
-                      {selected && <Check size={14} strokeWidth={2.5} className="ml-auto text-black" />}
+                      <MapPin size={14} strokeWidth={2} className={`shrink-0 ${selected ? 'text-blue-600' : 'text-gray-400'}`} />
+                      <span className={`break-words ${selected ? 'font-semibold text-blue-700' : 'text-gray-700'}`}>
+                        {loc.name}
+                      </span>
+                      {selected && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
                     </button>
                   );
                 })}
@@ -105,13 +108,16 @@ export function ProductSearch({
         </div>
       </div>
 
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by name, SKU, or OEM..."
-        autoFocus
-        className="w-full border-2 border-gray-300 rounded-md p-3 text-base sm:text-sm outline-none focus:border-black"
-      />
+      <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+        <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, SKU, or OEM..."
+          autoFocus
+          className="flex-1 min-w-0 text-base sm:text-sm outline-none placeholder:text-gray-400 bg-transparent"
+        />
+      </div>
 
       <div className="mt-3 flex flex-col gap-2">
         {searching && <p className="text-sm text-gray-500">Searching...</p>}
@@ -121,13 +127,10 @@ export function ProductSearch({
         )}
 
         {results.map((product) => {
-          // FIX — was summing stockByLocation across ALL locations even
-          // when a location filter was active, so a product with stock
-          // elsewhere but zero at the filtered location rendered as
-          // fully available. addToCart() (in the parent page) already
-          // checks stock at the specific filtered location — this now
-          // matches that same logic so the card's appearance doesn't
-          // lie about what clicking it will actually do.
+          // Stock shown/checked always matches the active location filter
+          // (or the sum across all locations when there isn't one) — this
+          // is what addToCart() in the parent page actually checks, so the
+          // card never implies availability that clicking it would reject.
           const relevantStock = locationFilter
             ? product.stockByLocation.find((s) => s.locationId === locationFilter.id)?.quantity ?? 0
             : product.stockByLocation.reduce((s, l) => s + l.quantity, 0);
@@ -135,27 +138,28 @@ export function ProductSearch({
           return (
             <div
               key={product.id}
-              // FIX — the card's disabled styling wasn't backed by an
-              // actual guard; clicking it while "disabled" still fired
-              // onAddToCart and relied on the parent to reject it with
-              // an error. Now a visually disabled card behaves disabled.
               onClick={() => {
                 if (outOfStock) return;
                 onAddToCart(product);
               }}
-              className={`border-2 rounded-md p-3 transition-colors ${
+              className={`border rounded-xl p-3 transition-colors ${
                 outOfStock
                   ? 'opacity-50 cursor-not-allowed border-gray-200'
-                  : 'cursor-pointer border-gray-300 hover:bg-gray-50 active:bg-gray-100 hover:border-gray-400'
+                  : 'cursor-pointer border-blue-500/15 hover:bg-blue-50/50 active:bg-blue-50 hover:border-blue-500/35'
               }`}
             >
-              <div className="flex items-start sm:items-center justify-between gap-2">
+              {/* items-start (not items-center) + break-words + min-w-0 on
+                  the text column: a long product name now wraps onto a
+                  second line inside the card instead of forcing a single
+                  line that widens the page. The price column keeps
+                  shrink-0 so it never gets squeezed by a long name. */}
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="font-medium truncate">{product.name}</p>
-                  <p className="text-xs text-gray-500">{product.sku ?? '—'}</p>
+                  <p className="font-medium break-words leading-snug">{product.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{product.sku ?? '—'}</p>
                 </div>
                 {!posModeEnabled && (
-                  <span className="text-sm font-semibold shrink-0 text-right">
+                  <span className="text-sm font-semibold shrink-0 text-right whitespace-nowrap">
                     {product.sellingPrice != null ? formatIDR(product.sellingPrice) : 'No price'}
                   </span>
                 )}
@@ -166,14 +170,14 @@ export function ProductSearch({
                 {product.stockByLocation.map((s) => (
                   <span
                     key={s.locationId}
-                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border ${
+                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border max-w-full ${
                       locationFilter && s.locationId !== locationFilter.id
                         ? 'border-gray-200 text-gray-400'
-                        : 'border-gray-300 text-gray-700'
+                        : 'border-blue-500/20 text-blue-700 bg-blue-600/5'
                     }`}
                   >
-                    <MapPin size={10} strokeWidth={2} />
-                    {s.locationName}: {s.quantity}
+                    <MapPin size={10} strokeWidth={2} className="shrink-0" />
+                    <span className="truncate">{s.locationName}: {s.quantity}</span>
                   </span>
                 ))}
               </div>

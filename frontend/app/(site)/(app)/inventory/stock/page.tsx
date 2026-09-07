@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -17,6 +18,11 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useSortableData } from '@/lib/hooks/useSortableData';
+import SortableTh from '@/app/components/SortableTh';
+import Pagination from '@/app/components/Pagination';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type ProductSummary = {
   productId: string;
@@ -46,7 +52,9 @@ type FieldErrors = {
   stock?: string;
 };
 
-const PAGE_SIZE = 20;
+// Columns the table can be sorted by. Locations is deliberately excluded —
+// it's a per-row breakdown list, not a single sortable value.
+type SortKey = 'sku' | 'name' | 'sellingPrice' | 'costPrice' | 'totalStock';
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -58,7 +66,7 @@ function formatIDR(amount: number): string {
 
 const inputBase =
   'w-full border-2 rounded-md px-3 py-2 text-sm outline-none transition-colors placeholder:text-gray-400 bg-white';
-const inputOk = 'border-gray-300 focus:border-black';
+const inputOk = 'border-gray-300 focus:border-blue-500';
 const inputBad = 'border-red-400 focus:border-red-500 bg-red-50/40';
 
 function fieldClass(err?: string) {
@@ -166,7 +174,7 @@ function ComboBox({
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => selectOption(opt.name)}
-                className={`w-full text-left px-3 py-2 ${i === highlight ? 'bg-gray-100' : ''}`}
+                className={`w-full text-left px-3 py-2 ${i === highlight ? 'bg-blue-50' : ''}`}
               >
                 {opt.name}
               </button>
@@ -181,7 +189,7 @@ function ComboBox({
               onMouseEnter={() => setHighlight(filtered.length)}
               onClick={() => selectOption(value.trim())}
               className={`w-full text-left px-3 py-2 border-t border-gray-200 text-gray-600 ${
-                highlight === filtered.length ? 'bg-gray-100' : ''
+                highlight === filtered.length ? 'bg-blue-50' : ''
               }`}
             >
               + Create &quot;{value.trim()}&quot;
@@ -199,6 +207,7 @@ export default function StockPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const router = useRouter();
 
   const [categories, setCategories] = useState<Option[]>([]);
@@ -277,6 +286,11 @@ export default function StockPage() {
   const showCostPrice =
     enabledModules.includes('INVOICE_POS') && currentUser?.role === 'ADMIN';
 
+  // Per-location breakdown only means anything for orgs actually running
+  // the warehouse module — single-location (CENTRE-only) orgs would just
+  // see one redundant row repeating the Total Stock column.
+  const showLocations = enabledModules.includes('WAREHOUSE_OPS');
+
   // Only admins get the ability to create products from this page at all —
   // everyone else is here to look up stock, not manage the catalog.
   const canCreateProduct = currentUser?.role === 'ADMIN';
@@ -288,12 +302,29 @@ export default function StockPage() {
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, search]);
 
-  // Reset to page 1 whenever the search term changes
+  // Column sorting — applied to the full filtered set, before pagination,
+  // so sorting reorders across all pages rather than just the visible one.
+  const { sorted: sortedProducts, sort, toggleSort } = useSortableData<ProductSummary, SortKey>(
+    filteredProducts,
+    {
+      sku: (p) => p.sku ?? '',
+      name: (p) => p.name,
+      sellingPrice: (p) => p.sellingPrice,
+      costPrice: (p) => p.costPrice,
+      totalStock: (p) => p.totalStock,
+    },
+  );
+
+  // Reset to page 1 whenever the search term or sort changes
   useEffect(() => {
     setPage(1);
   }, [search]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  useEffect(() => {
+    setPage(1);
+  }, [sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize));
 
   // Clamp page if filtering shrinks the result set below the current page
   useEffect(() => {
@@ -301,9 +332,16 @@ export default function StockPage() {
   }, [page, totalPages]);
 
   const paginatedProducts = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return filteredProducts.slice(start, start + PAGE_SIZE);
-  }, [filteredProducts, page]);
+    const start = (page - 1) * pageSize;
+    return sortedProducts.slice(start, start + pageSize);
+  }, [sortedProducts, page, pageSize]);
+
+  // Small helper so the active sorted column's cells get the same subtle
+  // highlight as its header, making it easy to visually track down a
+  // column while scanning rows.
+  function cellHighlight(key: SortKey) {
+    return sort?.key === key ? 'bg-blue-50/70' : '';
+  }
 
   // --- New Product form logic ---
 
@@ -473,45 +511,73 @@ export default function StockPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      {/* Header */}
-      <div className="px-6 py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /vehicles/search and /labels. Search bar now lives here too. */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Hub
           </button>
-          <div className="flex items-center gap-2">
-            <LayoutDashboard size={22} strokeWidth={2} className="text-gray-700" />
-            <div>
-              <h1 className="text-2xl font-bold">Stock</h1>
-              <p className="text-xs text-gray-500">Current stock across all locations — sorted by SKU</p>
+
+          <div className="flex items-center gap-2.5 mb-4">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <LayoutDashboard size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Stock
+              </h1>
+              <p className="text-xs text-gray-500 truncate">
+                Current stock across all locations — sorted by SKU
+              </p>
             </div>
+          </div>
+
+          {/* Search — command-palette style matching /vehicles/search and /labels */}
+          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+            <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search product name..."
+              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+            />
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="p-6 max-w-5xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
 
         {/* New Product dropdown (admins only) */}
         {canCreateProduct && (
-          <div className="border-2 border-gray-300 rounded-md overflow-hidden">
+          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
             <button
               onClick={() => setFormOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 bg-blue-50/60 hover:bg-blue-50 transition-colors"
             >
               <span className="flex items-center gap-2 text-sm font-semibold">
-                <Plus size={16} strokeWidth={2.5} className="text-gray-600" />
+                <Plus size={16} strokeWidth={2.5} className="text-blue-700" />
                 New Product
               </span>
               {formOpen ? (
-                <ChevronUp size={16} strokeWidth={2} className="text-gray-500" />
+                <ChevronUp size={16} strokeWidth={2} className="text-blue-700" />
               ) : (
-                <ChevronDown size={16} strokeWidth={2} className="text-gray-500" />
+                <ChevronDown size={16} strokeWidth={2} className="text-blue-700" />
               )}
             </button>
 
@@ -533,7 +599,7 @@ export default function StockPage() {
 
                 {/* Section: Identity */}
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Tag size={12} strokeWidth={2.5} />
                     Identity
                   </div>
@@ -563,7 +629,7 @@ export default function StockPage() {
 
                 {/* Section: Catalog identifiers */}
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Hash size={12} strokeWidth={2.5} />
                     Catalog
                   </div>
@@ -618,7 +684,7 @@ export default function StockPage() {
 
                 {/* Section: Pricing & Inventory */}
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Wallet size={12} strokeWidth={2.5} />
                     Pricing &amp; Inventory
                   </div>
@@ -714,14 +780,14 @@ export default function StockPage() {
                   <button
                     onClick={createProduct}
                     disabled={creating}
-                    className="px-4 py-2 bg-black text-white rounded-md text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     {creating ? 'Creating...' : 'Create Product'}
                   </button>
                   <button
                     onClick={resetCreateForm}
                     disabled={creating}
-                    className="px-4 py-2 text-gray-500 text-sm hover:text-black disabled:opacity-40"
+                    className="px-4 py-2 text-gray-500 text-sm hover:text-blue-700 disabled:opacity-40 transition-colors"
                   >
                     Clear
                   </button>
@@ -732,19 +798,7 @@ export default function StockPage() {
           </div>
         )}
 
-        {/* Search */}
-        <div className="relative sm:max-w-sm">
-          <Search size={14} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search product name..."
-            className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
-          />
-        </div>
-
-        <div className="border-2 border-gray-300 rounded-md overflow-hidden">
+        <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
           <div
             ref={scrollRef}
             onMouseDown={onMouseDown}
@@ -756,16 +810,51 @@ export default function StockPage() {
             style={{ scrollbarWidth: 'thin' }}
           >
             <table className="w-full text-sm min-w-[640px]">
-              <thead className="bg-gray-100 border-b-2 border-gray-300">
+              <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">SKU</th>
-                  <th className="text-left px-4 py-3 font-semibold">Product</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Price</th>
+                  <SortableTh<SortKey>
+                    label="SKU"
+                    columnKey="sku"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                  />
+                  <SortableTh<SortKey>
+                    label="Product"
+                    columnKey="name"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                  />
+                  <SortableTh<SortKey>
+                    label="Price"
+                    columnKey="sellingPrice"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                  />
                   {showCostPrice && (
-                    <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Cost Price</th>
+                    <SortableTh<SortKey>
+                      label="Cost Price"
+                      columnKey="costPrice"
+                      activeKey={sort?.key ?? null}
+                      direction={sort?.direction ?? null}
+                      onSort={toggleSort}
+                    />
                   )}
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Total Stock</th>
-                  <th className="text-left px-4 py-3 font-semibold">Locations</th>
+                  <SortableTh<SortKey>
+                    label="Total Stock"
+                    columnKey="totalStock"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                  />
+                  {/* Locations is per-location detail, not a single sortable
+                      value — and only meaningful for orgs actually running
+                      multiple locations via the warehouse module. */}
+                  {showLocations && (
+                    <th className="text-left px-4 py-3 font-semibold">Locations</th>
+                  )}
                 </tr>
               </thead>
 
@@ -779,13 +868,13 @@ export default function StockPage() {
                       hover:bg-blue-50
                       ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}
                     `}
-                    onClick={() => router.push(`/inventory/products/${product.productId}`)}
+                    onClick={() => router.push(`/inventory/stocks/${product.productId}`)}
                   >
-                    <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">
+                    <td className={`px-4 py-3 text-gray-500 font-mono whitespace-nowrap ${cellHighlight('sku')}`}>
                       {product.sku ?? '-'}
                     </td>
-                    <td className="px-4 py-3 font-medium">{product.name}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{product.name}</td>
+                    <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('sellingPrice')}`}>
                       {product.sellingPrice != null ? (
                         formatIDR(product.sellingPrice)
                       ) : (
@@ -793,7 +882,7 @@ export default function StockPage() {
                       )}
                     </td>
                     {showCostPrice && (
-                      <td className="px-4 py-3 whitespace-nowrap">
+                      <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('costPrice')}`}>
                         {product.costPrice != null ? (
                           formatIDR(product.costPrice)
                         ) : (
@@ -801,18 +890,22 @@ export default function StockPage() {
                         )}
                       </td>
                     )}
-                    <td className="px-4 py-3 font-bold whitespace-nowrap">{product.totalStock}</td>
-                    <td className="px-4 py-3 text-xs text-gray-700">
-                      {product.locations.length === 0 ? (
-                        <span className="text-gray-500">No stock</span>
-                      ) : (
-                        product.locations.map((location, index) => (
-                          <div key={index} className="whitespace-nowrap">
-                            {location.location}: {location.qty}
-                          </div>
-                        ))
-                      )}
+                    <td className={`px-4 py-3 font-bold whitespace-nowrap ${cellHighlight('totalStock')}`}>
+                      {product.totalStock}
                     </td>
+                    {showLocations && (
+                      <td className="px-4 py-3 text-xs text-gray-700">
+                        {product.locations.length === 0 ? (
+                          <span className="text-gray-500">No stock</span>
+                        ) : (
+                          product.locations.map((location, index) => (
+                            <div key={index} className="whitespace-nowrap">
+                              {location.location}: {location.qty}
+                            </div>
+                          ))
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -828,31 +921,16 @@ export default function StockPage() {
 
         {/* Pagination */}
         {filteredProducts.length > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-500">
-              Showing {(page - 1) * PAGE_SIZE + 1}–
-              {Math.min(page * PAGE_SIZE, filteredProducts.length)} of {filteredProducts.length}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-              >
-                Prev
-              </button>
-              <span className="text-gray-600">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={filteredProducts.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         )}
       </div>
     </main>

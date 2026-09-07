@@ -21,6 +21,7 @@ import {
   Users,
   Car,
   Bell,
+  Search,
   ShoppingCart,
   ClipboardList,
   Receipt,
@@ -144,7 +145,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const salesChildren: NavItem[] = [
     { href: '/sales/orders', label: 'Sales Order', icon: ClipboardList },
     { href: '/sales/invoices', label: 'Invoice', icon: Receipt },
-    { href: '/sales/delivery-order', label: 'Delivery Order', icon: Truck },
+    { href: '/sales/delivery-orders', label: 'Delivery Order', icon: Truck },
     { href: '/sales/quotations', label: 'Sales Quotation', icon: FileSpreadsheet },
   ];
 
@@ -206,6 +207,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       items: hasWorkshopRms
         ? [
             { href: '/workshop/vehicles', label: 'Vehicles', icon: Car },
+            { href: '/workshop/vehicles/search', label: 'Vehicle Lookup', icon: Search },
             { href: '/workshop/reminders', label: 'Reminders', icon: Bell },
           ]
         : [],
@@ -245,8 +247,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setMobileOpenGroups((prev) => ({ ...prev, [href]: !prev[href] }))}
             className={`relative shrink-0 snap-start flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-md border font-medium transition-colors active:scale-[0.97] ${
               active
-                ? 'border-gray-900 bg-gray-900 text-white'
-                : 'border-gray-300 text-gray-700 hover:bg-gray-100 hover:border-gray-400'
+                ? 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/20'
+                : 'border-blue-500/15 text-gray-700 hover:bg-blue-50 hover:border-blue-500/30'
             }`}
           >
             <Icon size={16} strokeWidth={2} />
@@ -265,8 +267,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           onClick={() => router.push(href)}
           className={`relative shrink-0 snap-start flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-md border font-medium transition-colors active:scale-[0.97] ${
             active
-              ? 'border-gray-900 bg-gray-900 text-white'
-              : 'border-gray-300 text-gray-700 hover:bg-gray-100 hover:border-gray-400'
+              ? 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/20'
+              : 'border-blue-500/15 text-gray-700 hover:bg-blue-50 hover:border-blue-500/30'
           }`}
         >
           <Icon size={16} strokeWidth={2} />
@@ -274,7 +276,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {href === '/upload-order' && !!pendingOrders && (
             <span
               className={`ml-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
-                active ? 'bg-white text-gray-900' : 'bg-violet-600 text-white'
+                active ? 'bg-white text-blue-700' : 'bg-blue-600 text-white'
               }`}
             >
               {pendingOrders}
@@ -293,10 +295,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => setOpenGroups((prev) => ({ ...prev, [href]: !prev[href] }))}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg font-medium text-[14.5px] transition-colors text-left ${
-              active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+              active
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/20 ring-1 ring-blue-500/30'
+                : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'
             }`}
           >
-            <Icon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-gray-500'} />
+            <Icon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-gray-400'} />
             <span>{label}</span>
             {isOpen ? (
               <ChevronDown size={16} strokeWidth={2} className="ml-auto" />
@@ -305,7 +309,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </button>
           {isOpen && (
-            <div className="mt-1 ml-4 pl-3 border-l-2 border-gray-100 space-y-1">
+            <div className="mt-1 ml-4 pl-3 border-l-2 border-blue-500/15 space-y-1">
               {children.map((child) => (
                 <NavLink key={child.href} item={child} variant="sidebar" />
               ))}
@@ -319,13 +323,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <button
         onClick={() => router.push(href)}
         className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg font-medium text-[14.5px] transition-colors text-left ${
-          active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+          active
+            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/20 ring-1 ring-blue-500/30'
+            : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'
         }`}
       >
-        <Icon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-gray-500'} />
+        <Icon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-gray-400'} />
         <span>{label}</span>
         {href === '/upload-order' && !!pendingOrders && (
-          <span className="ml-auto flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full bg-violet-600 text-white text-[11px] font-bold">
+          <span className="ml-auto flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">
             {pendingOrders}
           </span>
         )}
@@ -334,13 +340,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <main className="min-h-screen bg-white text-black flex flex-col md:flex-row">
+    <main
+      className="min-h-screen text-black flex flex-col md:flex-row"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.07) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
       <NotificationDrawer enabled={hasWorkshopRms} />
 
-      <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r-2 border-gray-200 h-screen sticky top-0">
+      <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-screen sticky top-0">
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b-2 border-gray-200">
-          <div className="w-9 h-9 rounded-lg bg-gray-900 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-blue-500/15">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0 ring-1 ring-white/10 shadow-sm shadow-blue-600/30">
             <Boxes size={18} strokeWidth={2} className="text-white" />
           </div>
           <div>
@@ -356,7 +370,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div key={group.label}>
               {group.items.length > 0 && (
                 <>
-                  <p className="text-[11px] font-semibold text-gray-400 px-3.5 mb-1.5">
+                  <p className="text-[11px] font-semibold text-blue-700/50 tracking-wide uppercase px-3.5 mb-1.5">
                     {group.label}
                   </p>
                   <div className="space-y-1">
@@ -370,10 +384,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <div className="px-3 py-4 border-t-2 border-gray-200">
+        <div className="px-3 py-4 border-t border-blue-500/15">
           <button
             onClick={() => setShowProfile(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border-2 border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-blue-500/15 bg-white hover:bg-blue-50/60 hover:border-blue-500/30 transition-colors text-left"
           >
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
               {profile?.email ? profile.email.slice(0, 2).toUpperCase() : <User size={14} />}
@@ -395,10 +409,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* TOP BAR — mobile only, sticky so nav stays reachable while scrolling */}
-        <div className="md:hidden sticky top-0 z-30 bg-white/95 backdrop-blur border-b-2 border-gray-300 pt-[env(safe-area-inset-top)]">
+        <div className="md:hidden sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] pt-[env(safe-area-inset-top)]">
           <div className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0 ring-1 ring-white/10">
                 <Boxes size={16} strokeWidth={2} className="text-white" />
               </div>
               <div className="min-w-0">
@@ -411,10 +425,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
             <button
               onClick={() => setShowProfile(true)}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-gray-300 hover:bg-gray-100 font-medium transition-colors shrink-0 active:scale-95"
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/40 font-medium transition-colors shrink-0 active:scale-95"
               aria-label="Account"
             >
-              <User size={16} strokeWidth={2} />
+              <User size={16} strokeWidth={2} className="text-blue-700" />
               <span className="hidden xs:inline">Account</span>
             </button>
           </div>
@@ -430,7 +444,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             .map((item) => (
               <div
                 key={item.href}
-                className="flex gap-2 overflow-x-auto snap-x px-4 sm:px-5 pb-3 border-t border-gray-100 pt-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className="flex gap-2 overflow-x-auto snap-x px-4 sm:px-5 pb-3 border-t border-blue-500/10 pt-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
                 {item.children!.map((child) => (
                   <NavLink key={child.href} item={child} variant="mobile" />
@@ -446,14 +460,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setShowProfile(false)}
           >
             <div
-              className="bg-white rounded-t-xl sm:rounded-xl border border-gray-100 p-6 w-full sm:w-[320px] max-w-full sm:max-w-[320px] max-h-[85vh] overflow-y-auto shadow-xl pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+              className="bg-white rounded-t-xl sm:rounded-xl border border-blue-500/15 p-6 w-full sm:w-[320px] max-w-full sm:max-w-[320px] max-h-[85vh] overflow-y-auto shadow-xl shadow-blue-900/5 pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
                 <span className="text-[15px] font-medium">Account</span>
                 <button
                   onClick={() => setShowProfile(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors p-1 -m-1"
+                  className="text-gray-400 hover:text-blue-700 transition-colors p-1 -m-1"
                   aria-label="Close"
                 >
                   <X size={18} />
@@ -483,7 +497,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               )}
 
-              <div className="border-t border-gray-100 pt-4 space-y-2.5 mb-5">
+              <div className="border-t border-blue-500/10 pt-4 space-y-2.5 mb-5">
                 {[
                   { label: 'Email', value: profile.email },
                   { label: 'Role', value: profile.role },
@@ -503,7 +517,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     setShowProfile(false);
                     router.push('/settings');
                   }}
-                  className="w-full text-[13px] text-gray-500 hover:text-black mb-5 text-center underline py-1"
+                  className="w-full text-[13px] text-blue-600 hover:text-blue-800 mb-5 text-center underline py-1"
                 >
                   Manage business & organization settings
                 </button>

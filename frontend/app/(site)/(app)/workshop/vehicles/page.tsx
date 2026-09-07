@@ -1,10 +1,16 @@
-// app/(app)/vehicles/page.tsx
+// app/(app)/workshop/vehicles/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Car, Search } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import Pagination from '@/app/components/Pagination';
+import { useSortableData } from '@/lib/hooks/useSortableData';
+import SortableTh from '@/app/components/SortableTh';
+
+const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type VehicleListItem = {
   id: string;
@@ -15,7 +21,12 @@ type VehicleListItem = {
   customer: { id: string; name: string; companyName: string | null };
 };
 
-const PAGE_SIZE = 20;
+// Columns the table can be sorted by. VIN is deliberately excluded — same
+// reasoning as Customers' Address: it's an identifier people scan/match
+// against a document, not a value with a meaningful order.
+type SortKey = 'plate' | 'model' | 'customer' | 'odometer';
+
+const PAGE_SIZE_DEFAULT = 20;
 
 export default function VehiclesPage() {
   const router = useRouter();
@@ -25,6 +36,7 @@ export default function VehiclesPage() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
 
   async function load(q?: string) {
     setLoading(true);
@@ -61,50 +73,80 @@ export default function VehiclesPage() {
     setPage(1);
   }, [query]);
 
-  const totalPages = Math.max(1, Math.ceil(vehicles.length / PAGE_SIZE));
+  // The whole result set is loaded client-side (no server pagination
+  // here), so — same as Stock and Customers — sorting applies across the
+  // full list, and pagination slices the already-sorted array below.
+  const { sorted: sortedVehicles, sort, toggleSort } = useSortableData<VehicleListItem, SortKey>(
+    vehicles,
+    {
+      plate: (v) => v.plateNumber,
+      model: (v) => v.vehicleModel,
+      customer: (v) => v.customer.name,
+      odometer: (v) => v.odometer ?? -1,
+    },
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedVehicles.length / pageSize));
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const paginatedVehicles = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return vehicles.slice(start, start + PAGE_SIZE);
-  }, [vehicles, page]);
+  const paginatedVehicles = sortedVehicles.slice((page - 1) * pageSize, page * pageSize);
+
+  function cellHighlight(key: SortKey) {
+    return sort?.key === key ? 'bg-blue-50/70' : '';
+  }
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      {/* Header — sticky, blue-outline + backdrop-blur treatment matching
+          /customers, /vehicles/search, and /inventory/stock. Search bar
+          now lives here too, same as those pages. */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Hub
           </button>
 
-          <div className="flex items-center gap-2 min-w-0">
-            <Car size={22} strokeWidth={2} className="text-gray-700 shrink-0" />
+          <div className="flex items-center gap-2.5 min-w-0 mb-4">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Car size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold truncate">Vehicles</h1>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Vehicles
+              </h1>
               <p className="text-xs text-gray-500 truncate">Every vehicle on file, across all customers</p>
             </div>
+          </div>
+
+          {/* Search — command-palette style matching /vehicles/search, /customers, /inventory/stock */}
+          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+            <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by plate, model, VIN, or customer..."
+              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+            />
           </div>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
-        <div className="relative mb-4 sm:max-w-sm">
-          <Search size={14} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by plate, model, VIN, or customer..."
-            className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
-          />
-        </div>
-
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>
         )}
@@ -115,16 +157,45 @@ export default function VehiclesPage() {
             table is a reasonable trade-off vs. the effort of a full mobile
             card rework. Say the word if you'd rather it match the
             card-per-row treatment used on the customers page. */}
-        <div className="border-2 border-gray-300 rounded-md overflow-hidden">
+        <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
-              <thead className="bg-gray-100 border-b-2 border-gray-300">
+              <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Plate</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Car</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Customer</th>
+                  <SortableTh<SortKey>
+                    label="Plate"
+                    columnKey="plate"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                    className="whitespace-nowrap"
+                  />
+                  <SortableTh<SortKey>
+                    label="Car"
+                    columnKey="model"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                    className="whitespace-nowrap"
+                  />
+                  <SortableTh<SortKey>
+                    label="Customer"
+                    columnKey="customer"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                    className="whitespace-nowrap"
+                  />
                   <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">VIN</th>
-                  <th className="text-right px-4 py-3 font-semibold whitespace-nowrap">Latest Odometer</th>
+                  <SortableTh<SortKey>
+                    label="Latest Odometer"
+                    columnKey="odometer"
+                    activeKey={sort?.key ?? null}
+                    direction={sort?.direction ?? null}
+                    onSort={toggleSort}
+                    align="right"
+                    className="whitespace-nowrap"
+                  />
                 </tr>
               </thead>
               <tbody>
@@ -132,16 +203,20 @@ export default function VehiclesPage() {
                   <tr
                     key={v.id}
                     onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
-                    className={`border-t border-gray-300 cursor-pointer hover:bg-gray-100 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+                    className={`border-t border-gray-300 cursor-pointer hover:bg-blue-50 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
                   >
-                    <td className="px-4 py-3 font-medium whitespace-nowrap">{v.plateNumber}</td>
-                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.vehicleModel}</td>
-                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                    <td className={`px-4 py-3 font-medium whitespace-nowrap ${cellHighlight('plate')}`}>
+                      {v.plateNumber}
+                    </td>
+                    <td className={`px-4 py-3 text-gray-600 whitespace-nowrap ${cellHighlight('model')}`}>
+                      {v.vehicleModel}
+                    </td>
+                    <td className={`px-4 py-3 text-gray-600 whitespace-nowrap ${cellHighlight('customer')}`}>
                       {v.customer.name}
                       {v.customer.companyName ? ` · ${v.customer.companyName}` : ''}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.vin ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-gray-600 whitespace-nowrap">
+                    <td className={`px-4 py-3 text-right text-gray-600 whitespace-nowrap ${cellHighlight('odometer')}`}>
                       {v.odometer != null ? `${v.odometer.toLocaleString('id-ID')} km` : '—'}
                     </td>
                   </tr>
@@ -156,32 +231,21 @@ export default function VehiclesPage() {
           {loading && <div className="p-8 text-center text-sm text-gray-500">Loading...</div>}
         </div>
 
-        {/* Pagination */}
-        {vehicles.length > 0 && (
-          <div className="flex items-center justify-between mt-4 text-sm">
-            <span className="text-gray-500">
-              Showing {(page - 1) * PAGE_SIZE + 1}–
-              {Math.min(page * PAGE_SIZE, vehicles.length)} of {vehicles.length}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-              >
-                Prev
-              </button>
-              <span className="text-gray-600">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-              >
-                Next
-              </button>
-            </div>
+        {/* Pagination — shared component (same as /customers, /invoices,
+            /sales-orders, /purchase-orders) instead of a hand-rolled
+            Prev/Next row. */}
+        {!loading && vehicles.length > 0 && (
+          <div className="mt-4">
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              totalItems={sortedVehicles.length}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
           </div>
         )}
       </div>
