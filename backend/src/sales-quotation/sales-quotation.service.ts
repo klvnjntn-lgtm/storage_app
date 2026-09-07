@@ -4,11 +4,15 @@ import { TenantOwnershipService } from '../shared/documents/tenant-ownership.ser
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { PrintTokenService } from '../common/print/print-token.service';
+import { BankAccountResolverService } from '../bank-accounts/bank-account-resolver.service';
 import { Prisma, SalesQuotationStatus, SalesQuotationActivityEventType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
 
+// bank* fields removed from organization.select — SalesQuotation now
+// carries its own snapshot columns (bankAccountId/bankName/
+// bankAccountNumber/bankAccountName), same as Invoice.
 const quotationDetailInclude = {
   items: { include: { product: true, taxes: true } },
   taxes: true,
@@ -19,10 +23,6 @@ const quotationDetailInclude = {
       name: true,
       legalName: true,
       npwp: true,
-      bankName: true,           // NEW
-      bankAccountNumber: true,  // NEW
-      bankAccountName: true,    // NEW
-
       logoUrl: true,
       address: true,
       phone: true,
@@ -32,9 +32,6 @@ const quotationDetailInclude = {
   invoices: { select: { id: true, invoiceNumber: true, status: true } },
 } satisfies Prisma.SalesQuotationInclude;
 
-// Statuses in which item/field edits are allowed. SENT is included per
-// the SENT -> edit -> DRAFT -> send -> SENT rule: nothing sent to a
-// customer stays mutable under the same SENT status.
 const EDITABLE_STATUSES: SalesQuotationStatus[] = [
   SalesQuotationStatus.DRAFT,
   SalesQuotationStatus.SENT,
@@ -53,12 +50,13 @@ export type QuotationPrintView = {
   businessPhone: string | null;
 
   discount: number;
-  bankName: string | null;            // NEW
-  bankAccountNumber: string | null;   // NEW
-  bankAccountName: string | null;     // NEW
+  // Snapshotted on the quotation itself now, not read off organization.
+  bankName: string | null;
+  bankAccountNumber: string | null;
+  bankAccountName: string | null;
 
-  quotationDate: Date | null;        // NEW
-  termsAndConditions: string | null; // NEW — note: customerPoNumber deliberately NOT added here, spec says Quotation never prints it
+  quotationDate: Date | null;
+  termsAndConditions: string | null;
 
   locationName: string;
   locationAddress: string | null;
@@ -105,6 +103,7 @@ export class SalesQuotationService {
     private numbering: DocumentNumberingService,
     private pricing: LineItemPricingService,
     private printTokenService: PrintTokenService,
+    private bankAccounts: BankAccountResolverService,
   ) {}
 
   private round2(n: number) {
@@ -152,10 +151,12 @@ export class SalesQuotationService {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items);
-    const quotationDate = dto.quotationDate ? new Date(dto.quotationDate) : new Date(); // NEW
+    const quotationDate = dto.quotationDate ? new Date(dto.quotationDate) : new Date();
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
+
         const quotation = await tx.salesQuotation.create({
           data: {
             organizationId,
@@ -163,16 +164,18 @@ export class SalesQuotationService {
             locationId: dto.locationId,
             customerId: dto.customerId,
             customerName: dto.customerName,
-            customerPoNumber: dto.customerPoNumber ?? null, // NEW
-            quotationDate, // NEW
-            termsAndConditions: dto.termsAndConditions ?? null, // NEW
+            customerPoNumber: dto.customerPoNumber ?? null,
+            quotationDate,
+            termsAndConditions: dto.termsAndConditions ?? null,
+            bankAccountId: bank.bankAccountId,
+            bankName: bank.bankName,
+            bankAccountNumber: bank.bankAccountNumber,
+            bankAccountName: bank.bankAccountName,
 
             format: dto.format,
             validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
             status: SalesQuotationStatus.DRAFT,
             subtotal,
-            // SalesQuotation.discount existed in the schema but was
-            // never written; now derived as sum(item discountAmount).
             discount: discountAmount,
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
@@ -183,7 +186,7 @@ export class SalesQuotationService {
                 locationId: l.locationId,
                 quantity: l.quantity,
                 unitPrice: l.unitPrice,
-                unit: l.unit, // NEW — was missing
+                unit: l.unit,
                 lineTotal: l.lineTotal,
                 discountType: l.discountType,
                 discountValue: l.discountValue,
@@ -210,10 +213,6 @@ export class SalesQuotationService {
         return quotation;
       });
     } catch (err) {
-      // FIX: handleFkViolation only throws on FK-constraint errors. If it
-      // returns normally for anything else (validation errors, unexpected
-      // P2002s, connection blips), this function must not silently resolve
-      // to `undefined` — always rethrow so callers see a real error.
       this.tenantOwnership.handleFkViolation(err);
       throw err;
     }
@@ -221,27 +220,28 @@ export class SalesQuotationService {
 
   // ---- update (DRAFT or SENT; SENT reverts to DRAFT) ---------------------
 
-async update(organizationId: string, id: string, userId: string, dto: UpdateSalesQuotationDto) {
-  const quotation = await this.getEditableOrThrow(organizationId, id);
-  await this.tenantOwnership.validate(organizationId, dto);
-    // Editing a SENT quotation silently reverts it to DRAFT — nothing the
-    // customer received stays mutable under the same SENT status. The
-    // caller must explicitly re-send to hand out a new version.
-      if (
-    dto.items !== undefined &&
-    dto.items.length === 0 &&
-    quotation.items.length > 0 &&
-    !dto.clearItems
-  ) {
-    throw new BadRequestException(
-      'Refusing to replace existing items with an empty list — pass clearItems: true if this is intentional',
-    );
-  }
+  async update(organizationId: string, id: string, userId: string, dto: UpdateSalesQuotationDto) {
+    const quotation = await this.getEditableOrThrow(organizationId, id);
+    await this.tenantOwnership.validate(organizationId, dto);
+    if (
+      dto.items !== undefined &&
+      dto.items.length === 0 &&
+      quotation.items.length > 0 &&
+      !dto.clearItems
+    ) {
+      throw new BadRequestException(
+        'Refusing to replace existing items with an empty list — pass clearItems: true if this is intentional',
+      );
+    }
     const wasSent = quotation.status === SalesQuotationStatus.SENT;
 
     if (!dto.items) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          const bank = dto.bankAccountId !== undefined
+            ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+            : null;
+
           const updated = await tx.salesQuotation.update({
             where: { id: quotation.id },
             data: {
@@ -259,8 +259,12 @@ async update(organizationId: string, id: string, userId: string, dto: UpdateSale
                 ? (dto.validUntil ? new Date(dto.validUntil) : null)
                 : undefined,
               status: wasSent ? SalesQuotationStatus.DRAFT : undefined,
-              // NO subtotal/taxAmount/total/items/taxes here — nothing
-              // priced in this branch, items are untouched.
+              ...(bank && {
+                bankAccountId: bank.bankAccountId,
+                bankName: bank.bankName,
+                bankAccountNumber: bank.bankAccountNumber,
+                bankAccountName: bank.bankAccountName,
+              }),
             },
             include: { items: true, taxes: true, customer: true },
           });
@@ -274,15 +278,15 @@ async update(organizationId: string, id: string, userId: string, dto: UpdateSale
             metadata: {
               revertedFromSent: wasSent,
               fields: {
-                format: dto.format ?? quotation.format,   // kept once, dup removed
+                format: dto.format ?? quotation.format,
                 locationId: dto.locationId,
                 customerId: dto.customerId,
                 customerName: dto.customerName,
                 validUntil: dto.validUntil,
-                    customerPoNumber: dto.customerPoNumber,        // NEW
-    quotationDate: dto.quotationDate,               // NEW
-    termsAndConditions: dto.termsAndConditions,     // NEW
-
+                customerPoNumber: dto.customerPoNumber,
+                quotationDate: dto.quotationDate,
+                termsAndConditions: dto.termsAndConditions,
+                bankAccountId: dto.bankAccountId,
               },
             } as Prisma.InputJsonValue,
           });
@@ -290,7 +294,6 @@ async update(organizationId: string, id: string, userId: string, dto: UpdateSale
           return updated;
         });
       } catch (err) {
-        // FIX: same silent-swallow issue as create() — always rethrow.
         this.tenantOwnership.handleFkViolation(err);
         throw err;
       }
@@ -301,6 +304,10 @@ async update(organizationId: string, id: string, userId: string, dto: UpdateSale
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, dto.items!, tx);
 
+        const bank = dto.bankAccountId !== undefined
+          ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+          : null;
+
         const existingItemIds = (
           await tx.salesQuotationItem.findMany({ where: { salesQuotationId: quotation.id }, select: { id: true } })
         ).map((i) => i.id);
@@ -310,73 +317,78 @@ async update(organizationId: string, id: string, userId: string, dto: UpdateSale
         await tx.salesQuotationItem.deleteMany({ where: { salesQuotationId: quotation.id } });
         await tx.salesQuotationTax.deleteMany({ where: { salesQuotationId: quotation.id } });
 
-const updated = await tx.salesQuotation.update({
-  where: { id: quotation.id },
-  data: {
-    locationId: dto.locationId ?? quotation.locationId,
-    format: dto.format ?? quotation.format,
-    customerId: dto.customerId ?? quotation.customerId,
-    customerName: dto.customerName ?? quotation.customerName,
-    customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : quotation.customerPoNumber,
-    quotationDate: dto.quotationDate !== undefined
-      ? (dto.quotationDate ? new Date(dto.quotationDate) : null)
-      : quotation.quotationDate,
-    termsAndConditions: dto.termsAndConditions !== undefined ? dto.termsAndConditions : quotation.termsAndConditions,
-    validUntil: dto.validUntil !== undefined
-      ? (dto.validUntil ? new Date(dto.validUntil) : null)
-      : undefined,
-    status: wasSent ? SalesQuotationStatus.DRAFT : undefined,
+        const updated = await tx.salesQuotation.update({
+          where: { id: quotation.id },
+          data: {
+            locationId: dto.locationId ?? quotation.locationId,
+            format: dto.format ?? quotation.format,
+            customerId: dto.customerId ?? quotation.customerId,
+            customerName: dto.customerName ?? quotation.customerName,
+            customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : quotation.customerPoNumber,
+            quotationDate: dto.quotationDate !== undefined
+              ? (dto.quotationDate ? new Date(dto.quotationDate) : null)
+              : quotation.quotationDate,
+            termsAndConditions: dto.termsAndConditions !== undefined ? dto.termsAndConditions : quotation.termsAndConditions,
+            validUntil: dto.validUntil !== undefined
+              ? (dto.validUntil ? new Date(dto.validUntil) : null)
+              : undefined,
+            status: wasSent ? SalesQuotationStatus.DRAFT : undefined,
+            ...(bank && {
+              bankAccountId: bank.bankAccountId,
+              bankName: bank.bankName,
+              bankAccountNumber: bank.bankAccountNumber,
+              bankAccountName: bank.bankAccountName,
+            }),
 
-    // ADDED — these were computed above and never written:
-    subtotal,
-    discount: discountAmount,
-    taxAmount,
-    total: this.round2(subtotal - discountAmount + taxAmount),
-    items: {
-      create: lines.map((l) => ({
-        productId: l.productId,
-        description: l.description,
-        locationId: l.locationId,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        unit: l.unit,
-        lineTotal: l.lineTotal,
-        discountType: l.discountType,
-        discountValue: l.discountValue,
-        discountAmount: l.discountAmount,
-        netAmount: l.netAmount,
-        taxAmount: l.taxAmount,
-        total: l.total,
-        taxes: { create: l.taxes },
-      })),
-    },
-    taxes: { create: taxLines },
-  },
-  include: { items: true, taxes: true, customer: true },
-});
+            subtotal,
+            discount: discountAmount,
+            taxAmount,
+            total: this.round2(subtotal - discountAmount + taxAmount),
+            items: {
+              create: lines.map((l) => ({
+                productId: l.productId,
+                description: l.description,
+                locationId: l.locationId,
+                quantity: l.quantity,
+                unitPrice: l.unitPrice,
+                unit: l.unit,
+                lineTotal: l.lineTotal,
+                discountType: l.discountType,
+                discountValue: l.discountValue,
+                discountAmount: l.discountAmount,
+                netAmount: l.netAmount,
+                taxAmount: l.taxAmount,
+                total: l.total,
+                taxes: { create: l.taxes },
+              })),
+            },
+            taxes: { create: taxLines },
+          },
+          include: { items: true, taxes: true, customer: true },
+        });
         const diff = this.buildEditDiff(quotation.items, lines);
 
-await this.logActivity(tx, {
-  quotationId: quotation.id,
-  quotationNumber: quotation.quotationNumber,
-  organizationId,
-  userId,
-  eventType: SalesQuotationActivityEventType.EDITED,
-  metadata: {
-    revertedFromSent: wasSent,
-    changes: diff,
-    fields: {                                          // NEW block
-      customerPoNumber: dto.customerPoNumber,
-      quotationDate: dto.quotationDate,
-      termsAndConditions: dto.termsAndConditions,
-    },
-  } as Prisma.InputJsonValue,
-});
+        await this.logActivity(tx, {
+          quotationId: quotation.id,
+          quotationNumber: quotation.quotationNumber,
+          organizationId,
+          userId,
+          eventType: SalesQuotationActivityEventType.EDITED,
+          metadata: {
+            revertedFromSent: wasSent,
+            changes: diff,
+            fields: {
+              customerPoNumber: dto.customerPoNumber,
+              quotationDate: dto.quotationDate,
+              termsAndConditions: dto.termsAndConditions,
+              bankAccountId: dto.bankAccountId,
+            },
+          } as Prisma.InputJsonValue,
+        });
 
         return updated;
       });
     } catch (err) {
-      // FIX: same silent-swallow issue as create() — always rethrow.
       this.tenantOwnership.handleFkViolation(err);
       throw err;
     }
@@ -476,11 +488,6 @@ await this.logActivity(tx, {
         return updated;
       });
     } catch (err) {
-      // FIX: quotation-number race — two concurrent send() calls can read
-      // the same `count` before either commits. Translate the resulting
-      // P2002 into a friendly, retryable error instead of an unhandled
-      // Prisma exception (mirrors the same backstop used elsewhere for
-      // quotation -> sales order conversion races).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestException(
           'Quotation number assignment conflicted with a concurrent send — please retry',
@@ -506,9 +513,6 @@ await this.logActivity(tx, {
     );
   }
 
-  // Cancel is your company withdrawing the quote; reject is the customer's
-  // call. Allowed from SENT or ACCEPTED — not DRAFT (that's discardDraft's
-  // job) and not CONVERTED (locked once it became another document).
   async cancel(organizationId: string, id: string, userId: string, reason: string) {
     if (!reason?.trim()) {
       throw new BadRequestException('A reason is required to cancel a quotation');
@@ -553,8 +557,6 @@ await this.logActivity(tx, {
   }
 
   // ---- conversion ---------------------------------------------------------
-  // Split by target type for type safety at the call site — no string-typed
-  // "documentType" param that could be passed inconsistently with the id.
 
   async markConvertedToInvoice(
     organizationId: string,
@@ -569,9 +571,6 @@ await this.logActivity(tx, {
     );
   }
 
-  // No SalesOrder model exists yet — this exists so future SO-conversion
-  // code has a typed method to call rather than another signature change
-  // later. Delete if SO conversion ends up working differently.
   async markConvertedToSalesOrder(
     organizationId: string,
     id: string,
@@ -612,9 +611,6 @@ await this.logActivity(tx, {
     return updated;
   }
 
-  // Called by InvoiceService when a linked invoice is voided or discarded,
-  // to flip CONVERTED back to ACCEPTED. Logged as ACCEPTED with metadata
-  // distinguishing it from a normal accept() — not a 9th event type.
   async reopenIfConverted(
     organizationId: string,
     id: string,
@@ -671,10 +667,6 @@ await this.logActivity(tx, {
       await tx.salesQuotationItem.deleteMany({ where: { salesQuotationId: quotation.id } });
       await tx.salesQuotationTax.deleteMany({ where: { salesQuotationId: quotation.id } });
 
-      // Log before delete. quotationId is SetNull on delete, and
-      // quotationNumber is snapshotted, so this row survives the parent's
-      // deletion — but it still needs to be created while the FK target
-      // exists.
       await this.logActivity(tx, {
         quotationId: quotation.id,
         quotationNumber: quotation.quotationNumber,
@@ -784,11 +776,12 @@ await this.logActivity(tx, {
       status: quotation.status,
       format: quotation.format,
       discount: toNumber(quotation.discount),
-      quotationDate: quotation.quotationDate,               // NEW
-      termsAndConditions: quotation.termsAndConditions,      // NEW
-      bankName: quotation.organization.bankName,                   // NEW
-      bankAccountNumber: quotation.organization.bankAccountNumber, // NEW
-      bankAccountName: quotation.organization.bankAccountName,     // NEW
+      quotationDate: quotation.quotationDate,
+      termsAndConditions: quotation.termsAndConditions,
+      // Snapshotted on the quotation itself now.
+      bankName: quotation.bankName,
+      bankAccountNumber: quotation.bankAccountNumber,
+      bankAccountName: quotation.bankAccountName,
 
       businessName: quotation.organization.name,
       businessLegalName: quotation.organization.legalName,
@@ -825,9 +818,9 @@ await this.logActivity(tx, {
         productName: item.product?.name ?? item.description ?? '',
         sku: item.product?.sku ?? null,
         unit: item.unit,
-        itemDiscount: toNumber(item.discountAmount), // NEW
-        itemTotal: toNumber(item.netAmount), // NEW — matches Invoice's convention: pre-tax, post-discount
-        itemTaxAmount: toNumber(item.taxAmount), // NEW
+        itemDiscount: toNumber(item.discountAmount),
+        itemTotal: toNumber(item.netAmount),
+        itemTaxAmount: toNumber(item.taxAmount),
 
         quantity: toNumber(item.quantity),
         unitPrice: toNumber(item.unitPrice),
@@ -842,7 +835,6 @@ await this.logActivity(tx, {
     formatOverride?: string,
   ): Promise<Buffer> {
     try {
-      // confirms tenant ownership before a token is ever minted
       const printView = await this.getPrintView(organizationId, id);
       const format = formatOverride ?? printView.format;
 
@@ -878,7 +870,6 @@ await this.logActivity(tx, {
       throw e;
     }
   }
-  // unchanged: sign() usage in renderPdf() stays as-is
 
   verifyPrintToken(token: string, quotationId: string) {
     return this.printTokenService.verifyDocumentToken(token, 'quotation', quotationId);

@@ -59,6 +59,7 @@ model Customer {
   vehicles       Vehicle[]
 
   @@unique([id, organizationId])
+  @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
   @@index([organizationId])
   @@index([organizationId, name])
 }
@@ -67,6 +68,7 @@ model Vehicle {
   id             String            @id @default(cuid())
   customerId     String
   plateNumber    String
+  plateNormalized String           // FIX — uppercase, separator-stripped form of plateNumber (e.g. "BP1234XX"), computed at write time by normalizePlate(); used only for format-agnostic lookup matching, never displayed
   vehicleModel   String
   vin            String?
   salesOrders SalesOrder[]
@@ -82,8 +84,10 @@ model Vehicle {
 
   @@unique([id, organizationId])
   @@unique([organizationId, customerId, plateNumber])
+  @@unique([organizationId, vin]) // FIX — VIN should identify one vehicle per org; nullable, so multiple vehicles with no VIN on file are still fine
   @@index([organizationId])
   @@index([customerId])
+  @@index([organizationId, plateNormalized]) // FIX — supports vehicle-lookup search()/findByExactPlate()
 }
 
 model Organization {
@@ -94,9 +98,8 @@ model Organization {
   createdAt              DateTime                @default(now())
   fulfillmentMode        FulfillmentMode         @default(PICK_PACK_SHIP)
   posPricingEnabled      Boolean                 @default(false)
-  bankAccountName        String?
-  bankAccountNumber      String?
-  bankName               String?
+  documentSequences DocumentSequence[]
+
   legalName              String?
   logoUrl                String?
     purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
@@ -131,6 +134,7 @@ suppliers Supplier[]
   users                  User[]
   vehicles               Vehicle[]
   vehicleReminders       VehicleReminder[]
+  bankAccounts           OrganizationBankAccount[]
 }
 
 model User {
@@ -213,7 +217,33 @@ model Supplier {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  // NEW — Accurate GDB import support
+  externalId     String?  // Accurate PERSONDATA.ID (PO.VENDORID) — stable match key, avoids name-collision issues
+
   @@index([organizationId, name])
+  @@unique([organizationId, npwp])
+  @@unique([organizationId, externalId]) // NEW
+}
+
+enum DocumentType {
+  INVOICE
+  SALES_QUOTATION
+  SALES_ORDER
+  DELIVERY_ORDER
+  PURCHASE_ORDER
+}
+
+model DocumentSequence {
+  id             String       @id @default(cuid())
+  organizationId String
+  documentType   DocumentType
+  prefix         String
+  lastNumber     Int
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, documentType])
 }
 
 model Category {
@@ -328,7 +358,7 @@ model Event {
   organizationId String
   userId         String?
   invoiceId      String?
-  salesOrderId   String?      // mirrors invoiceId; lets SO-driven stock movements be
+  salesOrderId String? 
                                // queried/joined the same way invoice-driven ones already are,
                                // instead of being buried inside `metadata`.
   fromLocation   Location?    @relation("FromLocation", fields: [fromLocationId], references: [id])
@@ -491,10 +521,10 @@ model SalesQuotation {
   sentAt DateTime?
   activityEvents SalesQuotationActivityEvent[]
   format QuotationFormat @default(A4)
-  quotationDate DateTime? @db.Date // NEW
+  quotationDate DateTime? @db.Date
   customerId   String?
-  customerName String? // free-text fallback, same convention as Invoice.customerName
-  customerPoNumber String? // NEW — customer's own reference/PO number
+  customerName String?
+  customerPoNumber String?
 
   subtotal  Decimal @default(0) @db.Decimal(12, 2)
   discount  Decimal @default(0) @db.Decimal(12, 2)
@@ -505,7 +535,14 @@ model SalesQuotation {
   createdAt          DateTime  @default(now())
   userId             String?
 termsAndConditions String?
-  notes              String?   // NEW
+  notes              String?
+
+  // NEW — same bank-account snapshot as Invoice, above.
+  bankAccountId     String?
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountName   String?
+  bankAccount       OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
   organization Organization         @relation(fields: [organizationId], references: [id])
   customer     Customer?            @relation(fields: [customerId, organizationId], references: [id, organizationId])
@@ -513,7 +550,7 @@ termsAndConditions String?
   user         User?                @relation(fields: [userId], references: [id])
   items        SalesQuotationItem[]
   taxes        SalesQuotationTax[]
-  salesOrders  SalesOrder[] // one quotation can spawn more than one SO attempt (re-quote, re-convert)
+  salesOrders  SalesOrder[]
 
   @@unique([organizationId, quotationNumber])
 }
@@ -767,19 +804,36 @@ enum DiscountType {
   FIXED
   PERCENTAGE
 }
+
+model OrganizationBankAccount {
+  id             String       @id @default(uuid())
+  organizationId String
+  bankName       String
+  accountNumber  String
+  accountName    String
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  archivedAt     DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoices        Invoice[]
+  salesQuotations SalesQuotation[]
+
+  @@index([organizationId])
+  @@unique([organizationId, bankName, accountNumber])
+}
 model Invoice {
   id             String                 @id @default(uuid())
   invoiceNumber  String?
   organizationId String
-    deliveryOrders DeliveryOrder[]    // NEW reverse relation
+    deliveryOrders DeliveryOrder[]
 
   locationId     String?
   format         InvoiceFormat
   status         InvoiceStatus          @default(DRAFT)
   customerName   String?
   customerPoNumber String?
-  subtotal       Decimal                @default(0) @db.Decimal(12, 2) // sum of item.lineTotal (gross), unchanged
-  discount       Decimal                @default(0) @db.Decimal(12, 2) // CHANGED MEANING — now always derived as sum(item.discountAmount), never independently settable
+  subtotal       Decimal                @default(0) @db.Decimal(12, 2)
+  discount       Decimal                @default(0) @db.Decimal(12, 2)
   total          Decimal                @default(0) @db.Decimal(12, 2)
   userId         String?
   createdAt      DateTime               @default(now())
@@ -790,9 +844,18 @@ model Invoice {
   paymentStatus  PaymentStatus          @default(UNPAID)
   paymentTerms   String?
   dueDate        DateTime?
-  taxAmount      Decimal                @default(0) @db.Decimal(12, 2) // now sum of item taxAmount computed on netAmount
+  taxAmount      Decimal                @default(0) @db.Decimal(12, 2)
   vehicleId      String?
-  salesOrderId   String?  // NEW — enforces one-to-one at the DB level, closing the race window the app-level guard alone can't
+  salesOrderId   String?  
+
+  // NEW — bank account snapshot, same rationale as customerName /
+  // DeliveryOrderItem.productName: a printed document shouldn't
+  // silently change if the account is edited or archived later.
+  bankAccountId     String?
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountName   String?
+  bankAccount       OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
   notes          String?
   events         Event[]
@@ -812,13 +875,6 @@ model Invoice {
   odometer      Int?
   nextServiceKm Int?
 
-  // DEPRECATED — document-level discount. No longer written by any
-  // service path; per-item discount (InvoiceItem.discountType/Value) is
-  // now the only discount mechanism. Left in place (nullable, unused
-  // going forward) so invoices created before this change keep their
-  // historical values instead of being silently nulled out by a
-  // migration. Safe to drop in a later cleanup migration once you're
-  // confident nothing still reads them.
   discountType  DiscountType?
   discountValue Decimal?
 
@@ -862,9 +918,16 @@ model PurchaseOrder {
   supplier        Supplier?            @relation(fields: [supplierId], references: [id])
   taxRate         OrganizationTaxRate? @relation(fields: [taxRateId], references: [id])
   location        Location?            @relation(fields: [locationId], references: [id])
-activityEvents  PurchaseOrderActivityEvent[]
+  activityEvents  PurchaseOrderActivityEvent[]
+
+  // NEW — Accurate GDB import support
+  externalId      String?             // Accurate PO.POID — stable idempotency key, independent of poNumber
+  orderDate       DateTime?           @db.Date // Accurate PODATE
+
   @@unique([organizationId, poNumber])
+  @@unique([organizationId, externalId]) // NEW
 }
+
 model PurchaseOrderItem {
   id              String  @id @default(uuid())
   purchaseOrderId String
@@ -872,13 +935,24 @@ model PurchaseOrderItem {
   quantity        Decimal @db.Decimal(12, 2)
   unitCost        Decimal @db.Decimal(12, 2)
   lineTotal       Decimal @db.Decimal(12, 2)
-  description String?
-goodsReceiptItems GoodsReceiptItem[]
-  // receivedQuantity Decimal @default(0) @db.Decimal(12, 2) — same cached-aggregate
-  // pattern as SalesOrderItem.deliveredQuantity once GoodsReceiptItem exists.
+  description     String?
+  goodsReceiptItems GoodsReceiptItem[]
+
+  // REMOVED — dead field, never read by GoodsReceiptService. Superseded by
+  // importedReceivedQuantity below, which the service actually consumes.
+  // receivedQuantity Decimal @default(0) @db.Decimal(12, 2)
+
+  // NEW — Accurate GDB import support
+  unit                      String?              // Accurate PODET.ITEMUNIT
+  unitRatio                 Decimal?  @db.Decimal(12, 4) // Accurate PODET.UNITRATIO
+  discountPercentage        Decimal?  @db.Decimal(5, 2)  // Accurate PODET.ITEMDISCPC (also applied into lineTotal at import time)
+  importedReceivedQuantity  Decimal   @default(0) @db.Decimal(12, 2) // Accurate PODET.QTYRECV — historical only, no real GoodsReceipt behind it; folded into GoodsReceiptService.receivedQuantitiesByPoItem
+  externalSeq               Int?      // Accurate PODET.SEQ — stable per-line key within one PO, for idempotent re-import
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product       Product?      @relation(fields: [productId], references: [id])
+
+  @@unique([purchaseOrderId, externalSeq]) // NEW — nullable externalSeq is fine, Postgres allows many NULLs in a unique index
 }
 
 model PurchaseOrderActivityEvent {
@@ -921,6 +995,7 @@ model GoodsReceipt {
   createdAt       DateTime @default(now())
 
   @@index([organizationId, purchaseOrderId])
+  @@unique([organizationId, receiptNumber]) // FIX — matches the @@unique([organizationId, xNumber]) pattern every other document number follows; comment already claimed DocumentNumberingService assigns these, so they should never collide
 }
 
 model GoodsReceiptItem {

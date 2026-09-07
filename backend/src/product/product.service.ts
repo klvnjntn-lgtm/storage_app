@@ -292,20 +292,98 @@ async create(
     }));
   }
 
-  async updateCategory(organizationId: string, id: string, categoryId: string) {
-    await this.assertProductOwnership(organizationId, id);
+async update(
+  organizationId: string,
+  id: string,
+  data: {
+    name?: string;
+    sku?: string;
+    oem?: string;
+    category?: string;
+    brand?: string;
+    barcode?: string;
+    sellingPrice?: number;
+    costPrice?: number;
+  },
+  tx: Tx = this.prisma,
+) {
+  await this.assertProductOwnership(organizationId, id);
 
-    const category = await this.prisma.category.findFirst({
-      where: { id: categoryId, organizationId },
-    });
-    if (!category) throw new BadRequestException('Category not found');
+  const updateData: Prisma.ProductUpdateInput = {};
 
-    return this.prisma.product.update({
-      where: { id },
-      data: { categoryId },
-    });
+  if (data.name !== undefined) {
+    const name = data.name.trim();
+    if (!name) throw new BadRequestException('Product name is required');
+    if (name.length > 255) throw new BadRequestException('Name exceeds 255 characters');
+    updateData.name = name;
   }
 
+  if (data.sku !== undefined) {
+    const sku = data.sku.trim();
+    if (!sku) throw new BadRequestException('SKU is required');
+    if (sku.length > 100) throw new BadRequestException('SKU exceeds 100 characters');
+    updateData.sku = sku;
+  }
+
+  if (data.oem !== undefined) {
+    const oem = data.oem.trim();
+    if (oem.length > 100) throw new BadRequestException('OEM exceeds 100 characters');
+    updateData.oem = oem || null;
+  }
+
+  if (data.barcode !== undefined) {
+    const barcode = data.barcode.trim();
+    if (barcode.length > 100) throw new BadRequestException('Barcode exceeds 100 characters');
+    updateData.barcode = barcode || null;
+  }
+
+  if (data.sellingPrice !== undefined) {
+    if (data.sellingPrice != null && data.sellingPrice < 0) {
+      throw new BadRequestException('Selling price cannot be negative');
+    }
+    updateData.sellingPrice = data.sellingPrice;
+  }
+
+  if (data.costPrice !== undefined) {
+    if (data.costPrice != null && data.costPrice < 0) {
+      throw new BadRequestException('Cost price cannot be negative');
+    }
+    updateData.costPrice = data.costPrice;
+  }
+
+  if (data.category !== undefined) {
+    const categoryName = data.category.trim();
+    if (!categoryName) throw new BadRequestException('Category is required');
+    if (categoryName.length > 100) throw new BadRequestException('Category exceeds 100 characters');
+    const category = await this.findOrCreateCategory(organizationId, categoryName, tx);
+    (updateData as any).categoryId = category.id;
+  }
+
+  if (data.brand !== undefined) {
+    const brandName = data.brand.trim();
+    if (brandName) {
+      if (brandName.length > 100) throw new BadRequestException('Brand exceeds 100 characters');
+      const brand = await this.findOrCreateBrand(organizationId, brandName, tx);
+      (updateData as any).brandId = brand.id;
+    } else {
+      (updateData as any).brandId = null;
+    }
+  }
+
+  try {
+    return await tx.product.update({
+      where: { id },
+      data: updateData,
+    });
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      throw new ConflictException(
+        `A product with SKU "${data.sku ?? ''}"${data.barcode ? ` or barcode "${data.barcode}"` : ''} already exists`,
+      );
+    }
+    throw err;
+  }
+}
   async archive(organizationId: string, id: string) {
     await this.assertProductOwnership(organizationId, id);
     return this.prisma.product.update({

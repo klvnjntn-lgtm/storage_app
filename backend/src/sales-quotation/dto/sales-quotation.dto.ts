@@ -81,7 +81,9 @@ export class CreateSalesQuotationDto {
   @IsOptional()
   @IsString()
   customerName?: string;
-
+@IsOptional()
+@IsString()
+bankAccountId?: string | null;
   @IsOptional()
   @IsString()
   customerPoNumber?: string;
@@ -115,7 +117,9 @@ export class UpdateSalesQuotationDto {
   @IsOptional()
   @IsString()
   customerId?: string;
-
+@IsOptional()
+@IsString()
+bankAccountId?: string | null;
   @IsOptional()
   @IsString()
   customerName?: string;

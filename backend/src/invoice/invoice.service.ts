@@ -12,11 +12,13 @@ import { TenantOwnershipService } from '../shared/documents/tenant-ownership.ser
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { PrintTokenService } from '../common/print/print-token.service';
+import { BankAccountResolverService } from '../bank-accounts/bank-account-resolver.service';
 import {
   CreateDraftInvoiceDto,
   UpdateDraftInvoiceDto,
 } from './dto/invoice.dto';
 import {
+  DocumentType,
   EventType,
   InvoiceActivityEventType,
   InvoiceStatus,
@@ -34,8 +36,8 @@ import { SalesQuotationService } from '../sales-quotation/sales-quotation.servic
 export type InvoicePrintView = {
   id: string;
   format: string;
-  salesOrderId: string | null;        // NEW
-  deliveryOrders: { id: string; doNumber: string | null; status: string }[]; // NEW
+  salesOrderId: string | null;
+  deliveryOrders: { id: string; doNumber: string | null; status: string }[];
 
   invoiceNumber: string | null;
   status: string;
@@ -47,14 +49,17 @@ export type InvoicePrintView = {
   vehicleOdometer: number | null;
   businessAddress: string | null;
   businessPhone: string | null;
-  customerPoNumber: string | null; // NEW — optional/reference field per
-                                    // updated PO Number policy; print
-                                    // only when non-null (frontend concern)
+  customerPoNumber: string | null;
 
   businessName: string;
   businessLegalName: string | null;
   businessNpwp: string | null;
   businessLogoUrl: string | null;
+  // Now sourced from the invoice's own snapshot columns (bankAccountId +
+  // bankName/bankAccountNumber/bankAccountName), not a live join to
+  // Organization — see BankAccountResolverService. Field names on this
+  // print view are unchanged so nothing downstream (print templates)
+  // needs updating.
   bankName: string | null;
   bankAccountNumber: string | null;
   bankAccountName: string | null;
@@ -65,12 +70,6 @@ export type InvoicePrintView = {
 
   customerName: string | null;
   customerAddress: string | null;
-  // NEW — spec requires Invoice to show Billing Address distinct from
-  // Customer Address (Quotation/SO/DO only ever show customerAddress).
-  // Falls back to customerAddress when the customer has no dedicated
-  // billing address on file. Customer.billingAddress confirmed to exist
-  // on the schema (String?), so this reads it directly — no fallback-only
-  // uncertainty here anymore.
   billingAddress: string | null;
   customerPhone: string | null;
   customerNpwp: string | null;
@@ -103,10 +102,6 @@ export type InvoicePrintView = {
     unit: string | null;
 
     unitPrice: number;
-    // NEW — per-item discount, tax, and line total. Spec requires
-    // Discount/Tax/Item Total columns on the Invoice item table; these
-    // were already computed and persisted on InvoiceItem
-    // (taxAmount/total) but never left the service.
     itemDiscount: number;
     itemTaxAmount: number;
     itemTotal: number;
@@ -116,6 +111,9 @@ export type InvoicePrintView = {
 };
 
 // ---- invoiceDetailInclude ----
+// bank* fields removed from organization.select — they now live directly
+// on Invoice (bankAccountId/bankName/bankAccountNumber/bankAccountName),
+// snapshotted at create/edit time via BankAccountResolverService.
 const invoiceDetailInclude = {
   organization: {
     select: {
@@ -123,17 +121,11 @@ const invoiceDetailInclude = {
       legalName: true,
       npwp: true,
       logoUrl: true,
-      bankName: true,
       address: true,
       phone: true,
-
-      bankAccountNumber: true,
-      bankAccountName: true,
     },
   },
   location: { select: { name: true, address: true, phone: true } },
-  // billingAddress selected alongside the existing customer fields so
-  // mapInvoiceForPrint can fall back to `address` when it's unset.
   customer: true,
   vehicle: true,
   items: {
@@ -143,8 +135,7 @@ const invoiceDetailInclude = {
     },
   },
   taxes: { select: { name: true, percentage: true, amount: true } },
-    deliveryOrders: { select: { id: true, doNumber: true, status: true } }, // NEW
-
+  deliveryOrders: { select: { id: true, doNumber: true, status: true } },
 } satisfies Prisma.InvoiceInclude;
 
 @Injectable()
@@ -159,6 +150,7 @@ export class InvoiceService {
     private numbering: DocumentNumberingService,
     private pricing: LineItemPricingService,
     private quotationService: SalesQuotationService,
+    private bankAccounts: BankAccountResolverService,
   ) {}
 
   // ---- draft cart -------------------------------------------------
@@ -171,19 +163,18 @@ export class InvoiceService {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items);
-    // Discount is computed per-line inside priceLines (including the
-    // 0–100 bound), and discountAmount/taxAmount above are already the
-    // correct post-discount aggregates.
     const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // Consolidated into one call via applyOdometerReading; still
-        // fully atomic within the same transaction, so ordering relative
-        // to invoice.create doesn't matter.
         if (dto.vehicleId && dto.odometer != null) {
           await this.applyOdometerReading(tx, organizationId, dto.vehicleId, dto.odometer);
         }
+
+        // undefined (field not sent) -> org's current default account.
+        // null (field explicitly sent as null) -> no bank details.
+        // string -> that specific active account, or throws.
+        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
 
         const invoice = await tx.invoice.create({
           data: {
@@ -201,6 +192,10 @@ export class InvoiceService {
             invoiceDate,
             dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
             status: InvoiceStatus.DRAFT,
+            bankAccountId: bank.bankAccountId,
+            bankName: bank.bankName,
+            bankAccountNumber: bank.bankAccountNumber,
+            bankAccountName: bank.bankAccountName,
             subtotal,
             discount: discountAmount,
             taxAmount,
@@ -245,9 +240,6 @@ export class InvoiceService {
         return invoice;
       });
     } catch (err) {
-      // FIX: handleFkViolation only throws on FK-constraint errors. If it
-      // returns normally for anything else, this must not silently
-      // resolve to `undefined` — always rethrow.
       this.tenantOwnership.handleFkViolation(err);
       throw err;
     }
@@ -262,18 +254,22 @@ export class InvoiceService {
     await this.tenantOwnership.validate(organizationId, dto);
 
     if (!dto.items) {
-      // FIX: this branch previously contained a full copy of the
-      // items-repricing logic and called `this.pricing.priceLines(...,
-      // dto.items!, tx)` — but dto.items is falsy inside this `if`, so
-      // that call would throw (or behave incorrectly) on every
-      // header-only update. Restored to what the branch name promises:
-      // update header fields only, touch nothing pricing-related.
       try {
         return await this.prisma.$transaction(async (tx) => {
           const resolvedVehicleId = dto.vehicleId ?? invoice.vehicleId;
           if (resolvedVehicleId && dto.odometer != null) {
             await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
           }
+
+          // Only re-resolve if the DTO actually touched bankAccountId —
+          // same "only write what was sent" convention as every other
+          // field in this branch. `null` here means "don't touch it",
+          // distinct from BankAccountResolverService's own null sentinel
+          // ("clear the selection"), which only applies when the DTO did
+          // send bankAccountId.
+          const bank = dto.bankAccountId !== undefined
+            ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+            : null;
 
           return tx.invoice.update({
             where: { id: invoice.id },
@@ -291,8 +287,12 @@ export class InvoiceService {
               dueDate: dto.dueDate !== undefined
                 ? (dto.dueDate ? new Date(dto.dueDate) : null)
                 : invoice.dueDate,
-              // NO subtotal/discount/taxAmount/total/items/taxes here —
-              // nothing priced in this branch, items are untouched.
+              ...(bank && {
+                bankAccountId: bank.bankAccountId,
+                bankName: bank.bankName,
+                bankAccountNumber: bank.bankAccountNumber,
+                bankAccountName: bank.bankAccountName,
+              }),
             },
             include: {
               items: { include: { product: true, location: true, taxes: true } },
@@ -316,6 +316,10 @@ export class InvoiceService {
         if (resolvedVehicleId && dto.odometer != null) {
           await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
         }
+
+        const bank = dto.bankAccountId !== undefined
+          ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+          : null;
 
         const existingItemIds = (
           await tx.invoiceItem.findMany({
@@ -347,6 +351,12 @@ export class InvoiceService {
             dueDate: dto.dueDate !== undefined
               ? (dto.dueDate ? new Date(dto.dueDate) : null)
               : invoice.dueDate,
+            ...(bank && {
+              bankAccountId: bank.bankAccountId,
+              bankName: bank.bankName,
+              bankAccountNumber: bank.bankAccountNumber,
+              bankAccountName: bank.bankAccountName,
+            }),
             subtotal,
             discount: discountAmount,
             taxAmount,
@@ -386,105 +396,96 @@ export class InvoiceService {
   }
 
   // ---- print / issue ------------------------------------------------
-async issue(organizationId: string, invoiceId: string): Promise<InvoicePrintView & { sessionId: string | null }> {
-  const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
-  if (invoice.items.length === 0) {
-    throw new BadRequestException('Cannot print an empty invoice');
-  }
-  if (!invoice.userId) {
-    throw new BadRequestException('Invoice has no associated user');
-  }
-
-  const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
-  const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
-
-  // Under WAREHOUSE_OPS, exactly one workflow owns physical stock
-  // movement for a sales-order-originated invoice: delivery
-  // (DeliveryOrder.ship()), not invoicing. createDraftFromSalesOrder()
-  // only ever invoices already-delivered quantities in that mode, so
-  // stock for these items was already decremented when they shipped —
-  // creating a FULFILLMENT session here would pick and decrement the
-  // same items a second time. Direct invoices (no salesOrderId) have no
-  // delivery workflow of their own, so they keep using the session/PICK
-  // path as before.
-  const ownedByDeliveryWorkflow = hasWarehouseOps && !!invoice.salesOrderId;
-
-  if (!hasWarehouseOps) {
-    const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
-    if (missingLocation) {
-      throw new BadRequestException(
-        `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
-      );
+  async issue(organizationId: string, invoiceId: string): Promise<InvoicePrintView & { sessionId: string | null }> {
+    const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
+    if (invoice.items.length === 0) {
+      throw new BadRequestException('Cannot print an empty invoice');
     }
-  }
+    if (!invoice.userId) {
+      throw new BadRequestException('Invoice has no associated user');
+    }
 
-  try {
-    return await this.prisma.$transaction(async (tx) => {
-      const claim = await tx.invoice.updateMany({
-        where: { id: invoice.id, organizationId, status: InvoiceStatus.DRAFT },
-        data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() },
-      });
-      if (claim.count === 0) {
-        throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
+    const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
+    const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+
+    const ownedByDeliveryWorkflow = hasWarehouseOps && !!invoice.salesOrderId;
+
+    if (!hasWarehouseOps) {
+      const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
+      if (missingLocation) {
+        throw new BadRequestException(
+          `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
+        );
       }
+    }
 
-      if (!hasWarehouseOps) {
-        for (const item of invoice.items) {
-          if (!item.productId) continue;
-          await this.stockService.decrease(
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const claim = await tx.invoice.updateMany({
+          where: { id: invoice.id, organizationId, status: InvoiceStatus.DRAFT },
+          data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() },
+        });
+        if (claim.count === 0) {
+          throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
+        }
+
+        if (!hasWarehouseOps) {
+          for (const item of invoice.items) {
+            if (!item.productId) continue;
+            await this.stockService.decrease(
+              organizationId,
+              item.productId,
+              item.locationId as string,
+              Number(item.quantity),
+              invoice.userId!,
+              { type: EventType.SALE, invoiceId: invoice.id },
+              tx,
+            );
+          }
+        }
+
+        const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
+        const invoiceDate = invoice.invoiceDate ?? new Date();
+
+        const updated = await tx.invoice.update({
+          where: { id: invoice.id },
+          data: { invoiceDate, invoiceNumber },
+          include: invoiceDetailInclude,
+        });
+
+        await tx.invoiceActivityEvent.create({
+          data: {
+            invoiceId: invoice.id,
             organizationId,
-            item.productId,
-            item.locationId as string,
-            Number(item.quantity),
-            invoice.userId!,
-            { type: EventType.SALE, invoiceId: invoice.id },
+            userId: invoice.userId!,
+            eventType: InvoiceActivityEventType.ISSUED,
+          },
+        });
+
+        let sessionId: string | null = null;
+        if (hasWarehouseOps && !ownedByDeliveryWorkflow) {
+          const session = await this.sessionsService.create(
+            organizationId,
+            SessionType.FULFILLMENT,
+            updated.id,
             tx,
           );
+          sessionId = session.id;
         }
-      }
 
-      const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
-      const invoiceDate = invoice.invoiceDate ?? new Date();
-
-      const updated = await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { invoiceDate, invoiceNumber },
-        include: invoiceDetailInclude,
+        return { ...this.mapInvoiceForPrint(updated), sessionId };
       });
-
-      await tx.invoiceActivityEvent.create({
-        data: {
-          invoiceId: invoice.id,
-          organizationId,
-          userId: invoice.userId!,
-          eventType: InvoiceActivityEventType.ISSUED,
-        },
-      });
-
-      let sessionId: string | null = null;
-      if (hasWarehouseOps && !ownedByDeliveryWorkflow) {
-        const session = await this.sessionsService.create(
-          organizationId,
-          SessionType.FULFILLMENT,
-          updated.id,
-          tx,
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestException(
+          'Invoice number assignment conflicted with a concurrent issue — please retry',
         );
-        sessionId = session.id;
       }
-
-      return { ...this.mapInvoiceForPrint(updated), sessionId };
-    });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new BadRequestException(
-        'Invoice number assignment conflicted with a concurrent issue — please retry',
-      );
+      throw err;
     }
-    throw err;
   }
-}
 
-async getRevenueReport(
+  async getRevenueReport(
     organizationId: string,
     from: Date,
     to: Date,
@@ -710,8 +711,8 @@ async getRevenueReport(
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
       format: invoice.format,
-    salesOrderId: invoice.salesOrderId, // NEW
-    deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })), // NEW
+      salesOrderId: invoice.salesOrderId,
+      deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })),
 
       vehicleId: invoice.vehicleId ?? null,
       businessAddress: invoice.organization.address,
@@ -728,9 +729,10 @@ async getRevenueReport(
       businessLegalName: invoice.organization.legalName,
       businessNpwp: invoice.organization.npwp,
       businessLogoUrl: invoice.organization.logoUrl,
-      bankName: invoice.organization.bankName,
-      bankAccountNumber: invoice.organization.bankAccountNumber,
-      bankAccountName: invoice.organization.bankAccountName,
+      // Snapshotted on the invoice itself now, not read off organization.
+      bankName: invoice.bankName,
+      bankAccountNumber: invoice.bankAccountNumber,
+      bankAccountName: invoice.bankAccountName,
 
       locationName: invoice.location?.name ?? '',
       locationAddress: invoice.location?.address ?? null,
@@ -740,9 +742,6 @@ async getRevenueReport(
 
       customerName: invoice.customer?.name ?? invoice.customerName,
       customerAddress: invoice.customer?.address ?? null,
-      // Confirmed: Customer.billingAddress exists on the schema (String?).
-      // Falls back to customer.address when the customer has no dedicated
-      // billing address on file.
       billingAddress: invoice.customer?.billingAddress ?? invoice.customer?.address ?? null,
       customerPhone: invoice.customer?.phone ?? null,
       customerNpwp: invoice.customer?.npwp ?? null,
@@ -751,12 +750,6 @@ async getRevenueReport(
       discount: toNumber(invoice.discount),
       taxAmount: toNumber(invoice.taxAmount),
       total: toNumber(invoice.total),
-      // FIX: every other Decimal field here goes through toNumber();
-      // amountPaid was returned raw, which leaks a Prisma Decimal
-      // instance into the print view instead of a plain number
-      // (getRevenueReport / getCustomerStatement both already treat
-      // amountPaid as a Decimal via Number(inv.amountPaid), confirming
-      // the type mismatch here).
       amountPaid: Number(invoice.amountPaid),
       invoiceDate: invoice.invoiceDate,
       dueDate: invoice.dueDate,
@@ -779,13 +772,6 @@ async getRevenueReport(
         unitPrice: toNumber(item.unitPrice),
         itemDiscount: toNumber(item.discountAmount),
         itemTaxAmount: toNumber(item.taxAmount),
-        // FIX (consistency): now uses item.netAmount, matching the
-        // SalesQuotation and SalesOrder convention for "itemTotal"
-        // (pre-tax, post-discount). Previously used item.total, which
-        // silently disagreed with the sibling documents for the same
-        // logical field — a shared Item Table component would have
-        // rendered a different number on Invoice than on
-        // Quotation/SalesOrder for the same underlying line.
         itemTotal: toNumber(item.netAmount),
         lineTotal: toNumber(item.lineTotal),
         locationName: item.location?.name ?? '',
@@ -793,15 +779,6 @@ async getRevenueReport(
     };
   }
 
-  // Whole method wrapped in one transaction, and the quotation reopen is
-  // passed `tx` instead of running standalone. Previously the reopen ran
-  // ahead of three non-transactional deletes — if any delete failed
-  // partway, the quotation would already be back at ACCEPTED while the
-  // draft invoice (or orphaned items) still existed.
-  //
-  // NOTE: signature changed — now requires `userId` (reopenIfConverted
-  // needs it to log the ACCEPTED activity event). Update the controller
-  // call site to pass the authenticated user's id.
   async discardDraft(organizationId: string, id: string, userId: string) {
     const invoice = await this.getDraftOrThrow(organizationId, id);
 
@@ -853,7 +830,31 @@ async getRevenueReport(
     return invoice;
   }
 
-  private async nextInvoiceNumber(tx: any, organizationId: string) {
+  // -------------------------------------------------------------------
+  // Invoice numbering.
+  //
+  // Organizations that came through the Accurate GDB importer have a
+  // DocumentSequence row (organizationId, INVOICE) seeded with the
+  // detected prefix/highest-number from their imported invoices (e.g.
+  // "ATL - " / 59886) — see GdbImportService.importInvoices. For those
+  // orgs, numbering.nextForOrganization() atomically increments that row
+  // and the new invoice continues the customer's original numbering
+  // ("ATL - 59887", "ATL - 59888", ...).
+  //
+  // Organizations with no such row (never imported, or a fresh org) fall
+  // straight through to the original year-scoped, count-based numbering
+  // below — completely unchanged from before. This intentionally does NOT
+  // migrate every org onto DocumentSequence; doing so would silently drop
+  // the yearly reset ("INV-2026-0001") that this fallback still provides.
+  // -------------------------------------------------------------------
+  private async nextInvoiceNumber(tx: Prisma.TransactionClient, organizationId: string) {
+    const fromImportedSequence = await this.numbering.nextForOrganization(
+      tx,
+      organizationId,
+      DocumentType.INVOICE,
+    );
+    if (fromImportedSequence) return fromImportedSequence;
+
     const year = new Date().getFullYear();
     const count = await tx.invoice.count({
       where: {
@@ -902,20 +903,38 @@ async getRevenueReport(
     });
     if (!customer) throw new NotFoundException('Customer not found');
 
-    const organization = await this.prisma.organization.findUniqueOrThrow({
+    // A statement isn't a single printed document tied to one invoice —
+    // it's a live summary, so it resolves to the org's CURRENT default
+    // bank account rather than any one invoice's snapshot (invoices in
+    // range may each have a different bankAccountId).
+    const orgRaw = await this.prisma.organization.findUniqueOrThrow({
       where: { id: organizationId },
       select: {
         name: true,
         legalName: true,
         npwp: true,
         logoUrl: true,
-        bankName: true,
-        bankAccountNumber: true,
-        bankAccountName: true,
         address: true,
         phone: true,
+        bankAccounts: {
+          where: { isDefault: true, archivedAt: null },
+          take: 1,
+          select: { bankName: true, accountNumber: true, accountName: true },
+        },
       },
     });
+    const defaultBank = orgRaw.bankAccounts[0];
+    const organization = {
+      name: orgRaw.name,
+      legalName: orgRaw.legalName,
+      npwp: orgRaw.npwp,
+      logoUrl: orgRaw.logoUrl,
+      address: orgRaw.address,
+      phone: orgRaw.phone,
+      bankName: defaultBank?.bankName ?? null,
+      bankAccountNumber: defaultBank?.accountNumber ?? null,
+      bankAccountName: defaultBank?.accountName ?? null,
+    };
 
     const vehicleFilter =
       vehicleIds && vehicleIds.length > 0 ? { vehicleId: { in: vehicleIds } } : {};
@@ -1037,13 +1056,6 @@ async getRevenueReport(
       );
     }
 
-    // Computed once, outside the transaction — this is the ONLY
-    // oldQtyByKey. FIX: a second `const oldQtyByKey = new Map()` used to
-    // be declared again inside the transaction below, shadowing this one
-    // with an empty map. That made every stock delta compute against 0,
-    // so every edit re-decreased the FULL new quantity for every line
-    // instead of just the delta — silently corrupting stock on every
-    // issued-invoice edit. Do not redeclare this inside the transaction.
     const oldQtyByKey = new Map<string, number>();
     for (const item of invoice.items) {
       if (!item.productId || !item.locationId) continue;
@@ -1056,13 +1068,13 @@ async getRevenueReport(
         await this.pricing.priceLines(organizationId, dto.items, tx);
       const newTotal = this.round2(subtotal - discountAmount + taxAmount);
 
-      // Odometer handling, consistent with createDraft/updateDraft.
-      // No dto.vehicleId exists on this DTO (the vehicle isn't
-      // reassignable during an issued-invoice edit), so the vehicle is
-      // always the invoice's existing one.
       if (invoice.vehicleId && dto.odometer != null) {
         await this.applyOdometerReading(tx, organizationId, invoice.vehicleId, dto.odometer);
       }
+
+      const bank = dto.bankAccountId !== undefined
+        ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+        : null;
 
       const newQtyByKey = new Map<string, number>();
       for (const l of lines) {
@@ -1108,6 +1120,12 @@ async getRevenueReport(
             ? (dto.dueDate ? new Date(dto.dueDate) : null)
             : invoice.dueDate,
           odometer: dto.odometer !== undefined ? dto.odometer : invoice.odometer,
+          ...(bank && {
+            bankAccountId: bank.bankAccountId,
+            bankName: bank.bankName,
+            bankAccountNumber: bank.bankAccountNumber,
+            bankAccountName: bank.bankAccountName,
+          }),
           subtotal,
           taxAmount,
           discount: discountAmount,
@@ -1167,7 +1185,7 @@ async getRevenueReport(
       description: string | null;
       quantity: number;
       unitPrice: any;
-      discountAmount: any; // Decimal from DB — coerced with Number() below, same convention as unitPrice
+      discountAmount: any;
       product?: { name: string } | null;
     }[],
     newItems: {
@@ -1175,7 +1193,7 @@ async getRevenueReport(
       description: string | null;
       quantity: number;
       unitPrice: number;
-      discountAmount: number; // already a plain number from PricedLine
+      discountAmount: number;
     }[],
     productNames: Map<string, string>,
   ): { label: string; before: string; after: string }[] {
@@ -1184,10 +1202,6 @@ async getRevenueReport(
     const labelOf = (i: { productId: string | null; description: string | null; product?: { name: string } | null }) =>
       i.productId ? (i.product?.name ?? productNames.get(i.productId) ?? 'Unknown product') : (i.description ?? 'Service');
 
-    // Formats a line's qty/price/discount into one comparable string.
-    // Discount is only appended when non-zero, so a line with no discount
-    // on either side still reads exactly as before (`× 2 @ 100000`) rather
-    // than always showing a noisy `(disc 0)` suffix.
     const describe = (i: { quantity: number; unitPrice: any; discountAmount: any }) => {
       const discount = Number(i.discountAmount ?? 0);
       const base = `× ${i.quantity} @ ${Number(i.unitPrice)}`;
@@ -1210,9 +1224,6 @@ async getRevenueReport(
       } else if (
         before.quantity !== after.quantity ||
         Number(before.unitPrice) !== Number(after.unitPrice) ||
-        // A line whose qty and price are unchanged but whose discount
-        // changed (added, removed, or its amount changed) now shows up in
-        // the diff instead of being silently skipped.
         Number(before.discountAmount ?? 0) !== Number(after.discountAmount ?? 0)
       ) {
         changes.push({
@@ -1247,13 +1258,6 @@ async getRevenueReport(
     });
   }
 
-  // The quotation reopen now runs INSIDE the transaction, after
-  // tx.invoice.update flips the invoice to VOID, and passes `tx`.
-  // Previously it ran unconditionally before the transaction even opened
-  // — if the transaction later threw (e.g. the WAREHOUSE_OPS
-  // session-has-items guard below), the quotation had already been
-  // reopened to ACCEPTED even though the invoice was never actually
-  // voided.
   async voidInvoice(
     organizationId: string,
     invoiceId: string,
@@ -1336,11 +1340,6 @@ async getRevenueReport(
   async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string) {
     const quotation = await this.prisma.salesQuotation.findFirst({
       where: { id: quotationId, organizationId },
-      // `status` added to the invoices select — the guard below now filters
-      // out VOID invoices instead of blocking on "any invoice ever existed",
-      // so a quotation can be re-invoiced after its prior invoice was voided
-      // (matching what reopenIfConverted already flips the quotation's
-      // status back to ACCEPTED for).
       include: { items: true, invoices: { select: { id: true, status: true } } },
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
@@ -1349,10 +1348,6 @@ async getRevenueReport(
     if (!invoiceableStatuses.includes(quotation.status)) {
       throw new BadRequestException('Only a sent, accepted, or converted quotation can be invoiced');
     }
-    // Was `quotation.invoices.length > 0`, which counted VOID invoices
-    // too and permanently blocked re-invoicing even after
-    // reopenIfConverted() explicitly reopened the quotation for exactly
-    // that purpose. Now only a live (non-VOID) invoice blocks conversion.
     const activeInvoices = quotation.invoices.filter((inv) => inv.status !== 'VOID');
     if (activeInvoices.length > 0) {
       throw new BadRequestException('This quotation has already been invoiced');
@@ -1382,6 +1377,14 @@ async getRevenueReport(
             customerName: quotation.customerName,
             customerId: quotation.customerId,
             quotationId: quotation.id,
+            // Carry the quotation's own bank snapshot forward as-is —
+            // it's already a point-in-time copy (same reasoning as
+            // customerName above), not re-resolved to the org's current
+            // default.
+            bankAccountId: quotation.bankAccountId,
+            bankName: quotation.bankName,
+            bankAccountNumber: quotation.bankAccountNumber,
+            bankAccountName: quotation.bankAccountName,
             invoiceDate: new Date(),
             status: 'DRAFT',
             subtotal,
@@ -1407,14 +1410,6 @@ async getRevenueReport(
         return invoice;
       });
     } catch (err) {
-      // Backstop for the race the app-level guard above can't fully
-      // close: two concurrent requests can both read activeInvoices.length
-      // === 0 before either transaction commits. The partial unique index
-      // on Invoice.quotationId is the real protection; this just turns the
-      // resulting raw Postgres unique violation into a clean error. Only
-      // one unique constraint can plausibly fire inside this transaction
-      // (invoiceNumber is still null at draft time, and multiple nulls are
-      // allowed in a unique index), so a bare code check is unambiguous here.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestException('This quotation has already been invoiced');
       }
@@ -1422,107 +1417,103 @@ async getRevenueReport(
     }
   }
 
-async createDraftFromSalesOrder(organizationId: string, userId: string, salesOrderId: string) {
-  const order = await this.prisma.salesOrder.findFirst({
-    where: { id: salesOrderId, organizationId },
-    include: { items: true, invoices: { select: { id: true } } },
-  });
-  if (!order) throw new NotFoundException('Sales order not found');
-
-  const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
-  const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
-
-  // Under WAREHOUSE_OPS, delivery exclusively owns physical stock
-  // movement, and this order can only ever be invoiced once (see the
-  // salesOrderId uniqueness guard below) — so a partially-delivered
-  // order isn't invoiceable yet, or the remaining quantity could never
-  // be billed once it eventually ships. Only CONFIRMED (nothing to
-  // invoice) and FULLY_DELIVERED (everything shipped, safe to invoice
-  // once, in full) are meaningfully different here; PARTIALLY_DELIVERED
-  // is excluded on purpose, not merged into a shared allow-list.
-  //
-  // Non-WAREHOUSE_OPS has no competing delivery workflow, so all three
-  // statuses remain invoiceable at full order quantity, as before.
-  if (hasWarehouseOps) {
-    if (order.status !== 'FULLY_DELIVERED') {
-      throw new BadRequestException(
-        order.status === 'CONFIRMED' || order.status === 'PARTIALLY_DELIVERED'
-          ? 'This order must be fully delivered before it can be invoiced — create delivery orders for the remaining items first.'
-          : 'Only a fully delivered order can be invoiced directly',
-      );
-    }
-  } else {
-    if (
-      order.status !== 'CONFIRMED' &&
-      order.status !== 'PARTIALLY_DELIVERED' &&
-      order.status !== 'FULLY_DELIVERED'
-    ) {
-      throw new BadRequestException('Only a confirmed order can be invoiced directly');
-    }
-  }
-
-  if (order.invoices.length > 0) {
-    throw new BadRequestException('This sales order has already been invoiced');
-  }
-
-  const items = order.items.map((i) => ({
-    productId: i.productId ?? undefined,
-    description: i.description ?? undefined,
-    locationId: i.locationId ?? undefined,
-    quantity: Number(i.quantity),
-    unitPrice: Number(i.unitPrice),
-    discountType: i.discountType ?? undefined,
-    discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-    taxRateIds: [] as string[],
-  }));
-
-  try {
-    return await this.prisma.$transaction(async (tx) => {
-      const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-        await this.pricing.priceLines(organizationId, items, tx);
-      const invoice = await tx.invoice.create({
-        data: {
-          organizationId,
-          userId,
-          locationId: order.locationId,
-          format: 'A4',
-          customerName: order.customerName,
-          customerId: order.customerId,
-          salesOrderId: order.id,
-          invoiceDate: new Date(),
-          status: 'DRAFT',
-          subtotal,
-          discount: discountAmount,
-          taxAmount,
-          total: this.round2(subtotal - discountAmount + taxAmount),
-          items: { create: lines.map((l) => ({
-            productId: l.productId, description: l.description, locationId: l.locationId,
-            quantity: l.quantity, unitPrice: l.unitPrice, unitCost: l.unitCost,
-            lineTotal: l.lineTotal,
-            discountType: l.discountType, discountValue: l.discountValue,
-            discountAmount: l.discountAmount, netAmount: l.netAmount,
-            taxAmount: l.taxAmount, total: l.total,
-            taxes: { create: l.taxes },
-          })) },
-          taxes: { create: taxLines },
-        },
-        include: { items: true, customer: true, taxes: true },
-      });
-      return invoice;
+  async createDraftFromSalesOrder(organizationId: string, userId: string, salesOrderId: string) {
+    const order = await this.prisma.salesOrder.findFirst({
+      where: { id: salesOrderId, organizationId },
+      include: { items: true, invoices: { select: { id: true } } },
     });
-  } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2002' &&
-      (err.meta?.target as string[] | undefined)?.includes('salesOrderId')
-    ) {
+    if (!order) throw new NotFoundException('Sales order not found');
+
+    const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
+    const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+
+    if (hasWarehouseOps) {
+      if (order.status !== 'FULLY_DELIVERED') {
+        throw new BadRequestException(
+          order.status === 'CONFIRMED' || order.status === 'PARTIALLY_DELIVERED'
+            ? 'This order must be fully delivered before it can be invoiced — create delivery orders for the remaining items first.'
+            : 'Only a fully delivered order can be invoiced directly',
+        );
+      }
+    } else {
+      if (
+        order.status !== 'CONFIRMED' &&
+        order.status !== 'PARTIALLY_DELIVERED' &&
+        order.status !== 'FULLY_DELIVERED'
+      ) {
+        throw new BadRequestException('Only a confirmed order can be invoiced directly');
+      }
+    }
+
+    if (order.invoices.length > 0) {
       throw new BadRequestException('This sales order has already been invoiced');
     }
-    throw err;
-  }
-}
 
-private async applyOdometerReading(
+    const items = order.items.map((i) => ({
+      productId: i.productId ?? undefined,
+      description: i.description ?? undefined,
+      locationId: i.locationId ?? undefined,
+      quantity: Number(i.quantity),
+      unitPrice: Number(i.unitPrice),
+      discountType: i.discountType ?? undefined,
+      discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
+      taxRateIds: [] as string[],
+    }));
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
+          await this.pricing.priceLines(organizationId, items, tx);
+        // SalesOrder carries no bank snapshot of its own, so this falls
+        // back to the org's current default account.
+        const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
+        const invoice = await tx.invoice.create({
+          data: {
+            organizationId,
+            userId,
+            locationId: order.locationId,
+            format: 'A4',
+            customerName: order.customerName,
+            customerId: order.customerId,
+            salesOrderId: order.id,
+            bankAccountId: bank.bankAccountId,
+            bankName: bank.bankName,
+            bankAccountNumber: bank.bankAccountNumber,
+            bankAccountName: bank.bankAccountName,
+            invoiceDate: new Date(),
+            status: 'DRAFT',
+            subtotal,
+            discount: discountAmount,
+            taxAmount,
+            total: this.round2(subtotal - discountAmount + taxAmount),
+            items: { create: lines.map((l) => ({
+              productId: l.productId, description: l.description, locationId: l.locationId,
+              quantity: l.quantity, unitPrice: l.unitPrice, unitCost: l.unitCost,
+              lineTotal: l.lineTotal,
+              discountType: l.discountType, discountValue: l.discountValue,
+              discountAmount: l.discountAmount, netAmount: l.netAmount,
+              taxAmount: l.taxAmount, total: l.total,
+              taxes: { create: l.taxes },
+            })) },
+            taxes: { create: taxLines },
+          },
+          include: { items: true, customer: true, taxes: true },
+        });
+        return invoice;
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        (err.meta?.target as string[] | undefined)?.includes('salesOrderId')
+      ) {
+        throw new BadRequestException('This sales order has already been invoiced');
+      }
+      throw err;
+    }
+  }
+
+  private async applyOdometerReading(
     tx: Prisma.TransactionClient,
     organizationId: string,
     vehicleId: string,

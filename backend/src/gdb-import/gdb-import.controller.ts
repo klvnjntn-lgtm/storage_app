@@ -32,6 +32,16 @@ const UPLOAD_DIR = '/tmp/gdb-imports';
 // xinetd) can traverse into it, not just this Node process's own user.
 mkdirSync(UPLOAD_DIR, { recursive: true, mode: 0o777 });
 
+// NEW — was 'products_only' | 'full_invoices'. Adding a target here is the
+// only wiring step the PO importer needs on this side; the service already
+// branches on the exact string 'full_invoices_and_purchase_orders'.
+type GdbImportTarget = 'products_only' | 'full_invoices' | 'full_invoices_and_purchase_orders';
+const VALID_TARGETS: GdbImportTarget[] = [
+  'products_only',
+  'full_invoices',
+  'full_invoices_and_purchase_orders',
+];
+
 @Controller('integrations/accurate-gdb')
 export class GdbImportController {
   constructor(private readonly gdbImportService: GdbImportService) {}
@@ -79,7 +89,7 @@ return await this.gdbImportService.preview(token);
     @Req() req: AuthedRequest,
     @Body()
     body: {
-      target: 'products_only' | 'full_invoices';
+      target: GdbImportTarget;
       invoiceFormat?: InvoiceFormat;
     },
   ) {
@@ -87,8 +97,8 @@ return await this.gdbImportService.preview(token);
     if (!organizationId) {
       throw new BadRequestException('No organization found on the authenticated request');
     }
-    if (body.target !== 'products_only' && body.target !== 'full_invoices') {
-      throw new BadRequestException('target must be "products_only" or "full_invoices"');
+    if (!VALID_TARGETS.includes(body.target)) {
+      throw new BadRequestException(`target must be one of: ${VALID_TARGETS.join(', ')}`);
     }
 
     return this.gdbImportService.confirmImport(

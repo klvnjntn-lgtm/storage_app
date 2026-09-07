@@ -33,6 +33,8 @@ import { SalesOrderModule } from './sales-order/sales-order.module';
 import { DeliveryOrderModule } from './delivery-order/delivery-order.module';
 import { PurchaseOrderModule } from './purchase-order/purchase-order.module';
 import { SupplierModule } from './supplier/supplier.module';
+import { BankAccountModule } from './bank-accounts/bank-account.module';
+import { SalesSearchModule } from './sales-quotation/sales-search.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { SupplierModule } from './supplier/supplier.module';
     SupplierModule,
     StockModule,
     BrandModule,
+    SalesSearchModule,
+    BankAccountModule,
     PaymentsModule,
     SalesQuotationModule,
     SalesOrderModule,

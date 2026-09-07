@@ -24,7 +24,7 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ImportProductDto } from './dto/import-product.dto';
-
+import { UpdateProductDto } from './dto/update-product.dto';
 // Class-level guards deliberately stop at JwtAuthGuard/OrgGuard — most
 // of this controller (listing, search, barcode lookup) is core
 // infrastructure available regardless of module status, same reasoning
@@ -97,7 +97,14 @@ export class ProductController {
   archive(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.productService.archive(organizationId, id);
   }
-
+@Patch(':id')
+update(
+  @CurrentOrg() organizationId: string,
+  @Param('id') id: string,
+  @Body() body: UpdateProductDto,
+) {
+  return this.productService.update(organizationId, id, body);
+}
   @Patch(':id/restore')
   restore(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.productService.restore(organizationId, id);

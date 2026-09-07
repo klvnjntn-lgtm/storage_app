@@ -8,24 +8,12 @@ export type UpdateOrganizationSettingsInput = {
   legalName?: string;
   npwp?: string;
   logoUrl?: string;
-  bankName?: string;
   address?: string;
   phone?: string;
-  bankAccountNumber?: string;
-  bankAccountName?: string;
   taxEnabled?: boolean;
 };
 
-const STRING_FIELDS = [
-  'legalName',
-  'npwp',
-  'logoUrl',
-  'bankName',
-  'address',
-  'phone',
-  'bankAccountNumber',
-  'bankAccountName',
-] as const;
+const STRING_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone'] as const;
 
 const MAX_STRING_FIELD_LENGTH = 200;
 
@@ -42,11 +30,8 @@ export class OrganizationService {
         legalName: true,
         npwp: true,
         logoUrl: true,
-        bankName: true,
         address: true,
         phone: true,
-        bankAccountNumber: true,
-        bankAccountName: true,
         taxEnabled: true,
       },
     });
@@ -56,11 +41,8 @@ export class OrganizationService {
       legalName: org?.legalName ?? null,
       npwp: org?.npwp ?? null,
       logoUrl: org?.logoUrl ?? null,
-      bankName: org?.bankName ?? null,
       address: org?.address ?? null,
       phone: org?.phone ?? null,
-      bankAccountNumber: org?.bankAccountNumber ?? null,
-      bankAccountName: org?.bankAccountName ?? null,
       taxEnabled: org?.taxEnabled ?? false,
     };
   }
@@ -110,11 +92,8 @@ export class OrganizationService {
         ...(rest.legalName !== undefined && { legalName: rest.legalName.trim() }),
         ...(rest.npwp !== undefined && { npwp: rest.npwp.trim() }),
         ...(rest.logoUrl !== undefined && { logoUrl: rest.logoUrl.trim() }),
-        ...(rest.bankName !== undefined && { bankName: rest.bankName.trim() }),
         ...(rest.address !== undefined && { address: rest.address.trim() }),
         ...(rest.phone !== undefined && { phone: rest.phone.trim() }),
-        ...(rest.bankAccountNumber !== undefined && { bankAccountNumber: rest.bankAccountNumber.trim() }),
-        ...(rest.bankAccountName !== undefined && { bankAccountName: rest.bankAccountName.trim() }),
       },
       select: {
         fulfillmentMode: true,
@@ -122,11 +101,8 @@ export class OrganizationService {
         legalName: true,
         npwp: true,
         logoUrl: true,
-        bankName: true,
         address: true,
         phone: true,
-        bankAccountNumber: true,
-        bankAccountName: true,
         taxEnabled: true,
       },
     });

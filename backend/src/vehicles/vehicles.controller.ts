@@ -21,11 +21,47 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
-// vehicles.controller.ts — add the route (and import Query from '@nestjs/common'):
-@Get('vehicles')
-listAll(@CurrentOrg() orgId: string, @Query('q') q?: string) {
-  return this.vehiclesService.listAll(orgId, q);
-}
+  @Get('vehicles')
+  listAll(@CurrentOrg() orgId: string, @Query('q') q?: string) {
+    return this.vehiclesService.listAll(orgId, q);
+  }
+
+  // ── Vehicle Lookup (/vehicles/search) ─────────────────────────────────
+  // MUST stay declared above @Get('vehicles/:id') below — these are flat
+  // string paths, not nested under @Controller('vehicles'), so Nest/Express
+  // matches them in declaration order. If 'vehicles/:id' comes first, a
+  // request to /vehicles/search matches it with id="search" instead.
+
+  @Get('vehicles/search')
+  search(@CurrentOrg() orgId: string, @Query('q') q = '') {
+    return this.vehiclesService.search(orgId, q);
+  }
+
+  @Get('vehicles/lookup')
+  lookup(@CurrentOrg() orgId: string, @Query('q') q = '') {
+    return this.vehiclesService.findByExactPlate(orgId, q);
+  }
+
+  @Get('vehicles/:id/summary')
+  summary(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.vehiclesService.getSummary(orgId, id);
+  }
+
+  @Get('vehicles/:id/history')
+  history(
+    @CurrentOrg() orgId: string,
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.vehiclesService.getHistory(
+      orgId,
+      id,
+      page ? Number(page) : undefined,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
   @Post('customers/:customerId/vehicles')
   create(
     @CurrentOrg() orgId: string,
@@ -49,11 +85,12 @@ listAll(@CurrentOrg() orgId: string, @Query('q') q?: string) {
   remove(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.vehiclesService.remove(orgId, id);
   }
+
   @Get('customers/:customerId/vehicles')
-listByCustomer(
-  @CurrentOrg() orgId: string,
-  @Param('customerId') customerId: string,
-) {
-  return this.vehiclesService.listByCustomer(orgId, customerId);
-}
+  listByCustomer(
+    @CurrentOrg() orgId: string,
+    @Param('customerId') customerId: string,
+  ) {
+    return this.vehiclesService.listByCustomer(orgId, customerId);
+  }
 }

@@ -163,19 +163,48 @@ if (!poItem.productId) continue;
 
   // ---- helpers ------------------------------------------------
 
+  // Combines two sources of "received" quantity for a PO item:
+  //  1. Real GoodsReceiptItem rows — actual receiving events with a real
+  //     location, user, and timestamp.
+  //  2. PurchaseOrderItem.importedReceivedQuantity — a purely historical
+  //     figure carried over from an external system's QTYRECV at import
+  //     time, with NO real GoodsReceipt behind it. This is intentional:
+  //     the importer does not fabricate GoodsReceipt rows (no real
+  //     location/user/date exists for that historical receiving), so this
+  //     is the only place that number is folded back into "how much of
+  //     this PO item is effectively already received" for status and
+  //     remaining-quantity purposes. Every caller of this method
+  //     (getReceivingSummary, receive()'s pre-check and its
+  //     transaction-scoped re-check) goes through here, so they all stay
+  //     consistent automatically.
   private async receivedQuantitiesByPoItem(
     purchaseOrderId: string,
     tx: any = this.prisma,
   ): Promise<Map<string, number>> {
-    const rows = await tx.goodsReceiptItem.groupBy({
-      by: ['purchaseOrderItemId'],
-      where: { goodsReceipt: { purchaseOrderId } },
-      _sum: { quantity: true },
-    });
+    const [receiptRows, items] = await Promise.all([
+      tx.goodsReceiptItem.groupBy({
+        by: ['purchaseOrderItemId'],
+        where: { goodsReceipt: { purchaseOrderId } },
+        _sum: { quantity: true },
+      }),
+      tx.purchaseOrderItem.findMany({
+        where: { purchaseOrderId },
+        select: { id: true, importedReceivedQuantity: true },
+      }),
+    ]);
+
     const map = new Map<string, number>();
-    for (const r of rows as any[]) {
-      map.set(r.purchaseOrderItemId, r._sum.quantity ?? 0);
+
+    for (const item of items as any[]) {
+      const imported = Number(item.importedReceivedQuantity ?? 0);
+      if (imported > 0) map.set(item.id, imported);
     }
+
+    for (const r of receiptRows as any[]) {
+      const existing = map.get(r.purchaseOrderItemId) ?? 0;
+      map.set(r.purchaseOrderItemId, existing + (r._sum.quantity ?? 0));
+    }
+
     return map;
   }
 
