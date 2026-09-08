@@ -29,7 +29,7 @@ services:
 
     volumes:
       - firebird_data:/firebird/data
-      - /home/kelvi/warehouse-layer/gdb-imports:/tmp/gdb-imports
+      - ./gdb-imports:/tmp/gdb-imports
 
 
   backend:

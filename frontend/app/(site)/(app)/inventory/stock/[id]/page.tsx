@@ -43,8 +43,6 @@ type Product = {
 
 type OrgLocation = { id: string; name: string };
 
-const EVENTS_PAGE_SIZE = 10;
-
 export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -86,15 +84,16 @@ const eventColor = (type: string) => {
   // the full list in one shot, so we slice it here rather than round-trip
   // to the server for each page). ---
   const [eventsPage, setEventsPage] = useState(1);
-  const eventsTotalPages = Math.max(1, Math.ceil(events.length / EVENTS_PAGE_SIZE));
+  const [eventsPageSize, setEventsPageSize] = useState(10);
+  const eventsTotalPages = Math.max(1, Math.ceil(events.length / eventsPageSize));
 
   useEffect(() => {
     if (eventsPage > eventsTotalPages) setEventsPage(eventsTotalPages);
   }, [eventsPage, eventsTotalPages]);
 
   const paginatedEvents = useMemo(
-    () => events.slice((eventsPage - 1) * EVENTS_PAGE_SIZE, eventsPage * EVENTS_PAGE_SIZE),
-    [events, eventsPage],
+    () => events.slice((eventsPage - 1) * eventsPageSize, eventsPage * eventsPageSize),
+    [events, eventsPage, eventsPageSize],
   );
 
   // --- Module gating for the location picker ---
@@ -406,33 +405,19 @@ const eventColor = (type: string) => {
             )}
           </div>
 
-          {/* Pagination — same manual prev/next treatment used on
-              /inventory/stock and the vehicle history list. */}
+          {/* Pagination */}
           {events.length > 0 && (
-            <div className="flex items-center justify-between mt-3 text-sm">
-              <span className="text-gray-500">
-                Showing {(eventsPage - 1) * EVENTS_PAGE_SIZE + 1}–
-                {Math.min(eventsPage * EVENTS_PAGE_SIZE, events.length)} of {events.length}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setEventsPage((p) => Math.max(1, p - 1))}
-                  disabled={eventsPage === 1}
-                  className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
-                >
-                  Prev
-                </button>
-                <span className="text-gray-600">
-                  Page {eventsPage} of {eventsTotalPages}
-                </span>
-                <button
-                  onClick={() => setEventsPage((p) => Math.min(eventsTotalPages, p + 1))}
-                  disabled={eventsPage === eventsTotalPages}
-                  className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
-                >
-                  Next
-                </button>
-              </div>
+            <div className="mt-3">
+              <Pagination
+                page={eventsPage}
+                pageSize={eventsPageSize}
+                totalItems={events.length}
+                onPageChange={setEventsPage}
+                onPageSizeChange={(size) => {
+                  setEventsPageSize(size);
+                  setEventsPage(1);
+                }}
+              />
             </div>
           )}
         </section>

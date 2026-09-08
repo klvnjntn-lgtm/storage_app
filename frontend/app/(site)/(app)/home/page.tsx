@@ -174,7 +174,7 @@ export default function Home() {
             {warehouseEnabled ? (
               <button
                 onClick={() => router.push('/inventory')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-sky-500 to-blue-700 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
+                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-green-700 to-green-400 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
               >
                 <div className="flex items-start justify-between">
                   <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
@@ -213,7 +213,7 @@ export default function Home() {
             {salesEnabled ? (
               <button
                 onClick={() => router.push('/sales')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-green-400 to-yellow-500 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
+                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-red-500 to-pink-600 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
               >
                 <div className="flex items-start justify-between">
                   <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">

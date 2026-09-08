@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import Pagination from '@/app/components/Pagination';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -39,8 +40,6 @@ type RevenueReport = {
   collected: number; // cash actually collected (sum of amountPaid)
   invoices: InvoiceReportRow[];
 };
-
-const PAGE_SIZE = 20;
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -85,6 +84,7 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   async function loadReport() {
     setLoading(true);
@@ -145,16 +145,16 @@ export default function ReportsPage() {
     });
   }, [report]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   const paginatedRows = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return sortedRows.slice(start, start + PAGE_SIZE);
-  }, [sortedRows, page]);
+    const start = (page - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, page, pageSize]);
 
   return (
     <main
@@ -422,30 +422,17 @@ export default function ReportsPage() {
                 </div>
 
                 {/* Pagination */}
-                <div className="flex items-center justify-between mt-4 text-sm">
-                  <span className="text-gray-500">
-                    Showing {(page - 1) * PAGE_SIZE + 1}–
-                    {Math.min(page * PAGE_SIZE, sortedRows.length)} of {sortedRows.length}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
-                    >
-                      Prev
-                    </button>
-                    <span className="text-gray-600">
-                      Page {page} of {totalPages}
-                    </span>
-                    <button
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                      className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-50"
-                    >
-                      Next
-                    </button>
-                  </div>
+                <div className="mt-4">
+                  <Pagination
+                    page={page}
+                    pageSize={pageSize}
+                    totalItems={sortedRows.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size);
+                      setPage(1);
+                    }}
+                  />
                 </div>
               </>
             )}

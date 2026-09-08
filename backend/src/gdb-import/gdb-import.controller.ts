@@ -57,7 +57,7 @@ export class GdbImportController {
         // traversal.
         filename: (_req, _file, cb) => cb(null, `${randomUUID()}.gdb`),
       }),
-      limits: { fileSize: 500 * 1024 * 1024 }, // 500MB — adjust to your largest expected GDB
+      limits: { fileSize: 1200 * 1024 * 1024 }, // ~1.2GB — headroom above the 1GB requirement
       fileFilter: (_req, file, cb) => {
         if (!file.originalname.toLowerCase().endsWith('.gdb')) {
           return cb(new BadRequestException('File must be a .gdb file'), false);

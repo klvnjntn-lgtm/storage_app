@@ -7,6 +7,7 @@ import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Building2, Search, Plus, Pencil, Trash2, Power, PowerOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Supplier } from '@/app/components/suppliers/types';
+import Pagination from '@/app/components/Pagination';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -20,7 +21,7 @@ export default function SuppliersListPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [pageSize, setPageSize] = useState(20);
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [total, setTotal] = useState(0);
@@ -59,7 +60,7 @@ export default function SuppliersListPage() {
     const timeout = setTimeout(load, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, page]);
+  }, [search, statusFilter, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
@@ -111,7 +112,7 @@ async function toggleActive(supplier: Supplier) {
     }
   }
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
 
   return (
     <main
@@ -267,27 +268,16 @@ async function toggleActive(supplier: Supplier) {
         )}
 
         {!loading && total > 0 && (
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <span>
-              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40 hover:bg-blue-50"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-md border-2 border-gray-300 font-medium disabled:opacity-40 hover:bg-blue-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={total}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         )}
       </div>
     </main>

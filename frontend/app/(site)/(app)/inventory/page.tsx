@@ -1,4 +1,3 @@
-// app/(app)/inventory/page.tsx
 'use client';
 
 import { useRouter } from 'next/navigation';
@@ -19,41 +18,43 @@ import { apiFetch } from '@/lib/apifetch';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
+// Brighter, more saturated stops (400 -> 600) than the old 500 -> 700 —
+// same hues, punchier and less muddy against the white cards.
 const INVENTORY_ITEMS = [
   {
     title: 'Stock',
     description: 'View and manage current stock levels',
     href: '/inventory/stock',
     icon: LayoutDashboard,
-    gradient: 'from-emerald-500 to-teal-700',
+    gradient: 'from-emerald-400 to-teal-600',
   },
   {
     title: 'Products',
     description: 'Manage your product catalog',
     href: '/inventory/products',
     icon: Package,
-    gradient: 'from-rose-500 to-red-700',
+    gradient: 'from-rose-400 to-red-600',
   },
   {
     title: 'Sessions',
     description: 'Scan, receive, and move stock',
     href: '/inventory/sessions',
     icon: ClipboardList,
-    gradient: 'from-sky-500 to-blue-700',
+    gradient: 'from-sky-400 to-blue-600',
   },
   {
     title: 'Warehouse',
     description: 'Manage warehouse locations and layout',
     href: '/inventory/warehouse',
     icon: Warehouse,
-    gradient: 'from-violet-500 to-purple-700',
+    gradient: 'from-violet-400 to-purple-600',
   },
   {
     title: 'Labels',
     description: 'Print and manage product labels',
     href: '/inventory/labels',
     icon: Tag,
-    gradient: 'from-amber-500 to-orange-700',
+    gradient: 'from-amber-400 to-orange-600',
   },
 ];
 
@@ -80,22 +81,31 @@ export default function InventoryHome() {
   const warehouseEnabled = enabledModules.includes('WAREHOUSE_OPS');
 
   return (
-    <main className="min-h-screen bg-white text-black">
-      {/* Header — matches Sales / Workshop / Invoices page style */}
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-6 py-5 border-b-2 border-gray-300">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
           </button>
 
-          <div className="flex items-center gap-2">
-            <Inbox size={20} strokeWidth={2} className="text-gray-700" />
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Inbox size={18} strokeWidth={2} className="text-blue-700" />
+            </span>
             <div>
-              <h1 className="text-2xl font-bold">Inventory</h1>
+              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>Inventory</h1>
               <p className="text-xs text-gray-500">
                 Stock, products, sessions, warehouse, and labels
               </p>
@@ -111,9 +121,9 @@ export default function InventoryHome() {
         {!modulesLoaded ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : !warehouseEnabled ? (
-          <div className="flex flex-col items-center justify-center text-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 py-16 px-6">
-            <span className="rounded-lg bg-gray-200 p-3 mb-4">
-              <Lock size={22} strokeWidth={2} className="text-gray-400" />
+          <div className="flex flex-col items-center justify-center text-center rounded-xl border border-dashed border-blue-500/25 bg-blue-600/5 py-16 px-6">
+            <span className="rounded-lg bg-blue-600/10 border border-blue-600/20 p-3 mb-4">
+              <Lock size={22} strokeWidth={2} className="text-blue-700/60" />
             </span>
             <p className={`${display.className} text-lg font-bold text-gray-600`}>
               Inventory isn't enabled

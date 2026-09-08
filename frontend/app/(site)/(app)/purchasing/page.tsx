@@ -1,4 +1,3 @@
-// app/(app)/purchasing/page.tsx
 'use client';
 
 import { useRouter } from 'next/navigation';
@@ -7,20 +6,21 @@ import { ClipboardList, Building2, ArrowUpRight, ArrowLeft, Package } from 'luci
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
+// Brighter, more saturated stops (400 -> 600), matching inventory/page.tsx.
 const PURCHASING_ITEMS = [
   {
     title: 'Purchase Orders',
     description: 'Create and track orders placed with suppliers',
     href: '/purchasing/purchase-orders',
     icon: ClipboardList,
-    gradient: 'from-amber-500 to-orange-700',
+    gradient: 'from-amber-400 to-orange-600',
   },
   {
     title: 'Suppliers',
     description: 'Manage supplier contacts and details',
     href: '/purchasing/suppliers',
     icon: Building2,
-    gradient: 'from-slate-500 to-gray-700',
+    gradient: 'from-slate-400 to-gray-600',
   },
 ];
 

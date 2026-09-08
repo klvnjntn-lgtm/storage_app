@@ -1,14 +1,12 @@
 // app/(app)/workshop/vehicles/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
 import { ArrowLeft, Car, Search } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/Pagination';
-import { useSortableData } from '@/lib/hooks/useSortableData';
-import SortableTh from '@/app/components/SortableTh';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -21,13 +19,6 @@ type VehicleListItem = {
   customer: { id: string; name: string; companyName: string | null };
 };
 
-// Columns the table can be sorted by. VIN is deliberately excluded — same
-// reasoning as Customers' Address: it's an identifier people scan/match
-// against a document, not a value with a meaningful order.
-type SortKey = 'plate' | 'model' | 'customer' | 'odometer';
-
-const PAGE_SIZE_DEFAULT = 20;
-
 export default function VehiclesPage() {
   const router = useRouter();
 
@@ -36,7 +27,7 @@ export default function VehiclesPage() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [pageSize, setPageSize] = useState(20);
 
   async function load(q?: string) {
     setLoading(true);
@@ -73,30 +64,16 @@ export default function VehiclesPage() {
     setPage(1);
   }, [query]);
 
-  // The whole result set is loaded client-side (no server pagination
-  // here), so — same as Stock and Customers — sorting applies across the
-  // full list, and pagination slices the already-sorted array below.
-  const { sorted: sortedVehicles, sort, toggleSort } = useSortableData<VehicleListItem, SortKey>(
-    vehicles,
-    {
-      plate: (v) => v.plateNumber,
-      model: (v) => v.vehicleModel,
-      customer: (v) => v.customer.name,
-      odometer: (v) => v.odometer ?? -1,
-    },
-  );
-
-  const totalPages = Math.max(1, Math.ceil(sortedVehicles.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(vehicles.length / pageSize));
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const paginatedVehicles = sortedVehicles.slice((page - 1) * pageSize, page * pageSize);
-
-  function cellHighlight(key: SortKey) {
-    return sort?.key === key ? 'bg-blue-50/70' : '';
-  }
+  const paginatedVehicles = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return vehicles.slice(start, start + pageSize);
+  }, [vehicles, page, pageSize]);
 
   return (
     <main
@@ -162,40 +139,11 @@ export default function VehiclesPage() {
             <table className="w-full text-sm min-w-[720px]">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                 <tr>
-                  <SortableTh<SortKey>
-                    label="Plate"
-                    columnKey="plate"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                    className="whitespace-nowrap"
-                  />
-                  <SortableTh<SortKey>
-                    label="Car"
-                    columnKey="model"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                    className="whitespace-nowrap"
-                  />
-                  <SortableTh<SortKey>
-                    label="Customer"
-                    columnKey="customer"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                    className="whitespace-nowrap"
-                  />
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Plate</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Car</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Customer</th>
                   <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">VIN</th>
-                  <SortableTh<SortKey>
-                    label="Latest Odometer"
-                    columnKey="odometer"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                    align="right"
-                    className="whitespace-nowrap"
-                  />
+                  <th className="text-right px-4 py-3 font-semibold whitespace-nowrap">Latest Odometer</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,18 +153,14 @@ export default function VehiclesPage() {
                     onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
                     className={`border-t border-gray-300 cursor-pointer hover:bg-blue-50 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
                   >
-                    <td className={`px-4 py-3 font-medium whitespace-nowrap ${cellHighlight('plate')}`}>
-                      {v.plateNumber}
-                    </td>
-                    <td className={`px-4 py-3 text-gray-600 whitespace-nowrap ${cellHighlight('model')}`}>
-                      {v.vehicleModel}
-                    </td>
-                    <td className={`px-4 py-3 text-gray-600 whitespace-nowrap ${cellHighlight('customer')}`}>
+                    <td className="px-4 py-3 font-medium whitespace-nowrap">{v.plateNumber}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.vehicleModel}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                       {v.customer.name}
                       {v.customer.companyName ? ` · ${v.customer.companyName}` : ''}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.vin ?? '—'}</td>
-                    <td className={`px-4 py-3 text-right text-gray-600 whitespace-nowrap ${cellHighlight('odometer')}`}>
+                    <td className="px-4 py-3 text-right text-gray-600 whitespace-nowrap">
                       {v.odometer != null ? `${v.odometer.toLocaleString('id-ID')} km` : '—'}
                     </td>
                   </tr>
@@ -231,15 +175,13 @@ export default function VehiclesPage() {
           {loading && <div className="p-8 text-center text-sm text-gray-500">Loading...</div>}
         </div>
 
-        {/* Pagination — shared component (same as /customers, /invoices,
-            /sales-orders, /purchase-orders) instead of a hand-rolled
-            Prev/Next row. */}
-        {!loading && vehicles.length > 0 && (
+        {/* Pagination */}
+        {vehicles.length > 0 && (
           <div className="mt-4">
             <Pagination
               page={page}
               pageSize={pageSize}
-              totalItems={sortedVehicles.length}
+              totalItems={vehicles.length}
               onPageChange={setPage}
               onPageSizeChange={(size) => {
                 setPageSize(size);
