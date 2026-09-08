@@ -20,6 +20,7 @@ import {
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { parseCalendarDate } from '@/lib/dates';
+import Pagination from '@/app/components/Pagination';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -66,7 +67,7 @@ type HistoryPage = {
 };
 
 const DEBOUNCE_MS = 350;
-const HISTORY_LIMIT = 20;
+const HISTORY_LIMIT_DEFAULT = 20;
 const ITEMS_SUMMARY_MAX = 3;
 
 function displayDateFor(h: HistoryItem): Date {
@@ -139,6 +140,7 @@ export default function VehicleLookupPage() {
   // History state
   const [history, setHistory] = useState<HistoryPage | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(HISTORY_LIMIT_DEFAULT);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Item-level search — separate from the vehicle-lookup `query` above.
@@ -250,7 +252,7 @@ export default function VehicleLookupPage() {
       const res = await apiFetch(`/vehicles/${id}/summary`);
       if (res.ok) {
         setVehicle(await res.json());
-        await loadHistory(id, 1);
+        await loadHistory(id, 1, historyPageSize);
       } else {
         const body = await res.json().catch(() => null);
         setVehicleError(body?.message ?? `Failed to load vehicle (${res.status})`);
@@ -262,10 +264,10 @@ export default function VehicleLookupPage() {
     }
   }
 
-  async function loadHistory(vehicleId: string, page: number) {
+  async function loadHistory(vehicleId: string, page: number, limit: number = historyPageSize) {
     setHistoryLoading(true);
     try {
-      const res = await apiFetch(`/vehicles/${vehicleId}/history?page=${page}&limit=${HISTORY_LIMIT}`);
+      const res = await apiFetch(`/vehicles/${vehicleId}/history?page=${page}&limit=${limit}`);
       if (res.ok) {
         setHistory(await res.json());
         setHistoryPage(page);
@@ -354,8 +356,6 @@ export default function VehicleLookupPage() {
     }
   }
 
-  const totalPages = history?.totalPages ?? 1;
-
   return (
     <main
       className="min-h-screen text-black"
@@ -366,7 +366,9 @@ export default function VehicleLookupPage() {
         backgroundSize: '24px 24px',
       }}
     >
-      {/* Header — matches /workshop's blue-outline + backdrop-blur treatment */}
+      {/* Header — blue-outline + backdrop-blur treatment matching /labels,
+          /inventory/stock, and /customers. Widened to max-w-5xl to match
+          those pages instead of the old max-w-3xl. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
@@ -391,10 +393,9 @@ export default function VehicleLookupPage() {
             </div>
           </div>
 
-          {/* Search bar — same command-palette style as /workshop's quick
-              lookup: outlined, focus glow, monospace Enter hint. Logic
-              (debounce, dropdown, arrow-key nav, deep link) is unchanged
-              from before — only the visual treatment moved to match. */}
+          {/* Search bar — command-palette style: outlined, focus glow,
+              monospace Enter hint. Logic (debounce, dropdown, arrow-key
+              nav, deep link) is unchanged — only the visual treatment. */}
           <div className="relative">
             <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
               <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
@@ -447,7 +448,7 @@ export default function VehicleLookupPage() {
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {notFound && !vehicleLoading && !vehicle && (
-          <p className="text-sm text-gray-500 bg-gray-50 border-2 border-gray-200 rounded-md p-4 text-center">
+          <p className="text-sm text-gray-500 bg-white border-2 border-gray-200 rounded-md p-4 text-center">
             No vehicle found for &quot;{notFound}&quot;
           </p>
         )}
@@ -461,7 +462,7 @@ export default function VehicleLookupPage() {
         {vehicle && (
           <>
             {/* Vehicle summary card */}
-            <div className="border-2 border-gray-300 rounded-md p-4 mb-4">
+            <div className="border-2 border-gray-300 rounded-md p-4 mb-4 bg-white">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2 min-w-0">
                   <Car size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
@@ -472,7 +473,7 @@ export default function VehicleLookupPage() {
                 </div>
                 <button
                   onClick={() => router.push(`/vehicles/${vehicle.id}`)}
-                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md border-2 border-gray-300 hover:bg-gray-100 shrink-0"
+                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 hover:bg-blue-50 shrink-0 transition-colors"
                 >
                   <ExternalLink size={13} strokeWidth={2} />
                   View Full Vehicle Profile
@@ -509,7 +510,7 @@ export default function VehicleLookupPage() {
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
                   placeholder="Find a part/service on this page..."
-                  className="w-full border-2 border-gray-300 rounded-md pl-8 pr-3 py-1.5 text-xs outline-none focus:border-black"
+                  className="w-full border-2 border-gray-300 rounded-md pl-8 pr-3 py-1.5 text-xs outline-none focus:border-blue-500"
                 />
               </div>
             </div>
@@ -530,10 +531,10 @@ export default function VehicleLookupPage() {
                     onClick={() =>
                       router.push(h.status === 'DRAFT' ? `/sales/invoices/new?draftId=${h.id}` : `/sales/invoices/${h.id}`)
                     }
-                    className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer transition-colors ${
+                    className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer bg-white transition-colors ${
                       overdue
                         ? 'border-red-300 bg-red-50/40 hover:border-red-400 hover:bg-red-50 active:bg-red-100'
-                        : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50 active:bg-gray-100'
+                        : 'border-gray-300 hover:border-blue-500/40 hover:bg-blue-50/40 active:bg-blue-100/60'
                     }`}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
@@ -576,7 +577,7 @@ export default function VehicleLookupPage() {
                           <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                             <button
                               onClick={() => router.push(`/sales/invoices/new?draftId=${h.id}`)}
-                              className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-gray-100 active:bg-gray-200"
+                              className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-blue-50 active:bg-blue-100"
                             >
                               <RotateCcw size={13} strokeWidth={2} />
                               Resume
@@ -603,26 +604,17 @@ export default function VehicleLookupPage() {
             </div>
 
             {history && history.total > 0 && (
-              <div className="flex items-center justify-between mt-4 text-sm">
-                <span className="text-gray-500">
-                  Page {history.page} of {history.totalPages} · {history.total} total
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => selectedId && loadHistory(selectedId, historyPage - 1)}
-                    disabled={historyPage <= 1 || historyLoading}
-                    className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    onClick={() => selectedId && loadHistory(selectedId, historyPage + 1)}
-                    disabled={historyPage >= totalPages || historyLoading}
-                    className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
-                  >
-                    Next
-                  </button>
-                </div>
+              <div className="mt-4">
+                <Pagination
+                  page={historyPage}
+                  pageSize={historyPageSize}
+                  totalItems={history.total}
+                  onPageChange={(p) => selectedId && loadHistory(selectedId, p, historyPageSize)}
+                  onPageSizeChange={(size) => {
+                    setHistoryPageSize(size);
+                    if (selectedId) loadHistory(selectedId, 1, size);
+                  }}
+                />
               </div>
             )}
           </>

@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
 const backendUrl =
-  process.env.BACKEND_URL || "http://localhost:3002";
+  process.env.BACKEND_URL || "http://localhost:3000";
 
 const nextConfig: NextConfig = {
-    experimental: {
-    proxyClientMaxBodySize: "500mb",
-  },
+experimental: {
+  proxyClientMaxBodySize: "1200mb",
+},
   async rewrites() {
     return [
       {
