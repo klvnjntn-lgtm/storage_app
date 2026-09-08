@@ -21,10 +21,11 @@ export const MARGIN_MM: Record<string, number> = {
 
 // @page size per format. Roll-paper widths use a generous height since
 // Puppeteer clips to actual content when printing to PDF with no fixed height.
+// lib/invoice-format.ts
 export const PAGE_CSS: Record<string, string> = {
   THERMAL_58: `@page { size: 58mm 297mm; margin: ${MARGIN_MM.THERMAL_58}mm; }`,
   RECEIPT: `@page { size: 80mm 297mm; margin: ${MARGIN_MM.RECEIPT}mm; }`,
-  A5: `@page { size: A5 landscape; margin: ${MARGIN_MM.A5}mm; }`,
+  A5: `@page { size: 210mm 148mm; margin: ${MARGIN_MM.A5}mm; }`, // was: A5 landscape
   A4: `@page { size: A4; margin: ${MARGIN_MM.A4}mm; }`,
 };
 
