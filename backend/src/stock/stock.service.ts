@@ -68,7 +68,7 @@ type SalesOrderReturnContext = {
   invoiceId?: never;
   metadata?: Prisma.InputJsonObject;
 };
-type InvoiceReturnContext = { // NEW
+type InvoiceReturnContext = {
   type: typeof EventType.RETURNS;
   invoiceId: string;
   salesOrderId?: never;
@@ -81,14 +81,47 @@ export type StockMovementContext =
   | InvoiceAdjustmentContext
   | SalesOrderAdjustmentContext
   | PurchaseOrderReceiptContext
-  | SalesOrderReturnContext // NEW
-  | InvoiceReturnContext; // NEW
+  | SalesOrderReturnContext
+  | InvoiceReturnContext;
+
 @Injectable()
 export class StockService {
   constructor(
     private prisma: PrismaService,
     private productService: ProductService,
   ) {}
+
+  // -----------------------------
+  // Shared row lock
+  // -----------------------------
+  // SELECT ... FOR UPDATE on the Stock row, inside the current
+  // transaction. A concurrent decrease()/fulfill()/adjust() call against
+  // the SAME product+location blocks here until the first transaction
+  // commits or rolls back, so whatever this call reads next is
+  // guaranteed current — not a stale snapshot from before a concurrent
+  // writer landed. Returns 0 (not null) when no Stock row exists yet, so
+  // callers don't need a separate null-check.
+  //
+  // NOTE: organizationId isn't part of the actual unique constraint
+  // (productId_locationId), so it's included here only as a defense-in-
+  // depth filter matching the 🔒 pattern used elsewhere in this file —
+  // productId/locationId are assumed to already be org-scoped upstream
+  // by assertProductActive()/assertLocationOwnership().
+  private async lockStockRow(
+    client: Prisma.TransactionClient,
+    orgId: string,
+    productId: string,
+    locationId: string,
+  ): Promise<number> {
+    const rows = await client.$queryRaw<{ quantity: number }[]>(Prisma.sql`
+      SELECT quantity FROM "Stock"
+      WHERE "productId" = ${productId}
+        AND "locationId" = ${locationId}
+        AND "organizationId" = ${orgId}
+      FOR UPDATE
+    `);
+    return rows[0]?.quantity ?? 0;
+  }
 
   // -----------------------------
   // INCREASE
@@ -144,6 +177,16 @@ export class StockService {
   // -----------------------------
   // DECREASE
   // -----------------------------
+  // CHANGED — now locks the Stock row (FOR UPDATE) before checking
+  // sufficiency, instead of a plain findUnique(). The old comment here
+  // claimed the transaction wrapper alone prevented concurrent
+  // over-decrement; it didn't. Two simultaneous decrease() calls against
+  // the same product+location could both read "10 available" before
+  // either committed, both pass the `>= qty` check, and both apply their
+  // relative decrement — landing on a negative quantity even though each
+  // individual check looked correct at read time. Locking the row makes
+  // the second caller wait until the first transaction resolves, so its
+  // read (and therefore its check) reflects reality.
   async decrease(
     orgId: string,
     productId: string,
@@ -159,15 +202,8 @@ export class StockService {
       await this.assertProductActive(orgId, productId, client);
       await this.assertLocationOwnership(orgId, locationId, client);
 
-      // Re-check stock inside the transaction to prevent concurrent
-      // over-decrement, regardless of whose transaction this is.
-      const stock = await client.stock.findUnique({
-        where: {
-          productId_locationId: { productId, locationId },
-        },
-      });
-
-      if (!stock || stock.quantity < qty) {
+      const available = await this.lockStockRow(client, orgId, productId, locationId);
+      if (available < qty) {
         throw new BadRequestException('Insufficient stock');
       }
 
@@ -197,8 +233,79 @@ export class StockService {
   }
 
   // -----------------------------
+  // FULFILL — NEW
+  // -----------------------------
+  // Unlike decrease() — strict, throws on insufficient stock, used by
+  // DeliveryOrder.ship() where physically shipping stock that doesn't
+  // exist must never be allowed — fulfill() takes as much as is
+  // physically available and reports back exactly what happened, rather
+  // than throwing or silently taking more than exists. Stock.quantity can
+  // never go below zero as a result of this call. Used by
+  // InvoiceService.issue()/editIssuedInvoice() for non-warehouse orgs,
+  // where a sale can still succeed even when it oversells.
+  //
+  // Same FOR UPDATE locking as decrease(), for the same reason: two
+  // invoices issued at the same instant for the same product+location
+  // must serialize on this row rather than both reading "3 available"
+  // and each granting 3.
+  async fulfill(
+    orgId: string,
+    productId: string,
+    locationId: string,
+    requestedQty: number,
+    userId: string,
+    context: StockMovementContext,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ fulfilledQuantity: number; shortfall: number }> {
+    if (requestedQty <= 0) return { fulfilledQuantity: 0, shortfall: 0 };
+
+    const run = async (client: Prisma.TransactionClient) => {
+      await this.assertProductActive(orgId, productId, client);
+      await this.assertLocationOwnership(orgId, locationId, client);
+
+      const available = await this.lockStockRow(client, orgId, productId, locationId);
+      const fulfilledQuantity = Math.min(available, requestedQty);
+      const shortfall = requestedQty - fulfilledQuantity;
+
+      if (fulfilledQuantity > 0) {
+        await client.stock.update({
+          where: { productId_locationId: { productId, locationId } },
+          data: { quantity: { decrement: fulfilledQuantity } },
+        });
+
+        await client.event.create({
+          data: {
+            type: context.type,
+            productId,
+            fromLocationId: locationId,
+            quantity: -fulfilledQuantity,
+            userId,
+            organizationId: orgId,                          // 🔒
+            invoiceId: context.invoiceId,
+            salesOrderId: context.salesOrderId,
+            metadata: context.metadata ?? {},
+          },
+        });
+      }
+      // fulfilledQuantity === 0 (no Stock row, or genuinely zero on
+      // hand): nothing moved, so no Event is written — there's nothing
+      // to audit yet. The shortfall itself isn't a stock movement; it's
+      // read straight off InvoiceItem.quantity - fulfilledQuantity by
+      // whoever needs it (see InvoiceService.recomputeFulfillmentStatus).
+
+      return { fulfilledQuantity, shortfall };
+    };
+
+    return tx ? run(tx) : this.prisma.$transaction(run);
+  }
+
+  // -----------------------------
   // ADJUST
   // -----------------------------
+  // CHANGED — same lock-before-check fix as decrease(), for the same
+  // reason: two concurrent negative adjustments on the same
+  // product+location could otherwise both pass the "would this go
+  // negative?" check against a stale read and jointly overshoot.
   async adjust(orgId: string, userId: string, data: AdjustStockDto) {
     const { productId, locationId, qtyDelta, reason } = data;
 
@@ -220,11 +327,8 @@ export class StockService {
       await this.assertLocationOwnership(orgId, locationId, tx);
 
       if (qtyDelta < 0) {
-        const stock = await tx.stock.findUnique({
-          where: { productId_locationId: { productId, locationId } },
-        });
-
-        if (!stock || stock.quantity + qtyDelta < 0) {
+        const available = await this.lockStockRow(tx, orgId, productId, locationId);
+        if (available + qtyDelta < 0) {
           throw new BadRequestException('Adjustment would result in negative stock');
         }
       }
@@ -301,11 +405,6 @@ export class StockService {
             row,
             tx,
           );
-
-          // Import creates products/locations on the fly, so there's no
-          // pre-existing product/location to assert against here — the
-          // active/ownership checks apply to increase/decrease/adjust,
-          // where the product and location must already exist.
 
           const locationId = `${orgId}_${slugify(row.location)}`;
 
@@ -414,9 +513,6 @@ export class StockService {
     if (!product) throw new BadRequestException('Product not found');
   }
 
-  // Now accepts the active Prisma client (tx or this.prisma), so when a
-  // caller passes `tx`, this check runs inside the same transaction
-  // instead of on a separate connection outside it.
   private async assertProductActive(
     orgId: string,
     productId: string,

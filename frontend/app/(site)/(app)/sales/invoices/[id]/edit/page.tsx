@@ -141,6 +141,13 @@ if (item.productId) {
     discountType: item.discountType ?? 'PERCENTAGE',
     discountValue: Number(item.discountValue ?? 0),
     taxRateIds,
+    // NEW — floor for changeQty()'s decrement below. The backend now
+    // refuses to save a line below its fulfilledQuantity (physical stock
+    // already left for that amount), so the stepper enforces the same
+    // floor here rather than letting the user hit a save-time error.
+    // Requires CartLine to declare `fulfilledQuantity?: number` — see
+    // 07-frontend-type-patches.md.
+    fulfilledQuantity: item.fulfilledQuantity ?? 0,
   };
           }
         }
@@ -232,6 +239,12 @@ function addToCart(product: ProductSearchResult) {
         discountType: existing?.discountType ?? 'PERCENTAGE',
         discountValue: existing?.discountValue ?? 0,
         taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
+        // A newly added line has nothing fulfilled yet, whether or not
+        // one already existed with a floor from the restored invoice —
+        // if `existing` came from the restored cart it already carries
+        // its own fulfilledQuantity forward via the spread-free object
+        // literal here, so default to that, not always 0.
+        fulfilledQuantity: existing?.fulfilledQuantity ?? 0,
       },
     };
   });
@@ -241,6 +254,13 @@ function addToCart(product: ProductSearchResult) {
       const line = prev[key];
       if (!line) return prev;
       const nextQty = line.quantity + delta;
+      const floor = line.fulfilledQuantity ?? 0;
+      // CHANGED — can't shrink below what's already been fulfilled;
+      // physical stock already left for that amount. Mirrors the
+      // BadRequestException InvoiceService.editIssuedInvoice() now
+      // throws for the same case, but catches it here before the user
+      // ever hits Save.
+      if (nextQty < floor) return prev;
       if (nextQty <= 0) {
         const { [key]: _removed, ...rest } = prev;
         return rest;
@@ -500,6 +520,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
               {cartLines.map((line) => {
                 const available = stockAtLineLocation(line);
                 const editing = editingPriceKey === line.key;
+                const floor = line.fulfilledQuantity ?? 0;
                 return (
                   <div key={line.key} className="flex flex-col gap-2 py-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -534,9 +555,20 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
   {line.unit ? ` ${line.unit}` : ''} = <span className="font-medium text-gray-700">{formatIDR(line.lineSubtotal)}</span>
 </span>
                         </div>
+                        {/* NEW — surfaces why the stepper below might
+                            refuse to go lower than expected. */}
+                        {floor > 0 && (
+                          <p className="text-xs text-amber-700 mt-1">
+                            {floor} unit{floor === 1 ? '' : 's'} already fulfilled — can't reduce below this
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => changeQty(line.key, -1)} className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100">
+                        <button
+                          onClick={() => changeQty(line.key, -1)}
+                          disabled={line.quantity <= floor}
+                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
+                        >
                           <Minus size={14} strokeWidth={2} />
                         </button>
                         <span className="w-5 text-center text-sm">{line.quantity}</span>
@@ -547,7 +579,10 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         >
                           <Plus size={14} strokeWidth={2} />
                         </button>
-                        <button onClick={() => removeFromCart(line.key)} className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600">
+                        <button
+                          onClick={() => removeFromCart(line.key)}
+                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
+                        >
                           <Trash2 size={14} strokeWidth={2} />
                         </button>
                       </div>

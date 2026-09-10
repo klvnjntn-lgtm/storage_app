@@ -134,23 +134,25 @@ export default function WorkshopHome() {
     >
       {/* Header — subtle blue outline + backdrop blur instead of the flat
           white/gray-300 border, to read as "techy" rather than plain */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Wrench size={18} strokeWidth={2} className="text-blue-700" />
             </span>
-            <div>
-              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>Workshop</h1>
-              <p className="text-xs text-gray-500">Vehicles, service jobs, and reminders</p>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Workshop
+              </h1>
+              <p className="text-xs text-gray-500 truncate">Vehicles, service jobs, and reminders</p>
             </div>
           </div>
         </div>

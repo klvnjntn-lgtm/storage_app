@@ -18,6 +18,8 @@ export type CartLine = {
   unitPrice: number;
   unit: string | null;
   locationId: string;
+    fulfilledQuantity?: number; // floor for quantity edits on an issued invoice
+
   locationName: string;
   taxRateIds: string[];
   discountType: DiscountType | null;

@@ -831,11 +831,18 @@ model OrganizationBankAccount {
   @@index([organizationId])
   @@unique([organizationId, bankName, accountNumber])
 }
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+}
+
 model Invoice {
   id             String                 @id @default(uuid())
   invoiceNumber  String?
   organizationId String
     deliveryOrders DeliveryOrder[]
+  fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
 
   locationId     String?
   format         InvoiceFormat
@@ -1051,6 +1058,8 @@ model InvoiceItem {
   unitPrice           Decimal            @db.Decimal(12, 2)
   unitCost            Decimal?           @db.Decimal(12, 2)
   lineTotal           Decimal            @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
+  fulfilledQuantity Int @default(0)
+  reservedQuantity  Int @default(0)
 
   // NEW — per-item discount. Mirrors Invoice.discountType/discountValue
   // (now deprecated at the document level, see below) but scoped per line.

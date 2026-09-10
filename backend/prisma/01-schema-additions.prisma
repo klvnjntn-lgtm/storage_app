@@ -1,0 +1,48 @@
+// ---------------------------------------------------------------------
+// Schema additions — merge these into your existing schema.prisma,
+// then run a migration. Nothing here removes or renames existing fields.
+// ---------------------------------------------------------------------
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+}
+
+model Invoice {
+  // ...existing fields unchanged...
+
+  // Cached/derived from InvoiceItem.fulfilledQuantity vs quantity, kept in
+  // sync by InvoiceService.recomputeFulfillmentStatus() — same pattern as
+  // SalesOrder.status being derived from SalesOrderItem.deliveredQuantity.
+  // Only meaningful for invoices NOT owned by the SalesOrder→DeliveryOrder
+  // pipeline (i.e. invoice.salesOrderId is null); warehouse-ops invoices
+  // that came from a confirmed sales order track fulfillment on the
+  // SalesOrder/DeliveryOrder side instead, so this stays UNFULFILLED
+  // (unused) for them — check invoice.salesOrderId before reading it.
+}
+
+model InvoiceItem {
+  // ...existing fields unchanged...
+
+  // How much of `quantity` has ACTUALLY left the warehouse (physically
+  // decremented from Stock). Set at Invoice.issue() (up to what's
+  // available) and incremented again at DeliveryOrder.ship() for any
+  // remainder fulfilled later. Never store `backorderedQuantity` — derive
+  // it as `quantity - fulfilledQuantity` wherever needed, so it can't
+  // drift out of sync with the other two numbers.
+
+  // How much of the (quantity - fulfilledQuantity) outstanding balance is
+  // already committed to an open (PACKED, not yet shipped) DeliveryOrder.
+  // Exists purely to stop two concurrent DeliveryOrder.createFromInvoice()
+  // calls from both claiming the same backordered units — mirrors how
+  // SalesOrderItem.deliveredQuantity is incremented at DeliveryOrder
+  // creation time, not just at ship(). Released back to 0 on cancel(),
+  // converted into fulfilledQuantity on ship(). This quantity has NOT
+  // physically left the warehouse yet — don't fold it into
+  // fulfilledQuantity or FulfillmentStatus.
+}
+
+// No changes needed to DeliveryOrder / DeliveryOrderItem — invoiceId and
+// invoiceItemId already exist and already get populated by
+// DeliveryOrderService.createFromInvoice().
