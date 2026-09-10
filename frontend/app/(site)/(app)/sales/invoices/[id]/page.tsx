@@ -229,49 +229,13 @@ async function handlePrint() {
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-
-    // Print via a hidden iframe rather than opening the PDF in a new tab.
-    // Chrome/Edge's full-tab embedded PDF viewer has a well-documented bug
-    // where a landscape-oriented PDF still gets a portrait-defaulted print
-    // dialog (the page itself is correctly landscape — confirmed earlier —
-    // but the viewer's print settings don't inherit that). Loading the PDF
-    // into an iframe on the current page and calling print() on the iframe's
-    // own window sidesteps that viewer entirely.
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
-    iframe.src = url;
-
-    iframe.onload = () => {
-      // Small delay: onload fires when the iframe's own document is ready,
-      // but the embedded PDF renderer inside it can still be a beat behind —
-      // calling print() too early can silently no-op or print a blank page.
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (e) {
-          console.error('iframe print failed:', e);
-          setError('Could not open the print dialog. Try Download PDF instead.');
-        }
-      }, 300);
-    };
-
-    document.body.appendChild(iframe);
-
-    // Clean up well after the print dialog would have appeared and been
-    // dismissed — removing the iframe/blob too early can cancel an
-    // in-progress print job on some browsers.
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-      URL.revokeObjectURL(url);
-    }, 60_000);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${invoice.invoiceNumber ?? 'invoice'}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   } catch (e: any) {
-    setError(e.message || 'Could not generate PDF for printing.');
+    setError(e.message || 'Could not generate PDF.');
   } finally {
     setPdfGenerating(false);
   }
