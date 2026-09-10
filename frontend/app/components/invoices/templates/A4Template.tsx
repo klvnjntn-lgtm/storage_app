@@ -21,6 +21,10 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
 
   const billTo = invoice.billingAddress ?? invoice.customerAddress;
 
+  const displayDate = invoice.invoiceDate
+    ? parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')
+    : new Date(invoice.issuedAt).toLocaleDateString('id-ID');
+
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
       {/* Business identity + invoice meta */}
@@ -41,19 +45,19 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
             </h2>
 
             {invoice.businessAddress && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-black">
                 {invoice.businessAddress}
               </p>
             )}
 
             {invoice.businessPhone && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-black">
                 {invoice.businessPhone}
               </p>
             )}
 
             {invoice.businessNpwp && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-black">
                 NPWP: {invoice.businessNpwp}
               </p>
             )}
@@ -65,19 +69,17 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
             <strong>Invoice</strong> {invoice.invoiceNumber}
           </p>
 
-          {invoice.invoiceDate && (
-            <p className="text-gray-600">
-              {parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')}
-            </p>
-          )}
+          <p className="text-black">
+            {displayDate}
+          </p>
           {invoice.dueDate && (
-            <p className="text-gray-600">
+            <p className="text-black">
               Due{' '}
               {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}
             </p>
           )}
           {invoice.paymentTerms && (
-            <p className="text-gray-600 text-xs">
+            <p className="text-black text-xs">
               {invoice.paymentTerms}
             </p>
           )}
@@ -89,7 +91,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
         invoice.customerPhone ||
         billTo) && (
         <div className="mt-6 border-t border-gray-300 pt-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
+          <p className="text-xs uppercase tracking-wide text-black font-semibold">
             Bill to
           </p>
 
@@ -112,7 +114,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           )}
 
           {invoice.customerNpwp && (
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-black">
               NPWP: {invoice.customerNpwp}
             </p>
           )}
@@ -120,7 +122,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           {/* NEW — PO Number is optional/reference on Invoice per policy;
               only prints when the customer actually provided one. */}
           {invoice.customerPoNumber && (
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-black">
               Customer PO No.: {invoice.customerPoNumber}
             </p>
           )}
@@ -130,7 +132,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       {/* Vehicle — WORKSHOP_RMS */}
       {hasVehicle && (
         <div className="mt-4 border-t border-gray-300 pt-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
+          <p className="text-xs uppercase tracking-wide text-black font-semibold">
             Vehicle
           </p>
 
@@ -142,13 +144,13 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           </p>
 
           {invoice.vehicleVin && (
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-black">
               VIN: {invoice.vehicleVin}
             </p>
           )}
 
           {invoice.vehicleOdometer != null && (
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-black">
               Odometer: {invoice.vehicleOdometer} km
             </p>
           )}
@@ -180,7 +182,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
               <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
                 {item.quantity}
                 {item.unit && (
-                  <span className="text-gray-400 text-xs ml-1">{item.unit}</span>
+                  <span className="text-black text-xs ml-1">{item.unit}</span>
                 )}
               </td>
 
@@ -188,11 +190,11 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
                 {formatIDR(item.unitPrice)}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-black whitespace-nowrap">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-black whitespace-nowrap">
                 {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
               </td>
 
@@ -222,7 +224,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           invoice.taxes.map((tax, index) => (
             <div
               key={`${tax.name}-${tax.percentage}-${index}`}
-              className="flex justify-between py-1 text-gray-600"
+              className="flex justify-between py-1 text-black"
             >
               <span>
                 {tax.name} ({tax.percentage}%)
@@ -253,14 +255,14 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       </div>
 
       {/* Amount in words */}
-      <p className="mt-4 text-xs italic text-gray-600">
+      <p className="mt-4 text-xs italic text-black">
         Terbilang: {terbilang(invoice.total)}
       </p>
 
       {/* Bank details */}
       {hasBankDetails && (
         <div className="mt-8 border-t border-gray-300 pt-3 text-xs">
-          <p className="uppercase tracking-wide text-gray-500 font-semibold mb-1">
+          <p className="uppercase tracking-wide text-black font-semibold mb-1">
             Payment to
           </p>
 
@@ -275,7 +277,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       {/* Notes */}
       {invoice.notes && (
         <div className="mt-6 border-t border-gray-300 pt-3 text-xs">
-          <p className="uppercase tracking-wide text-gray-500 font-semibold mb-1">
+          <p className="uppercase tracking-wide text-black font-semibold mb-1">
             Notes
           </p>
           <p className="text-black whitespace-pre-line">{invoice.notes}</p>
