@@ -1,8 +1,11 @@
+// src/invoice/invoice-print.controller.ts
 import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/common';
 import { InvoiceService } from './invoice.service';
 import { Public } from '../auth/decorators/public.decorator';
+import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decorator';
 
 @Public()
+@SkipLicenseCheck()
 @Controller('print/invoices')
 export class InvoicePrintController {
   constructor(private invoiceService: InvoiceService) {}
