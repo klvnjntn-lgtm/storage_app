@@ -38,10 +38,10 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
             <h2 className="text-xl font-bold leading-tight text-black">
               {invoice.businessName ?? invoice.locationName}
             </h2>
-            {invoice.businessAddress && <p className="text-[11px] text-gray-600">{invoice.businessAddress}</p>}
-            {invoice.businessPhone && <p className="text-[11px] text-gray-600">{invoice.businessPhone}</p>}
+            {invoice.businessAddress && <p className="text-[11px] text-black">{invoice.businessAddress}</p>}
+            {invoice.businessPhone && <p className="text-[11px] text-black">{invoice.businessPhone}</p>}
             {invoice.businessNpwp && (
-              <p className="text-[11px] text-gray-600">NPWP: {invoice.businessNpwp}</p>
+              <p className="text-[11px] text-black">NPWP: {invoice.businessNpwp}</p>
             )}
           </div>
         </div>
@@ -50,9 +50,9 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           <p className="text-black">
             <strong>Invoice</strong> {invoice.invoiceNumber}
           </p>
-          <p className="text-gray-600">{displayDate}</p>
+          <p className="text-black">{displayDate}</p>
           {invoice.dueDate && (
-            <p className="text-gray-600">Due {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}</p>
+            <p className="text-black">Due {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}</p>
           )}
         </div>
       </div>
@@ -64,11 +64,11 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
         <div className="mt-3 border-t border-gray-300 pt-2 flex gap-6">
           {hasCustomer && (
             <div className="w-[100mm]">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">Bill to</p>
+              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">Bill to</p>
               {invoice.customerName && <p className="font-semibold text-black">{invoice.customerName}</p>}
               {invoice.customerPhone && <p className="text-black">{invoice.customerPhone}</p>}
               {billTo && <p className="text-black">{billTo}</p>}
-              {invoice.customerNpwp && <p className="text-[10px] text-gray-600">NPWP: {invoice.customerNpwp}</p>}
+              {invoice.customerNpwp && <p className="text-[10px] text-black">NPWP: {invoice.customerNpwp}</p>}
             </div>
           )}
 
@@ -76,14 +76,14 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
               attached to a vehicle. */}
           {hasVehicle && (
             <div className="w-[80mm]">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">Vehicle</p>
+              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">Vehicle</p>
               <p className="font-semibold text-black">
                 {invoice.vehiclePlateNumber}
                 {invoice.vehicleModel ? ` · ${invoice.vehicleModel}` : ''}
               </p>
-              {invoice.vehicleVin && <p className="text-[10px] text-gray-600">VIN: {invoice.vehicleVin}</p>}
+              {invoice.vehicleVin && <p className="text-[10px] text-black">VIN: {invoice.vehicleVin}</p>}
               {invoice.vehicleOdometer != null && (
-                <p className="text-[10px] text-gray-600">Odometer: {invoice.vehicleOdometer} km</p>
+                <p className="text-[10px] text-black">Odometer: {invoice.vehicleOdometer} km</p>
               )}
             </div>
           )}
@@ -115,7 +115,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
               <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">
                 {item.quantity}
                 {item.unit && (
-                  <span className="text-gray-400 text-[10px] ml-1">{item.unit}</span>
+                  <span className="text-black text-[10px] ml-1">{item.unit}</span>
                 )}
               </td>
 
@@ -123,11 +123,11 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
                 {formatIDR(item.unitPrice)}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 px-2 text-right text-black whitespace-nowrap">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 px-2 text-right text-black whitespace-nowrap">
                 {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
               </td>
 
@@ -140,7 +140,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
       </table>
       
       <div className="mt-2 flex justify-between gap-6">
-        <p className="text-[10px] italic text-gray-600 max-w-[60%] self-end">
+        <p className="text-[10px] italic text-black max-w-[60%] self-end">
           Terbilang: {terbilang(invoice.total)}
         </p>
         <div className="w-64 shrink-0">
@@ -156,7 +156,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           )}
           {invoice.taxAmount > 0 &&
             invoice.taxes.map((tax, i) => (
-              <div key={i} className="flex justify-between py-0.5 text-gray-600">
+              <div key={i} className="flex justify-between py-0.5 text-black">
                 <span>
                   {tax.name} ({tax.percentage}%)
                 </span>
@@ -184,7 +184,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
 
       {hasBankDetails && (
         <div className="mt-3 border-t border-gray-300 pt-2 text-[10px]">
-          <p className="uppercase tracking-wide text-gray-500 font-semibold mb-0.5">Payment to</p>
+          <p className="uppercase tracking-wide text-black font-semibold mb-0.5">Payment to</p>
           <p className="text-black">
             {invoice.bankName} — {invoice.bankAccountNumber}
             {invoice.bankAccountName ? ` a.n. ${invoice.bankAccountName}` : ''}

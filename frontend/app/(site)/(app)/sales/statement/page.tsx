@@ -174,20 +174,20 @@ export default function InvoiceStatementPage() {
                   />
                 )}
                 <div>
-                  <p className="font-bold text-lg leading-tight">
+                  <p className="font-bold text-lg leading-tight text-black">
                     {statement.organization.legalName ?? statement.organization.name}
                   </p>
                   {statement.organization.address && (
-                    <p className="text-xs text-gray-500">{statement.organization.address}</p>
+                    <p className="text-xs text-black">{statement.organization.address}</p>
                   )}
                   {statement.organization.phone && (
-                    <p className="text-xs text-gray-500">{statement.organization.phone}</p>
+                    <p className="text-xs text-black">{statement.organization.phone}</p>
                   )}
                   {statement.organization.npwp && (
-                    <p className="text-xs text-gray-500">NPWP: {statement.organization.npwp}</p>
+                    <p className="text-xs text-black">NPWP: {statement.organization.npwp}</p>
                   )}
                   {(statement.organization.bankName || statement.organization.bankAccountNumber) && (
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-black mt-0.5">
                       {statement.organization.bankName}
                       {statement.organization.bankAccountNumber && ` · ${statement.organization.bankAccountNumber}`}
                       {statement.organization.bankAccountName && ` (${statement.organization.bankAccountName})`}
@@ -197,18 +197,18 @@ export default function InvoiceStatementPage() {
               </div>
 
               <div className="text-right text-sm">
-                <p className="font-semibold">{statement.customer.name}</p>
+                <p className="font-semibold text-black">{statement.customer.name}</p>
                 {statement.customer.address && (
-                  <p className="text-xs text-gray-500">{statement.customer.address}</p>
+                  <p className="text-xs text-black">{statement.customer.address}</p>
                 )}
                 {statement.customer.phone && (
-                  <p className="text-xs text-gray-500">{statement.customer.phone}</p>
+                  <p className="text-xs text-black">{statement.customer.phone}</p>
                 )}
               </div>
             </div>
 
             {/* Statement information */}
-            <div className="flex justify-between items-center text-xs text-gray-600 mb-4">
+            <div className="flex justify-between items-center text-xs text-black mb-4">
               <span>
                 Statement period: {new Date(statement.from).toLocaleDateString('id-ID')} –{' '}
                 {new Date(statement.to).toLocaleDateString('id-ID')}
@@ -219,13 +219,13 @@ export default function InvoiceStatementPage() {
             </div>
 
             {/* Running balance */}
-            <div className="flex justify-between items-center bg-gray-50 border border-gray-200 rounded-md p-3 mb-4 text-sm">
+            <div className="flex justify-between items-center bg-gray-50 border border-gray-200 rounded-md p-3 mb-4 text-sm text-black">
               <span>Opening balance</span>
               <span className="font-semibold">{formatIDR(statement.openingBalance)}</span>
             </div>
 
             {statement.paymentTimingUnavailable && (
-              <div className="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3 mb-4">
+              <div className="flex items-start gap-2 text-xs text-black bg-gray-50 border border-gray-200 rounded-md p-3 mb-4">
                 <Info size={14} strokeWidth={2} className="shrink-0 mt-0.5" />
                 <span>
                   "Paid to date" reflects each invoice's current payment status, not the date the
@@ -236,7 +236,7 @@ export default function InvoiceStatementPage() {
             )}
 
             {statement.lines.length === 0 && (
-              <p className="text-sm text-gray-400">No invoices in this date range.</p>
+              <p className="text-sm text-black">No invoices in this date range.</p>
             )}
 
             {statement.lines.length > 0 && (
@@ -244,12 +244,12 @@ export default function InvoiceStatementPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b-2 border-gray-300">
                     <tr>
-                      <th className="text-left p-2 font-semibold">Invoice</th>
-                      <th className="text-left p-2 font-semibold">Date</th>
-                      <th className="text-left p-2 font-semibold">Vehicle</th>
-                      <th className="text-right p-2 font-semibold">Invoiced</th>
-                      <th className="text-right p-2 font-semibold">Paid to date</th>
-                      <th className="text-right p-2 font-semibold">Balance</th>
+                      <th className="text-left p-2 font-semibold text-black">Invoice</th>
+                      <th className="text-left p-2 font-semibold text-black">Date</th>
+                      <th className="text-left p-2 font-semibold text-black">Vehicle</th>
+                      <th className="text-right p-2 font-semibold text-black">Invoiced</th>
+                      <th className="text-right p-2 font-semibold text-black">Paid to date</th>
+                      <th className="text-right p-2 font-semibold text-black">Balance</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -259,18 +259,18 @@ export default function InvoiceStatementPage() {
                         onClick={() => router.push(`/sales/invoices/${line.id}`)}
                         className="border-b border-gray-200 last:border-0 cursor-pointer hover:bg-gray-50 print:cursor-default print:hover:bg-transparent"
                       >
-                        <td className="p-2 font-medium">{line.invoiceNumber ?? '—'}</td>
-                        <td className="p-2 text-gray-600">
+                        <td className="p-2 font-medium text-black">{line.invoiceNumber ?? '—'}</td>
+                        <td className="p-2 text-black">
                           {line.issuedAt ? new Date(line.issuedAt).toLocaleDateString('id-ID') : '—'}
                         </td>
-                        <td className="p-2 text-gray-600">
+                        <td className="p-2 text-black">
                           {line.vehiclePlateNumber
                             ? `${line.vehiclePlateNumber}${line.vehicleModel ? ` · ${line.vehicleModel}` : ''}`
                             : '—'}
                         </td>
-                        <td className="p-2 text-right">{formatIDR(line.invoiced)}</td>
-                        <td className="p-2 text-right">{formatIDR(line.paidToDate)}</td>
-                        <td className="p-2 text-right font-semibold">{formatIDR(line.balance)}</td>
+                        <td className="p-2 text-right text-black">{formatIDR(line.invoiced)}</td>
+                        <td className="p-2 text-right text-black">{formatIDR(line.paidToDate)}</td>
+                        <td className="p-2 text-right font-semibold text-black">{formatIDR(line.balance)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -280,7 +280,7 @@ export default function InvoiceStatementPage() {
 
             {statement.lines.length > 0 && (
               <div className="flex justify-end mb-4">
-                <div className="w-64 text-xs text-gray-600">
+                <div className="w-64 text-xs text-black">
                   <div className="flex justify-between py-0.5">
                     <span>Total invoiced</span>
                     <span>{formatIDR(totalInvoiced)}</span>
@@ -289,7 +289,7 @@ export default function InvoiceStatementPage() {
                     <span>Total paid</span>
                     <span>{formatIDR(totalPaid)}</span>
                   </div>
-                  <div className="flex justify-between py-0.5 font-semibold text-gray-800">
+                  <div className="flex justify-between py-0.5 font-semibold text-black">
                     <span>Total balance</span>
                     <span>{formatIDR(totalBalance)}</span>
                   </div>
@@ -299,13 +299,13 @@ export default function InvoiceStatementPage() {
 
             {/* Closing balance */}
             <div className="flex justify-end mt-4 pt-4 border-t-2 border-gray-300">
-              <div className="w-64 text-sm">
+              <div className="w-64 text-sm text-black">
                 <div className="flex justify-between py-1">
-                  <span className="text-gray-500">Opening balance</span>
+                  <span>Opening balance</span>
                   <span>{formatIDR(statement.openingBalance)}</span>
                 </div>
                 <div className="flex justify-between py-1">
-                  <span className="text-gray-500">Period activity</span>
+                  <span>Period activity</span>
                   <span>{formatIDR(statement.closingBalance - statement.openingBalance)}</span>
                 </div>
                 <div className="flex justify-between py-1 font-bold text-base border-t-2 border-gray-300 mt-1 pt-2">
