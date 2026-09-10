@@ -17,6 +17,11 @@ import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { PAGE_CSS, MARGIN_MM } from '@/lib/invoice-format';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
+// NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
+// added on the backend. See 07-frontend-type-patches.md for where this
+// needs to be declared in lib/invoice-mapper.ts.
+type FulfillmentStatus = 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED';
+
 type InvoiceActivityEventType = 'CREATED' | 'ISSUED' | 'EDITED' | 'PAYMENT_RECORDED' | 'MARKED_PAID' | 'VOIDED';
 
 type ActivityEntry = {
@@ -81,6 +86,18 @@ function PaymentBadge({ status }: { status: PaymentStatus }) {
   );
 }
 
+// NEW — surfaces InvoicePrintView.fulfillmentStatus. Renders nothing once
+// fully fulfilled, so it doesn't clutter the header for the common case.
+function FulfillmentBadge({ status }: { status: FulfillmentStatus }) {
+  if (status === 'FULFILLED') return null;
+  return (
+    <span className="inline-flex items-center gap-1 border-2 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide border-amber-600 text-amber-700 bg-amber-50">
+      <Truck size={11} strokeWidth={2} />
+      {status === 'PARTIALLY_FULFILLED' ? 'Partially fulfilled' : 'Backordered'}
+    </span>
+  );
+}
+
 function OverdueBadge() {
   return (
     <span className="inline-flex items-center gap-1 border-2 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide border-red-600 text-red-700 bg-red-50">
@@ -88,6 +105,24 @@ function OverdueBadge() {
       Overdue
     </span>
   );
+}
+
+// NEW — same status→style mapping already used on the delivery order
+// detail page, duplicated here rather than shared since there's no
+// existing shared-components import path visible for it. Worth lifting
+// into a shared util if this page and the delivery-order page keep
+// needing to stay in sync.
+function doStatusStyle(status: string) {
+  switch (status) {
+    case 'PACKED':
+      return 'bg-amber-100 text-amber-800 border-amber-300';
+    case 'SHIPPED':
+      return 'bg-green-100 text-green-800 border-green-300';
+    case 'CANCELLED':
+      return 'bg-red-100 text-red-800 border-red-300';
+    default:
+      return 'bg-gray-100 text-gray-600 border-gray-300';
+  }
 }
 
 export default function InvoiceDetailPage() {
@@ -182,6 +217,44 @@ const [actionLoading, setActionLoading] = useState<string | null>(null);
       setReminderSaving(false);
     }
   }
+
+  async function handlePrint() {
+  if (!invoice) return;
+  setPdfGenerating(true);
+  setError(null);
+  try {
+    const res = await apiFetch(`/invoices/${invoice.id}/pdf?format=${printFormat}`);
+    if (!res.ok) {
+      throw new Error(`Failed to generate PDF (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+
+    // Open in a new tab so Chrome's own PDF viewer handles it — this is
+    // the pipeline that already prints A5/landscape correctly, since the
+    // PDF's page geometry is baked in rather than negotiated live via
+    // @page CSS against a driver.
+    const printWindow = window.open(url, '_blank');
+
+    // Auto-trigger the print dialog once the PDF has actually loaded.
+    // A fixed delay is a fallback for popup blockers / slow loads —
+    // print() on a window that hasn't finished loading its PDF can
+    // silently no-op in some Chrome versions.
+    if (printWindow) {
+      printWindow.addEventListener('load', () => {
+        printWindow.print();
+      });
+    }
+
+    // Revoke a bit later, not immediately — the new tab needs the blob
+    // URL to still be valid when it loads and when print() fires.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (e: any) {
+    setError(e.message || 'Could not generate PDF for printing.');
+  } finally {
+    setPdfGenerating(false);
+  }
+}
 async function handleConvertToDeliveryOrder() {
   if (!invoice) return;
   setActionLoading('convert-do');
@@ -265,11 +338,12 @@ async function handleConvertToDeliveryOrder() {
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
                   {invoice?.invoiceNumber ?? 'Invoice'}
                 </h1>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <p className="text-xs text-gray-500">
                     {invoice?.status ?? '\u00A0'}
                   </p>
                   {invoice && <PaymentBadge status={invoice.paymentStatus} />}
+                  {invoice && <FulfillmentBadge status={invoice.fulfillmentStatus} />}
                   {overdue && <OverdueBadge />}
                 </div>
                 {invoice?.invoiceDate && (
@@ -324,7 +398,12 @@ async function handleConvertToDeliveryOrder() {
   </button>
 )}
 
-{invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.deliveryOrders.length === 0 && (
+{/* CHANGED — was `invoice.deliveryOrders.length === 0`, which only
+    worked under the old one-shot model. createFromInvoice() can now be
+    called repeatedly as backorders get fulfilled in batches, so this
+    needs to key off whether there's still outstanding demand, not
+    whether a delivery order has ever been created before. */}
+{invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
   <button
     disabled={actionLoading === 'convert-do'}
     onClick={handleConvertToDeliveryOrder}
@@ -352,13 +431,14 @@ async function handleConvertToDeliveryOrder() {
                 <Download size={16} strokeWidth={2} />
                 {pdfGenerating ? 'Generating...' : 'Download PDF'}
               </button>
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit transition-colors"
-              >
-                <Printer size={16} strokeWidth={2} />
-                Print
-              </button>
+<button
+  onClick={handlePrint}
+  disabled={pdfGenerating}
+  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit disabled:opacity-50 transition-colors"
+>
+  <Printer size={16} strokeWidth={2} />
+  {pdfGenerating ? 'Preparing...' : 'Print'}
+</button>
             </div>
           )}
         </div>
@@ -454,6 +534,35 @@ async function handleConvertToDeliveryOrder() {
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* NEW — invoice.deliveryOrders was already being fetched
+                (it's what the old "Convert to Delivery Order" gate
+                checked the length of) but never actually rendered.
+                Now that an invoice can accumulate more than one delivery
+                order over its life (first partial shipment, then a
+                second once more stock arrives), it's worth listing. */}
+            {invoice.deliveryOrders.length > 0 && (
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2 flex items-center gap-2">
+                  <Truck size={16} strokeWidth={2} />
+                  Delivery orders
+                </h2>
+                <div className="border-2 border-gray-300 bg-white rounded-md divide-y divide-gray-200">
+                  {invoice.deliveryOrders.map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => router.push(`/sales/delivery-orders/${d.id}`)}
+                      className="w-full text-left p-3 text-sm flex items-center justify-between hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="font-medium">{d.doNumber ?? d.id}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${doStatusStyle(d.status)}`}>
+                        {d.status}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

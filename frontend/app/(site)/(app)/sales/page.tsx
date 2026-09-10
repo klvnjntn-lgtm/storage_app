@@ -66,7 +66,7 @@ type SalesSearchResult = {
 // Maps a result's type to its detail route and display chrome. Keep this
 // in sync with SALES_ITEMS above if any of those hrefs change, and with
 // TYPE_META in /sales/search/page.tsx.
-const TYPE_META: Record<
+const TYPE_META: Record <
   SalesSearchResultType,
   {
     label: string;
@@ -195,23 +195,25 @@ export default function SalesHome() {
       }}
     >
       {/* Header — same outlined/blurred treatment as Workshop */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <ShoppingCart size={18} strokeWidth={2} className="text-blue-700" />
             </span>
-            <div>
-              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>Sales</h1>
-              <p className="text-xs text-gray-500">Manage quotations, orders, invoices, and deliveries</p>
+            <div className="min-w-0">
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                Sales
+              </h1>
+              <p className="text-xs text-gray-500 truncate">Manage quotations, orders, invoices, and deliveries</p>
             </div>
           </div>
         </div>

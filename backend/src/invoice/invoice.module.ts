@@ -26,5 +26,6 @@ import { BankAccountResolverService } from 'src/bank-accounts/bank-account-resol
   ],
   controllers: [InvoiceController, InvoicePrintController],
   providers: [InvoiceService, BankAccountResolverService],
+  exports: [InvoiceService],
 })
 export class InvoiceModule {}

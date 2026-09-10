@@ -8,6 +8,7 @@ export type InvoicePrintView = {
   status: 'DRAFT' | 'ISSUED' | 'VOID';
   format: InvoiceFormat;
   paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID';
+  fulfillmentStatus: 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED';
 
   businessName: string;
   businessLegalName: string | null;
@@ -24,6 +25,7 @@ export type InvoicePrintView = {
   locationName: string;
   locationAddress: string | null;
   locationPhone: string | null;
+    fulfilledQuantity: number;
 
   customerName: string | null;
   customerAddress: string | null;

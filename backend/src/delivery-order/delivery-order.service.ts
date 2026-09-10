@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
+import { InvoiceService } from '../invoice/invoice.service'; // NEW
 import { StockService } from '../stock/stock.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { DeliveryOrderStatus, SalesOrderStatus, EventType, Prisma } from '@prisma/client';
@@ -56,6 +57,7 @@ export class DeliveryOrderService {
     private tenantOwnership: TenantOwnershipService,
     private numbering: DocumentNumberingService,
     private salesOrderService: SalesOrderService,
+    private invoiceService: InvoiceService, // NEW
     private stockService: StockService,
     private printTokenService: PrintTokenService,
   ) {}
@@ -165,14 +167,19 @@ export class DeliveryOrderService {
   // sales-order.service.ts for why: confirm is a commercial commitment,
   // create is a planned delivery, not proof anything left the building).
   //
-  // Whether stock actually needs decrementing here is a per-delivery-order
-  // fact, not an org-wide setting: a delivery order created from a
-  // warehouse pack session (sessionId set) already had its stock moved at
-  // pick time — decrementing again here would double it. A delivery order
-  // created directly off a sales order with no session behind it has NOT
-  // had stock touched yet, and needs it decremented here regardless of
-  // whether the organization also uses warehouse pick/pack sessions for
-  // other orders.
+  // CHANGED: shouldDecreaseStock used to require `!!salesOrderId`, which
+  // was correct under the old all-or-nothing invoice model (an
+  // invoice-sourced delivery order only ever existed AFTER Invoice.issue()
+  // had already decremented the full quantity, so shipping it was a
+  // paperwork-only step). Under the oversell model, Invoice.issue() only
+  // takes what's physically available — DeliveryOrderService.createFromInvoice()
+  // now creates a delivery order specifically for the remainder that was
+  // NEVER decremented. So stock must move here for invoice-sourced
+  // deliveries too. The only thing that should ever skip the decrement is
+  // a delivery order whose stock already moved at pick time via a
+  // warehouse Session (sessionId set) — that's the actual double-decrement
+  // risk, regardless of whether the DO traces back to a SalesOrder or an
+  // Invoice.
   //
   // Idempotency: the status flip to SHIPPED is done as an atomic
   // updateMany guarded on status === PACKED, as the FIRST statement
@@ -192,7 +199,8 @@ export class DeliveryOrderService {
     }
 
     const salesOrderId = deliveryOrder.salesOrderId; // narrowed once, reused below
-    const shouldDecreaseStock = !deliveryOrder.sessionId && !!salesOrderId;
+    const invoiceId = deliveryOrder.invoiceId; // NEW — narrowed once, reused below
+    const shouldDecreaseStock = !deliveryOrder.sessionId; // CHANGED — see comment above
 
     if (shouldDecreaseStock) {
       const missingLocation = deliveryOrder.items.find((item) => item.productId && !item.locationId);
@@ -212,15 +220,41 @@ export class DeliveryOrderService {
         throw new BadRequestException('This delivery order has already been shipped or is no longer packed');
       }
 
-      if (shouldDecreaseStock && salesOrderId) {
+      if (shouldDecreaseStock) {
         for (const item of deliveryOrder.items) {
           if (!item.productId || !item.locationId) continue;
           await this.stockService.decrease(
             organizationId, item.productId, item.locationId, Number(item.quantity), userId,
-            { type: EventType.SALE, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id } },
+            salesOrderId
+              ? { type: EventType.SALE, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id } }
+              : { type: EventType.SALE, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id } },
             tx,
           );
         }
+      }
+
+      // NEW — invoice-sourced delivery orders (no salesOrderId) represent
+      // quantity that was reserved (InvoiceItem.reservedQuantity) but not
+      // yet physically fulfilled. Shipping is the real fulfillment event
+      // for those lines: move the shipped amount out of "reserved" and
+      // into "fulfilled", then refresh the invoice's cached
+      // fulfillmentStatus — mirrors salesOrderService.recomputeDeliveryStatus()
+      // for the sales-order path just above.
+      if (invoiceId) {
+        for (const item of deliveryOrder.items) {
+          if (!item.invoiceItemId) continue;
+          // item.quantity is a Decimal (DeliveryOrderItem) — cast to a
+          // plain number for the Int fields on InvoiceItem.
+          const shippedQty = Number(item.quantity);
+          await tx.invoiceItem.update({
+            where: { id: Number(item.invoiceItemId) },
+            data: {
+              reservedQuantity: { decrement: shippedQty },
+              fulfilledQuantity: { increment: shippedQty },
+            },
+          });
+        }
+        await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
       }
 
       return tx.deliveryOrder.findUniqueOrThrow({ where: { id } });
@@ -251,9 +285,10 @@ export class DeliveryOrderService {
   // Only valid PACKED → CANCELLED. Nothing has physically left the
   // warehouse at PACKED (stock now only moves at ship()), so there is no
   // stock movement to reverse here — just release the reserved quantity
-  // back onto the sales order line. A shipped delivery order that needs
-  // reversing goes through recordReturn() instead, which is a distinct
-  // event (a customer return), not an undo of a mistake.
+  // back onto the originating line, whether that's a SalesOrderItem or an
+  // InvoiceItem. A shipped delivery order that needs reversing goes
+  // through recordReturn() instead, which is a distinct event (a customer
+  // return), not an undo of a mistake.
   async cancel(organizationId: string, id: string, userId: string) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
@@ -266,11 +301,26 @@ export class DeliveryOrderService {
 
     return this.prisma.$transaction(async (tx) => {
       for (const item of deliveryOrder.items) {
-        if (!item.salesOrderItemId) continue; // invoice-sourced item, no SO line to release
-        await tx.salesOrderItem.update({
-          where: { id: item.salesOrderItemId },
-          data: { deliveredQuantity: { decrement: item.quantity } },
-        });
+        if (item.salesOrderItemId) {
+          await tx.salesOrderItem.update({
+            where: { id: item.salesOrderItemId },
+            data: { deliveredQuantity: { decrement: item.quantity } },
+          });
+        } else if (item.invoiceItemId) {
+          // CHANGED — previously skipped entirely ("invoice-sourced item,
+          // no SO line to release"). Under the oversell model, invoice-
+          // sourced items DO reserve against InvoiceItem.reservedQuantity
+          // at createFromInvoice() time, so cancelling this DO before it
+          // ships must release that reservation, or the outstanding
+          // balance would look permanently claimed by a dead delivery
+          // order and block a future createFromInvoice() call.
+          await tx.invoiceItem.update({
+            where: { id: Number(item.invoiceItemId) },
+            // item.quantity is a Decimal (DeliveryOrderItem) — cast for
+            // the Int field on InvoiceItem.
+            data: { reservedQuantity: { decrement: Number(item.quantity) } },
+          });
+        }
       }
       const cancelled = await tx.deliveryOrder.update({ where: { id }, data: { status: DeliveryOrderStatus.CANCELLED } });
       if (deliveryOrder.salesOrderId) {
@@ -346,6 +396,13 @@ export class DeliveryOrderService {
             where: { id: doItem.salesOrderItemId },
             data: { deliveredQuantity: { decrement: line.quantity } },
           });
+        } else if (doItem.invoiceItemId) {
+          // NEW — mirror of the salesOrderItemId branch above: a returned
+          // unit was fulfilledQuantity before, and isn't anymore.
+          await tx.invoiceItem.update({
+            where: { id: Number(doItem.invoiceItemId) },
+            data: { fulfilledQuantity: { decrement: line.quantity } },
+          });
         }
 
         if (doItem.productId && doItem.locationId) {
@@ -366,6 +423,10 @@ export class DeliveryOrderService {
       const updated = await this.recomputeReturnStatus(organizationId, id, tx);
       if (salesOrderId) {
         await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrderId, tx);
+      }
+      if (invoiceId) {
+        // NEW
+        await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
       }
       return updated;
     });
@@ -536,13 +597,34 @@ export class DeliveryOrderService {
     return this.printTokenService.verifyDocumentToken(token, 'delivery-order', deliveryOrderId);
   }
 
-  async createFromInvoice(organizationId: string, userId: string, invoiceId: string) {
+  // CHANGED — this whole method. Previously gated on "no delivery order
+  // exists yet for this invoice" and copied the FULL invoice item
+  // quantity, because under the old model an invoice-sourced DO could
+  // only ever be a one-shot, all-at-once paperwork step (stock had
+  // already fully moved at issue() time). Under the oversell model this
+  // needs to be:
+  //   1. Callable more than once, as backorders get fulfilled incrementally.
+  //   2. Scoped to OUTSTANDING quantity only (quantity - fulfilledQuantity
+  //      - reservedQuantity), not the full line — the fulfilled portion
+  //      already shipped conceptually at issue() time (stock moved then,
+  //      even though no DeliveryOrder existed for it), and the reserved
+  //      portion is already claimed by another open (PACKED) delivery
+  //      order.
+  //
+  // `itemOverrides` lets a caller explicitly choose to deliver less than
+  // everything outstanding on a line (partial pick); omitted entirely,
+  // it defaults to "everything outstanding, on every line."
+  async createFromInvoice(
+    organizationId: string,
+    userId: string,
+    invoiceId: string,
+    itemOverrides?: { invoiceItemId: string; quantity: number }[],
+  ) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id: invoiceId, organizationId },
       include: {
         items: { include: { product: { select: { name: true } } } },
         customer: true,
-        deliveryOrders: { select: { id: true } },
       },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -555,8 +637,31 @@ export class DeliveryOrderService {
     if (invoice.status !== 'ISSUED') {
       throw new BadRequestException('Only an issued invoice can be converted to a delivery order');
     }
-    if (invoice.deliveryOrders.length > 0) {
-      throw new BadRequestException('This invoice has already been converted to a delivery order');
+
+    const overrideByItemId = new Map((itemOverrides ?? []).map((o) => [o.invoiceItemId, o.quantity]));
+
+    const candidateLines = invoice.items
+      .filter((item) => item.productId) // service lines have nothing to physically deliver
+      .map((item) => {
+        const outstanding =
+          Number(item.quantity) - Number(item.fulfilledQuantity) - Number(item.reservedQuantity);
+        const requested = overrideByItemId.has(String(item.id))
+          ? overrideByItemId.get(String(item.id))!
+          : outstanding;
+        return { item, quantity: requested, outstanding };
+      })
+      .filter((l) => l.quantity > 0);
+
+    for (const l of candidateLines) {
+      if (l.quantity > l.outstanding) {
+        throw new BadRequestException(
+          `Cannot deliver ${l.quantity} of "${l.item.product?.name ?? l.item.description}" — only ${l.outstanding} unit(s) are outstanding (accounting for what's already fulfilled or reserved on another delivery order)`,
+        );
+      }
+    }
+
+    if (candidateLines.length === 0) {
+      throw new BadRequestException('This invoice has nothing outstanding to deliver');
     }
 
     try {
@@ -567,7 +672,7 @@ export class DeliveryOrderService {
         });
         const doNumber = await this.numbering.next({ prefix: 'DO', count, year });
 
-        return tx.deliveryOrder.create({
+        const deliveryOrder = await tx.deliveryOrder.create({
           data: {
             organizationId,
             invoiceId: invoice.id,
@@ -584,12 +689,12 @@ export class DeliveryOrderService {
             deliveryAddress: invoice.customer?.address ?? null,
             notes: null,
             items: {
-              create: invoice.items.map((item) => ({
+              create: candidateLines.map(({ item, quantity }) => ({
                 salesOrderItemId: null,
                 invoiceItemId: String(item.id), // InvoiceItem.id is a numeric autoincrement column
                 productId: item.productId,
                 productName: item.product?.name ?? item.description ?? 'Service',
-                quantity: item.quantity,
+                quantity,
                 unit: item.unit,
                 locationId: item.locationId,
               })),
@@ -597,11 +702,24 @@ export class DeliveryOrderService {
           },
           include: { items: true },
         });
+
+        // NEW — claim this quantity as reserved so a second concurrent
+        // createFromInvoice() call (or a second manual call before this
+        // one ships) can't also treat the same backordered units as
+        // outstanding. Released back on cancel(), converted to
+        // fulfilledQuantity on ship().
+        for (const { item, quantity } of candidateLines) {
+          await tx.invoiceItem.update({
+            where: { id: item.id },
+            data: { reservedQuantity: { increment: quantity } },
+          });
+        }
+
+        return deliveryOrder;
       });
     } catch (err) {
-      // Race backstop, same pattern as SalesOrderService.createFromQuotation
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new BadRequestException('This invoice has already been converted to a delivery order');
+        throw new BadRequestException('A conflicting delivery order was created concurrently — please retry');
       }
       throw err;
     }

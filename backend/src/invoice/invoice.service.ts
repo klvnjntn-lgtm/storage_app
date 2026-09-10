@@ -20,6 +20,7 @@ import {
 import {
   DocumentType,
   EventType,
+  FulfillmentStatus,
   InvoiceActivityEventType,
   InvoiceStatus,
   ModuleKey,
@@ -41,6 +42,7 @@ export type InvoicePrintView = {
 
   invoiceNumber: string | null;
   status: string;
+  fulfillmentStatus: string; // NEW
   vehicleId: string | null;
   paymentStatus: string;
   vehiclePlateNumber: string | null;
@@ -55,11 +57,6 @@ export type InvoicePrintView = {
   businessLegalName: string | null;
   businessNpwp: string | null;
   businessLogoUrl: string | null;
-  // Now sourced from the invoice's own snapshot columns (bankAccountId +
-  // bankName/bankAccountNumber/bankAccountName), not a live join to
-  // Organization — see BankAccountResolverService. Field names on this
-  // print view are unchanged so nothing downstream (print templates)
-  // needs updating.
   bankName: string | null;
   bankAccountNumber: string | null;
   bankAccountName: string | null;
@@ -107,13 +104,11 @@ export type InvoicePrintView = {
     itemTotal: number;
     lineTotal: number;
     locationName: string;
+    fulfilledQuantity: number; // NEW
   }[];
 };
 
 // ---- invoiceDetailInclude ----
-// bank* fields removed from organization.select — they now live directly
-// on Invoice (bankAccountId/bankName/bankAccountNumber/bankAccountName),
-// snapshotted at create/edit time via BankAccountResolverService.
 const invoiceDetailInclude = {
   organization: {
     select: {
@@ -171,9 +166,6 @@ export class InvoiceService {
           await this.applyOdometerReading(tx, organizationId, dto.vehicleId, dto.odometer);
         }
 
-        // undefined (field not sent) -> org's current default account.
-        // null (field explicitly sent as null) -> no bank details.
-        // string -> that specific active account, or throws.
         const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
 
         const invoice = await tx.invoice.create({
@@ -261,12 +253,6 @@ export class InvoiceService {
             await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
           }
 
-          // Only re-resolve if the DTO actually touched bankAccountId —
-          // same "only write what was sent" convention as every other
-          // field in this branch. `null` here means "don't touch it",
-          // distinct from BankAccountResolverService's own null sentinel
-          // ("clear the selection"), which only applies when the DTO did
-          // send bankAccountId.
           const bank = dto.bankAccountId !== undefined
             ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
             : null;
@@ -429,10 +415,22 @@ export class InvoiceService {
           throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
         }
 
+        // CHANGED: non-warehouse orgs now FULFILL rather than DECREASE.
+        // fulfill() takes up to what's physically available and never
+        // throws for insufficient stock — the sale still goes through.
+        // Whatever isn't covered stays as outstanding demand, visible as
+        // item.quantity > item.fulfilledQuantity, and can be picked up
+        // later via DeliveryOrderService.createFromInvoice() (e.g. once
+        // this org enables WAREHOUSE_OPS, or once new stock arrives).
+        //
+        // Warehouse-ops orgs are untouched here: stock for a sales-order
+        // invoice moves at DeliveryOrder.ship(), and a direct (no
+        // salesOrderId) invoice under warehouse ops is routed to a
+        // FULFILLMENT Session below, same as before.
         if (!hasWarehouseOps) {
           for (const item of invoice.items) {
             if (!item.productId) continue;
-            await this.stockService.decrease(
+            const { fulfilledQuantity } = await this.stockService.fulfill(
               organizationId,
               item.productId,
               item.locationId as string,
@@ -441,7 +439,14 @@ export class InvoiceService {
               { type: EventType.SALE, invoiceId: invoice.id },
               tx,
             );
+            if (fulfilledQuantity > 0) {
+              await tx.invoiceItem.update({
+                where: { id: item.id },
+                data: { fulfilledQuantity: { increment: fulfilledQuantity } },
+              });
+            }
           }
+          await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
         }
 
         const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
@@ -483,6 +488,41 @@ export class InvoiceService {
       }
       throw err;
     }
+  }
+
+  // NEW — recomputes Invoice.fulfillmentStatus from summed
+  // fulfilledQuantity vs quantity across its items. Same derived-status
+  // pattern as SalesOrderService.recomputeDeliveryStatus(). Called from
+  // issue() and from DeliveryOrderService (ship() / recordReturn()) inside
+  // whatever transaction changed a fulfilledQuantity — never call this
+  // standalone outside that transaction, or the two can drift.
+  //
+  // Service lines (no productId) have no physical fulfillment concept and
+  // are excluded from the calculation entirely.
+  async recomputeFulfillmentStatus(
+    organizationId: string,
+    invoiceId: string,
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const invoice = await tx.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+      include: { items: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const physicalItems = invoice.items.filter((i) => i.productId);
+    const totalQuantity = physicalItems.reduce((sum, i) => sum + Number(i.quantity), 0);
+    const totalFulfilled = physicalItems.reduce((sum, i) => sum + Number(i.fulfilledQuantity), 0);
+
+    const newStatus =
+      totalQuantity === 0 || totalFulfilled >= totalQuantity
+        ? FulfillmentStatus.FULFILLED
+        : totalFulfilled > 0
+        ? FulfillmentStatus.PARTIALLY_FULFILLED
+        : FulfillmentStatus.UNFULFILLED;
+
+    if (newStatus === invoice.fulfillmentStatus) return invoice;
+    return tx.invoice.update({ where: { id: invoiceId }, data: { fulfillmentStatus: newStatus } });
   }
 
   async getRevenueReport(
@@ -710,6 +750,7 @@ export class InvoiceService {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
+      fulfillmentStatus: invoice.fulfillmentStatus, // NEW
       format: invoice.format,
       salesOrderId: invoice.salesOrderId,
       deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })),
@@ -729,7 +770,6 @@ export class InvoiceService {
       businessLegalName: invoice.organization.legalName,
       businessNpwp: invoice.organization.npwp,
       businessLogoUrl: invoice.organization.logoUrl,
-      // Snapshotted on the invoice itself now, not read off organization.
       bankName: invoice.bankName,
       bankAccountNumber: invoice.bankAccountNumber,
       bankAccountName: invoice.bankAccountName,
@@ -775,6 +815,7 @@ export class InvoiceService {
         itemTotal: toNumber(item.netAmount),
         lineTotal: toNumber(item.lineTotal),
         locationName: item.location?.name ?? '',
+        fulfilledQuantity: Number(item.fulfilledQuantity), // NEW
       })),
     };
   }
@@ -830,23 +871,6 @@ export class InvoiceService {
     return invoice;
   }
 
-  // -------------------------------------------------------------------
-  // Invoice numbering.
-  //
-  // Organizations that came through the Accurate GDB importer have a
-  // DocumentSequence row (organizationId, INVOICE) seeded with the
-  // detected prefix/highest-number from their imported invoices (e.g.
-  // "ATL - " / 59886) — see GdbImportService.importInvoices. For those
-  // orgs, numbering.nextForOrganization() atomically increments that row
-  // and the new invoice continues the customer's original numbering
-  // ("ATL - 59887", "ATL - 59888", ...).
-  //
-  // Organizations with no such row (never imported, or a fresh org) fall
-  // straight through to the original year-scoped, count-based numbering
-  // below — completely unchanged from before. This intentionally does NOT
-  // migrate every org onto DocumentSequence; doing so would silently drop
-  // the yearly reset ("INV-2026-0001") that this fallback still provides.
-  // -------------------------------------------------------------------
   private async nextInvoiceNumber(tx: Prisma.TransactionClient, organizationId: string) {
     const fromImportedSequence = await this.numbering.nextForOrganization(
       tx,
@@ -903,10 +927,6 @@ export class InvoiceService {
     });
     if (!customer) throw new NotFoundException('Customer not found');
 
-    // A statement isn't a single printed document tied to one invoice —
-    // it's a live summary, so it resolves to the org's CURRENT default
-    // bank account rather than any one invoice's snapshot (invoices in
-    // range may each have a different bankAccountId).
     const orgRaw = await this.prisma.organization.findUniqueOrThrow({
       where: { id: organizationId },
       select: {
@@ -1055,13 +1075,17 @@ export class InvoiceService {
         'Item edits on issued invoices are not supported for organizations using warehouse fulfillment. Void and reissue instead.',
       );
     }
+    // Because WAREHOUSE_OPS is always blocked above, everything below only
+    // ever runs for non-warehouse orgs — the same population that used
+    // fulfill()-with-oversell in issue().
 
-    const oldQtyByKey = new Map<string, number>();
-    for (const item of invoice.items) {
-      if (!item.productId || !item.locationId) continue;
-      const key = `${item.productId}__${item.locationId}`;
-      oldQtyByKey.set(key, (oldQtyByKey.get(key) ?? 0) + item.quantity);
-    }
+    // Same identity key as buildEditDiff() below — matches an old line to
+    // its corresponding new line so fulfilledQuantity can be carried
+    // forward per-line rather than aggregated blindly by product+location.
+    const keyOf = (i: { productId: string | null; description: string | null }) =>
+      i.productId ? `p:${i.productId}` : `s:${i.description}`;
+
+    const oldItemByKey = new Map(invoice.items.map((i) => [keyOf(i), i]));
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
@@ -1076,30 +1100,62 @@ export class InvoiceService {
         ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
         : null;
 
-      const newQtyByKey = new Map<string, number>();
-      for (const l of lines) {
-        if (!l.productId || !l.locationId) continue;
-        const key = `${l.productId}__${l.locationId}`;
-        newQtyByKey.set(key, (newQtyByKey.get(key) ?? 0) + l.quantity);
-      }
+      // CHANGED: this whole block replaces the old aggregate-by-
+      // product+location decrease()/increase() diff. That old logic
+      // assumed the FULL original quantity had left stock — under the
+      // oversell model, only item.fulfilledQuantity actually did.
+      //
+      // Rule enforced here: you cannot shrink a line below what's already
+      // been fulfilled — that's not an edit, physical stock already left
+      // for that amount. A genuine return should go through a return
+      // flow, not a quantity edit. Increasing a line (or adding a new
+      // one) attempts to fulfill only the newly added demand, using the
+      // same oversell-safe fulfill() as issue() — it does not retroactively
+      // try to resolve a pre-existing backorder on an untouched line.
+      const carriedFulfilledByLineIndex = new Map<number, number>();
 
-      const allKeys = new Set([...oldQtyByKey.keys(), ...newQtyByKey.keys()]);
-      for (const key of allKeys) {
-        const [productId, locationId] = key.split('__');
-        const oldQty = oldQtyByKey.get(key) ?? 0;
-        const newQty = newQtyByKey.get(key) ?? 0;
-        const delta = newQty - oldQty;
-        if (delta === 0) continue;
+      for (let idx = 0; idx < lines.length; idx++) {
+        const l = lines[idx];
+        if (!l.productId || !l.locationId) continue; // service line — no physical fulfillment
 
-        if (delta > 0) {
-          await this.stockService.decrease(
-            organizationId, productId, locationId, delta, invoice.userId!,
+        const key = keyOf(l);
+        const oldItem = oldItemByKey.get(key);
+        const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
+        const oldQty = oldItem ? Number(oldItem.quantity) : 0;
+
+        if (l.quantity < oldFulfilled) {
+          throw new BadRequestException(
+            `Cannot reduce "${l.description ?? key}" to ${l.quantity} — ${oldFulfilled} unit(s) are already fulfilled. Process a return instead.`,
+          );
+        }
+
+        let fulfilledForThisLine = oldFulfilled;
+        const addedDemand = l.quantity - oldQty;
+        if (addedDemand > 0) {
+          const { fulfilledQuantity } = await this.stockService.fulfill(
+            organizationId, l.productId, l.locationId, addedDemand, invoice.userId!,
             { type: EventType.SALE, invoiceId: invoice.id }, tx,
           );
-        } else {
+          fulfilledForThisLine += fulfilledQuantity;
+        }
+        carriedFulfilledByLineIndex.set(idx, fulfilledForThisLine);
+      }
+
+      // A line that existed before but was removed entirely (or turned
+      // into a service line) needs its already-fulfilled stock returned —
+      // it was truly decremented, and deleting the line shouldn't erase
+      // that fact.
+      const newKeys = new Set(
+        lines.filter((l) => l.productId && l.locationId).map((l) => keyOf(l)),
+      );
+      for (const item of invoice.items) {
+        if (!item.productId || !item.locationId) continue;
+        if (newKeys.has(keyOf(item))) continue;
+        const fulfilled = Number(item.fulfilledQuantity);
+        if (fulfilled > 0) {
           await this.stockService.increase(
-            organizationId, productId, locationId, Math.abs(delta), invoice.userId!,
-            { type: EventType.SALE, invoiceId: invoice.id }, tx,
+            organizationId, item.productId, item.locationId, fulfilled, invoice.userId!,
+            { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
           );
         }
       }
@@ -1130,7 +1186,7 @@ export class InvoiceService {
           taxAmount,
           discount: discountAmount,
           items: {
-            create: lines.map((l) => ({
+            create: lines.map((l, idx) => ({
               productId: l.productId,
               description: l.description,
               locationId: l.locationId,
@@ -1145,6 +1201,7 @@ export class InvoiceService {
               netAmount: l.netAmount,
               taxAmount: l.taxAmount,
               total: l.total,
+              fulfilledQuantity: carriedFulfilledByLineIndex.get(idx) ?? 0, // NEW
               taxes: { create: l.taxes },
             })),
           },
@@ -1152,6 +1209,8 @@ export class InvoiceService {
         },
         include: invoiceDetailInclude,
       });
+
+      await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
 
       const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
       const products = productIds.length
@@ -1173,7 +1232,9 @@ export class InvoiceService {
         },
       });
 
-      return result;
+      // Re-fetch so the returned view reflects fulfillmentStatus written
+      // by recomputeFulfillmentStatus() after `result` was captured.
+      return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceDetailInclude });
     });
 
     return this.mapInvoiceForPrint(updated);
@@ -1287,8 +1348,14 @@ export class InvoiceService {
       if (!hasWarehouseOps) {
         for (const item of invoice.items) {
           if (!item.productId || !item.locationId) continue;
+          // CHANGED: only the FULFILLED portion of this item ever actually
+          // left Stock — the rest was outstanding/backordered and never
+          // touched physical inventory. Reversing item.quantity (the old
+          // behavior) would credit back stock that was never taken.
+          const fulfilled = Number(item.fulfilledQuantity);
+          if (fulfilled <= 0) continue;
           await this.stockService.increase(
-            organizationId, item.productId, item.locationId, item.quantity, userId,
+            organizationId, item.productId, item.locationId, fulfilled, userId,
             { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
           );
         }
@@ -1377,10 +1444,6 @@ export class InvoiceService {
             customerName: quotation.customerName,
             customerId: quotation.customerId,
             quotationId: quotation.id,
-            // Carry the quotation's own bank snapshot forward as-is —
-            // it's already a point-in-time copy (same reasoning as
-            // customerName above), not re-resolved to the org's current
-            // default.
             bankAccountId: quotation.bankAccountId,
             bankName: quotation.bankName,
             bankAccountNumber: quotation.bankAccountNumber,
@@ -1464,8 +1527,6 @@ export class InvoiceService {
       return await this.prisma.$transaction(async (tx) => {
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx);
-        // SalesOrder carries no bank snapshot of its own, so this falls
-        // back to the org's current default account.
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
         const invoice = await tx.invoice.create({
           data: {
