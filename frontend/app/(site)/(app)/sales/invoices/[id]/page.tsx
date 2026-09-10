@@ -218,7 +218,7 @@ const [actionLoading, setActionLoading] = useState<string | null>(null);
     }
   }
 
-  async function handlePrint() {
+async function handlePrint() {
   if (!invoice) return;
   setPdfGenerating(true);
   setError(null);
@@ -230,31 +230,53 @@ const [actionLoading, setActionLoading] = useState<string | null>(null);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
 
-    // Open in a new tab so Chrome's own PDF viewer handles it — this is
-    // the pipeline that already prints A5/landscape correctly, since the
-    // PDF's page geometry is baked in rather than negotiated live via
-    // @page CSS against a driver.
-    const printWindow = window.open(url, '_blank');
+    // Print via a hidden iframe rather than opening the PDF in a new tab.
+    // Chrome/Edge's full-tab embedded PDF viewer has a well-documented bug
+    // where a landscape-oriented PDF still gets a portrait-defaulted print
+    // dialog (the page itself is correctly landscape — confirmed earlier —
+    // but the viewer's print settings don't inherit that). Loading the PDF
+    // into an iframe on the current page and calling print() on the iframe's
+    // own window sidesteps that viewer entirely.
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.src = url;
 
-    // Auto-trigger the print dialog once the PDF has actually loaded.
-    // A fixed delay is a fallback for popup blockers / slow loads —
-    // print() on a window that hasn't finished loading its PDF can
-    // silently no-op in some Chrome versions.
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        printWindow.print();
-      });
-    }
+    iframe.onload = () => {
+      // Small delay: onload fires when the iframe's own document is ready,
+      // but the embedded PDF renderer inside it can still be a beat behind —
+      // calling print() too early can silently no-op or print a blank page.
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.error('iframe print failed:', e);
+          setError('Could not open the print dialog. Try Download PDF instead.');
+        }
+      }, 300);
+    };
 
-    // Revoke a bit later, not immediately — the new tab needs the blob
-    // URL to still be valid when it loads and when print() fires.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    document.body.appendChild(iframe);
+
+    // Clean up well after the print dialog would have appeared and been
+    // dismissed — removing the iframe/blob too early can cancel an
+    // in-progress print job on some browsers.
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      URL.revokeObjectURL(url);
+    }, 60_000);
   } catch (e: any) {
     setError(e.message || 'Could not generate PDF for printing.');
   } finally {
     setPdfGenerating(false);
   }
 }
+
 async function handleConvertToDeliveryOrder() {
   if (!invoice) return;
   setActionLoading('convert-do');
