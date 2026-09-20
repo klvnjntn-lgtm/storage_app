@@ -8,13 +8,15 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { randomUUID } from 'crypto';
+import { MailerService } from './mailer/mailer.service';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
+    private mailer: MailerService,
   ) {}
 
   async login(email: string, password: string) {
@@ -106,6 +108,102 @@ export class AuthService {
       data: { email: normalizedEmail, password: hashed, role, organizationId: inviterOrgId },
       select: { id: true, email: true, role: true },
     });
+  }
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+  const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !user.active) {
+    throw new UnauthorizedException('User not found');
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.password);
+  if (!valid) {
+    throw new UnauthorizedException('Current password is incorrect');
+  }
+
+  if (!newPassword || newPassword.length < 8) {
+    throw new ForbiddenException('Password must be at least 8 characters');
+  }
+
+  const sameAsOld = await bcrypt.compare(newPassword, user.password);
+  if (sameAsOld) {
+    throw new ForbiddenException('New password must be different from current password');
+  }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+
+  await this.prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: hashed,
+      currentSessionId: null, // force re-login on all devices, same as resetPassword()
+    },
+  });
+
+  return { message: 'Password changed. Please sign in again.' };
+}
+
+  // Always returns the same message whether or not the email is
+  // registered — a differing response here would let this endpoint be
+  // used to enumerate every registered email address.
+  async forgotPassword(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    const genericResponse = {
+      message: 'If an account exists for that email, a reset link is on its way.',
+    };
+
+    if (!user || !user.active) {
+      return genericResponse;
+    }
+
+    // Only the hash is stored, mirroring how passwords are handled — if
+    // the database ever leaks, the leaked hashes alone can't be used to
+    // reset anyone's password (the raw token never touches the DB).
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { resetToken: tokenHash, resetTokenExpires: expires },
+    });
+
+    await this.mailer.sendPasswordReset(user.email, rawToken);
+
+    return genericResponse;
+  }
+
+  async resetPassword(rawToken: string, newPassword: string) {
+    if (!rawToken) {
+      throw new UnauthorizedException('Reset link is invalid or expired');
+    }
+    if (!newPassword || newPassword.length < 8) {
+      throw new ForbiddenException('Password must be at least 8 characters');
+    }
+
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const user = await this.prisma.user.findFirst({
+      where: { resetToken: tokenHash, resetTokenExpires: { gt: new Date() } },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Reset link is invalid or expired');
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashed,
+        resetToken: null,
+        resetTokenExpires: null,
+        currentSessionId: null, // force logout everywhere — see jwt.strategy.ts
+      },
+    });
+
+    return { message: 'Password has been reset' };
   }
 
   private async issueToken(

@@ -1,8 +1,9 @@
 // src/sessions/sessions.service.ts
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { EventType, SessionType, FulfillmentMode, ModuleKey } from '@prisma/client';
+import { EventType, SessionType, FulfillmentMode, ModuleKey, Prisma, DeliveryOrderStatus } from '@prisma/client';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
+import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import type { JwtPayload } from '../auth/decorators/current-user.decorator';
 
 const RETURN_REASONS = [
@@ -21,6 +22,8 @@ export class SessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizationModulesService: OrganizationModulesService,
+    private readonly postingRules: PostingRulesService, // NEW
+    private readonly logger = new Logger(SessionsService.name),
   ) {}
 
   private async getStagesForSession(
@@ -84,27 +87,61 @@ export class SessionsService {
   // this.organizationModulesService (not the tx `client` param) — module
   // enablement isn't being mutated concurrently with session creation, so
   // it doesn't need transactional consistency with the caller's tx.
-  async create(
-    organizationId: string,
-    type: SessionType,
-    invoiceId?: string,
-    client: Pick<PrismaService, 'session' | 'organization'> = this.prisma,
-  ) {
-    if (type === SessionType.FULFILLMENT) {
-      const hasWarehouseOps = await this.organizationModulesService.isModuleEnabled(
-        organizationId,
-        ModuleKey.WAREHOUSE_OPS,
+async create(
+  organizationId: string,
+  type: SessionType,
+  invoiceId?: string,
+  client: Pick<PrismaService, 'session' | 'organization' | 'deliveryOrder' | 'invoice'> = this.prisma,
+) {
+  if (type === SessionType.FULFILLMENT) {
+    const hasWarehouseOps = await this.organizationModulesService.isModuleEnabled(
+      organizationId,
+      ModuleKey.WAREHOUSE_OPS,
+    );
+    if (!hasWarehouseOps) {
+      throw new BadRequestException(
+        'Cannot create a fulfillment session for an organization without WAREHOUSE_OPS enabled',
       );
-      if (!hasWarehouseOps) {
+    }
+  }
+
+  const doCreate = async (tx: Prisma.TransactionClient) => {
+    if (type === SessionType.FULFILLMENT && invoiceId) {
+      // Atomic claim — must land before any pick/stock movement can occur,
+      // and before the legacy DeliveryOrder check below, since that check
+      // exists only as a backstop for pre-migration invoices whose
+      // fulfillmentPath is still NULL despite already being DIRECT.
+      const claimed = await tx.invoice.updateMany({
+        where: { id: invoiceId, organizationId, fulfillmentPath: null },
+        data: { fulfillmentPath: 'SESSION' },
+      });
+      if (claimed.count === 0) {
+        const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
         throw new BadRequestException(
-          'Cannot create a fulfillment session for an organization without WAREHOUSE_OPS enabled',
+          invoice.fulfillmentPath === 'DIRECT'
+            ? 'Cannot create fulfillment session. This invoice has already been fulfilled directly.'
+            : 'Cannot create fulfillment session. This invoice is already assigned to a warehouse fulfillment session.',
+        );
+      }
+
+      // Legacy backstop: covers the (post-migration, should be rare) case
+      // where DeliveryOrders exist directly against this invoice but the
+      // backfill above didn't run or missed a row. Safe to remove once
+      // you're confident the backfill is complete and no direct-fulfillment
+      // path can still write to DeliveryOrder without claiming DIRECT first.
+      const activeDeliveryOrders = await tx.deliveryOrder.count({
+        where: { organizationId, invoiceId, status: { not: DeliveryOrderStatus.CANCELLED } },
+      });
+      if (activeDeliveryOrders > 0) {
+        throw new BadRequestException(
+          'Cannot create fulfillment session. This invoice has already been fulfilled directly.',
         );
       }
     }
 
-    const stages = await this.getStagesForSession(organizationId, type, client);
+    const stages = await this.getStagesForSession(organizationId, type, tx);
 
-    return client.session.create({
+    return tx.session.create({
       data: {
         type,
         stage: stages ? stages[0] : null,
@@ -113,9 +150,14 @@ export class SessionsService {
         invoiceId,
       },
     });
-  }
+  };
 
-  async findAll(organizationId: string) {
+  return client === this.prisma
+    ? this.prisma.$transaction((tx) => doCreate(tx))
+    : doCreate(client as Prisma.TransactionClient);
+}
+
+async findAll(organizationId: string) {
     const sessions = await this.prisma.session.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
@@ -176,6 +218,40 @@ export class SessionsService {
     return { ...session, stages };
   }
 
+  // FIX — resolves the unit cost to post COGS with at pick time. Tries
+  // the linked Invoice's item first (same unitCost snapshot
+  // DeliveryOrderService already relies on), then the linked SalesOrder's
+  // item. Returns null — not Product.costPrice — when neither has a
+  // snapshot, since costPrice can drift after the order was placed and
+  // postCogs() already treats a null unitCost as "skip this line" rather
+  // than posting a fabricated amount.
+private async resolvePickUnitCost(
+  session: { id: string; invoiceId: string | null; salesOrderId?: string | null },
+  productId: string,
+  tx: Prisma.TransactionClient,
+): Promise<number | null> {
+  if (session.invoiceId) {
+    const invoiceItem = await tx.invoiceItem.findFirst({
+      where: { invoiceId: session.invoiceId, productId },
+      select: { unitCost: true },
+    });
+    if (invoiceItem?.unitCost != null) return Number(invoiceItem.unitCost);
+  }
+  if (session.salesOrderId) {
+    const salesOrderItem = await tx.salesOrderItem.findFirst({
+      where: { salesOrderId: session.salesOrderId, productId },
+      select: { unitCost: true },
+    });
+    if (salesOrderItem?.unitCost != null) return Number(salesOrderItem.unitCost);
+  }
+  // Session-linked delivery orders snapshot unitCost per item; ship() skips
+  // COGS for them, so the pick is the only place it can post.
+  const deliveryItem = await tx.deliveryOrderItem.findFirst({
+    where: { productId, deliveryOrder: { sessionId: session.id } },
+    select: { unitCost: true },
+  });
+  return deliveryItem?.unitCost != null ? Number(deliveryItem.unitCost) : null;
+}
   async addItem(
     organizationId: string,
     sessionId: string,
@@ -379,20 +455,55 @@ export class SessionsService {
         }
 
         case EventType.PICK: {
-          const fromStock = await tx.stock.findUnique({
-            where: {
-              productId_locationId: { productId, locationId: fromLocationId! },
-            },
-          });
-          if (!fromStock || fromStock.quantity < qty) {
-            throw new BadRequestException('Insufficient stock at source location');
+const picked = await tx.stock.updateMany({
+  where: { productId, locationId: fromLocationId!, organizationId, quantity: { gte: qty } },
+  data: { quantity: { decrement: qty } },
+});
+if (picked.count === 0) {
+  throw new BadRequestException('Insufficient stock at source location');
+}
+
+          // NEW — this is the pick-time stock decrement that
+          // DeliveryOrder.ship()'s comment points at as the missing COGS
+          // trigger for warehouse-ops orgs: for a session-linked delivery,
+          // ship() deliberately skips COGS because stock already left
+          // here, not at ship(). Only posts for FULFILLMENT sessions — a
+          // PICK inside a MOVE session is a warehouse transfer, not a
+          // sale, and has nothing to expense.
+          //
+          // ⚠ UNVERIFIED, DO NOT DEPLOY AS-IS — I have not seen
+          // InvoiceService.issue() or SalesOrderService.confirm(). Per
+          // the comment on SessionsService.create() above, both of them
+          // already skip their own stockService.decrease() when
+          // WAREHOUSE_OPS is on, trusting the FULFILLMENT session to
+          // decrement instead. If either of them still calls
+          // postingRules.postCogs() UNCONDITIONALLY — i.e. gated only on
+          // "did I decrease stock", which for a warehouse-ops org should
+          // already be false, but I can't confirm that's how the COGS
+          // call is actually gated in those files — this posts COGS
+          // twice for the same sale: once here, once there. Check both
+          // files and confirm their COGS call (not just their stock
+          // decrement) is skipped for WAREHOUSE_OPS orgs before merging
+          // this.
+if (session.type === SessionType.FULFILLMENT) {
+  const unitCost = await this.resolvePickUnitCost(session, productId, tx);
+  if (unitCost != null) {
+    await this.postingRules.postCogs(
+      organizationId,
+      {
+        sourceId: `${sessionId}:cogs:pick:${item.id}`,
+        date: new Date(),
+        memo: `COGS for pick session ${sessionId}`,
+        lines: [{ productId, quantity: qty, unitCost, locationId: fromLocationId ?? null }],
+      },
+      tx,
+    );
+  } else {
+    this.logger.warn(
+      `No unitCost for product ${productId} in session ${sessionId}; COGS not posted for this pick`,
+    );
+  }
           }
-          await tx.stock.update({
-            where: {
-              productId_locationId: { productId, locationId: fromLocationId! },
-            },
-            data: { quantity: { decrement: qty } },
-          });
           break;
         }
 

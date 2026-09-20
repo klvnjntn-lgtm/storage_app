@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/apifetch';
 
-const PUBLIC_PATHS = ['/', '/login', '/register'];
+const PUBLIC_PATHS = ['/', '/login', '/register', '/forgot-password', '/reset-password'];
 
 const checkIsPublic = (pathname: string) =>
   PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/print/');
@@ -57,12 +57,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         const res = await apiFetch('/auth/me');
         if (cancelled) return;
 
-if (!res.ok) {
-  if (!cancelled) {
-    setChecked(true);
-  }
-  return;
-}
+        if (!res.ok) {
+          if (!cancelled) {
+            setChecked(true);
+          }
+          return;
+        }
 
         verifiedTokenRef.current = token;
 

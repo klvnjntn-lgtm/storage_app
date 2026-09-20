@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Package } from 'lucide-react';
+import { ArrowLeft, Package, ImageOff, Upload, Trash2, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/Pagination';
 
@@ -39,9 +39,18 @@ type Product = {
   sku: string;
   category?: { name: string };
   brand?: { name: string };
+  // Primary product image. Optional — most fields on this page assume a
+  // product may never get one, and the UI treats that as a normal, not an
+  // error, state. The data model future-proofs for multiple images per
+  // product (a gallery), but only the primary one is used here and in
+  // Grid View / POS — see the "Product Image" section below.
+  image: string | null;
 };
 
 type OrgLocation = { id: string; name: string };
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
@@ -79,6 +88,92 @@ const eventColor = (type: string) => {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const totalStock = stock.reduce((acc, s) => acc + s.quantity, 0);
+
+  // --- Product image ---
+  // /products/[id] is the source of truth for image management — this is
+  // the only place with the full Change/Remove/Upload flow. Grid View on
+  // the stock list has a quick preview/edit action, but it's a shortcut
+  // into this same flow, not a second implementation of it.
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+  function openImagePicker() {
+    setImageError('');
+    imageInputRef.current?.click();
+  }
+
+  async function handleImageSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file || !product) return;
+
+    setImageError('');
+
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setImageError('Please choose a JPG, PNG, or WEBP image.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError('Image must be smaller than 5MB.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    setImageUploading(true);
+    try {
+      // NOTE: apiFetch must not force a JSON Content-Type header here —
+      // the browser needs to set multipart/form-data with its own
+      // boundary for FormData bodies. If apiFetch always injects
+      // 'Content-Type: application/json', add an escape hatch for this
+      // call (e.g. an `isFormData` option) rather than setting headers
+      // manually below.
+      const res = await apiFetch(`/products/${product.id}/image`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to upload image');
+      }
+
+      const data = await res.json();
+      setImageLoadFailed(false);
+      setProduct((p) => (p ? { ...p, image: data.image ?? data.url ?? null } : p));
+    } catch (err: any) {
+      console.error(err);
+      setImageError(err.message || 'Failed to upload image');
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
+  async function removeImage() {
+    if (!product || !product.image) return;
+    setImageError('');
+    setImageUploading(true);
+    try {
+      const res = await apiFetch(`/products/${product.id}/image`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to remove image');
+      }
+
+      setProduct((p) => (p ? { ...p, image: null } : p));
+    } catch (err: any) {
+      console.error(err);
+      setImageError(err.message || 'Failed to remove image');
+    } finally {
+      setImageUploading(false);
+    }
+  }
 
   // --- Event history pagination (client-side — the events endpoint returns
   // the full list in one shot, so we slice it here rather than round-trip
@@ -176,6 +271,8 @@ const eventColor = (type: string) => {
     );
   }
 
+  const showImage = product.image && !imageLoadFailed;
+
   return (
     <main
       className="min-h-screen text-black"
@@ -223,6 +320,77 @@ const eventColor = (type: string) => {
 
       {/* Content */}
       <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8">
+
+        {/* PRODUCT IMAGE */}
+        <section className="border-2 border-gray-300 rounded-md p-4 bg-white">
+          <h2 className="text-lg font-bold mb-3">Product Image</h2>
+
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="w-full sm:w-40 shrink-0">
+              {showImage ? (
+                <div className="w-full aspect-square rounded-md bg-gray-50 border-2 border-gray-200 overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={product.image as string}
+                    alt={product.name}
+                    className="w-full h-full object-cover"
+                    onError={() => setImageLoadFailed(true)}
+                  />
+                </div>
+              ) : (
+                <div className="w-full aspect-square rounded-md bg-gray-50 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1.5 text-gray-400">
+                  <ImageOff size={26} strokeWidth={1.75} />
+                  <span className="text-[11px] text-center px-2">No photo yet</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 justify-center">
+              <p className="text-xs text-gray-500 max-w-xs">
+                Images are optional. When set, this is the photo shown in Grid View and at
+                point of sale.
+              </p>
+
+              {imageError && <p className="text-xs text-red-600">{imageError}</p>}
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={openImagePicker}
+                  disabled={imageUploading}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {imageUploading ? (
+                    <Loader2 size={15} strokeWidth={2.5} className="animate-spin" />
+                  ) : (
+                    <Upload size={15} strokeWidth={2.5} />
+                  )}
+                  {product.image ? 'Change Photo' : 'Add Photo'}
+                </button>
+
+                {product.image && (
+                  <button
+                    type="button"
+                    onClick={removeImage}
+                    disabled={imageUploading}
+                    className="flex items-center gap-1.5 px-3 py-2 text-red-700 border-2 border-red-200 rounded-md text-sm font-semibold hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Trash2 size={15} strokeWidth={2.5} />
+                    Remove Photo
+                  </button>
+                )}
+              </div>
+
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept={ACCEPTED_IMAGE_TYPES.join(',')}
+                onChange={handleImageSelected}
+                className="hidden"
+              />
+            </div>
+          </div>
+        </section>
 
         {/* ADJUST STOCK */}
         <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">

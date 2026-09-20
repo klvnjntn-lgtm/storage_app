@@ -29,6 +29,8 @@ export type PurchaseOrderPrintView = {
 
   orderDate: Date;
   expectedDate: Date | null;
+  dueDate: Date | null;          // NEW — payment due date, distinct from expectedDate (delivery)
+  paymentTerms: string | null;   // NEW
   notes: string | null;
 
   subtotal: number;
@@ -218,6 +220,9 @@ export class PurchaseOrderService {
           taxAmount,
           total,
           notes: dto.notes,
+          expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : null,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,       // NEW
+          paymentTerms: dto.paymentTerms ?? null,                    // NEW
           items: { create: lines },
         },
         include: { items: true },
@@ -260,6 +265,18 @@ export class PurchaseOrderService {
             taxRateId,
             taxAmount,
             total,
+            // Was previously omitted from this branch entirely, so editing
+            // a PO's notes without also replacing its items silently did
+            // nothing. Same undefined-vs-null convention as the fields
+            // below it.
+            notes: dto.notes !== undefined ? dto.notes : po.notes,
+            expectedDate: dto.expectedDate !== undefined
+              ? (dto.expectedDate ? new Date(dto.expectedDate) : null)
+              : po.expectedDate,
+            dueDate: dto.dueDate !== undefined                       // NEW
+              ? (dto.dueDate ? new Date(dto.dueDate) : null)
+              : po.dueDate,
+            paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : po.paymentTerms, // NEW
           },
           include: { items: true },
         });
@@ -296,6 +313,14 @@ export class PurchaseOrderService {
           taxRateId,
           taxAmount,
           total,
+          notes: dto.notes !== undefined ? dto.notes : po.notes,
+          expectedDate: dto.expectedDate !== undefined
+            ? (dto.expectedDate ? new Date(dto.expectedDate) : null)
+            : po.expectedDate,
+          dueDate: dto.dueDate !== undefined                         // NEW
+            ? (dto.dueDate ? new Date(dto.dueDate) : null)
+            : po.dueDate,
+          paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : po.paymentTerms, // NEW
           items: { create: lines },
         },
         include: { items: true },
@@ -510,6 +535,8 @@ export class PurchaseOrderService {
 
       orderDate: po.createdAt,
       expectedDate: po.expectedDate ?? null,
+      dueDate: po.dueDate ?? null,             // NEW
+      paymentTerms: po.paymentTerms ?? null,   // NEW
       notes: po.notes ?? null,
 
       subtotal: Number(po.subtotal),

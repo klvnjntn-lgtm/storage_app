@@ -6,9 +6,10 @@ import { PurchaseOrderController } from './purchase-order.controller';
 import { PrintModule } from 'src/common/print/print.module';
 import { PurchaseOrderPrintController } from './purchase-order-print.controller';
 import { ProductModule } from 'src/product/product.module';
+import { AccountingModule } from 'src/accounting/accounting.module';
 
 @Module({
-  imports: [PrismaModule, SharedDocumentsModule, PrintModule, ProductModule],
+  imports: [PrismaModule, AccountingModule, SharedDocumentsModule, PrintModule, ProductModule],
   controllers: [PurchaseOrderController, PurchaseOrderPrintController],
   providers: [PurchaseOrderService],
   exports: [PurchaseOrderService],

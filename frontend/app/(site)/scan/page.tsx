@@ -237,23 +237,31 @@ export default function ScanPage() {
   const lastEntry = log[0];
 
   return (
-    <main className="min-h-screen bg-white text-black">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
       {/* Header */}
-      <div className="border-b-2 border-gray-300 p-6">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md p-6 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
           <button
             onClick={() => router.push(sessionId ? `/sessions/${sessionId}` : '/')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Exit scanning
           </button>
           <div className="flex items-center gap-2 text-sm">
-            <span className="px-2 py-1 rounded-md bg-gray-100 border border-gray-300 font-semibold">
+            <span className="px-2 py-1 rounded-md bg-blue-600/10 border border-blue-600/20 text-blue-800 font-semibold">
               {type ?? '...'}
             </span>
             {hasStages && session?.stage && (
-              <span className="px-2 py-1 rounded-md bg-black text-white font-semibold">
+              <span className="px-2 py-1 rounded-md bg-blue-600 text-white font-semibold">
                 {session.stage}
               </span>
             )}
@@ -266,7 +274,7 @@ export default function ScanPage() {
 
         {/* Step 1: locations, only shown when this mode needs them */}
         {(showFrom || showTo) && (
-          <section className="border-2 border-gray-300 rounded-md p-4 space-y-3">
+          <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">
               <MapPin size={14} strokeWidth={2} />
               Step 1 — Set location{showFrom && showTo ? 's' : ''}
@@ -279,7 +287,7 @@ export default function ScanPage() {
                     {fromLabel()} {requiresFrom && <span className="text-red-600">*</span>}
                   </label>
                   <select
-                    className={`border-2 rounded-md p-2 w-52 ${
+                    className={`border-2 rounded-md p-2 w-52 outline-none focus:border-blue-500 ${
                       missingFrom ? 'border-red-300' : 'border-gray-300'
                     }`}
                     value={fromLocationId}
@@ -302,7 +310,7 @@ export default function ScanPage() {
                     {!requiresTo && <span className="text-gray-400"> (optional)</span>}
                   </label>
                   <select
-                    className={`border-2 rounded-md p-2 w-52 ${
+                    className={`border-2 rounded-md p-2 w-52 outline-none focus:border-blue-500 ${
                       missingTo ? 'border-red-300' : 'border-gray-300'
                     }`}
                     value={toLocationId}
@@ -337,9 +345,9 @@ export default function ScanPage() {
             placeholder={readyToScan ? 'Scan a barcode…' : 'Set location above to enable scanning'}
             autoFocus
             autoComplete="off"
-            className={`w-full text-lg font-mono border-2 rounded-md p-4 outline-none ${
+            className={`w-full text-lg font-mono border-2 rounded-md p-4 outline-none transition-colors ${
               readyToScan
-                ? 'border-gray-300 focus:border-black bg-white'
+                ? 'border-blue-500/30 focus:border-blue-500 bg-white'
                 : 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
             }`}
           />
@@ -353,7 +361,7 @@ export default function ScanPage() {
 
         {/* Live status */}
         {status === 'submitting' && (
-          <div className="flex items-center gap-2 bg-gray-50 border-2 border-gray-300 text-gray-700 rounded-md p-3 text-sm">
+          <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 text-blue-800 rounded-md p-3 text-sm">
             Saving scan…
           </div>
         )}
@@ -378,7 +386,7 @@ export default function ScanPage() {
             <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
               Recent scans
             </h2>
-            <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200">
+            <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200 bg-white">
               {log.map((entry) => (
                 <div
                   key={entry.id}

@@ -144,7 +144,7 @@ export default function InvoiceDetailPage() {
   // (and now previews) this invoice on A4 paper without changing
   // invoice.format in the DB.
   const [printFormat, setPrintFormat] = useState<InvoiceFormat>('RECEIPT');
-const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -218,49 +218,34 @@ const [actionLoading, setActionLoading] = useState<string | null>(null);
     }
   }
 
-async function handlePrint() {
-  if (!invoice) return;
-  setPdfGenerating(true);
-  setError(null);
-  try {
-    const res = await apiFetch(`/invoices/${invoice.id}/pdf?format=${printFormat}`);
-    if (!res.ok) {
-      throw new Error(`Failed to generate PDF (${res.status})`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${invoice.invoiceNumber ?? 'invoice'}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e: any) {
-    setError(e.message || 'Could not generate PDF.');
-  } finally {
-    setPdfGenerating(false);
+  // CHANGED — now matches the quotation detail page's handlePrint:
+  // just triggers the native browser print dialog against #print-area,
+  // instead of fetching and downloading a PDF (that's handleDownloadPdf's
+  // job now).
+  function handlePrint() {
+    window.print();
   }
-}
 
-async function handleConvertToDeliveryOrder() {
-  if (!invoice) return;
-  setActionLoading('convert-do');
-  setError(null);
-  try {
-    const res = await apiFetch(`/delivery-orders/from-invoice/${invoice.id}`, { method: 'POST' });
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(body?.message ?? `Request failed (${res.status})`);
-      return;
+  async function handleConvertToDeliveryOrder() {
+    if (!invoice) return;
+    setActionLoading('convert-do');
+    setError(null);
+    try {
+      const res = await apiFetch(`/delivery-orders/from-invoice/${invoice.id}`, { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(body?.message ?? `Request failed (${res.status})`);
+        return;
+      }
+      if (body?.id) {
+        router.push(`/sales/delivery-orders/${body.id}`);
+      }
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setActionLoading(null);
     }
-    if (body?.id) {
-      router.push(`/sales/delivery-orders/${body.id}`);
-    }
-  } catch {
-    setError('Could not reach the server.');
-  } finally {
-    setActionLoading(null);
   }
-}
   async function handleDownloadPdf() {
     if (!invoice) return;
     setPdfGenerating(true);
@@ -291,7 +276,7 @@ async function handleConvertToDeliveryOrder() {
 
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
-<style>{`
+      <style>{`
   ${PAGE_CSS[printFormat] ?? PAGE_CSS.A4}
   @media print {
     body * { visibility: hidden; }
@@ -364,7 +349,7 @@ async function handleConvertToDeliveryOrder() {
 
               {invoice.status === 'ISSUED' &&
                 invoice.paymentStatus === 'UNPAID' &&
-                !hasWarehouseOps && (
+                 (
                   <button
                     onClick={() => router.push(`/sales/invoices/${invoice.id}/edit`)}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
@@ -374,31 +359,31 @@ async function handleConvertToDeliveryOrder() {
                   </button>
                 )}
 
-{invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
-  <button
-    onClick={() => setVoidDialogOpen(true)}
-    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
-  >
-    <Ban size={16} strokeWidth={2} />
-    Void
-  </button>
-)}
+              {invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
+                <button
+                  onClick={() => setVoidDialogOpen(true)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
+                >
+                  <Ban size={16} strokeWidth={2} />
+                  Void
+                </button>
+              )}
 
-{/* CHANGED — was `invoice.deliveryOrders.length === 0`, which only
-    worked under the old one-shot model. createFromInvoice() can now be
-    called repeatedly as backorders get fulfilled in batches, so this
-    needs to key off whether there's still outstanding demand, not
-    whether a delivery order has ever been created before. */}
-{invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
-  <button
-    disabled={actionLoading === 'convert-do'}
-    onClick={handleConvertToDeliveryOrder}
-    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit disabled:opacity-50 transition-colors"
-  >
-    <Truck size={16} strokeWidth={2} />
-    {actionLoading === 'convert-do' ? 'Converting...' : 'Convert to Delivery Order'}
-  </button>
-)}
+              {/* CHANGED — was `invoice.deliveryOrders.length === 0`, which only
+                  worked under the old one-shot model. createFromInvoice() can now be
+                  called repeatedly as backorders get fulfilled in batches, so this
+                  needs to key off whether there's still outstanding demand, not
+                  whether a delivery order has ever been created before. */}
+              {invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
+                <button
+                  disabled={actionLoading === 'convert-do'}
+                  onClick={handleConvertToDeliveryOrder}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit disabled:opacity-50 transition-colors"
+                >
+                  <Truck size={16} strokeWidth={2} />
+                  {actionLoading === 'convert-do' ? 'Converting...' : 'Convert to Delivery Order'}
+                </button>
+              )}
 
               {balanceDue > 0 && invoice.status !== 'VOID' && (
                 <button
@@ -417,14 +402,13 @@ async function handleConvertToDeliveryOrder() {
                 <Download size={16} strokeWidth={2} />
                 {pdfGenerating ? 'Generating...' : 'Download PDF'}
               </button>
-<button
-  onClick={handlePrint}
-  disabled={pdfGenerating}
-  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit disabled:opacity-50 transition-colors"
->
-  <Printer size={16} strokeWidth={2} />
-  {pdfGenerating ? 'Preparing...' : 'Print'}
-</button>
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit transition-colors"
+              >
+                <Printer size={16} strokeWidth={2} />
+                Print
+              </button>
             </div>
           )}
         </div>
@@ -614,23 +598,27 @@ async function handleConvertToDeliveryOrder() {
           Gray backdrop + centered white sheet + shadow mimics a real
           print-preview (Docs/Canva style), matching the sales order page.
           overflow-x-auto keeps wider formats (A4/A5) from forcing
-          horizontal scroll on the whole page on narrow viewports. */}
-{invoice && (
-<div className="py-8 px-4 overflow-x-auto print:p-0 print:overflow-visible">
-  <div className="mx-auto w-fit">
-    <div
-      style={{ padding: `${MARGIN_MM[printFormat] ?? 0}mm` }}
-      className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none print:p-0"
-    >
-      <InvoicePrintArea
-        format={printFormat}
-        invoice={toInvoiceView(invoice)}
-        alwaysVisible
-      />
-    </div>
-  </div>
-</div>
-)}
+          horizontal scroll on the whole page on narrow viewports.
+          id="print-area" — CHANGED: added so the @media print CSS above
+          (which targets #print-area) actually has something to select,
+          matching the quotation detail page's pattern. */}
+      {invoice && (
+        <div className="py-8 px-4 overflow-x-auto print:p-0 print:overflow-visible">
+          <div className="mx-auto w-fit">
+            <div
+              id="print-area"
+              style={{ padding: `${MARGIN_MM[printFormat] ?? 0}mm` }}
+              className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none print:p-0"
+            >
+              <InvoicePrintArea
+                format={printFormat}
+                invoice={toInvoiceView(invoice)}
+                alwaysVisible
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {invoice && paymentDialogOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">

@@ -31,6 +31,7 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  Warehouse,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import NotificationDrawer from '@/app/components/NotificationDrawer';
@@ -178,16 +179,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         { href: '/inventory/stock', label: 'Stock', icon: LayoutDashboard },
       ],
     },
-    {
-      label: 'Operations',
-      items: [
-        ...(hasWarehouseOps
-          ? [{ href: '/inventory/labels', label: 'Labels', icon: Tag }]
-          : []),
-        { href: '/upload', label: 'Upload', icon: UploadIcon },
-        { href: '/upload-order', label: 'Upload Order', icon: PlugZap },
-      ],
-    },
+{
+  label: 'Operations',
+  items: [
+    ...(hasWarehouseOps
+      ? [
+          { href: '/inventory/warehouse', label: 'Warehouse', icon: Warehouse },
+          { href: '/inventory/sessions', label: 'Sessions', icon: ClipboardList },
+          { href: '/inventory/labels', label: 'Labels', icon: Tag },
+        ]
+      : []),
+    { href: '/upload', label: 'Upload', icon: UploadIcon },
+    { href: '/upload-order', label: 'Upload Order', icon: PlugZap },
+  ],
+},
     {
       label: 'Sales',
       items: hasInvoicePos

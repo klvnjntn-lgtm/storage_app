@@ -179,10 +179,10 @@ export class InvoiceController {
     return this.invoiceService.discardDraft(organizationId, id, req.user.sub);
   }
 
-  @Post(':id/print')
-  print(@CurrentOrg() organizationId: string, @Param('id') id: string) {
-    return this.invoiceService.issue(organizationId, id);
-  }
+@Post(':id/print')
+print(@CurrentOrg() organizationId: string, @Req() req, @Param('id') id: string) {
+  return this.invoiceService.issue(organizationId, id, req.user.sub);
+}
 
   @Patch(':id/void')
   async voidInvoice(

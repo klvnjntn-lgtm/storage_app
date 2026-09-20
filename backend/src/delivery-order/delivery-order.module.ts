@@ -9,9 +9,10 @@ import { PrintModule } from 'src/common/print/print.module';
 import { OrganizationModulesModule } from 'src/organization-module/organization-modules.module';
 import { DeliveryOrderPrintController } from './delivery-order-print.controller';
 import { InvoiceModule } from 'src/invoice/invoice.module';
+import { AccountingModule } from 'src/accounting/accounting.module';
 
 @Module({
-  imports: [PrismaModule, SharedDocumentsModule, SalesOrderModule, StockModule, PrintModule, OrganizationModulesModule, InvoiceModule],
+  imports: [PrismaModule,AccountingModule , SharedDocumentsModule, SalesOrderModule, StockModule, PrintModule, OrganizationModulesModule, InvoiceModule],
   controllers: [DeliveryOrderController, DeliveryOrderPrintController],
   providers: [DeliveryOrderService],
   exports: [DeliveryOrderService],

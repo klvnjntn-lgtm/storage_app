@@ -20,20 +20,40 @@ export const MARGIN_MM: Record<string, number> = {
   A4: 0,
 };
 
+// A4 physical dimensions. Used both as the A4 page size itself, and as
+// the PDF canvas that A5 is now centered inside (see A5 case below) —
+// so any A4-capable printer (virtually all of them) produces correct
+// A5 output without the user having to touch driver/paper-size dialogs.
+export const A4_WIDTH_MM = 210;
+export const A4_HEIGHT_MM = 297;
+
+// Physical A5-landscape sheet dimensions. Landscape width matches A4's
+// width exactly, so only vertical centering is needed inside the A4
+// canvas — horizontal margin is 0.
+export const A5_SHEET_WIDTH_MM = 210;
+export const A5_SHEET_HEIGHT_MM = 148;
+
+// Top/bottom margin to center the A5 sheet vertically within the A4
+// canvas: (297 - 148) / 2.
+export const A5_ON_A4_MARGIN_TOP_MM = (A4_HEIGHT_MM - A5_SHEET_HEIGHT_MM) / 2; // 74.5
+
 // @page size per format — used ONLY by the headless Puppeteer PDF route
 // (app/print/invoices/[id]/page.tsx -> renderPdf() -> page.pdf()).
-// The in-app "Print" button no longer uses window.print() against the
-// live page at all — it now downloads this same PDF and opens it in
-// Chrome's PDF viewer for printing, which is what actually gave us
-// reliable A5-landscape output on real printers (see invoice detail
-// page's handlePrint()). So this file only has to satisfy Puppeteer's
-// CDP print-to-PDF path from here on.
+// The in-app "Print" button doesn't use window.print() against the live
+// page — it downloads this same PDF and opens it in Chrome's PDF viewer
+// for printing. So this file only has to satisfy Puppeteer's CDP
+// print-to-PDF path from here on.
 //
-// A5 uses explicit swapped dimensions (210mm 148mm) rather than the
-// `size: A5 landscape;` keyword form — Chromium's CDP printToPDF path
-// (which Puppeteer's page.pdf() calls under the hood) has a known bug
-// where named-size + landscape keyword is unreliably honored even with
-// preferCSSPageSize: true. Explicit dims sidestep that entirely.
+// CHANGED — A5's @page size is now A4, not a bare 210x148 sheet. Many
+// printer drivers don't expose A5 as a selectable paper size at all, so
+// a PDF page literally sized 210x148 could still get silently rescaled
+// or mis-fit depending on the user's local print dialog. Rendering onto
+// a full A4 canvas with the A5 content centered inside it (see the
+// wrapper in app/print/invoices/[id]/page.tsx) means any A4-capable
+// printer — i.e. essentially all of them — reproduces it correctly with
+// zero manual "fit to page" steps required from the user. Physical A5
+// paper stacking under an A4 print job is then just an optional refinement,
+// not a requirement.
 //
 // Roll-paper widths (THERMAL_58/RECEIPT) use a generous fixed height
 // since Puppeteer clips to actual content when printing to PDF with no
@@ -49,5 +69,8 @@ export const RECEIPT_CONTENT_WIDTH_MM = 80 - MARGIN_MM.RECEIPT * 2; // 72
 export const IS_RECEIPT_FORMAT = (format: string) =>
   format === 'THERMAL_58' || format === 'RECEIPT';
 
-// A5 landscape content width = 210mm page width - 2 × margin.
+
+// A5 landscape content width = 210mm sheet width - 2 × margin. This is
+// unchanged — it still describes the A5Template's own inner content
+// width, independent of the A4 canvas it now sits centered inside.
 export const A5_CONTENT_WIDTH_MM = 210 - MARGIN_MM.A5 * 2; // 186

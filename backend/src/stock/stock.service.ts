@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma, EventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductService } from '../product/product.service'; // adjust path if different
+import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 
 function slugify(value: string): string {
@@ -58,10 +59,7 @@ type PurchaseOrderReceiptContext = {
 };
 
 // A RETURNS stock movement — customer goods coming back after a
-// DeliveryOrder has shipped (DeliveryOrderService.recordReturn). Only
-// ties to a SalesOrder today, since Delivery Orders are sales-order-
-// scoped; add an InvoiceReturnContext alongside this, same shape, if an
-// invoice-side returns flow is ever built.
+// DeliveryOrder has shipped (DeliveryOrderService.recordReturn).
 type SalesOrderReturnContext = {
   type: typeof EventType.RETURNS;
   salesOrderId: string;
@@ -89,24 +87,17 @@ export class StockService {
   constructor(
     private prisma: PrismaService,
     private productService: ProductService,
+    private postingRules: PostingRulesService, // NEW
   ) {}
 
   // -----------------------------
   // Shared row lock
   // -----------------------------
   // SELECT ... FOR UPDATE on the Stock row, inside the current
-  // transaction. A concurrent decrease()/fulfill()/adjust() call against
-  // the SAME product+location blocks here until the first transaction
-  // commits or rolls back, so whatever this call reads next is
-  // guaranteed current — not a stale snapshot from before a concurrent
-  // writer landed. Returns 0 (not null) when no Stock row exists yet, so
-  // callers don't need a separate null-check.
-  //
-  // NOTE: organizationId isn't part of the actual unique constraint
-  // (productId_locationId), so it's included here only as a defense-in-
-  // depth filter matching the 🔒 pattern used elsewhere in this file —
-  // productId/locationId are assumed to already be org-scoped upstream
-  // by assertProductActive()/assertLocationOwnership().
+  // transaction. A concurrent decrease()/fulfill()/adjust()/import() call
+  // against the SAME product+location blocks here until the first
+  // transaction commits or rolls back, so whatever this call reads next is
+  // guaranteed current. Returns 0 (not null) when no Stock row exists yet.
   private async lockStockRow(
     client: Prisma.TransactionClient,
     orgId: string,
@@ -177,16 +168,9 @@ export class StockService {
   // -----------------------------
   // DECREASE
   // -----------------------------
-  // CHANGED — now locks the Stock row (FOR UPDATE) before checking
-  // sufficiency, instead of a plain findUnique(). The old comment here
-  // claimed the transaction wrapper alone prevented concurrent
-  // over-decrement; it didn't. Two simultaneous decrease() calls against
-  // the same product+location could both read "10 available" before
-  // either committed, both pass the `>= qty` check, and both apply their
-  // relative decrement — landing on a negative quantity even though each
-  // individual check looked correct at read time. Locking the row makes
-  // the second caller wait until the first transaction resolves, so its
-  // read (and therefore its check) reflects reality.
+  // Locks the Stock row (FOR UPDATE) before checking sufficiency, so two
+  // simultaneous decrease() calls against the same product+location can't
+  // both pass the check against a stale read.
   async decrease(
     orgId: string,
     productId: string,
@@ -233,21 +217,13 @@ export class StockService {
   }
 
   // -----------------------------
-  // FULFILL — NEW
+  // FULFILL
   // -----------------------------
-  // Unlike decrease() — strict, throws on insufficient stock, used by
-  // DeliveryOrder.ship() where physically shipping stock that doesn't
-  // exist must never be allowed — fulfill() takes as much as is
-  // physically available and reports back exactly what happened, rather
-  // than throwing or silently taking more than exists. Stock.quantity can
-  // never go below zero as a result of this call. Used by
+  // Unlike decrease() — strict, throws on insufficient stock — fulfill()
+  // takes as much as is physically available and reports back exactly what
+  // happened. Stock.quantity can never go below zero as a result. Used by
   // InvoiceService.issue()/editIssuedInvoice() for non-warehouse orgs,
   // where a sale can still succeed even when it oversells.
-  //
-  // Same FOR UPDATE locking as decrease(), for the same reason: two
-  // invoices issued at the same instant for the same product+location
-  // must serialize on this row rather than both reading "3 available"
-  // and each granting 3.
   async fulfill(
     orgId: string,
     productId: string,
@@ -287,11 +263,9 @@ export class StockService {
           },
         });
       }
-      // fulfilledQuantity === 0 (no Stock row, or genuinely zero on
-      // hand): nothing moved, so no Event is written — there's nothing
-      // to audit yet. The shortfall itself isn't a stock movement; it's
-      // read straight off InvoiceItem.quantity - fulfilledQuantity by
-      // whoever needs it (see InvoiceService.recomputeFulfillmentStatus).
+      // fulfilledQuantity === 0: nothing moved, so no Event is written.
+      // The shortfall is read straight off InvoiceItem.quantity -
+      // fulfilledQuantity by whoever needs it.
 
       return { fulfilledQuantity, shortfall };
     };
@@ -302,10 +276,11 @@ export class StockService {
   // -----------------------------
   // ADJUST
   // -----------------------------
-  // CHANGED — same lock-before-check fix as decrease(), for the same
-  // reason: two concurrent negative adjustments on the same
-  // product+location could otherwise both pass the "would this go
-  // negative?" check against a stale read and jointly overshoot.
+  // CHANGED — now posts to the ledger in the same transaction as the stock
+  // write. qtyDelta < 0 (shrinkage): Dr Inventory Adjustments, Cr Inventory.
+  // qtyDelta > 0 (found stock): Dr Inventory, Cr Inventory Adjustments.
+  // Valued at Product.costPrice; a product with no costPrice moves stock
+  // but posts nothing (same skip policy as postCogs).
   async adjust(orgId: string, userId: string, data: AdjustStockDto) {
     const { productId, locationId, qtyDelta, reason } = data;
 
@@ -344,7 +319,7 @@ export class StockService {
         },
       });
 
-      await tx.event.create({
+      const event = await tx.event.create({
         data: {
           type: 'ADJUSTMENT',
           productId,
@@ -355,6 +330,25 @@ export class StockService {
           metadata: { reason: reason.trim() },
         },
       });
+
+      // NEW — ledger posting.
+      const product = await tx.product.findFirst({
+        where: { id: productId, organizationId: orgId },
+        select: { costPrice: true },
+      });
+      await this.postingRules.postStockAdjustment(
+        orgId,
+        {
+          sourceId: `stock-adjust:${event.id}`,
+          date: new Date(),
+          memo: `Stock adjustment: ${reason.trim()}`,
+          qtyDelta,
+          unitCost: product?.costPrice != null ? Number(product.costPrice) : null,
+          locationId,
+          counter: 'ADJUSTMENT',
+        },
+        tx,
+      );
 
       return {
         success: true,
@@ -369,6 +363,11 @@ export class StockService {
   // -----------------------------
   // IMPORT
   // -----------------------------
+  // CHANGED — locks the Stock row before reading beforeQty (so a REPLACE
+  // can't overwrite an in-flight sale's decrement), and posts the quantity
+  // change to the ledger against Opening Balance Equity. Cost comes from
+  // the import row's costPrice, falling back to Product.costPrice; with
+  // neither, stock moves but nothing is posted.
   async import(
     orgId: string,
     userId: string,
@@ -422,15 +421,8 @@ export class StockService {
             });
           }
 
-          const existingStock = await tx.stock.findUnique({
-            where: {
-              productId_locationId: {
-                productId: product.id,
-                locationId: location.id,
-              },
-            },
-          });
-          const beforeQty = existingStock?.quantity ?? 0;
+          // CHANGED — locked read instead of plain findUnique.
+          const beforeQty = await this.lockStockRow(tx, orgId, product.id, location.id);
           const afterQty = mode === ImportMode.REPLACE ? row.qty : beforeQty + row.qty;
 
           await tx.stock.upsert({
@@ -452,7 +444,7 @@ export class StockService {
             },
           });
 
-          await tx.event.create({
+          const importEvent = await tx.event.create({
             data: {
               type: mode === ImportMode.REPLACE ? 'IMPORT_REPLACE' : 'IMPORT_INCREMENT',
               productId: product.id,
@@ -469,6 +461,29 @@ export class StockService {
               },
             },
           });
+
+          // NEW — ledger posting. Read cost from the DB rather than
+          // relying on what resolveForImport returns.
+          const costRow = await tx.product.findFirst({
+            where: { id: product.id, organizationId: orgId },
+            select: { costPrice: true },
+          });
+          const unitCost =
+            row.costPrice ?? (costRow?.costPrice != null ? Number(costRow.costPrice) : null);
+
+          await this.postingRules.postStockAdjustment(
+            orgId,
+            {
+              sourceId: `stock-import:${importEvent.id}`,
+              date: new Date(),
+              memo: `Stock import (${mode}): ${row.sku}`,
+              qtyDelta: afterQty - beforeQty,
+              unitCost,
+              locationId: location.id,
+              counter: 'OPENING_BALANCE',
+            },
+            tx,
+          );
 
           return { product, location };
         });

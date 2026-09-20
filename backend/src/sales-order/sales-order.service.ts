@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
-import { SalesQuotationService } from 'src/sales-quotation/sales-quotation.service';
+import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { Prisma, SalesOrderStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';

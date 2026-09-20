@@ -16,6 +16,10 @@ import {
   Boxes,
   AlertTriangle,
   CheckCircle2,
+  List,
+  LayoutGrid,
+  ImageOff,
+  ArrowUpDown,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useSortableData } from '@/lib/hooks/useSortableData';
@@ -31,6 +35,11 @@ type ProductSummary = {
   sellingPrice: number | null;
   costPrice: number | null;
   totalStock: number;
+  // Primary product image, if one has been set on /products/[id]. Optional
+  // by design — List View never needs it, and Grid View falls back to a
+  // placeholder when it's null. Keeping this on the summary row (rather
+  // than a separate fetch per card) avoids an N+1 in Grid View.
+  image: string | null;
   locations: {
     location: string;
     qty: number;
@@ -52,9 +61,15 @@ type FieldErrors = {
   stock?: string;
 };
 
-// Columns the table can be sorted by. Locations is deliberately excluded —
-// it's a per-row breakdown list, not a single sortable value.
+// Columns the table (and the Grid View sort control) can be sorted by.
+// Locations is deliberately excluded — it's a per-row breakdown list, not a
+// single sortable value.
 type SortKey = 'sku' | 'name' | 'sellingPrice' | 'costPrice' | 'totalStock';
+
+// Display preference only — not a separate feature/dataset. Both views read
+// from the same `products` state; this just controls how a row is rendered.
+type ViewMode = 'list' | 'grid';
+const VIEW_MODE_STORAGE_KEY = 'inventory-stock-view-mode';
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -201,6 +216,36 @@ function ComboBox({
   );
 }
 
+/**
+ * Square product thumbnail used in Grid View. Falls back to a plain
+ * placeholder (not a broken-image icon) whenever a product has no image —
+ * images are optional, so an empty state here is normal, not an error.
+ */
+function ProductThumb({ src, alt }: { src: string | null; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const showPlaceholder = !src || failed;
+
+  if (showPlaceholder) {
+    return (
+      <div className="w-full aspect-square rounded-md bg-gray-50 border border-gray-200 flex flex-col items-center justify-center gap-1 text-gray-300">
+        <ImageOff size={22} strokeWidth={1.75} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full aspect-square rounded-md bg-gray-50 border border-gray-200 overflow-hidden">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 export default function StockPage() {
   const [products, setProducts] = useState<ProductSummary[]>([]);
   const [enabledModules, setEnabledModules] = useState<string[]>([]);
@@ -212,6 +257,24 @@ export default function StockPage() {
 
   const [categories, setCategories] = useState<Option[]>([]);
   const [brands, setBrands] = useState<Option[]>([]);
+
+  // --- View mode (List / Grid) ---
+  // A UI/display preference only: both views read the same `products` state
+  // and the same filter/sort/pagination pipeline below. Persisted per
+  // browser so an org that always wants Grid (e.g. a flower shop) doesn't
+  // have to re-toggle it every visit. Defaults to List, since large
+  // inventories are the more common case and List is the safer first paint.
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (stored === 'list' || stored === 'grid') setViewMode(stored);
+  }, []);
+
+  function changeViewMode(mode: ViewMode) {
+    setViewMode(mode);
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  }
 
   // --- New Product dropdown ---
   const [formOpen, setFormOpen] = useState(false);
@@ -304,6 +367,8 @@ export default function StockPage() {
 
   // Column sorting — applied to the full filtered set, before pagination,
   // so sorting reorders across all pages rather than just the visible one.
+  // Shared by both views: List sorts via clickable column headers, Grid
+  // sorts via the dropdown next to the view toggle below.
   const { sorted: sortedProducts, sort, toggleSort } = useSortableData<ProductSummary, SortKey>(
     filteredProducts,
     {
@@ -342,6 +407,14 @@ export default function StockPage() {
   function cellHighlight(key: SortKey) {
     return sort?.key === key ? 'bg-blue-50/70' : '';
   }
+
+  const gridSortOptions: { key: SortKey; label: string }[] = [
+    { key: 'name', label: 'Product' },
+    { key: 'sku', label: 'SKU' },
+    { key: 'sellingPrice', label: 'Price' },
+    ...(showCostPrice ? [{ key: 'costPrice' as SortKey, label: 'Cost Price' }] : []),
+    { key: 'totalStock', label: 'Total Stock' },
+  ];
 
   // --- New Product form logic ---
 
@@ -546,16 +619,49 @@ export default function StockPage() {
             </div>
           </div>
 
-          {/* Search — command-palette style matching /vehicles/search and /labels */}
-          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
-            <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search product name..."
-              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
-            />
+          {/* Search + view toggle */}
+          <div className="flex items-center gap-2">
+            <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35 flex-1">
+              <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search product name..."
+                className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+              />
+            </div>
+
+            {/* List/Grid toggle. Pure display preference — same data, same
+                filter/sort/pagination, just a different row renderer. */}
+            <div
+              role="group"
+              aria-label="View mode"
+              className="flex items-center gap-0.5 rounded-xl border border-blue-500/20 bg-white p-1 shadow-sm shrink-0"
+            >
+              <button
+                type="button"
+                onClick={() => changeViewMode('list')}
+                aria-pressed={viewMode === 'list'}
+                title="List view"
+                className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
+                  viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700 hover:bg-blue-50'
+                }`}
+              >
+                <List size={17} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                onClick={() => changeViewMode('grid')}
+                aria-pressed={viewMode === 'grid'}
+                title="Grid view"
+                className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
+                  viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700 hover:bg-blue-50'
+                }`}
+              >
+                <LayoutGrid size={17} strokeWidth={2} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -798,126 +904,214 @@ export default function StockPage() {
           </div>
         )}
 
-        <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
-          <div
-            ref={scrollRef}
-            onMouseDown={onMouseDown}
-            onMouseMove={onMouseMove}
-            onMouseUp={onMouseLeaveOrUp}
-            onMouseLeave={onMouseLeaveOrUp}
-            onWheel={onWheel}
-            className="overflow-x-auto cursor-grab select-none"
-            style={{ scrollbarWidth: 'thin' }}
-          >
-            <table className="w-full text-sm min-w-[640px]">
-              <thead className="bg-blue-50/60 border-b-2 border-gray-300">
-                <tr>
-                  <SortableTh<SortKey>
-                    label="SKU"
-                    columnKey="sku"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                  />
-                  <SortableTh<SortKey>
-                    label="Product"
-                    columnKey="name"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                  />
-                  <SortableTh<SortKey>
-                    label="Price"
-                    columnKey="sellingPrice"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                  />
-                  {showCostPrice && (
+        {viewMode === 'list' ? (
+          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
+            <div
+              ref={scrollRef}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseLeaveOrUp}
+              onMouseLeave={onMouseLeaveOrUp}
+              onWheel={onWheel}
+              className="overflow-x-auto cursor-grab select-none"
+              style={{ scrollbarWidth: 'thin' }}
+            >
+              <table className="w-full text-sm min-w-[640px]">
+                <thead className="bg-blue-50/60 border-b-2 border-gray-300">
+                  <tr>
                     <SortableTh<SortKey>
-                      label="Cost Price"
-                      columnKey="costPrice"
+                      label="SKU"
+                      columnKey="sku"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
-                  )}
-                  <SortableTh<SortKey>
-                    label="Total Stock"
-                    columnKey="totalStock"
-                    activeKey={sort?.key ?? null}
-                    direction={sort?.direction ?? null}
-                    onSort={toggleSort}
-                  />
-                  {/* Locations is per-location detail, not a single sortable
-                      value — and only meaningful for orgs actually running
-                      multiple locations via the warehouse module. */}
-                  {showLocations && (
-                    <th className="text-left px-4 py-3 font-semibold">Locations</th>
-                  )}
-                </tr>
-              </thead>
-
-              <tbody>
-                {paginatedProducts.map((product, idx) => (
-                  <tr
-                    key={product.productId}
-                    className={`
-                      border-t border-gray-300
-                      cursor-pointer
-                      hover:bg-blue-50
-                      ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}
-                    `}
-                    onClick={() => router.push(`/inventory/stocks/${product.productId}`)}
-                  >
-                    <td className={`px-4 py-3 text-gray-500 font-mono whitespace-nowrap ${cellHighlight('sku')}`}>
-                      {product.sku ?? '-'}
-                    </td>
-                    <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{product.name}</td>
-                    <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('sellingPrice')}`}>
-                      {product.sellingPrice != null ? (
-                        formatIDR(product.sellingPrice)
-                      ) : (
-                        <span className="text-gray-400">No price</span>
-                      )}
-                    </td>
+                    <SortableTh<SortKey>
+                      label="Product"
+                      columnKey="name"
+                      activeKey={sort?.key ?? null}
+                      direction={sort?.direction ?? null}
+                      onSort={toggleSort}
+                    />
+                    <SortableTh<SortKey>
+                      label="Price"
+                      columnKey="sellingPrice"
+                      activeKey={sort?.key ?? null}
+                      direction={sort?.direction ?? null}
+                      onSort={toggleSort}
+                    />
                     {showCostPrice && (
-                      <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('costPrice')}`}>
-                        {product.costPrice != null ? (
-                          formatIDR(product.costPrice)
+                      <SortableTh<SortKey>
+                        label="Cost Price"
+                        columnKey="costPrice"
+                        activeKey={sort?.key ?? null}
+                        direction={sort?.direction ?? null}
+                        onSort={toggleSort}
+                      />
+                    )}
+                    <SortableTh<SortKey>
+                      label="Total Stock"
+                      columnKey="totalStock"
+                      activeKey={sort?.key ?? null}
+                      direction={sort?.direction ?? null}
+                      onSort={toggleSort}
+                    />
+                    {/* Locations is per-location detail, not a single sortable
+                        value — and only meaningful for orgs actually running
+                        multiple locations via the warehouse module. */}
+                    {showLocations && (
+                      <th className="text-left px-4 py-3 font-semibold">Locations</th>
+                    )}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {paginatedProducts.map((product, idx) => (
+                    <tr
+                      key={product.productId}
+                      className={`
+                        border-t border-gray-300
+                        cursor-pointer
+                        hover:bg-blue-50
+                        ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}
+                      `}
+                      onClick={() => router.push(`/inventory/stock/${product.productId}`)}
+                    >
+                      <td className={`px-4 py-3 text-gray-500 font-mono whitespace-nowrap ${cellHighlight('sku')}`}>
+                        {product.sku ?? '-'}
+                      </td>
+                      <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{product.name}</td>
+                      <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('sellingPrice')}`}>
+                        {product.sellingPrice != null ? (
+                          formatIDR(product.sellingPrice)
                         ) : (
                           <span className="text-gray-400">No price</span>
                         )}
                       </td>
-                    )}
-                    <td className={`px-4 py-3 font-bold whitespace-nowrap ${cellHighlight('totalStock')}`}>
-                      {product.totalStock}
-                    </td>
-                    {showLocations && (
-                      <td className="px-4 py-3 text-xs text-gray-700">
-                        {product.locations.length === 0 ? (
-                          <span className="text-gray-500">No stock</span>
-                        ) : (
-                          product.locations.map((location, index) => (
-                            <div key={index} className="whitespace-nowrap">
-                              {location.location}: {location.qty}
-                            </div>
-                          ))
-                        )}
+                      {showCostPrice && (
+                        <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('costPrice')}`}>
+                          {product.costPrice != null ? (
+                            formatIDR(product.costPrice)
+                          ) : (
+                            <span className="text-gray-400">No price</span>
+                          )}
+                        </td>
+                      )}
+                      <td className={`px-4 py-3 font-bold whitespace-nowrap ${cellHighlight('totalStock')}`}>
+                        {product.totalStock}
                       </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {filteredProducts.length === 0 && (
-            <div className="p-8 text-center text-sm text-gray-500">
-              {search ? 'No products match your search' : 'No products found'}
+                      {showLocations && (
+                        <td className="px-4 py-3 text-xs text-gray-700">
+                          {product.locations.length === 0 ? (
+                            <span className="text-gray-500">No stock</span>
+                          ) : (
+                            product.locations.map((location, index) => (
+                              <div key={index} className="whitespace-nowrap">
+                                {location.location}: {location.qty}
+                              </div>
+                            ))
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
+
+            {filteredProducts.length === 0 && (
+              <div className="p-8 text-center text-sm text-gray-500">
+                {search ? 'No products match your search' : 'No products found'}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Grid View has no column headers to sort by, so the same sort
+                state gets a small explicit control instead. */}
+            {filteredProducts.length > 0 && (
+              <div className="flex items-center gap-2 justify-end">
+                <ArrowUpDown size={14} strokeWidth={2} className="text-gray-400" />
+                <label className="text-xs text-gray-500">Sort by</label>
+                <select
+                  value={sort?.key ?? ''}
+                  onChange={(e) => {
+                    if (e.target.value) toggleSort(e.target.value as SortKey);
+                  }}
+                  className="text-xs border-2 border-gray-300 rounded-md px-2 py-1.5 outline-none focus:border-blue-500 bg-white"
+                >
+                  <option value="" disabled>
+                    Choose column
+                  </option>
+                  {gridSortOptions.map((opt) => (
+                    <option key={opt.key} value={opt.key}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                {sort?.key && (
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(sort.key)}
+                    title="Reverse sort direction"
+                    className="text-xs px-2 py-1.5 rounded-md border-2 border-gray-300 hover:bg-blue-50 font-semibold text-gray-600"
+                  >
+                    {sort.direction === 'asc' ? '↑ Asc' : '↓ Desc'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {paginatedProducts.map((product) => (
+                <button
+                  key={product.productId}
+                  onClick={() => router.push(`/inventory/stock/${product.productId}`)}
+                  className="text-left border-2 border-gray-300 rounded-md bg-white p-2.5 hover:border-blue-400 hover:shadow-sm transition-all flex flex-col gap-2"
+                >
+                  <ProductThumb src={product.image} alt={product.name} />
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{product.name}</p>
+                    <p className="text-xs text-gray-500 font-mono truncate">{product.sku ?? '-'}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-blue-800">
+                      {product.sellingPrice != null ? formatIDR(product.sellingPrice) : '—'}
+                    </span>
+                    <span
+                      className={`text-xs font-bold px-2 py-0.5 rounded-md border ${
+                        product.totalStock > 0
+                          ? 'bg-green-50 text-green-800 border-green-200'
+                          : 'bg-red-50 text-red-800 border-red-200'
+                      }`}
+                    >
+                      {product.totalStock} pcs
+                    </span>
+                  </div>
+
+                  {showLocations && product.locations.length > 0 && (
+                    <div className="text-[11px] text-gray-500 border-t border-gray-100 pt-1.5 space-y-0.5">
+                      {product.locations.map((location, index) => (
+                        <div key={index} className="flex justify-between gap-2 truncate">
+                          <span className="truncate">{location.location}</span>
+                          <span className="font-semibold shrink-0">{location.qty}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {filteredProducts.length === 0 && (
+              <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
+                {search ? 'No products match your search' : 'No products found'}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Pagination */}
         {filteredProducts.length > 0 && (

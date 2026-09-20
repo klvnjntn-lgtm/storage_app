@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Space_Grotesk, JetBrains_Mono } from 'next/font/google';
-import { Receipt, ShoppingCart, ArrowUpRight, Lock, Inbox, Wrench } from 'lucide-react';
+import { Receipt, ShoppingCart, ArrowUpRight, Lock, Inbox, Wrench, Calculator } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
@@ -105,10 +105,14 @@ export default function Home() {
   }, []);
 
   const warehouseEnabled = enabledModules.includes('WAREHOUSE_OPS');
-  // NOTE: Sales and Purchasing both currently gate on INVOICE_POS.
-  // Split this into its own PURCHASING flag once the backend exposes one.
+  // NOTE: Sales, Purchasing, and Accounting all currently gate on
+  // INVOICE_POS. Split each into its own flag once the backend exposes
+  // separate ones — Accounting in particular bundles Expenses/Payroll/
+  // reporting under the same module key as invoicing, which won't always
+  // be the right grouping.
   const salesEnabled = enabledModules.includes('INVOICE_POS');
   const purchasingEnabled = enabledModules.includes('INVOICE_POS');
+  const accountingEnabled = enabledModules.includes('INVOICE_POS');
   const workshopEnabled = enabledModules.includes('WORKSHOP_RMS');
 
   return (
@@ -280,6 +284,48 @@ export default function Home() {
                 </div>
                 <div>
                   <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>Purchasing</p>
+                  <p className="text-sm text-gray-400 mt-0.5">
+                    Not enabled — ask your admin to turn this module on
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Accounting — NEW. Gradient distinct from all four siblings
+                (indigo/blue, vs. green/red-pink/amber-orange/cyan-blue) so
+                the grid stays scannable at a glance rather than any two
+                cards reading as "the same module" by color alone. */}
+            {accountingEnabled ? (
+              <button
+                onClick={() => router.push('/accounting')}
+                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-indigo-500 to-blue-800 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
+              >
+                <div className="flex items-start justify-between">
+                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
+                    <Calculator size={22} strokeWidth={2} />
+                  </span>
+                  <ArrowUpRight
+                    size={18}
+                    strokeWidth={2}
+                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
+                  />
+                </div>
+                <div>
+                  <p className={`${display.className} text-xl font-bold leading-tight`}>Accounting</p>
+                  <p className="text-sm text-white/85 mt-0.5">
+                    Chart of accounts, expenses, payroll, and reports
+                  </p>
+                </div>
+              </button>
+            ) : (
+              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
+                <div className="flex items-start justify-between">
+                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
+                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
+                  </span>
+                </div>
+                <div>
+                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>Accounting</p>
                   <p className="text-sm text-gray-400 mt-0.5">
                     Not enabled — ask your admin to turn this module on
                   </p>

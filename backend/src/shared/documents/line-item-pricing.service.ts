@@ -84,7 +84,18 @@ export class LineItemPricingService {
     organizationId: string,
     items: PriceableLine[],
     client: Pick<PrismaService, 'product' | 'organizationTaxRate' | 'organization'> = this.prisma,
-    options: { serviceLineModuleKey?: ModuleKey | null } = {},
+    options: {
+      serviceLineModuleKey?: ModuleKey | null;
+      // NEW — when false, a product line is allowed to have no
+      // locationId. Defaults to true (the original, unconditional
+      // behavior), so every existing caller is unaffected unless it
+      // explicitly opts out. InvoiceService.editIssuedInvoice() passes
+      // false for WAREHOUSE_OPS orgs — physical location for those is
+      // decided later at pick/fulfillment time (see issue()'s own
+      // hasWarehouseOps carve-out for the identical rule), not fixed on
+      // the invoice line itself.
+      requireLocationForProducts?: boolean;
+    } = {},
   ): Promise<{
     items: PricedLine[];
     subtotal: number; // gross: sum(lineTotal)
@@ -95,6 +106,8 @@ export class LineItemPricingService {
   }> {
     const serviceLineModuleKey =
       options.serviceLineModuleKey === undefined ? ModuleKey.WORKSHOP_RMS : options.serviceLineModuleKey;
+    const requireLocationForProducts =
+      options.requireLocationForProducts === undefined ? true : options.requireLocationForProducts;
 
     const productItems = items.filter((i) => !!i.productId);
     const serviceItems = items.filter((i) => !i.productId);
@@ -170,7 +183,7 @@ export class LineItemPricingService {
         if (!product) {
           throw new NotFoundException(`Product ${item.productId} not found`);
         }
-        if (!locationId) {
+        if (!locationId && requireLocationForProducts) {
           throw new BadRequestException(`${product.name} needs a location`);
         }
         if (!unit) {

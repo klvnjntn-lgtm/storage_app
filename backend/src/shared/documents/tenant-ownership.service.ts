@@ -3,10 +3,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { Prisma as PrismaNS } from '@prisma/client';
 
 // Confirms every foreign id on a draft/create DTO (customer, vehicle,
-// location) actually belongs to this org before it's ever written to a
-// row. Without this, a client could pass another org's customerId and
-// the FK would happily attach, leaking that org's data into this
-// document's print view.
+// location, employee) actually belongs to this org before it's ever
+// written to a row. Without this, a client could pass another org's
+// customerId and the FK would happily attach, leaking that org's data
+// into this document's print view.
 //
 // The composite FKs on the target models (customerId+organizationId etc.)
 // are a DB-level backstop for this same thing — this check exists so a
@@ -15,7 +15,7 @@ import { Prisma as PrismaNS } from '@prisma/client';
 // backstop side of that.
 //
 // Used by InvoiceService, and now SalesQuotationService/SalesOrderService
-// — any document that references customer/vehicle/location by id.
+// — any document that references customer/vehicle/location/employee by id.
 @Injectable()
 export class TenantOwnershipService {
   constructor(private prisma: PrismaService) {}
@@ -26,8 +26,9 @@ export class TenantOwnershipService {
       customerId?: string | null;
       vehicleId?: string | null;
       locationId?: string | null;
+      employeeId?: string | null;
     },
-    client: Pick<PrismaService, 'customer' | 'vehicle' | 'location'> = this.prisma,
+    client: Pick<PrismaService, 'customer' | 'vehicle' | 'location' | 'employee'> = this.prisma,
   ) {
     if (refs.customerId) {
       const customer = await client.customer.findFirst({
@@ -49,6 +50,13 @@ export class TenantOwnershipService {
         select: { id: true },
       });
       if (!location) throw new NotFoundException('Location not found');
+    }
+    if (refs.employeeId) {
+      const employee = await client.employee.findFirst({
+        where: { id: refs.employeeId, organizationId },
+        select: { id: true },
+      });
+      if (!employee) throw new NotFoundException('Employee not found');
     }
   }
 

@@ -4,9 +4,10 @@ import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrganizationModulesModule } from 'src/organization-module/organization-modules.module';
+import { AccountingModule } from 'src/accounting/accounting.module';
 
 @Module({
-  imports: [OrganizationModulesModule], // was in `controllers` — that's for @Controller() classes only, doesn't wire up providers from another module
+  imports: [OrganizationModulesModule, AccountingModule], // was in `controllers` — that's for @Controller() classes only, doesn't wire up providers from another module
   controllers: [SessionsController],
   providers: [SessionsService, PrismaService],
   exports: [SessionsService],

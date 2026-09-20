@@ -1,11 +1,12 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
-import { InvoiceService } from '../invoice/invoice.service'; // NEW
-import { StockService } from '../stock/stock.service';
+import { InvoiceService } from '../invoice/invoice.service';
 import { PrintTokenService } from '../common/print/print-token.service';
+import { PostingRulesService } from '../accounting/posting-rules.service';
 import { DeliveryOrderStatus, SalesOrderStatus, EventType, Prisma } from '@prisma/client';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 
@@ -57,15 +58,23 @@ export class DeliveryOrderService {
     private tenantOwnership: TenantOwnershipService,
     private numbering: DocumentNumberingService,
     private salesOrderService: SalesOrderService,
-    private invoiceService: InvoiceService, // NEW
+    private invoiceService: InvoiceService,
     private stockService: StockService,
     private printTokenService: PrintTokenService,
+    private postingRules: PostingRulesService,
   ) {}
 
   // Creating a delivery order is a planned/prepared delivery — a
   // commitment against the sales order's remaining quantities, not a
   // physical movement. No stock is touched here. The actual departure
   // event is ship(), below.
+  //
+  // Each created line snapshots unitCost off the originating
+  // SalesOrderItem, same denormalization pattern as productName just
+  // below it. This is what lets ship() and recordReturn() post COGS
+  // without a join back to the sales order — the cost basis travels with
+  // the delivery order the way productName already does, and doesn't
+  // drift if the product's costPrice changes between order and shipment.
   async create(organizationId: string, userId: string, dto: CreateDeliveryOrderDto) {
     await this.tenantOwnership.validate(organizationId, { locationId: dto.locationId });
 
@@ -141,6 +150,7 @@ export class DeliveryOrderService {
                 quantity: line.quantity,
                 unit: soItem.unit,
                 locationId: soItem.locationId,
+                unitCost: soItem.unitCost,
               };
             }),
           },
@@ -163,31 +173,26 @@ export class DeliveryOrderService {
 
   // The physical departure event. This is the ONLY place stock is
   // decremented for a delivery order's fulfillment — neither
-  // SalesOrder.confirm() nor DeliveryOrder.create() touch stock (see
-  // sales-order.service.ts for why: confirm is a commercial commitment,
-  // create is a planned delivery, not proof anything left the building).
+  // SalesOrder.confirm() nor DeliveryOrder.create() touch stock.
   //
-  // CHANGED: shouldDecreaseStock used to require `!!salesOrderId`, which
-  // was correct under the old all-or-nothing invoice model (an
-  // invoice-sourced delivery order only ever existed AFTER Invoice.issue()
-  // had already decremented the full quantity, so shipping it was a
-  // paperwork-only step). Under the oversell model, Invoice.issue() only
-  // takes what's physically available — DeliveryOrderService.createFromInvoice()
-  // now creates a delivery order specifically for the remainder that was
-  // NEVER decremented. So stock must move here for invoice-sourced
-  // deliveries too. The only thing that should ever skip the decrement is
-  // a delivery order whose stock already moved at pick time via a
-  // warehouse Session (sessionId set) — that's the actual double-decrement
-  // risk, regardless of whether the DO traces back to a SalesOrder or an
-  // Invoice.
+  // This is also where COGS gets posted, for the same reason: this is
+  // the first point at which goods for THIS delivery order actually left
+  // the building. Revenue was already recognized back at Invoice.issue()
+  // (for invoice-sourced DOs, the whole invoice total; for
+  // sales-order-sourced DOs, revenue posts once the resulting invoice is
+  // issued) — COGS has to track the shipment event specifically, not the
+  // invoice event, since under the oversell/backorder model a delivery
+  // order can ship well after its invoice was issued.
   //
-  // Idempotency: the status flip to SHIPPED is done as an atomic
-  // updateMany guarded on status === PACKED, as the FIRST statement
-  // inside the transaction, before any stock is touched. If a concurrent
-  // ship() call on the same delivery order already won that race, this
-  // affects zero rows and the whole transaction throws before decrementing
-  // anything — so stock can never be decremented twice for one shipment,
-  // regardless of how many concurrent requests hit this at once.
+  // A delivery order created from a warehouse Session (sessionId set)
+  // skips both the stock decrement AND the COGS posting here — its stock
+  // already moved at pick time, and that pick event is where COGS for it
+  // belongs. See SessionsService.addItem()'s PICK case for that posting.
+  //
+  // costedLines carry each item's own locationId, not just
+  // productId/quantity/unitCost — postCogs() groups by location itself,
+  // which is what makes per-location P&L work correctly instead of every
+  // COGS/Inventory line landing with locationId: null.
   async ship(organizationId: string, id: string, userId: string) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
@@ -198,9 +203,9 @@ export class DeliveryOrderService {
       throw new BadRequestException('Only a packed delivery order can be shipped');
     }
 
-    const salesOrderId = deliveryOrder.salesOrderId; // narrowed once, reused below
-    const invoiceId = deliveryOrder.invoiceId; // NEW — narrowed once, reused below
-    const shouldDecreaseStock = !deliveryOrder.sessionId; // CHANGED — see comment above
+    const salesOrderId = deliveryOrder.salesOrderId;
+    const invoiceId = deliveryOrder.invoiceId;
+    const shouldDecreaseStock = !deliveryOrder.sessionId;
 
     if (shouldDecreaseStock) {
       const missingLocation = deliveryOrder.items.find((item) => item.productId && !item.locationId);
@@ -220,6 +225,8 @@ export class DeliveryOrderService {
         throw new BadRequestException('This delivery order has already been shipped or is no longer packed');
       }
 
+      const costedLines: { productId: string; quantity: number; unitCost: number | null; locationId: string | null }[] = [];
+
       if (shouldDecreaseStock) {
         for (const item of deliveryOrder.items) {
           if (!item.productId || !item.locationId) continue;
@@ -230,24 +237,21 @@ export class DeliveryOrderService {
               : { type: EventType.SALE, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id } },
             tx,
           );
+          costedLines.push({
+            productId: item.productId,
+            quantity: Number(item.quantity),
+            unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+            locationId: item.locationId,
+          });
         }
       }
 
-      // NEW — invoice-sourced delivery orders (no salesOrderId) represent
-      // quantity that was reserved (InvoiceItem.reservedQuantity) but not
-      // yet physically fulfilled. Shipping is the real fulfillment event
-      // for those lines: move the shipped amount out of "reserved" and
-      // into "fulfilled", then refresh the invoice's cached
-      // fulfillmentStatus — mirrors salesOrderService.recomputeDeliveryStatus()
-      // for the sales-order path just above.
       if (invoiceId) {
         for (const item of deliveryOrder.items) {
           if (!item.invoiceItemId) continue;
-          // item.quantity is a Decimal (DeliveryOrderItem) — cast to a
-          // plain number for the Int fields on InvoiceItem.
           const shippedQty = Number(item.quantity);
           await tx.invoiceItem.update({
-            where: { id: Number(item.invoiceItemId) },
+            where: { id: item.invoiceItemId },
             data: {
               reservedQuantity: { decrement: shippedQty },
               fulfilledQuantity: { increment: shippedQty },
@@ -255,6 +259,19 @@ export class DeliveryOrderService {
           });
         }
         await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
+      }
+
+      if (costedLines.length > 0) {
+        await this.postingRules.postCogs(
+          organizationId,
+          {
+            sourceId: `${deliveryOrder.id}:cogs`,
+            date: new Date(),
+            memo: `COGS for delivery order ${deliveryOrder.doNumber ?? deliveryOrder.id}`,
+            lines: costedLines,
+          },
+          tx,
+        );
       }
 
       return tx.deliveryOrder.findUniqueOrThrow({ where: { id } });
@@ -284,11 +301,8 @@ export class DeliveryOrderService {
 
   // Only valid PACKED → CANCELLED. Nothing has physically left the
   // warehouse at PACKED (stock now only moves at ship()), so there is no
-  // stock movement to reverse here — just release the reserved quantity
-  // back onto the originating line, whether that's a SalesOrderItem or an
-  // InvoiceItem. A shipped delivery order that needs reversing goes
-  // through recordReturn() instead, which is a distinct event (a customer
-  // return), not an undo of a mistake.
+  // stock movement OR journal entry to reverse here — ship() hasn't run
+  // yet, so no COGS was ever posted for this delivery order to begin with.
   async cancel(organizationId: string, id: string, userId: string) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
@@ -307,17 +321,8 @@ export class DeliveryOrderService {
             data: { deliveredQuantity: { decrement: item.quantity } },
           });
         } else if (item.invoiceItemId) {
-          // CHANGED — previously skipped entirely ("invoice-sourced item,
-          // no SO line to release"). Under the oversell model, invoice-
-          // sourced items DO reserve against InvoiceItem.reservedQuantity
-          // at createFromInvoice() time, so cancelling this DO before it
-          // ships must release that reservation, or the outstanding
-          // balance would look permanently claimed by a dead delivery
-          // order and block a future createFromInvoice() call.
           await tx.invoiceItem.update({
-            where: { id: Number(item.invoiceItemId) },
-            // item.quantity is a Decimal (DeliveryOrderItem) — cast for
-            // the Int field on InvoiceItem.
+            where: { id: item.invoiceItemId },
             data: { reservedQuantity: { decrement: Number(item.quantity) } },
           });
         }
@@ -330,12 +335,59 @@ export class DeliveryOrderService {
     });
   }
 
+  // Finds the InvoiceItem that recognized revenue for a returned line,
+  // regardless of which fulfillment path produced this DeliveryOrder.
+  // Invoice-sourced DOs link directly via invoiceItemId. SalesOrder-sourced
+  // DOs link only via salesOrderItemId — the matching InvoiceItem (if the
+  // order was ever invoiced) carries the same salesOrderItemId, since
+  // createDraftFromSalesOrder() copies SalesOrderItem lines forward onto
+  // the new InvoiceItem rows it creates.
+  //
+  // Returns the invoiceId alongside the item id/quantity so the caller
+  // never has to guess which invoice a SO-sourced return belongs to from
+  // deliveryOrder.invoiceId (which is null for that path) — it comes
+  // straight from wherever the InvoiceItem was actually found.
+  private async resolveInvoiceItemForReturn(
+    doItem: { invoiceItemId: number | null; salesOrderItemId: string | null },
+    tx: Prisma.TransactionClient,
+  ): Promise<{ id: number; invoiceId: string } | null> {
+    if (doItem.invoiceItemId) {
+      return tx.invoiceItem.findUnique({
+        where: { id: doItem.invoiceItemId },
+        select: { id: true, invoiceId: true },
+      });
+    }
+    if (!doItem.salesOrderItemId) return null;
+
+    // Safe to assume at most one invoice per SO — createDraftFromSalesOrder
+    // refuses to create a second invoice while any prior one exists on the
+    // order (see its `order.invoices.length > 0` check), so this can't
+    // resolve to two different invoices across lines of the same DO.
+    return tx.invoiceItem.findFirst({
+      where: { salesOrderItemId: doItem.salesOrderItemId },
+      select: { id: true, invoiceId: true },
+    });
+  }
+
   // A post-ship reversal — a customer return, not an undo of a mistake.
-  // Supports partial returns: a customer may return only some of what
-  // shipped, and this can be called more than once on the same delivery
-  // order as further items trickle back (validated against what's still
-  // outstanding — quantity minus returnedQuantity so far — not the
-  // original shipped quantity each time).
+  // Supports partial returns.
+  //
+  // Mirrors ship()'s COGS posting: every unit that comes back via
+  // stockService.increase() here had its cost expensed to COGS when it
+  // shipped, so returning it has to reverse that same amount, or COGS
+  // stays permanently overstated for anything ever returned.
+  //
+  // Also reverses revenue/tax/AR for whatever invoice line originally
+  // recognized it — see postSalesReturn() for what that does and does
+  // NOT touch (it leaves Invoice.amountPaid/paymentStatus alone; a
+  // return against a paid invoice creates a real credit balance with no
+  // refund workflow yet, which is a separate, not-yet-built piece).
+  //
+  // fulfilledQuantity/deliveredQuantity decrements use a clamped
+  // updateMany (gte guard) rather than a plain update — this is the
+  // ceiling that prevents postSalesReturn() from ever being asked to
+  // reverse more revenue than was actually recognized on a line, even
+  // across multiple partial recordReturn() calls over time.
   async recordReturn(
     organizationId: string,
     id: string,
@@ -377,12 +429,14 @@ export class DeliveryOrderService {
     const salesOrderId = deliveryOrder.salesOrderId;
     const invoiceId = deliveryOrder.invoiceId;
     if (!salesOrderId && !invoiceId) {
-      // Should be unreachable — every DO is created with exactly one of
-      // these — but fail loudly rather than silently mis-tagging the event.
       throw new BadRequestException('This delivery order has no originating sales order or invoice');
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const costedReturnLines: { productId: string; quantity: number; unitCost: number | null; locationId: string | null }[] = [];
+      const revenueReturnLines: { invoiceItemId: number; quantity: number }[] = [];
+      let resolvedInvoiceId: string | null = null;
+
       for (const line of items) {
         const doItem = itemsById.get(line.deliveryOrderItemId)!;
 
@@ -392,17 +446,36 @@ export class DeliveryOrderService {
         });
 
         if (doItem.salesOrderItemId) {
-          await tx.salesOrderItem.update({
-            where: { id: doItem.salesOrderItemId },
+          const decremented = await tx.salesOrderItem.updateMany({
+            where: { id: doItem.salesOrderItemId, deliveredQuantity: { gte: line.quantity } },
             data: { deliveredQuantity: { decrement: line.quantity } },
           });
+          if (decremented.count === 0) {
+            throw new BadRequestException(
+              `Return quantity exceeds delivered quantity for sales order line ${doItem.salesOrderItemId}`,
+            );
+          }
         } else if (doItem.invoiceItemId) {
-          // NEW — mirror of the salesOrderItemId branch above: a returned
-          // unit was fulfilledQuantity before, and isn't anymore.
-          await tx.invoiceItem.update({
-            where: { id: Number(doItem.invoiceItemId) },
+          const decremented = await tx.invoiceItem.updateMany({
+            where: { id: doItem.invoiceItemId, fulfilledQuantity: { gte: line.quantity } },
             data: { fulfilledQuantity: { decrement: line.quantity } },
           });
+          if (decremented.count === 0) {
+            throw new BadRequestException(
+              `Return quantity exceeds fulfilled quantity for invoice item ${doItem.invoiceItemId}`,
+            );
+          }
+        }
+
+        const revenueItem = await this.resolveInvoiceItemForReturn(doItem, tx);
+        if (revenueItem) {
+          if (resolvedInvoiceId && resolvedInvoiceId !== revenueItem.invoiceId) {
+            throw new BadRequestException(
+              'Return spans items from more than one invoice — this should not be possible',
+            );
+          }
+          resolvedInvoiceId = revenueItem.invoiceId;
+          revenueReturnLines.push({ invoiceItemId: revenueItem.id, quantity: line.quantity });
         }
 
         if (doItem.productId && doItem.locationId) {
@@ -417,6 +490,15 @@ export class DeliveryOrderService {
               : { type: EventType.RETURNS, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null } },
             tx,
           );
+          // Only goods whose stock actually came back have a COGS
+          // reversal to post; a returned service line (no productId) has
+          // no inventory/COGS entry to undo in the first place.
+          costedReturnLines.push({
+            productId: doItem.productId,
+            quantity: line.quantity,
+            unitCost: doItem.unitCost != null ? Number(doItem.unitCost) : null,
+            locationId: doItem.locationId,
+          });
         }
       }
 
@@ -425,19 +507,53 @@ export class DeliveryOrderService {
         await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrderId, tx);
       }
       if (invoiceId) {
-        // NEW
         await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
       }
+
+      // One reversal entry per recordReturn() call, keyed by a timestamp
+      // so multiple partial-return calls on the same delivery order each
+      // get their own entry rather than colliding on sourceId.
+      if (costedReturnLines.length > 0) {
+        await this.postingRules.postCogsReturn(
+          organizationId,
+          {
+            sourceId: `${deliveryOrder.id}:cogs-return:${Date.now()}`,
+            date: new Date(),
+            memo: `Return against delivery order ${deliveryOrder.doNumber ?? deliveryOrder.id}`,
+            lines: costedReturnLines,
+          },
+          tx,
+        );
+      }
+
+      // Reverse revenue/tax/AR for whatever had an invoice line to
+      // reverse against. Gated on resolvedInvoiceId, not
+      // deliveryOrder.invoiceId — a SalesOrder-sourced DO has a null
+      // deliveryOrder.invoiceId but can still resolve an invoice via its
+      // salesOrderItemId chain, and that resolved id is what must be used
+      // here. If nothing resolved (e.g. the sales order was never
+      // invoiced), nothing posts — correct, since no revenue was ever
+      // recognized to reverse.
+      if (revenueReturnLines.length > 0 && resolvedInvoiceId) {
+        await this.postingRules.postSalesReturn(
+          organizationId,
+          {
+            sourceId: `${deliveryOrder.id}:sales-return:${Date.now()}`,
+            date: new Date(),
+            memo: `Sales return against delivery order ${deliveryOrder.doNumber ?? deliveryOrder.id}`,
+            invoiceId: resolvedInvoiceId,
+            lines: revenueReturnLines,
+          },
+          tx,
+        );
+      }
+
       return updated;
     });
   }
 
   // Recomputes DeliveryOrder.status from summed returnedQuantity vs
-  // quantity across its items — same derived-status pattern as
-  // SalesOrderService.recomputeDeliveryStatus. Only ever transitions
-  // between SHIPPED / PARTIALLY_RETURNED / RETURNED; PACKED and
-  // CANCELLED are left untouched if somehow passed in (shouldn't happen,
-  // since recordReturn() already gates on SHIPPED/PARTIALLY_RETURNED).
+  // quantity across its items.
   private async recomputeReturnStatus(
     organizationId: string,
     deliveryOrderId: string,
@@ -597,23 +713,23 @@ export class DeliveryOrderService {
     return this.printTokenService.verifyDocumentToken(token, 'delivery-order', deliveryOrderId);
   }
 
-  // CHANGED — this whole method. Previously gated on "no delivery order
-  // exists yet for this invoice" and copied the FULL invoice item
-  // quantity, because under the old model an invoice-sourced DO could
-  // only ever be a one-shot, all-at-once paperwork step (stock had
-  // already fully moved at issue() time). Under the oversell model this
-  // needs to be:
-  //   1. Callable more than once, as backorders get fulfilled incrementally.
-  //   2. Scoped to OUTSTANDING quantity only (quantity - fulfilledQuantity
-  //      - reservedQuantity), not the full line — the fulfilled portion
-  //      already shipped conceptually at issue() time (stock moved then,
-  //      even though no DeliveryOrder existed for it), and the reserved
-  //      portion is already claimed by another open (PACKED) delivery
-  //      order.
+  // An invoice is fulfilled EITHER through a fulfillment session (pick-time
+  // stock + COGS) OR through delivery orders created here (ship-time stock
+  // + COGS), never both, and never twice through DIRECT_ISSUE either. The
+  // fulfillmentPath claim below is the sole enforcement mechanism — it
+  // replaces the earlier SELECT ... FOR UPDATE + Session-existence recheck,
+  // which only protected against a concurrent second call to THIS method,
+  // not against a concurrent SessionsService.create() or
+  // InvoiceService.issue() doing the conflicting thing on another table.
+  // A single atomic UPDATE against Invoice.fulfillmentPath is what makes
+  // all three call sites contend for the same lock.
   //
-  // `itemOverrides` lets a caller explicitly choose to deliver less than
-  // everything outstanding on a line (partial pick); omitted entirely,
-  // it defaults to "everything outstanding, on every line."
+  // Re-claimable when already DELIVERY_ORDER (not just null) — this method
+  // is legitimately called more than once per invoice for partial
+  // deliveries, so the claim's WHERE clause accepts either state.
+  //
+  // Snapshot unitCost off the InvoiceItem here too, same as create() does
+  // off SalesOrderItem: ship() needs it to post COGS without a join back.
   async createFromInvoice(
     organizationId: string,
     userId: string,
@@ -638,10 +754,26 @@ export class DeliveryOrderService {
       throw new BadRequestException('Only an issued invoice can be converted to a delivery order');
     }
 
+    // Cheap early check using the invoice already fetched — no extra
+    // query, and fulfillmentPath is the source of truth rather than a
+    // derived Session lookup. The authoritative check is the atomic claim
+    // inside the transaction below; this just gives a fast, friendly
+    // failure before doing any pricing work.
+    if (invoice.fulfillmentPath === 'SESSION') {
+      throw new BadRequestException(
+        'Cannot fulfill invoice directly. This invoice is already assigned to a warehouse fulfillment session.',
+      );
+    }
+    if (invoice.fulfillmentPath === 'DIRECT_ISSUE') {
+      throw new BadRequestException(
+        'Cannot fulfill invoice directly. This invoice was already fulfilled directly at issuance.',
+      );
+    }
+
     const overrideByItemId = new Map((itemOverrides ?? []).map((o) => [o.invoiceItemId, o.quantity]));
 
     const candidateLines = invoice.items
-      .filter((item) => item.productId) // service lines have nothing to physically deliver
+      .filter((item) => item.productId)
       .map((item) => {
         const outstanding =
           Number(item.quantity) - Number(item.fulfilledQuantity) - Number(item.reservedQuantity);
@@ -666,6 +798,27 @@ export class DeliveryOrderService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Atomic claim — the actual lock. Matches null (first-ever claim)
+        // OR DELIVERY_ORDER (this invoice's own path already, e.g. a
+        // second partial delivery order). An update to 0 rows means
+        // fulfillmentPath is SESSION or DIRECT_ISSUE.
+        const claimed = await tx.invoice.updateMany({
+          where: {
+            id: invoice.id,
+            organizationId,
+            fulfillmentPath: { in: [null, 'DELIVERY_ORDER'] },
+          },
+          data: { fulfillmentPath: 'DELIVERY_ORDER' },
+        });
+        if (claimed.count === 0) {
+          const current = await tx.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+          throw new BadRequestException(
+            current.fulfillmentPath === 'SESSION'
+              ? 'Cannot fulfill invoice directly. This invoice is already assigned to a warehouse fulfillment session.'
+              : 'Cannot fulfill invoice directly. This invoice was already fulfilled directly at issuance.',
+          );
+        }
+
         const year = new Date().getFullYear();
         const count = await tx.deliveryOrder.count({
           where: { organizationId, doNumber: { not: null }, createdAt: { gte: new Date(`${year}-01-01`) } },
@@ -691,23 +844,19 @@ export class DeliveryOrderService {
             items: {
               create: candidateLines.map(({ item, quantity }) => ({
                 salesOrderItemId: null,
-                invoiceItemId: String(item.id), // InvoiceItem.id is a numeric autoincrement column
+                invoiceItemId: item.id,
                 productId: item.productId,
                 productName: item.product?.name ?? item.description ?? 'Service',
                 quantity,
                 unit: item.unit,
                 locationId: item.locationId,
+                unitCost: item.unitCost,
               })),
             },
           },
           include: { items: true },
         });
 
-        // NEW — claim this quantity as reserved so a second concurrent
-        // createFromInvoice() call (or a second manual call before this
-        // one ships) can't also treat the same backordered units as
-        // outstanding. Released back on cancel(), converted to
-        // fulfilledQuantity on ship().
         for (const { item, quantity } of candidateLines) {
           await tx.invoiceItem.update({
             where: { id: item.id },

@@ -1,18 +1,28 @@
 // payments/payments.service.ts
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceActivityEventType, Prisma, PaymentStatus } from '@prisma/client';
+import { InvoiceActivityEventType, Prisma, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PostingRulesService } from '../accounting/posting-rules.service';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+
+const EPS = 0.005; // half a cent: amounts are 2dp, so anything smaller is float noise
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 function deriveStatus(amountPaid: number, total: number): PaymentStatus {
   if (amountPaid <= 0) return PaymentStatus.UNPAID;
-  if (amountPaid >= total) return PaymentStatus.PAID;
+  if (amountPaid >= total - EPS) return PaymentStatus.PAID;
   return PaymentStatus.PARTIAL;
 }
 
 @Injectable()
 export class PaymentService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private postingRules: PostingRulesService,
+  ) {}
 
   async recordPayment(
     organizationId: string,
@@ -20,14 +30,33 @@ export class PaymentService {
     dto: RecordPaymentDto,
     userId?: string,
   ) {
+    // Amount sanity, independent of the DTO decorators: positive, at most 2 decimals.
+    if (!(dto.amount > 0)) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+    if (Math.abs(round2(dto.amount) - dto.amount) > 1e-9) {
+      throw new BadRequestException('Payment amount can have at most 2 decimal places');
+    }
+
+    // Bank account validation, done BEFORE opening the transaction. The
+    // transaction runs at Serializable isolation, so every extra read inside
+    // it widens the window for a serialization failure (P2034).
+    const method = dto.method ?? PaymentMethod.CASH;
+    if (method !== PaymentMethod.CASH) {
+      if (!dto.bankAccountId) {
+        throw new BadRequestException(`bankAccountId is required for payment method ${method}`);
+      }
+      const bankAccount = await this.prisma.organizationBankAccount.findFirst({
+        where: { id: dto.bankAccountId, organizationId, archivedAt: null },
+      });
+      if (!bankAccount) {
+        throw new BadRequestException('bankAccountId does not refer to an active bank account for this organization');
+      }
+    }
+
     try {
-      return await this.prisma.$transaction(
+      const updated = await this.prisma.$transaction(
         async (tx) => {
-          // Scoped by organizationId — previously this was a bare
-          // findUnique by id alone, which let any authenticated user
-          // record a payment against ANY org's invoice if they knew or
-          // guessed the invoiceId. findFirst (not findUnique) since
-          // the compound filter isn't the model's unique key.
           const invoice = await tx.invoice.findFirst({
             where: { id: invoiceId, organizationId },
             select: { id: true, status: true, total: true, amountPaid: true, paymentStatus: true },
@@ -37,51 +66,52 @@ export class PaymentService {
             throw new BadRequestException('Payments can only be recorded against issued invoices');
           }
 
-          // total is Decimal (subtotal/discount/total all use @db.Decimal(12,2)),
-          // amountPaid is Int — normalize total to a number before comparing/storing.
+          // Both are Decimal(12,2) now; compare as 2dp numbers with a tolerance.
           const total = invoice.total.toNumber();
-          const newAmountPaid = invoice.amountPaid + dto.amount;
+          const alreadyPaid = invoice.amountPaid.toNumber();
+          const balance = round2(total - alreadyPaid);
 
-          if (newAmountPaid > total) {
+          if (dto.amount > balance + EPS) {
             throw new BadRequestException(
-              `Payment of ${dto.amount} exceeds balance due (${total - invoice.amountPaid})`,
+              `Payment of ${dto.amount} exceeds balance due (${balance})`,
             );
           }
 
-          await tx.payment.create({
-            data: { invoiceId, amount: dto.amount, method: dto.method, note: dto.note, recordedById: userId },
+          const newAmountPaid = round2(alreadyPaid + dto.amount);
+
+          const payment = await tx.payment.create({
+            data: {
+              invoiceId,
+              amount: dto.amount,
+              method,
+              note: dto.note,
+              recordedById: userId,
+              // CASH is never tied to a specific bank account, so this is
+              // forced null rather than trusting whatever the caller sent.
+              bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+            },
           });
 
           const newStatus = deriveStatus(newAmountPaid, total);
 
-          const updated = await tx.invoice.update({
+          const result = await tx.invoice.update({
             where: { id: invoiceId },
             data: { amountPaid: newAmountPaid, paymentStatus: newStatus },
             include: { payments: { orderBy: { createdAt: 'desc' } } },
           });
 
-          // PAYMENT_RECORDED always fires for a successful payment. The
-          // amount/method go in `reason` (free text) rather than
-          // oldTotal/newTotal — those columns mean "invoice total before
-          // vs after an edit" for EDITED rows, and repurposing them here
-          // for "amountPaid before vs after" would be a different meaning
-          // wearing the same column, which is worse than just not filling
-          // them for this event type.
           await tx.invoiceActivityEvent.create({
             data: {
               invoiceId,
               organizationId,
               userId,
               eventType: InvoiceActivityEventType.PAYMENT_RECORDED,
-              reason: `Rp ${dto.amount.toLocaleString('id-ID')} via ${dto.method ?? 'CASH'}${dto.note ? ` — ${dto.note}` : ''}`,
+              reason: `Rp ${dto.amount.toLocaleString('id-ID')} via ${method}${dto.note ? ` — ${dto.note}` : ''}`,
             },
           });
 
-          // MARKED_PAID only fires the moment this specific payment is
-          // what crossed the invoice into PAID — not on every payment
-          // while it's already sitting at PAID, and not on PARTIAL
-          // payments. invoice.paymentStatus here is the status BEFORE
-          // this transaction's update, so this correctly fires once.
+          // MARKED_PAID fires only the moment this payment crossed the invoice
+          // into PAID. invoice.paymentStatus is the status BEFORE this update.
           if (newStatus === PaymentStatus.PAID && invoice.paymentStatus !== PaymentStatus.PAID) {
             await tx.invoiceActivityEvent.create({
               data: {
@@ -93,10 +123,23 @@ export class PaymentService {
             });
           }
 
-          return updated;
+          // Cash/Bank (debit) + AR (credit), in the SAME transaction. If this
+          // throws, the whole payment rolls back.
+          await this.postingRules.postPayment(organizationId, payment.id, tx);
+
+          return result;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+
+      // Keep this endpoint's response shape stable: amountPaid and payment
+      // amounts were numbers when they were Int columns. Prisma Decimals
+      // would otherwise serialize as strings.
+      return {
+        ...updated,
+        amountPaid: updated.amountPaid.toNumber(),
+        payments: updated.payments.map((p) => ({ ...p, amount: p.amount.toNumber() })),
+      };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
         throw new ConflictException('Payment conflicted with a concurrent update, please retry');

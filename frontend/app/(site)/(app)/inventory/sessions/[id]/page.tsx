@@ -194,7 +194,15 @@ export default function SessionPage() {
 
   if (!session) {
     return (
-      <main className="min-h-screen bg-white text-black p-8">
+      <main
+        className="min-h-screen text-black p-8"
+        style={{
+          backgroundColor: '#f8fafc',
+          backgroundImage:
+            'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          backgroundSize: '24px 24px',
+        }}
+      >
         Loading...
       </main>
     );
@@ -216,14 +224,22 @@ export default function SessionPage() {
   const canComplete = !hasStages || session.stage === stages[stages.length - 1];
 
   return (
-    <main className="min-h-screen bg-white text-black">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
 
       {/* Header */}
-      <div className="px-6 py-5 border-b-2 border-gray-300">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/inventory/sessions')}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to Sessions
@@ -251,7 +267,7 @@ export default function SessionPage() {
                     <span
                       className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${
                         reached
-                          ? 'bg-black text-white border-black'
+                          ? 'bg-blue-600 text-white border-blue-600'
                           : 'bg-white text-gray-400 border-gray-300'
                       }`}
                     >
@@ -273,7 +289,7 @@ export default function SessionPage() {
 
         {/* Summary */}
         <div className="grid sm:grid-cols-3 gap-3">
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3">
+          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
             <Calendar size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">Created</p>
@@ -281,7 +297,7 @@ export default function SessionPage() {
             </div>
           </div>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3">
+          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
             <Package size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">Products</p>
@@ -289,7 +305,7 @@ export default function SessionPage() {
             </div>
           </div>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3">
+          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
             <ListOrdered size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">Total Qty</p>
@@ -313,7 +329,7 @@ export default function SessionPage() {
               <button
                 onClick={regressStage}
                 disabled={regressing}
-                className="flex items-center gap-2 border-2 border-gray-300 hover:bg-gray-100 disabled:opacity-50 text-gray-700 px-4 py-2 rounded-md font-semibold"
+                className="flex items-center gap-2 border-2 border-gray-300 hover:bg-blue-50 disabled:opacity-50 text-gray-700 px-4 py-2 rounded-md font-semibold transition-colors"
                 title={`Go back to ${prevStage} — e.g. if you advanced before finishing`}
               >
                 <ArrowLeftCircle size={18} strokeWidth={2} />
@@ -379,7 +395,7 @@ export default function SessionPage() {
                       setReopenOpen(false);
                       setReopenReason('');
                     }}
-                    className="border-2 border-gray-300 px-4 py-2 rounded-md text-sm font-semibold hover:bg-gray-100"
+                    className="border-2 border-gray-300 px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-50 transition-colors"
                   >
                     Cancel
                   </button>
@@ -396,7 +412,7 @@ export default function SessionPage() {
               <History size={16} strokeWidth={2} />
               Reopen History
             </h2>
-            <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200">
+            <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200 bg-white">
               {session.reopenEvents.map((ev) => (
                 <div key={ev.id} className="p-3 text-sm flex items-start justify-between gap-4">
                   <p className="flex-1">{ev.reason}</p>
@@ -416,7 +432,7 @@ export default function SessionPage() {
             Notes
           </h2>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 space-y-4">
+          <div className="border-2 border-gray-300 rounded-md p-4 space-y-4 bg-white">
             {(session.notes ?? []).length > 0 && (
               <div className="space-y-3">
                 {session.notes.map((n) => (
@@ -441,7 +457,7 @@ export default function SessionPage() {
             <button
               onClick={submitNote}
               disabled={!noteDraft.trim() || addingNote}
-              className="bg-black hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-semibold"
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-semibold transition-colors"
             >
               {addingNote ? 'Adding...' : 'Add Note'}
             </button>
@@ -452,9 +468,9 @@ export default function SessionPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Session Items</h2>
 
-          <div className="border-2 border-gray-300 rounded-md overflow-hidden">
+          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
             <table className="w-full text-sm">
-              <thead className="bg-gray-100 border-b-2 border-gray-300">
+              <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                 <tr>
                   <th className="p-3 text-left font-semibold">Product</th>
                   <th className="p-3 text-left font-semibold">SKU</th>
