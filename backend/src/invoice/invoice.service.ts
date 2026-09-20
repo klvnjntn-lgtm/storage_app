@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, ForbiddenException, NotFoundException, } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
@@ -13,16 +8,15 @@ import { DocumentNumberingService } from '../shared/documents/document-numbering
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { BankAccountResolverService } from '../bank-accounts/bank-account-resolver.service';
+import { CreateDraftInvoiceDto, UpdateDraftInvoiceDto } from './dto/invoice.dto';
 import {
-  CreateDraftInvoiceDto,
-  UpdateDraftInvoiceDto,
-} from './dto/invoice.dto';
-import {
+  DeliveryOrderStatus,
   DocumentType,
   EventType,
   FulfillmentStatus,
   InvoiceActivityEventType,
   InvoiceStatus,
+  JournalSourceType,
   ModuleKey,
   Prisma,
   SessionType,
@@ -32,6 +26,17 @@ import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
+import { PostingRulesService } from '../accounting/posting-rules.service';
+import { JournalService } from '../accounting/journal.service';
+
+const MM_TO_PX = 96 / 25.4;
+
+const PDF_VIEWPORT_PX: Record<string, { width: number; height: number }> = {
+  THERMAL_58: { width: Math.round(58 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
+  RECEIPT: { width: Math.round(80 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
+  A5: { width: Math.round(210 * MM_TO_PX), height: Math.round(148 * MM_TO_PX) },
+  A4: { width: Math.round(210 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
+};
 
 // ---- InvoicePrintView type ----
 export type InvoicePrintView = {
@@ -42,7 +47,7 @@ export type InvoicePrintView = {
 
   invoiceNumber: string | null;
   status: string;
-  fulfillmentStatus: string; // NEW
+  fulfillmentStatus: string;
   vehicleId: string | null;
   paymentStatus: string;
   vehiclePlateNumber: string | null;
@@ -52,6 +57,9 @@ export type InvoicePrintView = {
   businessAddress: string | null;
   businessPhone: string | null;
   customerPoNumber: string | null;
+
+  employeeId: string | null;      // NEW
+  employeeName: string | null;    // NEW
 
   businessName: string;
   businessLegalName: string | null;
@@ -104,7 +112,7 @@ export type InvoicePrintView = {
     itemTotal: number;
     lineTotal: number;
     locationName: string;
-    fulfilledQuantity: number; // NEW
+    fulfilledQuantity: number;
   }[];
 };
 
@@ -123,6 +131,7 @@ const invoiceDetailInclude = {
   location: { select: { name: true, address: true, phone: true } },
   customer: true,
   vehicle: true,
+  employee: { select: { id: true, name: true, position: true } }, // NEW
   items: {
     include: {
       product: { select: { name: true, sku: true } },
@@ -135,18 +144,20 @@ const invoiceDetailInclude = {
 
 @Injectable()
 export class InvoiceService {
-  constructor(
-    private prisma: PrismaService,
-    private stockService: StockService,
-    private orgModulesService: OrganizationModulesService,
-    private sessionsService: SessionsService,
-    private printTokenService: PrintTokenService,
-    private tenantOwnership: TenantOwnershipService,
-    private numbering: DocumentNumberingService,
-    private pricing: LineItemPricingService,
-    private quotationService: SalesQuotationService,
-    private bankAccounts: BankAccountResolverService,
-  ) {}
+constructor(
+  private prisma: PrismaService,
+  private stockService: StockService,
+  private orgModulesService: OrganizationModulesService,
+  private sessionsService: SessionsService,
+  private printTokenService: PrintTokenService,
+  private tenantOwnership: TenantOwnershipService,
+  private numbering: DocumentNumberingService,
+  private pricing: LineItemPricingService,
+  private quotationService: SalesQuotationService,
+  private bankAccounts: BankAccountResolverService,
+  private postingRules: PostingRulesService,
+  private journal: JournalService,
+) {}
 
   // ---- draft cart -------------------------------------------------
 
@@ -178,6 +189,7 @@ export class InvoiceService {
             customerName: dto.customerName,
             customerId: dto.customerId,
             vehicleId: dto.vehicleId,
+            employeeId: dto.employeeId ?? null, // NEW
             customerPoNumber: dto.customerPoNumber ?? null,
             paymentTerms: dto.paymentTerms ?? null,
             notes: dto.notes ?? null,
@@ -263,6 +275,7 @@ export class InvoiceService {
               customerName: dto.customerName ?? invoice.customerName,
               customerId: dto.customerId ?? invoice.customerId,
               vehicleId: dto.vehicleId ?? invoice.vehicleId,
+              employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
               customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
               paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
               notes: dto.notes !== undefined ? dto.notes : invoice.notes,
@@ -327,6 +340,7 @@ export class InvoiceService {
             customerName: dto.customerName ?? invoice.customerName,
             customerId: dto.customerId ?? invoice.customerId,
             vehicleId: dto.vehicleId ?? invoice.vehicleId,
+            employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
             customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
             paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
             notes: dto.notes !== undefined ? dto.notes : invoice.notes,
@@ -382,123 +396,153 @@ export class InvoiceService {
   }
 
   // ---- print / issue ------------------------------------------------
-  async issue(organizationId: string, invoiceId: string): Promise<InvoicePrintView & { sessionId: string | null }> {
-    const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
-    if (invoice.items.length === 0) {
-      throw new BadRequestException('Cannot print an empty invoice');
-    }
-    if (!invoice.userId) {
-      throw new BadRequestException('Invoice has no associated user');
-    }
+async issue(
+  organizationId: string,
+  invoiceId: string,
+  issuedByUserId: string,
+): Promise<InvoicePrintView & { sessionId: string | null }> {
+  const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
+  if (invoice.items.length === 0) {
+    throw new BadRequestException('Cannot print an empty invoice');
+  }
 
-    const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
-    const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+  const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
+  const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
-    const ownedByDeliveryWorkflow = hasWarehouseOps && !!invoice.salesOrderId;
+  // A sales-order-sourced invoice whose goods already move through delivery
+  // orders must not ALSO decrement stock / post COGS at issue time.
+  const soHasDeliveries = invoice.salesOrderId
+    ? (await this.prisma.deliveryOrder.count({
+        where: {
+          organizationId,
+          salesOrderId: invoice.salesOrderId,
+          status: { not: DeliveryOrderStatus.CANCELLED },
+        },
+      })) > 0
+    : false;
+  const ownedByDeliveryWorkflow = (hasWarehouseOps || soHasDeliveries) && !!invoice.salesOrderId;
+  const decreasesStockHere = !hasWarehouseOps && !ownedByDeliveryWorkflow;
 
-    if (!hasWarehouseOps) {
-      const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
-      if (missingLocation) {
-        throw new BadRequestException(
-          `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
-        );
-      }
-    }
-
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const claim = await tx.invoice.updateMany({
-          where: { id: invoice.id, organizationId, status: InvoiceStatus.DRAFT },
-          data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() },
-        });
-        if (claim.count === 0) {
-          throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
-        }
-
-        // CHANGED: non-warehouse orgs now FULFILL rather than DECREASE.
-        // fulfill() takes up to what's physically available and never
-        // throws for insufficient stock — the sale still goes through.
-        // Whatever isn't covered stays as outstanding demand, visible as
-        // item.quantity > item.fulfilledQuantity, and can be picked up
-        // later via DeliveryOrderService.createFromInvoice() (e.g. once
-        // this org enables WAREHOUSE_OPS, or once new stock arrives).
-        //
-        // Warehouse-ops orgs are untouched here: stock for a sales-order
-        // invoice moves at DeliveryOrder.ship(), and a direct (no
-        // salesOrderId) invoice under warehouse ops is routed to a
-        // FULFILLMENT Session below, same as before.
-        if (!hasWarehouseOps) {
-          for (const item of invoice.items) {
-            if (!item.productId) continue;
-            const { fulfilledQuantity } = await this.stockService.fulfill(
-              organizationId,
-              item.productId,
-              item.locationId as string,
-              Number(item.quantity),
-              invoice.userId!,
-              { type: EventType.SALE, invoiceId: invoice.id },
-              tx,
-            );
-            if (fulfilledQuantity > 0) {
-              await tx.invoiceItem.update({
-                where: { id: item.id },
-                data: { fulfilledQuantity: { increment: fulfilledQuantity } },
-              });
-            }
-          }
-          await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
-        }
-
-        const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
-        const invoiceDate = invoice.invoiceDate ?? new Date();
-
-        const updated = await tx.invoice.update({
-          where: { id: invoice.id },
-          data: { invoiceDate, invoiceNumber },
-          include: invoiceDetailInclude,
-        });
-
-        await tx.invoiceActivityEvent.create({
-          data: {
-            invoiceId: invoice.id,
-            organizationId,
-            userId: invoice.userId!,
-            eventType: InvoiceActivityEventType.ISSUED,
-          },
-        });
-
-        let sessionId: string | null = null;
-        if (hasWarehouseOps && !ownedByDeliveryWorkflow) {
-          const session = await this.sessionsService.create(
-            organizationId,
-            SessionType.FULFILLMENT,
-            updated.id,
-            tx,
-          );
-          sessionId = session.id;
-        }
-
-        return { ...this.mapInvoiceForPrint(updated), sessionId };
-      });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new BadRequestException(
-          'Invoice number assignment conflicted with a concurrent issue — please retry',
-        );
-      }
-      throw err;
+  if (decreasesStockHere) {
+    const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
+    if (missingLocation) {
+      throw new BadRequestException(
+        `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
+      );
     }
   }
 
-  // NEW — recomputes Invoice.fulfillmentStatus from summed
-  // fulfilledQuantity vs quantity across its items. Same derived-status
-  // pattern as SalesOrderService.recomputeDeliveryStatus(). Called from
-  // issue() and from DeliveryOrderService (ship() / recordReturn()) inside
-  // whatever transaction changed a fulfilledQuantity — never call this
-  // standalone outside that transaction, or the two can drift.
-  //
-  // Service lines (no productId) have no physical fulfillment concept and
-  // are excluded from the calculation entirely.
+  try {
+    return await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.invoice.updateMany({
+        where: { id: invoice.id, organizationId, status: InvoiceStatus.DRAFT },
+        data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
+      }
+      const costedLines: {
+        productId: string;
+        quantity: number;
+        unitCost: number | null;
+        locationId: string | null;
+      }[] = [];
+
+      if (decreasesStockHere) {
+        const claimed = await tx.invoice.updateMany({
+          where: { id: invoice.id, organizationId, fulfillmentPath: null },
+          data: { fulfillmentPath: 'DIRECT_ISSUE' },
+        });
+        if (claimed.count === 0) {
+          throw new BadRequestException(
+            'Cannot fulfill invoice directly — it is already assigned to another fulfillment path.',
+          );
+        }
+
+        for (const item of invoice.items) {
+          if (!item.productId) continue;
+          const { fulfilledQuantity } = await this.stockService.fulfill(
+            organizationId,
+            item.productId,
+            item.locationId as string,
+            Number(item.quantity),
+            issuedByUserId,
+            { type: EventType.SALE, invoiceId: invoice.id },
+            tx,
+          );
+          if (fulfilledQuantity > 0) {
+            await tx.invoiceItem.update({
+              where: { id: item.id },
+              data: { fulfilledQuantity: { increment: fulfilledQuantity } },
+            });
+            // Actual fulfilled qty, not ordered: oversold units haven't shipped.
+            costedLines.push({
+              productId: item.productId,
+              quantity: fulfilledQuantity,
+              unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+              locationId: item.locationId,
+            });
+          }
+        }
+        await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
+      }
+
+      const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
+      const invoiceDate = invoice.invoiceDate ?? new Date();
+
+      const updated = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { invoiceDate, invoiceNumber },
+        include: invoiceDetailInclude,
+      });
+
+      // Ledger: revenue/AR/tax now (after invoiceNumber is set, since the memo
+      // reads it). COGS only for what actually left stock in this call.
+      await this.postingRules.postInvoiceIssued(organizationId, invoice.id, tx);
+      if (costedLines.length > 0) {
+        await this.postingRules.postCogs(
+          organizationId,
+          {
+            sourceId: `${invoice.id}:cogs:issue`,
+            date: new Date(),
+            memo: `COGS for invoice ${invoiceNumber}`,
+            lines: costedLines,
+          },
+          tx,
+        );
+      }
+
+      await tx.invoiceActivityEvent.create({
+        data: {
+          invoiceId: invoice.id,
+          organizationId,
+          userId: issuedByUserId,
+          eventType: InvoiceActivityEventType.ISSUED,
+        },
+      });
+
+      let sessionId: string | null = null;
+      if (hasWarehouseOps && !ownedByDeliveryWorkflow) {
+        const session = await this.sessionsService.create(
+          organizationId,
+          SessionType.FULFILLMENT,
+          updated.id,
+          tx,
+        );
+        sessionId = session.id;
+      }
+
+      return { ...this.mapInvoiceForPrint(updated), sessionId };
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new BadRequestException(
+        'Invoice number assignment conflicted with a concurrent issue — please retry',
+      );
+    }
+    throw err;
+  }
+}
   async recomputeFulfillmentStatus(
     organizationId: string,
     invoiceId: string,
@@ -707,6 +751,10 @@ export class InvoiceService {
       });
       try {
         const page = await browser.newPage();
+
+        const viewport = PDF_VIEWPORT_PX[format] ?? PDF_VIEWPORT_PX.A4;
+        await page.setViewport(viewport);
+
         await page.emulateMediaType('print');
         await page.emulateMediaFeatures([
           { name: 'prefers-color-scheme', value: 'light' },
@@ -750,7 +798,7 @@ export class InvoiceService {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
-      fulfillmentStatus: invoice.fulfillmentStatus, // NEW
+      fulfillmentStatus: invoice.fulfillmentStatus,
       format: invoice.format,
       salesOrderId: invoice.salesOrderId,
       deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })),
@@ -766,6 +814,10 @@ export class InvoiceService {
       vehicleModel: invoice.vehicle?.vehicleModel ?? null,
       vehicleVin: invoice.vehicle?.vin ?? null,
       vehicleOdometer: invoice.odometer ?? invoice.vehicle?.odometer ?? null,
+
+      employeeId: invoice.employeeId ?? null,             // NEW
+      employeeName: invoice.employee?.name ?? null,        // NEW
+
       businessName: invoice.organization.name,
       businessLegalName: invoice.organization.legalName,
       businessNpwp: invoice.organization.npwp,
@@ -815,7 +867,7 @@ export class InvoiceService {
         itemTotal: toNumber(item.netAmount),
         lineTotal: toNumber(item.lineTotal),
         locationName: item.location?.name ?? '',
-        fulfilledQuantity: Number(item.fulfilledQuantity), // NEW
+        fulfilledQuantity: Number(item.fulfilledQuantity),
       })),
     };
   }
@@ -908,124 +960,127 @@ export class InvoiceService {
         customer: true,
         taxes: true,
         location: true,
+        employee: { select: { id: true, name: true, position: true } }, // NEW — so the new-invoice edit page can preselect the picker
       },
     });
     if (!invoice) throw new NotFoundException('Draft invoice not found');
     return invoice;
   }
 
-  async getCustomerStatement(
-    organizationId: string,
-    customerId: string,
-    from: Date,
-    to: Date,
-    vehicleIds?: string[],
-  ) {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, organizationId },
-      select: { id: true, name: true, address: true, phone: true, npwp: true },
-    });
-    if (!customer) throw new NotFoundException('Customer not found');
+async getCustomerStatement(
+  organizationId: string,
+  customerId: string,
+  from: Date,
+  to: Date,
+  vehicleIds?: string[],
+) {
+  const customer = await this.prisma.customer.findFirst({
+    where: { id: customerId, organizationId },
+    select: { id: true, name: true, address: true, phone: true, npwp: true },
+  });
+  if (!customer) throw new NotFoundException('Customer not found');
 
-    const orgRaw = await this.prisma.organization.findUniqueOrThrow({
-      where: { id: organizationId },
-      select: {
-        name: true,
-        legalName: true,
-        npwp: true,
-        logoUrl: true,
-        address: true,
-        phone: true,
-        bankAccounts: {
-          where: { isDefault: true, archivedAt: null },
-          take: 1,
-          select: { bankName: true, accountNumber: true, accountName: true },
-        },
+  const orgRaw = await this.prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: {
+      name: true,
+      legalName: true,
+      npwp: true,
+      logoUrl: true,
+      address: true,
+      phone: true,
+      bankAccounts: {
+        where: { isDefault: true, archivedAt: null },
+        take: 1,
+        select: { bankName: true, accountNumber: true, accountName: true },
       },
-    });
-    const defaultBank = orgRaw.bankAccounts[0];
-    const organization = {
-      name: orgRaw.name,
-      legalName: orgRaw.legalName,
-      npwp: orgRaw.npwp,
-      logoUrl: orgRaw.logoUrl,
-      address: orgRaw.address,
-      phone: orgRaw.phone,
-      bankName: defaultBank?.bankName ?? null,
-      bankAccountNumber: defaultBank?.accountNumber ?? null,
-      bankAccountName: defaultBank?.accountName ?? null,
-    };
+    },
+  });
+  const defaultBank = orgRaw.bankAccounts[0];
+  const organization = {
+    name: orgRaw.name,
+    legalName: orgRaw.legalName,
+    npwp: orgRaw.npwp,
+    logoUrl: orgRaw.logoUrl,
+    address: orgRaw.address,
+    phone: orgRaw.phone,
+    bankName: defaultBank?.bankName ?? null,
+    bankAccountNumber: defaultBank?.accountNumber ?? null,
+    bankAccountName: defaultBank?.accountName ?? null,
+  };
 
-    const vehicleFilter =
-      vehicleIds && vehicleIds.length > 0 ? { vehicleId: { in: vehicleIds } } : {};
+  const vehicleFilter =
+    vehicleIds && vehicleIds.length > 0 ? { vehicleId: { in: vehicleIds } } : {};
 
-    const [priorInvoices, periodInvoices] = await Promise.all([
-      this.prisma.invoice.findMany({
-        where: {
-          organizationId,
-          customerId,
-          status: InvoiceStatus.ISSUED,
-          issuedAt: { lt: from },
-          ...vehicleFilter,
-        },
-        select: { total: true, amountPaid: true },
-      }),
-      this.prisma.invoice.findMany({
-        where: {
-          organizationId,
-          customerId,
-          status: InvoiceStatus.ISSUED,
-          issuedAt: { gte: from, lte: to },
-          ...vehicleFilter,
-        },
-        select: {
-          id: true,
-          invoiceNumber: true,
-          issuedAt: true,
-          total: true,
-          amountPaid: true,
-          vehicleId: true,
-          vehicle: { select: { plateNumber: true, vehicleModel: true } },
-        },
-        orderBy: { issuedAt: 'asc' },
-      }),
-    ]);
+  const [priorInvoices, periodInvoices] = await Promise.all([
+    this.prisma.invoice.findMany({
+      where: {
+        organizationId,
+        customerId,
+        status: InvoiceStatus.ISSUED,
+        issuedAt: { lt: from },
+        ...vehicleFilter,
+      },
+      select: { total: true, amountPaid: true },
+    }),
+    this.prisma.invoice.findMany({
+      where: {
+        organizationId,
+        customerId,
+        status: InvoiceStatus.ISSUED,
+        issuedAt: { gte: from, lte: to },
+        ...vehicleFilter,
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        issuedAt: true,
+        total: true,
+        amountPaid: true,
+        vehicleId: true,
+        vehicle: { select: { plateNumber: true, vehicleModel: true } },
+      },
+      orderBy: { issuedAt: 'asc' },
+    }),
+  ]);
 
-    const openingBalance = this.round2(
-      priorInvoices.reduce((sum, inv) => sum + (Number(inv.total) - inv.amountPaid), 0),
-    );
-    const periodInvoiced = this.round2(
-      periodInvoices.reduce((sum, inv) => sum + Number(inv.total), 0),
-    );
-    const periodPaidAsOfNow = this.round2(
-      periodInvoices.reduce((sum, inv) => sum + inv.amountPaid, 0),
-    );
-    const closingBalance = this.round2(openingBalance + periodInvoiced - periodPaidAsOfNow);
+  // amountPaid is Decimal now; normalise once.
+  const paid = (inv: { amountPaid: Decimal }) => Number(inv.amountPaid);
 
-    return {
-      customer,
-      organization,
-      from,
-      to,
-      generatedAt: new Date(),
-      vehicleIds: vehicleIds ?? [],
-      openingBalance,
-      closingBalance,
-      paymentTimingUnavailable: true,
-      lines: periodInvoices.map((inv) => ({
-        id: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        issuedAt: inv.issuedAt,
-        invoiced: Number(inv.total),
-        paidToDate: inv.amountPaid,
-        balance: this.round2(Number(inv.total) - inv.amountPaid),
-        vehicleId: inv.vehicleId,
-        vehiclePlateNumber: inv.vehicle?.plateNumber ?? null,
-        vehicleModel: inv.vehicle?.vehicleModel ?? null,
-      })),
-    };
-  }
+  const openingBalance = this.round2(
+    priorInvoices.reduce((sum, inv) => sum + (Number(inv.total) - paid(inv)), 0),
+  );
+  const periodInvoiced = this.round2(
+    periodInvoices.reduce((sum, inv) => sum + Number(inv.total), 0),
+  );
+  const periodPaidAsOfNow = this.round2(
+    periodInvoices.reduce((sum, inv) => sum + paid(inv), 0),
+  );
+  const closingBalance = this.round2(openingBalance + periodInvoiced - periodPaidAsOfNow);
 
+  return {
+    customer,
+    organization,
+    from,
+    to,
+    generatedAt: new Date(),
+    vehicleIds: vehicleIds ?? [],
+    openingBalance,
+    closingBalance,
+    paymentTimingUnavailable: true,
+    lines: periodInvoices.map((inv) => ({
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      issuedAt: inv.issuedAt,
+      invoiced: Number(inv.total),
+      paidToDate: paid(inv),
+      balance: this.round2(Number(inv.total) - paid(inv)),
+      vehicleId: inv.vehicleId,
+      vehiclePlateNumber: inv.vehicle?.plateNumber ?? null,
+      vehicleModel: inv.vehicle?.vehicleModel ?? null,
+    })),
+  };
+}
   async getIssuedInvoiceEditDetail(organizationId: string, id: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, organizationId, status: InvoiceStatus.ISSUED },
@@ -1040,206 +1095,260 @@ export class InvoiceService {
         customer: true,
         taxes: true,
         location: true,
+        employee: { select: { id: true, name: true, position: true } }, // NEW
       },
     });
     if (!invoice) throw new NotFoundException('Issued invoice not found');
     return invoice;
   }
 
-  async editIssuedInvoice(
-    organizationId: string,
-    invoiceId: string,
-    dto: EditIssuedInvoiceDto,
-    userId: string,
-  ) {
-    const invoice = await this.prisma.invoice.findFirst({
-      where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
-      include: {
-        items: { include: { product: { select: { name: true } } } },
-      },
-    });
-    if (!invoice) throw new NotFoundException('Issued invoice not found');
-    if (!invoice.userId) {
-      throw new BadRequestException('Invoice has no associated user');
+async editIssuedInvoice(
+  organizationId: string,
+  invoiceId: string,
+  dto: EditIssuedInvoiceDto,
+  userId: string,
+) {
+  const invoice = await this.prisma.invoice.findFirst({
+    where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
+    include: {
+      items: { include: { product: { select: { name: true } } } },
+    },
+  });
+  if (!invoice) throw new NotFoundException('Issued invoice not found');
+
+  if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
+    throw new BadRequestException(
+      'Cannot edit items on an invoice that has payments recorded. Void and reissue instead.',
+    );
+  }
+
+  const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
+  const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+
+  const keyOf = (i: { productId: string | null; description: string | null }) =>
+    i.productId ? `p:${i.productId}` : `s:${i.description}`;
+
+  const oldItemByKey = new Map(invoice.items.map((i) => [keyOf(i), i]));
+
+  const updated = await this.prisma.$transaction(async (tx) => {
+    const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
+      await this.pricing.priceLines(organizationId, dto.items, tx, {
+        requireLocationForProducts: !hasWarehouseOps,
+      });
+    const newTotal = this.round2(subtotal - discountAmount + taxAmount);
+
+    if (invoice.vehicleId && dto.odometer != null) {
+      await this.applyOdometerReading(tx, organizationId, invoice.vehicleId, dto.odometer);
     }
 
-    if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
-      throw new BadRequestException(
-        'Cannot edit items on an invoice that has payments recorded. Void and reissue instead.',
-      );
-    }
+    const bank = dto.bankAccountId !== undefined
+      ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+      : null;
 
-    const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
-    if (enabledModules.includes(ModuleKey.WAREHOUSE_OPS)) {
-      throw new BadRequestException(
-        'Item edits on issued invoices are not supported for organizations using warehouse fulfillment. Void and reissue instead.',
-      );
-    }
-    // Because WAREHOUSE_OPS is always blocked above, everything below only
-    // ever runs for non-warehouse orgs — the same population that used
-    // fulfill()-with-oversell in issue().
+    const session = hasWarehouseOps
+      ? await tx.session.findFirst({ where: { invoiceId: invoice.id, organizationId } })
+      : null;
 
-    // Same identity key as buildEditDiff() below — matches an old line to
-    // its corresponding new line so fulfilledQuantity can be carried
-    // forward per-line rather than aggregated blindly by product+location.
-    const keyOf = (i: { productId: string | null; description: string | null }) =>
-      i.productId ? `p:${i.productId}` : `s:${i.description}`;
+    const demandChanges: { label: string; before: number; after: number }[] = [];
+    const carriedFulfilledByLineIndex = new Map<number, number>();
 
-    const oldItemByKey = new Map(invoice.items.map((i) => [keyOf(i), i]));
+    for (let idx = 0; idx < lines.length; idx++) {
+      const l = lines[idx];
+      if (!l.productId) continue;
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-        await this.pricing.priceLines(organizationId, dto.items, tx);
-      const newTotal = this.round2(subtotal - discountAmount + taxAmount);
+      const key = keyOf(l);
+      const oldItem = oldItemByKey.get(key);
+      const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
+      const oldQty = oldItem ? Number(oldItem.quantity) : 0;
 
-      if (invoice.vehicleId && dto.odometer != null) {
-        await this.applyOdometerReading(tx, organizationId, invoice.vehicleId, dto.odometer);
+      if (l.quantity < oldFulfilled) {
+        throw new BadRequestException(
+          `Cannot reduce "${l.description ?? key}" to ${l.quantity} — ${oldFulfilled} unit(s) are already fulfilled. Process a return instead.`,
+        );
       }
 
-      const bank = dto.bankAccountId !== undefined
-        ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
-        : null;
+      if (hasWarehouseOps && l.quantity !== oldQty) {
+        demandChanges.push({ label: l.description ?? key, before: oldQty, after: l.quantity });
+      }
 
-      // CHANGED: this whole block replaces the old aggregate-by-
-      // product+location decrease()/increase() diff. That old logic
-      // assumed the FULL original quantity had left stock — under the
-      // oversell model, only item.fulfilledQuantity actually did.
-      //
-      // Rule enforced here: you cannot shrink a line below what's already
-      // been fulfilled — that's not an edit, physical stock already left
-      // for that amount. A genuine return should go through a return
-      // flow, not a quantity edit. Increasing a line (or adding a new
-      // one) attempts to fulfill only the newly added demand, using the
-      // same oversell-safe fulfill() as issue() — it does not retroactively
-      // try to resolve a pre-existing backorder on an untouched line.
-      const carriedFulfilledByLineIndex = new Map<number, number>();
+      let fulfilledForThisLine = oldFulfilled;
 
-      for (let idx = 0; idx < lines.length; idx++) {
-        const l = lines[idx];
-        if (!l.productId || !l.locationId) continue; // service line — no physical fulfillment
-
-        const key = keyOf(l);
-        const oldItem = oldItemByKey.get(key);
-        const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
-        const oldQty = oldItem ? Number(oldItem.quantity) : 0;
-
-        if (l.quantity < oldFulfilled) {
-          throw new BadRequestException(
-            `Cannot reduce "${l.description ?? key}" to ${l.quantity} — ${oldFulfilled} unit(s) are already fulfilled. Process a return instead.`,
-          );
-        }
-
-        let fulfilledForThisLine = oldFulfilled;
+      if (!hasWarehouseOps) {
         const addedDemand = l.quantity - oldQty;
         if (addedDemand > 0) {
           const { fulfilledQuantity } = await this.stockService.fulfill(
-            organizationId, l.productId, l.locationId, addedDemand, invoice.userId!,
+            organizationId, l.productId, l.locationId!, addedDemand, userId,
             { type: EventType.SALE, invoiceId: invoice.id }, tx,
           );
           fulfilledForThisLine += fulfilledQuantity;
         }
-        carriedFulfilledByLineIndex.set(idx, fulfilledForThisLine);
       }
 
-      // A line that existed before but was removed entirely (or turned
-      // into a service line) needs its already-fulfilled stock returned —
-      // it was truly decremented, and deleting the line shouldn't erase
-      // that fact.
-      const newKeys = new Set(
-        lines.filter((l) => l.productId && l.locationId).map((l) => keyOf(l)),
-      );
-      for (const item of invoice.items) {
-        if (!item.productId || !item.locationId) continue;
-        if (newKeys.has(keyOf(item))) continue;
-        const fulfilled = Number(item.fulfilledQuantity);
-        if (fulfilled > 0) {
-          await this.stockService.increase(
-            organizationId, item.productId, item.locationId, fulfilled, invoice.userId!,
-            { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
+      carriedFulfilledByLineIndex.set(idx, fulfilledForThisLine);
+    }
+
+    const newKeys = new Set(lines.filter((l) => l.productId).map((l) => keyOf(l)));
+    for (const item of invoice.items) {
+      if (!item.productId) continue;
+      if (newKeys.has(keyOf(item))) continue;
+
+      if (hasWarehouseOps) {
+        demandChanges.push({
+          label: item.product?.name ?? item.description ?? keyOf(item),
+          before: Number(item.quantity),
+          after: 0,
+        });
+        continue;
+      }
+
+      if (!item.locationId) continue;
+
+      const fulfilled = Number(item.fulfilledQuantity);
+      if (fulfilled > 0) {
+        await this.stockService.increase(
+          organizationId, item.productId, item.locationId, fulfilled, userId,
+          { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
+        );
+      }
+    }
+
+    const existingItemIds = (
+      await tx.invoiceItem.findMany({ where: { invoiceId: invoice.id }, select: { id: true } })
+    ).map((i) => i.id);
+    if (existingItemIds.length) {
+      await tx.invoiceItemTax.deleteMany({ where: { invoiceItemId: { in: existingItemIds } } });
+    }
+    await tx.invoiceItem.deleteMany({ where: { invoiceId: invoice.id } });
+    await tx.invoiceTax.deleteMany({ where: { invoiceId: invoice.id } });
+
+    const result = await tx.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        dueDate: dto.dueDate !== undefined
+          ? (dto.dueDate ? new Date(dto.dueDate) : null)
+          : invoice.dueDate,
+        odometer: dto.odometer !== undefined ? dto.odometer : invoice.odometer,
+        employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId,
+        ...(bank && {
+          bankAccountId: bank.bankAccountId,
+          bankName: bank.bankName,
+          bankAccountNumber: bank.bankAccountNumber,
+          bankAccountName: bank.bankAccountName,
+        }),
+        subtotal,
+        taxAmount,
+        discount: discountAmount,
+        total: newTotal, // FIX — was never written, leaving invoice.total stale after every edit
+        items: {
+          create: lines.map((l, idx) => ({
+            productId: l.productId,
+            description: l.description,
+            locationId: l.locationId,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            unitCost: l.unitCost,
+            unit: l.unit,
+            lineTotal: l.lineTotal,
+            discountType: l.discountType,
+            discountValue: l.discountValue,
+            discountAmount: l.discountAmount,
+            netAmount: l.netAmount,
+            taxAmount: l.taxAmount,
+            total: l.total,
+            fulfilledQuantity: carriedFulfilledByLineIndex.get(idx) ?? 0,
+            taxes: { create: l.taxes },
+          })),
+        },
+        taxes: { create: taxLines },
+      },
+      include: invoiceDetailInclude,
+    });
+
+    await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
+
+    // NEW — repost. Only if this invoice was ever posted; invoices issued
+    // before ledger posting existed have no entry and stay out of the ledger.
+    const priorRevenue = await this.journal.findPostedBySource(
+      organizationId, JournalSourceType.INVOICE, invoice.id, tx,
+    );
+
+    if (priorRevenue) {
+      const voidReason = `Invoice edited: ${dto.reason.trim()}`;
+      await this.journal.voidEntry(organizationId, priorRevenue.id, userId, voidReason, tx);
+      await this.postingRules.postInvoiceIssued(organizationId, invoice.id, tx);
+
+      // Warehouse-ops orgs post COGS at pick/ship, so edits never touch it.
+      if (!hasWarehouseOps) {
+        const cogsSourceId = `${invoice.id}:cogs:issue`;
+        const priorCogs = await this.journal.findPostedBySource(
+          organizationId, JournalSourceType.INVOICE, cogsSourceId, tx,
+        );
+        if (priorCogs) {
+          await this.journal.voidEntry(organizationId, priorCogs.id, userId, voidReason, tx);
+        }
+
+        const costedLines = result.items
+          .filter((i) => i.productId && Number(i.fulfilledQuantity) > 0)
+          .map((i) => ({
+            productId: i.productId!,
+            quantity: Number(i.fulfilledQuantity),
+            unitCost: i.unitCost != null ? Number(i.unitCost) : null,
+            locationId: i.locationId,
+          }));
+
+        if (costedLines.length > 0) {
+          await this.postingRules.postCogs(
+            organizationId,
+            {
+              sourceId: cogsSourceId,
+              date: new Date(),
+              memo: `COGS for invoice ${invoice.invoiceNumber ?? invoice.id} (edited)`,
+              lines: costedLines,
+            },
+            tx,
           );
         }
       }
+    }
 
-      const existingItemIds = (
-        await tx.invoiceItem.findMany({ where: { invoiceId: invoice.id }, select: { id: true } })
-      ).map((i) => i.id);
-      if (existingItemIds.length) {
-        await tx.invoiceItemTax.deleteMany({ where: { invoiceItemId: { in: existingItemIds } } });
-      }
-      await tx.invoiceItem.deleteMany({ where: { invoiceId: invoice.id } });
-      await tx.invoiceTax.deleteMany({ where: { invoiceId: invoice.id } });
+    const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
+    const products = productIds.length
+      ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId }, select: { id: true, name: true } })
+      : [];
+    const productNames = new Map(products.map((p) => [p.id, p.name]));
+    const changes = this.buildEditDiff(invoice.items, lines, productNames);
 
-      const result = await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          dueDate: dto.dueDate !== undefined
-            ? (dto.dueDate ? new Date(dto.dueDate) : null)
-            : invoice.dueDate,
-          odometer: dto.odometer !== undefined ? dto.odometer : invoice.odometer,
-          ...(bank && {
-            bankAccountId: bank.bankAccountId,
-            bankName: bank.bankName,
-            bankAccountNumber: bank.bankAccountNumber,
-            bankAccountName: bank.bankAccountName,
-          }),
-          subtotal,
-          taxAmount,
-          discount: discountAmount,
-          items: {
-            create: lines.map((l, idx) => ({
-              productId: l.productId,
-              description: l.description,
-              locationId: l.locationId,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-              unitCost: l.unitCost,
-              unit: l.unit,
-              lineTotal: l.lineTotal,
-              discountType: l.discountType,
-              discountValue: l.discountValue,
-              discountAmount: l.discountAmount,
-              netAmount: l.netAmount,
-              taxAmount: l.taxAmount,
-              total: l.total,
-              fulfilledQuantity: carriedFulfilledByLineIndex.get(idx) ?? 0, // NEW
-              taxes: { create: l.taxes },
-            })),
-          },
-          taxes: { create: taxLines },
-        },
-        include: invoiceDetailInclude,
-      });
-
-      await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
-
-      const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
-      const products = productIds.length
-        ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId }, select: { id: true, name: true } })
-        : [];
-      const productNames = new Map(products.map((p) => [p.id, p.name]));
-      const changes = this.buildEditDiff(invoice.items, lines, productNames);
-
-      await tx.invoiceActivityEvent.create({
-        data: {
-          invoiceId: invoice.id,
-          organizationId,
-          userId,
-          eventType: InvoiceActivityEventType.EDITED,
-          reason: dto.reason.trim(),
-          oldTotal: invoice.total,
-          newTotal,
-          changes,
-        },
-      });
-
-      // Re-fetch so the returned view reflects fulfillmentStatus written
-      // by recomputeFulfillmentStatus() after `result` was captured.
-      return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceDetailInclude });
+    await tx.invoiceActivityEvent.create({
+      data: {
+        invoiceId: invoice.id,
+        organizationId,
+        userId,
+        eventType: InvoiceActivityEventType.EDITED,
+        reason: dto.reason.trim(),
+        oldTotal: invoice.total,
+        newTotal,
+        changes,
+      },
     });
 
-    return this.mapInvoiceForPrint(updated);
-  }
+    if (session && demandChanges.length > 0) {
+      const summary = demandChanges
+        .map((c) => `${c.label}: ${c.before} → ${c.after}${c.after === 0 ? ' (removed)' : ''}`)
+        .join('; ');
+      await tx.sessionNote.create({
+        data: {
+          sessionId: session.id,
+          note: `Invoice edited — demand changed: ${summary}`,
+          userId,
+        },
+      });
+    }
 
+    return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceDetailInclude });
+  });
+
+  return this.mapInvoiceForPrint(updated);
+}
   private buildEditDiff(
     oldItems: {
       productId: string | null;
@@ -1319,92 +1428,140 @@ export class InvoiceService {
     });
   }
 
-  async voidInvoice(
-    organizationId: string,
-    invoiceId: string,
-    reason: string,
-    userId: string,
-  ) {
-    if (!reason?.trim()) {
-      throw new BadRequestException('A reason is required to void an invoice');
-    }
+async voidInvoice(
+  organizationId: string,
+  invoiceId: string,
+  reason: string,
+  userId: string,
+) {
+  if (!reason?.trim()) {
+    throw new BadRequestException('A reason is required to void an invoice');
+  }
 
-    const invoice = await this.prisma.invoice.findFirst({
-      where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
-      include: { items: true },
+  const invoice = await this.prisma.invoice.findFirst({
+    where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
+    include: { items: true },
+  });
+  if (!invoice) throw new NotFoundException('Issued invoice not found');
+
+  if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
+    throw new BadRequestException(
+      'Cannot void an invoice with payments recorded. Refund and reconcile first.',
+    );
+  }
+
+  return this.prisma.$transaction(async (tx) => {
+    // ---- Block on anything physically shipped ------------------------
+    const shippedCount = await tx.deliveryOrder.count({
+      where: {
+        organizationId,
+        invoiceId: invoice.id,
+        status: { in: [DeliveryOrderStatus.SHIPPED, DeliveryOrderStatus.PARTIALLY_RETURNED] },
+      },
     });
-    if (!invoice) throw new NotFoundException('Issued invoice not found');
-
-    if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
+    if (shippedCount > 0) {
       throw new BadRequestException(
-        'Cannot void an invoice with payments recorded. Refund and reconcile first.',
+        `Cannot void — this invoice has ${shippedCount} shipped delivery order(s). Process a return on each before voiding.`,
       );
     }
 
-    const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
-    const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+    // ---- Block on anything physically picked --------------------------
+    // A SessionItem row and its stock decrement are written in the same
+    // transaction (SessionsService.addItem()'s PICK case) — there's no
+    // "reserved but not yet picked" state in this schema, so item count
+    // > 0 for a FULFILLMENT session means stock already moved. If
+    // addItem() is ever refactored to decouple reserving a line from
+    // committing the pick, this check needs to move to whatever field
+    // tracks the commit, not the line count.
+    const session = await tx.session.findFirst({
+      where: { invoiceId: invoice.id, organizationId },
+      include: { _count: { select: { items: true } } },
+    });
+    if (session && session._count.items > 0) {
+      throw new BadRequestException(
+        'Cannot void — fulfillment has already started on this invoice\'s session. Resolve the session first.',
+      );
+    }
 
-    return this.prisma.$transaction(async (tx) => {
-      if (!hasWarehouseOps) {
-        for (const item of invoice.items) {
-          if (!item.productId || !item.locationId) continue;
-          // CHANGED: only the FULFILLED portion of this item ever actually
-          // left Stock — the rest was outstanding/backordered and never
-          // touched physical inventory. Reversing item.quantity (the old
-          // behavior) would credit back stock that was never taken.
-          const fulfilled = Number(item.fulfilledQuantity);
-          if (fulfilled <= 0) continue;
-          await this.stockService.increase(
-            organizationId, item.productId, item.locationId, fulfilled, userId,
-            { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
-          );
-        }
-      } else {
-        const session = await tx.session.findFirst({
-          where: { invoiceId: invoice.id, organizationId },
-          include: { _count: { select: { items: true } } },
-        });
-        if (session && session._count.items > 0) {
-          throw new BadRequestException(
-            'Cannot void — fulfillment has already started on this invoice\'s session. Resolve the session first.',
-          );
-        }
-        if (session) {
-          await tx.session.delete({ where: { id: session.id } });
+    // ---- Nothing shipped/picked: safe to cancel remaining reservations --
+    if (session) {
+      await tx.session.update({ where: { id: session.id }, data: { status: 'CANCELLED' } });
+    }
+
+    const packedDeliveryOrders = await tx.deliveryOrder.findMany({
+      where: { organizationId, invoiceId: invoice.id, status: DeliveryOrderStatus.PACKED },
+      include: { items: true },
+    });
+    for (const d of packedDeliveryOrders) {
+      for (const item of d.items) {
+        if (item.invoiceItemId) {
+          await tx.invoiceItem.update({
+            where: { id: item.invoiceItemId },
+            data: { reservedQuantity: { decrement: Number(item.quantity) } },
+          });
         }
       }
+      await tx.deliveryOrder.update({ where: { id: d.id }, data: { status: DeliveryOrderStatus.CANCELLED } });
+    }
 
-      const updated = await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { status: InvoiceStatus.VOID },
-        include: invoiceDetailInclude,
-      });
-
-      if (invoice.quotationId) {
-        await this.quotationService.reopenIfConverted(
-          organizationId,
-          invoice.quotationId,
-          userId,
-          reason.trim(),
-          tx,
+    // ---- Reverse stock only for the path that decremented it directly --
+    // fulfillmentPath === 'DIRECT_ISSUE' precisely identifies "issue()
+    // itself decremented stock for this invoice" — more precise than
+    // re-deriving hasWarehouseOps/ownedByDeliveryWorkflow here, since
+    // those two booleans were only ever meant to decide behavior at
+    // issue() time, not to be recomputed later.
+    if (invoice.fulfillmentPath === 'DIRECT_ISSUE') {
+      for (const item of invoice.items) {
+        if (!item.productId || !item.locationId) continue;
+        const fulfilled = Number(item.fulfilledQuantity);
+        if (fulfilled <= 0) continue;
+        await this.stockService.increase(
+          organizationId, item.productId, item.locationId, fulfilled, userId,
+          { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
         );
       }
+    }
 
-      await tx.invoiceActivityEvent.create({
-        data: {
-          invoiceId: invoice.id,
-          organizationId,
-          userId,
-          eventType: InvoiceActivityEventType.VOIDED,
-          reason: reason.trim(),
-        },
-      });
+    // ---- Reverse the invoice's own ledger entries ----------------------
+    // Anything shipped/picked was already refused above, so these two
+    // sourceIds are the only COGS-bearing entries a voidable invoice can
+    // have at this point.
+    await this.journal.voidAllForSource(
+      organizationId,
+      JournalSourceType.INVOICE,
+      this.postingRules.invoiceJournalSourceIds(invoice.id),
+      userId,
+      `Invoice voided: ${reason.trim()}`,
+      tx,
+    );
 
-      return this.mapInvoiceForPrint(updated);
+    const updated = await tx.invoice.update({
+      where: { id: invoice.id },
+      data: { status: InvoiceStatus.VOID },
+      include: invoiceDetailInclude,
     });
-  }
 
-  async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string) {
+    if (invoice.quotationId) {
+      await this.quotationService.reopenIfConverted(
+        organizationId, invoice.quotationId, userId, reason.trim(), tx,
+      );
+    }
+
+    await tx.invoiceActivityEvent.create({
+      data: {
+        invoiceId: invoice.id,
+        organizationId,
+        userId,
+        eventType: InvoiceActivityEventType.VOIDED,
+        reason: reason.trim(),
+      },
+    });
+
+    return this.mapInvoiceForPrint(updated);
+  });
+}
+
+async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string) {
     const quotation = await this.prisma.salesQuotation.findFirst({
       where: { id: quotationId, organizationId },
       include: { items: true, invoices: { select: { id: true, status: true } } },

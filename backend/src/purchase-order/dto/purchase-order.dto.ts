@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import {
-  IsArray, IsNumber, IsOptional, IsPositive, IsString,
-  IsUUID, Min, ValidateNested, IsNotEmpty, ArrayMinSize,
+  IsArray, IsDateString, IsNumber, IsOptional, IsPositive, IsString,
+  IsUUID, MaxLength, Min, ValidateNested, IsNotEmpty, ArrayMinSize,
 } from 'class-validator';
 
 export class NewProductDto {
@@ -63,6 +63,23 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @IsString()
   notes?: string;
 
+  // NEW — when the goods are expected to ARRIVE. The schema field already
+  // existed; the service just never wrote it from the DTO before.
+  @IsOptional() @IsDateString()
+  expectedDate?: string;
+
+  // NEW — when payment is due to the supplier. Deliberately separate from
+  // expectedDate: delivery timing and payment timing are different things,
+  // and AP aging buckets against THIS one.
+  @IsOptional() @IsDateString()
+  dueDate?: string;
+
+  // NEW — free text, same as Invoice.paymentTerms ("Net 30", "COD", ...).
+  // Human-readable only; dueDate is what the system actually ages against,
+  // so whatever UI collects these should keep the two consistent.
+  @IsOptional() @IsString() @MaxLength(200)
+  paymentTerms?: string;
+
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];
 }
@@ -82,6 +99,15 @@ export class UpdatePurchaseOrderDto {
 
   @IsOptional() @IsString()
   notes?: string;
+
+  @IsOptional() @IsDateString()
+  expectedDate?: string;
+
+  @IsOptional() @IsDateString()
+  dueDate?: string;
+
+  @IsOptional() @IsString() @MaxLength(200)
+  paymentTerms?: string;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)
   items?: PurchaseOrderItemDto[];

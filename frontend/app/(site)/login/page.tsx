@@ -1,20 +1,29 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Space_Grotesk } from 'next/font/google';
-import { LogIn, AlertTriangle } from 'lucide-react';
+import { LogIn, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get('reset') === 'success') {
+      setResetSuccess(true);
+    }
+  }, [searchParams]);
 
   async function handleLogin() {
     setError('');
@@ -81,6 +90,13 @@ export default function LoginPage() {
           <p className="text-sm text-gray-500 mt-1">Warehouse Management System</p>
         </header>
 
+        {resetSuccess && (
+          <div className="flex items-start gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
+            <CheckCircle2 size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
+            Password reset. Sign in with your new password.
+          </div>
+        )}
+
         {error && (
           <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
             <AlertTriangle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
@@ -103,7 +119,15 @@ export default function LoginPage() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-gray-600">Password</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-gray-600">Password</label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
 
             <input
               type="password"

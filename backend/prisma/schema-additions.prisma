@@ -1,0 +1,283 @@
+// ============================================================================
+// ACCOUNTING FOUNDATION — merge into schema.prisma
+// ============================================================================
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+// Well-known accounts that posting rules look up by meaning, not by ID.
+// Each org configures ChartOfAccount rows with these keys once (via a COA
+// seed/setup flow); posting rules resolve through AccountResolverService
+// so they never hardcode an account UUID.
+enum SystemAccountKey {
+  CASH
+  BANK
+  ACCOUNTS_RECEIVABLE
+  ACCOUNTS_PAYABLE
+  INVENTORY
+  SALES_REVENUE
+  SALES_TAX_PAYABLE       // output VAT/PPN collected from customers
+  PURCHASE_TAX_RECEIVABLE // input VAT/PPN paid to suppliers, if taxEnabled
+  COST_OF_GOODS_SOLD
+  SALARY_EXPENSE
+  PAYROLL_PAYABLE          // net pay owed to employees, pre-disbursement
+  PAYROLL_DEDUCTIONS_PAYABLE // fallback for deductions with no specific account (BPJS/PPh21 etc.)
+  EXPENSE_PAYABLE           // generic AP for operating expenses (rent, electricity) before they're paid
+  UNCATEGORIZED_EXPENSE     // fallback when an ExpenseCategory has no accountId set
+  RETAINED_EARNINGS
+}
+
+model ChartOfAccount {
+  id             String            @id @default(uuid())
+  organizationId String
+  code           String            // e.g. "1100", "4000" — displayed/sorted account code
+  name           String
+  type           AccountType
+  normalBalance  NormalBalance
+  systemKey      SystemAccountKey? // null for org-specific accounts (e.g. a custom expense account)
+  parentId       String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  parent             ChartOfAccount?   @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children            ChartOfAccount[] @relation("AccountHierarchy")
+  journalLines        JournalEntryLine[]
+  expenseCategories    ExpenseCategory[]
+  salaryComponentTypes SalaryComponentType[]
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, systemKey]) // nullable field, many NULLs allowed — only one row per systemKey per org
+  @@index([organizationId, type])
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  CLOSED // no new postings; can still be reopened by an admin action
+  LOCKED // permanently closed, e.g. after a tax filing — never reopened
+}
+
+model FiscalPeriod {
+  id             String             @id @default(uuid())
+  organizationId String
+  year           Int
+  month          Int
+  status         FiscalPeriodStatus @default(OPEN)
+  closedAt       DateTime?
+
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  journalEntries JournalEntry[]
+
+  @@unique([organizationId, year, month])
+}
+
+enum JournalSourceType {
+  INVOICE
+  PAYMENT
+  PURCHASE_ORDER
+  GOODS_RECEIPT
+  SUPPLIER_PAYMENT
+  EXPENSE
+  PAYROLL
+  MANUAL
+}
+
+enum JournalEntryStatus {
+  POSTED
+  VOID
+}
+
+model JournalEntry {
+  id             String              @id @default(uuid())
+  organizationId String
+  entryNumber    String?
+  entryDate      DateTime            @db.Date
+  memo           String?
+  sourceType     JournalSourceType
+  sourceId       String?             // polymorphic — the Invoice/Payment/etc id. Not an FK: source lives in a different table per sourceType.
+  status         JournalEntryStatus  @default(POSTED)
+  fiscalPeriodId String
+  createdAt      DateTime            @default(now())
+  userId         String?
+
+  // Reversal pairing: never edit or delete a posted entry. To undo one,
+  // create a reversing entry (debits/credits swapped) linked back here.
+  reversalOfId   String?             @unique
+  reversalOf     JournalEntry?       @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversedBy     JournalEntry?       @relation("Reversal")
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  fiscalPeriod FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+  lines        JournalEntryLine[]
+
+  @@unique([organizationId, entryNumber])
+  @@index([organizationId, sourceType, sourceId])
+  @@index([organizationId, entryDate])
+}
+
+model JournalEntryLine {
+  id             String  @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  debit          Decimal @default(0) @db.Decimal(14, 2)
+  credit         Decimal @default(0) @db.Decimal(14, 2)
+  description    String?
+  locationId     String?
+
+  journalEntry JournalEntry    @relation(fields: [journalEntryId], references: [id])
+  account      ChartOfAccount  @relation(fields: [accountId], references: [id])
+  location     Location?       @relation(fields: [locationId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+// ---- Wire existing document models into the ledger ------------------------
+// Add these fields to the models you already have:
+
+// model ExpenseCategory {
+//   ...existing fields
+//   accountId String?
+//   account   ChartOfAccount? @relation(fields: [accountId], references: [id])
+// }
+
+// model SalaryComponentType {
+//   ...existing fields
+//   accountId String?   // e.g. a specific BPJS Payable / PPh21 Payable account for this deduction
+//   account   ChartOfAccount? @relation(fields: [accountId], references: [id])
+// }
+
+// Add to Organization:
+//   chartOfAccounts ChartOfAccount[]
+//   fiscalPeriods   FiscalPeriod[]
+//   journalEntries  JournalEntry[]
+
+// Add to User:
+//   journalEntries JournalEntry[]
+
+// Add to Location:
+//   journalEntryLines JournalEntryLine[]
+
+// ---- Supplier payments (needed for the AP → Cash posting rule) -----------
+// Not yet in your schema — PurchaseOrder/GoodsReceipt track what was
+// ordered/received, but nothing tracks cash actually leaving for it.
+
+model SupplierPayment {
+  id              String   @id @default(uuid())
+  organizationId  String
+  purchaseOrderId String
+  amount          Decimal  @db.Decimal(12, 2)
+  method          PaymentMethod @default(TRANSFER)
+  paidAt          DateTime @default(now())
+  note            String?
+  recordedById    String?
+  createdAt       DateTime @default(now())
+
+  // NEW — which specific bank account this went out of. Required
+  // (enforced in SupplierPaymentsService) whenever method != CASH.
+  bankAccountId String?
+  bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  recordedBy    User?         @relation(fields: [recordedById], references: [id])
+
+  @@index([purchaseOrderId])
+}
+
+// Add to PurchaseOrder: supplierPayments SupplierPayment[]
+// Add to Organization:  supplierPayments SupplierPayment[]
+// Add to User:          supplierPayments SupplierPayment[]
+
+// ---- DeliveryOrderItem: unitCost snapshot for COGS posting -----------
+// Add this field to the existing DeliveryOrderItem model in your main
+// schema. Same denormalization rationale as productName on that model:
+// a delivery order is a record of what happened at that moment, and the
+// cost basis it ships against shouldn't drift if a Product's costPrice
+// changes later. Populated at DeliveryOrder creation time from the
+// originating SalesOrderItem.unitCost or InvoiceItem.unitCost.
+
+// model DeliveryOrderItem {
+//   ...existing fields
+//   unitCost Decimal? @db.Decimal(12, 2)
+// }
+
+// ---- Payroll: paidAt/paymentMethod for the disbursement posting -------
+// Needed so PayrollService.markPaid() can post Payroll Payable (debit) +
+// Cash/Bank (credit) — same shape as Expense's "paid" leg. Without these,
+// there's no record of WHICH cash/bank account net pay actually left
+// from, or when.
+
+// model Payroll {
+//   ...existing fields
+//   paidAt        DateTime?
+//   paymentMethod PaymentMethod?
+//   bankAccountId String?               // NEW — which specific OrganizationBankAccount disbursement left from. Required when paymentMethod != CASH.
+//   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+// }
+
+// ---- Real multi-bank-account support -----------------------------------
+// You already have OrganizationBankAccount (BCA, BNI, Cash, ...) — this
+// links the GL to it instead of every cash-moving document routing
+// through one generic "Bank" account with no way to tell which real bank
+// it was. One bank account <-> one ChartOfAccount row (ASSET), created
+// automatically by BankAccountGLLinkService whenever an
+// OrganizationBankAccount is created — see that service for the code/
+// parent assignment logic.
+
+// model ChartOfAccount {
+//   ...existing fields
+//   bankAccountId String?                    @unique
+//   bankAccount   OrganizationBankAccount?    @relation(fields: [bankAccountId], references: [id])
+// }
+
+// model OrganizationBankAccount {
+//   ...existing fields
+//   chartAccount ChartOfAccount?   // inverse of the relation above
+//   payments         Payment[]          // NEW
+//   expenses         Expense[]          // NEW
+//   supplierPayments SupplierPayment[]  // NEW (in addition to the relation already declared on SupplierPayment below)
+//   payrolls         Payroll[]          // NEW
+// }
+
+// Add bankAccountId to every model that records a cash movement. Required
+// (enforced at the service/DTO layer, not the DB) whenever the payment
+// method isn't CASH — CASH never needs one, since cash isn't tied to a
+// specific bank.
+
+// model Payment {
+//   ...existing fields
+//   bankAccountId String?
+//   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+// }
+
+// model Expense {
+//   ...existing fields
+//   bankAccountId String?
+//   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+// }
+
+
+
+// ---- PurchaseOrder: real payment-due-date field ------------------------
+// Closes the AP aging gap: PurchaseOrder previously had no equivalent to
+// Invoice.dueDate/paymentTerms — only expectedDate (delivery timing, a
+// different concept from payment timing) and orderDate. Mirrors Invoice's
+// existing fields exactly, for the same reason and the same shape.
+
+// model PurchaseOrder {
+//   ...existing fields
+//   dueDate      DateTime?
+//   paymentTerms String?
+// }

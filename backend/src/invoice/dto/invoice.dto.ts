@@ -143,7 +143,9 @@ bankAccountId?: string | null;
   // exactly the double-discount bug this refactor exists to prevent.
   // Invoice.discountType/discountValue remain in the schema as
   // deprecated/read-only columns for historical invoices only.
-
+@IsOptional()
+@IsUUID()
+employeeId?: string;
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => InvoiceLineInput)
@@ -191,6 +193,9 @@ bankAccountId?: string | null;
   @IsInt()
   @Min(0)
   odometer?: number;
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
 
   @IsOptional()
   @IsDateString()

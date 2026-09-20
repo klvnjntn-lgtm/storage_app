@@ -440,34 +440,34 @@ function changeServiceUnit(key: string, value: string) {
 
   return (
     <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-4 sm:px-6 py-4 sm:py-5 border-b-2 border-gray-300">
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-3 sm:px-6 py-3 sm:py-5 border-b-2 border-gray-300">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push(`/sales/invoices/${params.id}`)}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-gray-100 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-gray-100 rounded-md"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to invoice
           </button>
-          <h1 className="text-xl sm:text-2xl font-bold">
+          <h1 className="text-xl sm:text-2xl font-bold truncate">
             Edit {invoiceNumber ?? 'Invoice'}
           </h1>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 truncate">
             {customerName ?? 'No customer'}
             {vehicleLabel ? ` · ${vehicleLabel}` : ''}
           </p>
         </div>
       </div>
 
-      {loading && <p className="text-sm text-gray-500 p-6 max-w-5xl mx-auto">Loading...</p>}
+      {loading && <p className="text-sm text-gray-500 p-4 sm:p-6 max-w-5xl mx-auto">Loading...</p>}
       {loadError && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 m-6 max-w-5xl mx-auto">
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 m-4 sm:m-6 max-w-5xl mx-auto">
           {loadError}
         </p>
       )}
 
       {!loading && !loadError && (
-        <div className="max-w-5xl mx-auto p-4 sm:p-6 grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
+        <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 md:grid-cols-[1fr_360px] gap-4 sm:gap-6">
           <ProductSearch
             query={query}
             setQuery={setQuery}
@@ -480,7 +480,7 @@ function changeServiceUnit(key: string, value: string) {
             posModeEnabled={posPricingEnabled}
           />
 
-          <div className="border-2 border-gray-300 rounded-md p-4 h-fit">
+          <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 h-fit">
             <div className="mb-3">
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
                 <CalendarClock size={12} strokeWidth={2} />
@@ -523,10 +523,14 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                 const floor = line.fulfilledQuantity ?? 0;
                 return (
                   <div key={line.key} className="flex flex-col gap-2 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
+                    {/* Wraps on very narrow screens instead of squeezing
+                        the price/qty-summary text against the stepper
+                        controls — name + price/summary can now drop to
+                        their own line above the steppers if needed. */}
+                    <div className="flex items-start justify-between gap-2 flex-wrap sm:flex-nowrap">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm truncate">{line.product.name}</p>
-                        <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           {editing ? (
                             <div className="flex items-center gap-1 bg-white border-2 border-black rounded-md pl-2 pr-1 py-1">
                               <span className="text-xs text-gray-400">Rp</span>
@@ -567,7 +571,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         <button
                           onClick={() => changeQty(line.key, -1)}
                           disabled={line.quantity <= floor}
-                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
+                          className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
                         >
                           <Minus size={14} strokeWidth={2} />
                         </button>
@@ -575,13 +579,13 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         <button
                           onClick={() => changeQty(line.key, 1)}
                           disabled={!posPricingEnabled && line.quantity >= available}
-                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
+                          className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
                         >
                           <Plus size={14} strokeWidth={2} />
                         </button>
                         <button
                           onClick={() => removeFromCart(line.key)}
-                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
+                          className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
                         >
                           <Trash2 size={14} strokeWidth={2} />
                         </button>
@@ -624,30 +628,32 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                             onChange={(e) => changeServiceDescription(s.key, e.target.value)}
                             rows={2}
                             placeholder="What service was done?"
-                            className="flex-1 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
+                            className="flex-1 min-w-0 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
                           />
-                          <button onClick={() => removeService(s.key)} className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0">
+                          <button onClick={() => removeService(s.key)} className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0">
                             <X size={14} strokeWidth={2} />
                           </button>
                         </div>
-                        <div className={`flex items-center gap-1 border-2 rounded-md pl-2 pr-1 py-1 w-fit ${priceMissing ? 'border-red-300' : 'border-gray-300'}`}>
-                          <span className="text-xs text-gray-400">Rp</span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className={`flex items-center gap-1 border-2 rounded-md pl-2 pr-1 py-1 w-fit ${priceMissing ? 'border-red-300' : 'border-gray-300'}`}>
+                            <span className="text-xs text-gray-400">Rp</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={s.unitPrice ?? ''}
+                              onChange={(e) => changeServicePrice(s.key, e.target.value)}
+                              placeholder="0"
+                              className="w-24 text-xs outline-none"
+                            />
+                          </div>
                           <input
-                            type="number"
-                            min={0}
-                            value={s.unitPrice ?? ''}
-                            onChange={(e) => changeServicePrice(s.key, e.target.value)}
-                            placeholder="0"
-                            className="w-24 text-xs outline-none"
+                            type="text"
+                            value={s.unit ?? ''}
+                            onChange={(e) => changeServiceUnit(s.key, e.target.value)}
+                            placeholder="Unit (optional)"
+                            className="w-28 border-2 border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:border-black"
                           />
                         </div>
-                        <input
-  type="text"
-  value={s.unit ?? ''}
-  onChange={(e) => changeServiceUnit(s.key, e.target.value)}
-  placeholder="Unit (optional)"
-  className="w-28 border-2 border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:border-black mt-2"
-/>
                         {taxRates.length > 0 && (
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             <Percent size={10} strokeWidth={2} className="text-gray-400" />

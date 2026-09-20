@@ -18,6 +18,7 @@ import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AdminKeyGuard } from './guards/admin-key.guard';
 import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.decorator';
+import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -73,4 +74,27 @@ export class AuthController {
   setSeatLimit(@Param('orgId') orgId: string, @Body() dto: SetSeatLimitDto) {
     return this.authService.setSeatLimit(orgId, dto.seatLimit);
   }
+
+  @Post('forgot-password')
+forgotPassword(@Body('email') email: string) {
+  return this.authService.forgotPassword(email);
+}
+
+@Post('reset-password')
+resetPassword(
+  @Body('token') token: string,
+  @Body('newPassword') newPassword: string,
+) {
+  return this.authService.resetPassword(token, newPassword);
+}
+
+@UseGuards(AuthGuard('jwt'))
+@Post('change-password')
+changePassword(
+  @CurrentUser() user: { sub: string },
+  @Body('currentPassword') currentPassword: string,
+  @Body('newPassword') newPassword: string,
+) {
+  return this.authService.changePassword(user.sub, currentPassword, newPassword);
+}
 }

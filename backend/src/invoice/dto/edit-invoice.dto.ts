@@ -85,6 +85,9 @@ export class EditIssuedInvoiceDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string;
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
 
   @IsString()
   @IsNotEmpty()

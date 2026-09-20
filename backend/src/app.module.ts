@@ -35,7 +35,10 @@ import { PurchaseOrderModule } from './purchase-order/purchase-order.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { BankAccountModule } from './bank-accounts/bank-account.module';
 import { SalesSearchModule } from './sales-quotation/sales-search.module';
-
+import { AccountingModule } from './accounting/accounting.module';
+import { SupplierPaymentsModule } from './accounting/supplier-payments.module';
+import { ExpensesModule } from './accounting/expenses.module';
+import { PayrollModule } from './accounting/payroll.module';
 @Module({
   imports: [
     PrismaModule,
@@ -55,6 +58,10 @@ import { SalesSearchModule } from './sales-quotation/sales-search.module';
     DeliveryOrderModule,
     PurchaseOrderModule,
     GdbImportModule,
+    AccountingModule,
+    SupplierPaymentsModule,
+    ExpensesModule,
+    PayrollModule,
     SessionsModule,
     LicenseModule,
     OrganizationModule,

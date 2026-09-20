@@ -195,11 +195,11 @@ export default function SalesHome() {
       }}
     >
       {/* Header — same outlined/blurred treatment as Workshop */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
@@ -219,7 +219,7 @@ export default function SalesHome() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto w-full px-6 pt-8 pb-16">
+      <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-6 sm:pt-8 pb-16">
         {/* Cross-document search — quotation/order/invoice/DO number, or
             customer name, in one box. Picking a row from the dropdown
             opens that document directly. Enter with nothing highlighted
@@ -235,7 +235,7 @@ export default function SalesHome() {
               onKeyDown={handleKeyDown}
               onFocus={() => results.length > 0 && setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
-              placeholder="Search invoice #, order #, quotation #, DO #, or customer..."
+              placeholder="Search invoice #, order #, quotation #, DO #..."
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {searching ? (
@@ -252,7 +252,7 @@ export default function SalesHome() {
           </div>
 
           {dropdownOpen && results.length > 0 && (
-            <div className="absolute left-0 right-0 mt-1.5 border border-blue-500/15 rounded-xl bg-white shadow-lg shadow-blue-900/5 overflow-hidden z-20">
+            <div className="absolute left-0 right-0 mt-1.5 border border-blue-500/15 rounded-xl bg-white shadow-lg shadow-blue-900/5 overflow-hidden z-20 max-h-[70vh] overflow-y-auto">
               {results.map((r, idx) => {
                 const meta = TYPE_META[r.type];
                 const Icon = meta.icon;
@@ -300,7 +300,7 @@ export default function SalesHome() {
             <button
               key={href}
               onClick={() => router.push(href)}
-              className={`group relative text-left rounded-xl p-6 bg-gradient-to-br ${gradient} text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between`}
+              className={`group relative text-left rounded-xl p-5 sm:p-6 bg-gradient-to-br ${gradient} text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[130px] sm:min-h-[150px] flex flex-col justify-between`}
             >
               <div className="flex items-start justify-between">
                 <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
@@ -313,7 +313,7 @@ export default function SalesHome() {
                 />
               </div>
               <div>
-                <p className={`${display.className} text-xl font-bold leading-tight`}>{title}</p>
+                <p className={`${display.className} text-lg sm:text-xl font-bold leading-tight`}>{title}</p>
                 <p className="text-sm text-white/85 mt-0.5">{description}</p>
               </div>
             </button>

@@ -11,6 +11,7 @@ import { SharedDocumentsModule } from 'src/shared/documents/shared-documents.mod
 import { SalesQuotationModule } from 'src/sales-quotation/sales-quotation.module';
 import { PrintModule } from 'src/common/print/print.module';
 import { BankAccountResolverService } from 'src/bank-accounts/bank-account-resolver.service';
+import { AccountingModule } from 'src/accounting/accounting.module';
 
 @Module({
   imports: [
@@ -18,8 +19,8 @@ import { BankAccountResolverService } from 'src/bank-accounts/bank-account-resol
     PrismaModule,
     GuardsModule,
     SalesQuotationModule,
+    AccountingModule,
     SharedDocumentsModule,
-    InvoiceModule,
     OrganizationModulesModule,
     SessionsModule,
     PrintModule,

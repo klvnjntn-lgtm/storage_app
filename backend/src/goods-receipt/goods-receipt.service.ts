@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
+import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { PurchaseOrderStatus, EventType } from '@prisma/client';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
 
@@ -13,6 +14,7 @@ export class GoodsReceiptService {
     private stockService: StockService,
     private tenantOwnership: TenantOwnershipService,
     private numbering: DocumentNumberingService,
+    private postingRules: PostingRulesService, // NEW
   ) {}
 
   async getReceivingSummary(organizationId: string, purchaseOrderId: string) {
@@ -51,43 +53,27 @@ export class GoodsReceiptService {
 
     const poItemsById = new Map(po.items.map((i) => [i.id, i]));
 
-    // Fast, non-transactional pre-check — fails fast for the common
-    // non-concurrent case so a bad request doesn't even open a
-    // transaction. This alone is NOT sufficient under concurrency; see
-    // the re-check inside the transaction below.
     const receivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId);
     for (const line of dto.items) {
       const poItem = poItemsById.get(line.purchaseOrderItemId);
       if (!poItem) {
-        throw new NotFoundException(
-          `Purchase order item ${line.purchaseOrderItemId} not found on this PO`,
-        );
+        throw new NotFoundException(`Purchase order item ${line.purchaseOrderItemId} not found on this PO`);
       }
       const alreadyReceived = receivedByItem.get(poItem.id) ?? 0;
       const remaining = Number(poItem.quantity) - alreadyReceived;
       if (line.quantity > remaining) {
-        throw new BadRequestException(
-          `Cannot receive ${line.quantity} — only ${remaining} remaining for this item`,
-        );
+        throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
       }
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // NEW — re-validate against a fresh, transaction-scoped read.
-      // Two concurrent receive() calls could both pass the outer
-      // pre-check above using the same stale receivedByItem snapshot;
-      // this closes that race by re-reading and re-checking inside the
-      // same transaction that will commit the new receipt, so the check
-      // and the write are atomic with respect to each other.
       const freshReceivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId, tx);
       for (const line of dto.items) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
         const alreadyReceived = freshReceivedByItem.get(poItem.id) ?? 0;
         const remaining = Number(poItem.quantity) - alreadyReceived;
         if (line.quantity > remaining) {
-          throw new BadRequestException(
-            `Cannot receive ${line.quantity} — only ${remaining} remaining for this item`,
-          );
+          throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
         }
       }
 
@@ -118,7 +104,7 @@ export class GoodsReceiptService {
 
       for (const line of dto.items) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
-if (!poItem.productId) continue;
+        if (!poItem.productId) continue;
         await this.stockService.increase(
           organizationId,
           poItem.productId,
@@ -148,6 +134,11 @@ if (!poItem.productId) continue;
         data: { status: newStatus },
       });
 
+      // NEW — Inventory (+ Input VAT) debit, AP credit, same transaction as
+      // the receipt. If posting throws, the receipt, stock increase, and
+      // status change all roll back together.
+      await this.postingRules.postGoodsReceipt(organizationId, receipt.id, tx);
+
       return { ...receipt, purchaseOrderStatus: newStatus };
     });
   }
@@ -161,22 +152,6 @@ if (!poItem.productId) continue;
     });
   }
 
-  // ---- helpers ------------------------------------------------
-
-  // Combines two sources of "received" quantity for a PO item:
-  //  1. Real GoodsReceiptItem rows — actual receiving events with a real
-  //     location, user, and timestamp.
-  //  2. PurchaseOrderItem.importedReceivedQuantity — a purely historical
-  //     figure carried over from an external system's QTYRECV at import
-  //     time, with NO real GoodsReceipt behind it. This is intentional:
-  //     the importer does not fabricate GoodsReceipt rows (no real
-  //     location/user/date exists for that historical receiving), so this
-  //     is the only place that number is folded back into "how much of
-  //     this PO item is effectively already received" for status and
-  //     remaining-quantity purposes. Every caller of this method
-  //     (getReceivingSummary, receive()'s pre-check and its
-  //     transaction-scoped re-check) goes through here, so they all stay
-  //     consistent automatically.
   private async receivedQuantitiesByPoItem(
     purchaseOrderId: string,
     tx: any = this.prisma,
@@ -225,9 +200,7 @@ if (!poItem.productId) continue;
       ...(allowFullyReceived ? [PurchaseOrderStatus.FULLY_RECEIVED] : []),
     ];
     if (!receivableStatuses.includes(po.status)) {
-      throw new BadRequestException(
-        `Cannot receive goods against a purchase order in ${po.status} status`,
-      );
+      throw new BadRequestException(`Cannot receive goods against a purchase order in ${po.status} status`);
     }
     return po;
   }

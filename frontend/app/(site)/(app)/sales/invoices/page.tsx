@@ -273,17 +273,17 @@ export default function InvoicesPage() {
       }}
     >
       {/* Header — matches Vehicle History Lookup's blue-outline + backdrop-blur treatment */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/sales')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 transition-colors -ml-1 py-1 px-1 active:bg-blue-50 rounded-md"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 transition-colors -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back
           </button>
 
-          <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
                 <Receipt size={18} strokeWidth={2} className="text-blue-700" />
@@ -296,10 +296,13 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            {/* Actions stack full-width below the title on mobile so long
+                labels never overflow or get clipped on narrow phones;
+                side-by-side, auto-width from sm up. */}
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <button
                 onClick={() => router.push('/sales/statement/new')}
-                className="flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
+                className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors w-full sm:w-auto"
               >
                 <FileText size={16} strokeWidth={2} />
                 Generate Statement
@@ -307,7 +310,7 @@ export default function InvoicesPage() {
 
               <button
                 onClick={() => router.push(`/sales/invoices/new?new=${Date.now()}`)}
-                className="flex items-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 active:bg-blue-800 shadow-sm transition-colors"
+                className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 active:bg-blue-800 shadow-sm transition-colors w-full sm:w-auto"
               >
                 <Plus size={16} strokeWidth={2} />
                 New Invoice
@@ -317,7 +320,7 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6">
         {/* Filters — grouped into one bordered bar with labeled sections
             instead of three stacked, independently-scrolling pill rows.
             Each group gets a small caption so it reads as "Date / Status /
@@ -326,19 +329,19 @@ export default function InvoicesPage() {
           {/* Search — invoice number or customer name. Its own row since
               it's the most-reached-for filter and free text doesn't pair
               well visually with the pill groups below it. */}
-          <div className="group relative flex items-center gap-2 mb-3 rounded-lg border border-blue-500/20 bg-white px-3 py-2 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+          <div className="group relative flex items-center gap-2 mb-3 rounded-lg border border-blue-500/20 bg-white px-3 py-2.5 sm:py-2 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={15} strokeWidth={2} className="text-blue-600/60 shrink-0" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by invoice number or customer name"
+              placeholder="Search invoice # or customer"
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="text-gray-400 hover:text-blue-700 p-0.5 shrink-0"
+                className="text-gray-400 hover:text-blue-700 p-1 shrink-0"
                 aria-label="Clear search"
               >
                 <X size={14} strokeWidth={2.5} />
@@ -346,7 +349,9 @@ export default function InvoicesPage() {
             )}
           </div>
 
-          <div className="grid sm:grid-cols-[auto_1fr_1fr] gap-x-6 gap-y-3">
+          {/* Filter groups stack full-width on mobile (single column),
+              then move into a 3-column row from sm up. */}
+          <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr] gap-x-6 gap-y-3">
             {/* Date range */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
@@ -357,7 +362,7 @@ export default function InvoicesPage() {
 
                 {/* Only relevant once a range is actually applied. */}
                 {hasDateRange && (
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {(
                       [
                         { value: 'issued' as const, label: 'Issued' },
@@ -386,12 +391,15 @@ export default function InvoicesPage() {
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
                 Status
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              {/* Horizontal scroll on narrow screens instead of wrapping —
+                  keeps each pill a comfortable tap target without the row
+                  height jumping around. */}
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-0.5 px-0.5 sm:flex-wrap sm:overflow-visible">
                 {STATUS_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setStatusFilter(opt.value)}
-                    className={`text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap transition-colors ${
+                    className={`text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap shrink-0 transition-colors ${
                       statusFilter === opt.value
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
@@ -408,12 +416,12 @@ export default function InvoicesPage() {
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
                 Payment
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-0.5 px-0.5 sm:flex-wrap sm:overflow-visible">
                 {PAYMENT_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setPaymentFilter(opt.value)}
-                    className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap transition-colors ${
+                    className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap shrink-0 transition-colors ${
                       paymentFilter === opt.value
                         ? opt.value === 'OVERDUE'
                           ? 'bg-red-600 text-white border-red-600'
@@ -433,18 +441,19 @@ export default function InvoicesPage() {
           </div>
 
           {/* Contextual note + clear-all, only shown when relevant so the
-              bar stays quiet by default. */}
+              bar stays quiet by default. Wraps to its own line on mobile
+              instead of squeezing against the clear-filters button. */}
           {(hasDateRange && dateField === 'invoice') || activeFilterCount > 0 ? (
-            <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-blue-500/10">
-              <p className="text-xs text-gray-400">
-                {hasDateRange && dateField === 'invoice'
-                  ? 'Showing invoices by the date printed on the document — this can differ from when an invoice was actually issued if it was backdated.'
-                  : ''}
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-blue-500/10">
+              {hasDateRange && dateField === 'invoice' && (
+                <p className="text-xs text-gray-400">
+                  Showing invoices by the date printed on the document — this can differ from when an invoice was actually issued if it was backdated.
+                </p>
+              )}
               {activeFilterCount > 0 && (
                 <button
                   onClick={clearFilters}
-                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors"
+                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors py-1"
                 >
                   <X size={12} strokeWidth={2.5} />
                   Clear filters
@@ -522,11 +531,13 @@ export default function InvoicesPage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                  {/* Amount + actions wrap onto their own line rather than
+                      overflowing when both are present on a narrow screen. */}
+                  <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 shrink-0">
                     <span className="font-semibold">{formatIDR(Number(inv.total))}</span>
 
                     {inv.status === 'DRAFT' && (
-                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => router.push(`/sales/invoices/new?draftId=${inv.id}`)}
                           className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 active:bg-blue-100 transition-colors"

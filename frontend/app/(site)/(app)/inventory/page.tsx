@@ -90,11 +90,11 @@ export default function InventoryHome() {
         backgroundSize: '24px 24px',
       }}
     >
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <button
             onClick={() => router.push('/')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
             Back to dashboard
@@ -116,14 +116,14 @@ export default function InventoryHome() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto w-full px-6 pt-8 pb-16">
+      <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-6 sm:pt-8 pb-16">
         {/* Wait for the modules fetch before deciding what to show, so we
             don't briefly flash the locked state before enabledModules
             resolves. */}
         {!modulesLoaded ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : !warehouseEnabled ? (
-          <div className="flex flex-col items-center justify-center text-center rounded-xl border border-dashed border-blue-500/25 bg-blue-600/5 py-16 px-6">
+          <div className="flex flex-col items-center justify-center text-center rounded-xl border border-dashed border-blue-500/25 bg-blue-600/5 py-12 sm:py-16 px-4 sm:px-6">
             <span className="rounded-lg bg-blue-600/10 border border-blue-600/20 p-3 mb-4">
               <Lock size={22} strokeWidth={2} className="text-blue-700/60" />
             </span>
@@ -141,7 +141,7 @@ export default function InventoryHome() {
               <button
                 key={href}
                 onClick={() => router.push(href)}
-                className={`group relative text-left rounded-lg p-6 bg-gradient-to-br ${gradient} text-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between`}
+                className={`group relative text-left rounded-lg p-5 sm:p-6 bg-gradient-to-br ${gradient} text-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[130px] sm:min-h-[150px] flex flex-col justify-between`}
               >
                 <div className="flex items-start justify-between">
                   <span className="shrink-0 rounded-lg bg-white/15 p-2.5">
@@ -154,7 +154,7 @@ export default function InventoryHome() {
                   />
                 </div>
                 <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{title}</p>
+                  <p className={`${display.className} text-lg sm:text-xl font-bold leading-tight`}>{title}</p>
                   <p className="text-sm text-white/85 mt-0.5">{description}</p>
                 </div>
               </button>

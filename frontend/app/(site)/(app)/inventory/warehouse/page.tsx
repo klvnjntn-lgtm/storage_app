@@ -162,7 +162,7 @@ export default function Warehouse() {
       body: JSON.stringify({ type: mode }),
     });
     const session = await res.json();
-    router.push(`/sessions/${session.id}`);
+    router.push(`/inventory/sessions/${session.id}`);
   };
 
   useEffect(() => {
@@ -193,12 +193,20 @@ export default function Warehouse() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-white text-black">
+    <main
+      className="min-h-screen text-black"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
       {/* TOP BAR — logo + account only, no nav links */}
-      <div className="border-b-2 border-gray-300">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shrink-0 shadow-sm">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center shrink-0 shadow-sm">
               <Boxes size={18} strokeWidth={2} className="text-white" />
             </div>
             <div className="min-w-0">
@@ -209,9 +217,9 @@ export default function Warehouse() {
 
           <button
             onClick={() => setShowProfile(true)}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-gray-300 hover:bg-gray-100 hover:border-gray-400 font-medium transition-colors shrink-0"
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/35 font-medium transition-colors shrink-0"
           >
-            <User size={16} strokeWidth={2} />
+            <User size={16} strokeWidth={2} className="text-blue-700" />
             <span className="hidden xs:inline">Account</span>
           </button>
         </div>
@@ -227,7 +235,7 @@ export default function Warehouse() {
               <span className="text-[15px] font-medium">Account</span>
               <button
                 onClick={() => setShowProfile(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-gray-400 hover:text-blue-700 transition-colors"
                 aria-label="Close"
               >
                 <X size={18} />
@@ -289,22 +297,18 @@ export default function Warehouse() {
       <div className="max-w-5xl mx-auto w-full px-4 sm:px-5 flex flex-col items-center text-center">
         {/* SEARCH BAR */}
         <div className="pt-8 w-full">
-          <div className="relative">
-            <Search
-              size={18}
-              strokeWidth={2}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-            />
+          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+            <Search size={18} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search SKU, product, rack, brand..."
-              className="w-full pl-10 pr-4 py-3 rounded-md border border-gray-300 focus:outline-none focus:border-black focus:shadow-[0_0_0_3px_rgba(0,0,0,0.06)] text-base transition-shadow text-left"
+              className="flex-1 min-w-0 text-base outline-none placeholder:text-gray-400 bg-transparent text-left"
             />
           </div>
 
           {query && (
-            <div className="mt-2 bg-white border border-gray-300 rounded-md overflow-hidden shadow-md text-left">
+            <div className="mt-2 bg-white border border-blue-500/20 rounded-md overflow-hidden shadow-md text-left">
               {loading && <div className="p-3 text-sm text-gray-500">Searching...</div>}
 
               {!loading && data && (
@@ -315,8 +319,8 @@ export default function Warehouse() {
                       {data.products.map((p: any) => (
                         <div
                           key={p.id}
-                          className="p-2 hover:bg-gray-100 rounded cursor-pointer"
-                          onClick={() => router.push(`/inventory/products/${p.id}`)}
+                          className="p-2 hover:bg-blue-50 rounded cursor-pointer"
+                          onClick={() => router.push(`/inventory/stock/${p.id}`)}
                         >
                           <p className="font-medium">{p.name}</p>
                           <p className="text-xs text-gray-500">{p.sku}</p>
@@ -331,7 +335,7 @@ export default function Warehouse() {
                       {data.stocks.map((s: any) => (
                         <div
                           key={s.id}
-                          className="p-2 hover:bg-gray-100 rounded cursor-pointer"
+                          className="p-2 hover:bg-blue-50 rounded cursor-pointer"
                           onClick={() => router.push(`/products/${s.productId}`)}
                         >
                           <p>{s.product?.name}</p>
@@ -347,7 +351,7 @@ export default function Warehouse() {
                       {data.locations.map((l: any) => (
                         <div
                           key={l.id}
-                          className="p-2 hover:bg-gray-100 rounded cursor-pointer"
+                          className="p-2 hover:bg-blue-50 rounded cursor-pointer"
                           onClick={() => router.push(`/locations/${l.id}`)}
                         >
                           {l.name}
@@ -362,9 +366,9 @@ export default function Warehouse() {
                       {data.events.map((e: any) => (
                         <div
                           key={e.id}
-                          className="p-2 text-xs text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+                          className="p-2 text-xs text-gray-700 hover:bg-blue-50 rounded cursor-pointer"
                           onClick={() =>
-                            router.push(e.sessionId ? `/sessions/${e.sessionId}` : `/products/${e.productId}`)
+                            router.push(e.sessionId ? `/inventory/sessions/${e.sessionId}` : `/inventory/stock/${e.productId}`)
                           }
                         >
                           {e.type} • {e.product?.name}
@@ -417,8 +421,8 @@ export default function Warehouse() {
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Sessions</h2>
             <button
-              onClick={() => router.push('/sessions')}
-              className="text-xs text-gray-500 hover:text-black font-semibold"
+              onClick={() => router.push('/inventory/sessions')}
+              className="text-xs text-gray-500 hover:text-blue-700 font-semibold transition-colors"
             >
               View All →
             </button>
@@ -428,8 +432,8 @@ export default function Warehouse() {
             {sessions.slice(0, 5).map((s) => (
               <div
                 key={s.id}
-                onClick={() => router.push(`/sessions/${s.id}`)}
-                className="bg-white border border-gray-300 rounded-md p-3 cursor-pointer hover:border-gray-400 hover:shadow-sm transition-all flex items-center justify-between gap-2"
+                onClick={() => router.push(`/inventory/sessions/${s.id}`)}
+                className="bg-white border border-gray-300 rounded-md p-3 cursor-pointer hover:border-blue-500/40 hover:shadow-sm transition-all flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <span className="font-semibold">{s.type}</span>
@@ -483,7 +487,7 @@ export default function Warehouse() {
       </div>
 
       {/* FOOTER */}
-      <div className="px-4 sm:px-6 py-4 text-center text-xs text-gray-500 border-t-2 border-gray-300">
+      <div className="px-4 sm:px-6 py-4 text-center text-xs text-gray-500 border-t border-blue-500/15">
         Tap a mode → scan items instantly
       </div>
     </main>
