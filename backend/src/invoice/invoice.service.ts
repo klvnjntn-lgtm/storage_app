@@ -34,7 +34,7 @@ const MM_TO_PX = 96 / 25.4;
 const PDF_VIEWPORT_PX: Record<string, { width: number; height: number }> = {
   THERMAL_58: { width: Math.round(58 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
   RECEIPT: { width: Math.round(80 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
-  A5: { width: Math.round(210 * MM_TO_PX), height: Math.round(148 * MM_TO_PX) },
+  A5: { width: Math.round(210 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
   A4: { width: Math.round(210 * MM_TO_PX), height: Math.round(297 * MM_TO_PX) },
 };
 
