@@ -3,55 +3,43 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  LayoutDashboard,
-  Tag,
-  ClipboardList,
-  Warehouse,
-  Package,
-  ArrowUpRight,
-  ArrowLeft,
-  Inbox,
-  Lock,
-} from 'lucide-react';
+import { LayoutDashboard, Tag, ClipboardList, Warehouse, Package, ArrowUpRight, Inbox, Lock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // Brighter, more saturated stops (400 -> 600) than the old 500 -> 700 —
 // same hues, punchier and less muddy against the white cards.
-const INVENTORY_ITEMS = [
+const INVENTORY_ITEM_DEFS = [
   {
-    title: 'Stock',
-    description: 'View and manage current stock levels',
+    key: 'stock' as const,
     href: '/inventory/stock',
     icon: LayoutDashboard,
     gradient: 'from-emerald-400 to-teal-600',
   },
   {
-    title: 'Products',
-    description: 'Manage your product catalog',
-    href: '/inventory/products',
+    key: 'products' as const,
+    // FIX — was '/inventory/products', which doesn't exist. Product
+    // management actually lives under Admin.
+    href: '/admin/products',
     icon: Package,
     gradient: 'from-rose-400 to-red-600',
   },
   {
-    title: 'Sessions',
-    description: 'Scan, receive, and move stock',
+    key: 'sessions' as const,
     href: '/inventory/sessions',
     icon: ClipboardList,
     gradient: 'from-sky-400 to-blue-600',
   },
   {
-    title: 'Warehouse',
-    description: 'Manage warehouse locations and layout',
+    key: 'warehouse' as const,
     href: '/inventory/warehouse',
     icon: Warehouse,
     gradient: 'from-violet-400 to-purple-600',
   },
   {
-    title: 'Labels',
-    description: 'Print and manage product labels',
+    key: 'labels' as const,
     href: '/inventory/labels',
     icon: Tag,
     gradient: 'from-amber-400 to-orange-600',
@@ -60,6 +48,13 @@ const INVENTORY_ITEMS = [
 
 export default function InventoryHome() {
   const router = useRouter();
+  const { t } = useLanguage();
+
+  const INVENTORY_ITEMS = INVENTORY_ITEM_DEFS.map((item) => ({
+    ...item,
+    title: t(`inventory.home.items.${item.key}.title`),
+    description: t(`inventory.home.items.${item.key}.description`),
+  }));
   const [enabledModules, setEnabledModules] = useState<string[]>([]);
   const [modulesLoaded, setModulesLoaded] = useState(false);
 
@@ -92,24 +87,16 @@ export default function InventoryHome() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to dashboard
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Inbox size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Inventory
+                {t('inventory.home.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Stock, products, sessions, warehouse, and labels
+                {t('inventory.home.subtitle')}
               </p>
             </div>
           </div>
@@ -121,18 +108,17 @@ export default function InventoryHome() {
             don't briefly flash the locked state before enabledModules
             resolves. */}
         {!modulesLoaded ? (
-          <p className="text-sm text-gray-400">Loading...</p>
+          <p className="text-sm text-gray-400">{t('common.loading')}</p>
         ) : !warehouseEnabled ? (
           <div className="flex flex-col items-center justify-center text-center rounded-xl border border-dashed border-blue-500/25 bg-blue-600/5 py-12 sm:py-16 px-4 sm:px-6">
             <span className="rounded-lg bg-blue-600/10 border border-blue-600/20 p-3 mb-4">
               <Lock size={22} strokeWidth={2} className="text-blue-700/60" />
             </span>
             <p className={`${display.className} text-lg font-bold text-gray-600`}>
-              Inventory isn't enabled
+              {t('inventory.home.notEnabledTitle')}
             </p>
             <p className="text-sm text-gray-400 mt-1 max-w-sm">
-              Ask your admin to turn on the Warehouse Operations module to access
-              stock, products, sessions, warehouse, and labels.
+              {t('inventory.home.notEnabledDesc')}
             </p>
           </div>
         ) : (

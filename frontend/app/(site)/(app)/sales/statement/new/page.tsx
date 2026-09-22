@@ -3,10 +3,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Search, Car, Calendar, X, Check } from 'lucide-react';
+import { FileText, Search, Car, Calendar, X, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { useHasModule } from '@/lib/useHasModule';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
+import { toCalendarDateString } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 // Entry point for building a statement: pick a customer, optionally
 // scope to one or more of their vehicles (WORKSHOP_RMS orgs only), pick
@@ -26,8 +28,10 @@ type CustomerSearchResult = {
   phone: string | null;
 };
 
+// FIX — was d.toISOString().slice(0, 10), which converts to UTC first
+// and rolls the date back one day in a timezone ahead of UTC.
 function toDateInput(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return toCalendarDateString(d);
 }
 
 function defaultFrom(): string {
@@ -37,14 +41,15 @@ function defaultFrom(): string {
 }
 
 const PRESETS = [
-  { label: 'This month', from: () => { const d = new Date(); d.setDate(1); return d; } },
-  { label: 'Last month', from: () => { const d = new Date(); d.setMonth(d.getMonth() - 1, 1); return d; }, to: () => { const d = new Date(); d.setDate(0); return d; } },
-  { label: 'Last 3 months', from: () => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d; } },
-  { label: 'This year', from: () => { const d = new Date(); d.setMonth(0, 1); return d; } },
+  { labelKey: 'sales.statementNew.presetThisMonth', from: () => { const d = new Date(); d.setDate(1); return d; } },
+  { labelKey: 'sales.statementNew.presetLastMonth', from: () => { const d = new Date(); d.setMonth(d.getMonth() - 1, 1); return d; }, to: () => { const d = new Date(); d.setDate(0); return d; } },
+  { labelKey: 'sales.statementNew.presetLast3Months', from: () => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d; } },
+  { labelKey: 'sales.statementNew.presetThisYear', from: () => { const d = new Date(); d.setMonth(0, 1); return d; } },
 ];
 
 export default function NewStatementPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
 
   // Customer search
@@ -158,19 +163,11 @@ const params = new URLSearchParams({ q: query.trim() });
     <main className="min-h-screen bg-white text-black">
       <div className="px-6 py-5 border-b-2 border-gray-300">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.back()}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex items-center gap-2">
             <FileText size={22} strokeWidth={2} className="text-gray-700" />
             <div>
-              <h1 className="text-2xl font-bold">Generate Statement</h1>
-              <p className="text-xs text-gray-500">Choose a customer, optionally one or more vehicles, and a date range.</p>
+              <h1 className="text-2xl font-bold">{t('sales.statementNew.title')}</h1>
+              <p className="text-xs text-gray-500">{t('sales.statementNew.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -179,7 +176,7 @@ const params = new URLSearchParams({ q: query.trim() });
       <div className="max-w-5xl mx-auto p-6">
         {/* Customer search */}
         <div className="mb-5">
-          <label className="text-xs font-semibold text-gray-600 mb-1 block">Customer</label>
+          <label className="text-xs font-semibold text-gray-600 mb-1 block">{t('sales.statementNew.customer')}</label>
 
           {selectedCustomer ? (
             <div className="flex items-center justify-between border-2 border-black rounded-md p-3">
@@ -207,7 +204,7 @@ const params = new URLSearchParams({ q: query.trim() });
                     setShowResults(true);
                   }}
                   onFocus={() => setShowResults(true)}
-                  placeholder="Search customer by name, company, or phone"
+                  placeholder={t('sales.statementNew.customerSearchPlaceholder')}
                   className="flex-1 text-sm outline-none"
                   autoFocus
                 />
@@ -215,9 +212,9 @@ const params = new URLSearchParams({ q: query.trim() });
 
               {showResults && query.trim() && (
                 <div className="absolute z-10 top-full left-0 right-0 mt-1 border-2 border-gray-300 rounded-md bg-white shadow-lg max-h-64 overflow-y-auto">
-                  {searching && <p className="text-sm text-gray-500 p-3">Searching...</p>}
+                  {searching && <p className="text-sm text-gray-500 p-3">{t('sales.statementNew.searching')}</p>}
                   {!searching && results.length === 0 && (
-                    <p className="text-sm text-gray-400 p-3">No customers found.</p>
+                    <p className="text-sm text-gray-400 p-3">{t('sales.statementNew.noCustomersFound')}</p>
                   )}
                   {!searching &&
                     results.map((c) => (
@@ -245,24 +242,24 @@ const params = new URLSearchParams({ q: query.trim() });
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
                 <Car size={12} strokeWidth={2} />
-                Vehicles
+                {t('sales.statementNew.vehicles')}
               </label>
               {selectedVehicleIds.length > 0 && (
                 <button
                   onClick={() => setSelectedVehicleIds([])}
                   className="text-xs text-gray-500 hover:text-black"
                 >
-                  Clear ({selectedVehicleIds.length})
+                  {t('sales.statementNew.clearCount', { n: selectedVehicleIds.length })}
                 </button>
               )}
             </div>
             <p className="text-xs text-gray-400 mb-2">
-              Leave all unchecked to include invoices for every vehicle (and any without one).
+              {t('sales.statementNew.vehiclesHint')}
             </p>
 
-            {vehiclesLoading && <p className="text-sm text-gray-500">Loading vehicles...</p>}
+            {vehiclesLoading && <p className="text-sm text-gray-500">{t('sales.statementNew.loadingVehicles')}</p>}
             {!vehiclesLoading && vehicles.length === 0 && (
-              <p className="text-sm text-gray-400">No vehicles on file for this customer.</p>
+              <p className="text-sm text-gray-400">{t('sales.statementNew.noVehicles')}</p>
             )}
             {!vehiclesLoading && vehicles.length > 0 && (
               <div className="flex flex-col gap-1.5">
@@ -294,24 +291,24 @@ const params = new URLSearchParams({ q: query.trim() });
         <div className="mb-6">
           <label className="text-xs font-semibold text-gray-600 mb-1 flex items-center gap-1">
             <Calendar size={12} strokeWidth={2} />
-            Date range
+            {t('sales.statementNew.dateRange')}
           </label>
 
           <div className="flex flex-wrap gap-1.5 mb-2">
             {PRESETS.map((preset) => (
               <button
-                key={preset.label}
+                key={preset.labelKey}
                 onClick={() => applyPreset(preset)}
                 className="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
               >
-                {preset.label}
+                {t(preset.labelKey)}
               </button>
             ))}
           </div>
 
           <div className="flex gap-2">
             <div className="flex flex-col gap-1 flex-1">
-              <label className="text-xs text-gray-500">From</label>
+              <label className="text-xs text-gray-500">{t('sales.statementNew.from')}</label>
               <input
                 type="date"
                 value={from}
@@ -320,7 +317,7 @@ const params = new URLSearchParams({ q: query.trim() });
               />
             </div>
             <div className="flex flex-col gap-1 flex-1">
-              <label className="text-xs text-gray-500">To</label>
+              <label className="text-xs text-gray-500">{t('sales.statementNew.to')}</label>
               <input
                 type="date"
                 value={to}
@@ -337,7 +334,7 @@ const params = new URLSearchParams({ q: query.trim() });
           className="w-full flex items-center justify-center gap-2 bg-black text-white rounded-md p-3 text-sm font-semibold hover:bg-gray-800 disabled:bg-gray-300"
         >
           <Check size={16} strokeWidth={2} />
-          Generate Statement
+          {t('sales.statementNew.generate')}
         </button>
       </div>
     </main>

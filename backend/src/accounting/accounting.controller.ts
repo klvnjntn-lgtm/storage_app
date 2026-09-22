@@ -24,7 +24,7 @@ import { ChartOfAccountsSeedService } from './chart-of-accounts-seed.service';
 import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { AccountingReportsService, AgingBucket } from './accounting-reports.service';
 import { CashFlowService } from './cash-flow.service';
-import { endOfBusinessDay, parseDateOnly, todayBusinessDate, toBusinessDate } from './business-date';
+import { endOfBusinessDay, parseDateOnly, resolveTimezone, todayBusinessDate } from './business-date';
 import { CreateAccountDto, CreateManualJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
 
 const AGING_BUCKETS: AgingBucket[] = ['current', '1-30', '31-60', '61-90', '90+'];
@@ -83,6 +83,18 @@ export class AccountingController {
     if (req?.user?.role !== 'ADMIN') {
       throw new ForbiddenException('Only an administrator can perform this action');
     }
+  }
+
+  // Per-org timezone (Organization.timezone) — resolved fresh per request
+  // rather than cached, same tradeoff OrgGuard already makes for org
+  // existence checks. Only needed by handlers that default "today"/asOf
+  // off the business timezone; explicit from/to dates never need it.
+  private async getOrgTimezone(organizationId: string): Promise<string> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { timezone: true },
+    });
+    return resolveTimezone(org);
   }
 
   // --- Chart of Accounts ---
@@ -157,7 +169,7 @@ export class AccountingController {
     this.assertAdmin(req);
 
     const date = parseEntryDate(dto.date);
-    await this.assertManualLinesBelongToOrg(organizationId, dto.lines as { accountId: string; locationId?: string }[]);
+    await this.assertManualLinesBelongToOrg(organizationId, dto.lines);
 
     return this.journal.postEntry(organizationId, {
       date,
@@ -200,7 +212,7 @@ export class AccountingController {
   // page, pageSize (max 200), bucket, customerId. Summary totals always
   // cover all open invoices; only `lines` is paged/filtered.
   @Get('reports/ar-aging')
-  getARAging(
+  async getARAging(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
     @Query('page') page?: string,
@@ -209,7 +221,8 @@ export class AccountingController {
     @Query('customerId') customerId?: string,
   ) {
     // Aging compares timestamps (issuedAt), so use the true end of the business day.
-    const asOfDate = endOfBusinessDay(asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate());
+    const tz = await this.getOrgTimezone(organizationId);
+    const asOfDate = endOfBusinessDay(asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(tz), tz);
     return this.reports.getARAging(organizationId, asOfDate, {
       page: parsePositiveInt(page, 'page'),
       pageSize: parsePositiveInt(pageSize, 'pageSize'),
@@ -219,7 +232,7 @@ export class AccountingController {
   }
 
   @Get('reports/ap-aging')
-  getAPAging(
+  async getAPAging(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
     @Query('page') page?: string,
@@ -227,7 +240,8 @@ export class AccountingController {
     @Query('bucket') bucket?: string,
     @Query('supplierId') supplierId?: string,
   ) {
-    const asOfDate = endOfBusinessDay(asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate());
+    const tz = await this.getOrgTimezone(organizationId);
+    const asOfDate = endOfBusinessDay(asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(tz), tz);
     return this.reports.getAPAging(organizationId, asOfDate, {
       page: parsePositiveInt(page, 'page'),
       pageSize: parsePositiveInt(pageSize, 'pageSize'),
@@ -261,22 +275,22 @@ export class AccountingController {
   }
 
   @Get('reports/trial-balance')
-  getTrialBalance(
+  async getTrialBalance(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
     @Query('locationId') locationId?: string,
   ) {
-    const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate();
+    const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(await this.getOrgTimezone(organizationId));
     return this.reports.getTrialBalance(organizationId, asOfDate, locationId); // 400s if locationId is set
   }
 
   @Get('reports/balance-sheet')
-  getBalanceSheet(
+  async getBalanceSheet(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
     @Query('locationId') locationId?: string,
   ) {
-    const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate();
+    const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(await this.getOrgTimezone(organizationId));
     return this.reports.getBalanceSheet(organizationId, asOfDate, locationId); // 400s if locationId is set
   }
 

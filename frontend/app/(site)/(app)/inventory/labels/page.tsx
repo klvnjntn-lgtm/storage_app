@@ -4,10 +4,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
 import Barcode from 'react-barcode';
-import { ArrowLeft, Tag, Printer, Minus, Plus, Search, X } from 'lucide-react';
+import { Tag, Printer, Minus, Plus, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import PrintLabels from '@/app/components/PrintLabels';
-import Pagination from '@/app/components/Pagination';
+import PrintLabels from '@/app/components/shared/PrintLabels';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -32,6 +33,7 @@ const LabelCard = memo(function LabelCard({
   onSetQty: (sku: string, qty: number) => void;
   onPrint: (item: Item) => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="border-2 border-gray-300 rounded-lg p-3 sm:p-4 flex flex-col items-center gap-2.5 sm:gap-3 bg-white hover:border-blue-500/40 hover:shadow-sm transition-colors">
       <div className="text-center w-full">
@@ -49,7 +51,7 @@ const LabelCard = memo(function LabelCard({
           <button
             type="button"
             onClick={() => onBump(item.sku, -1)}
-            aria-label={`Decrease quantity for ${item.sku}`}
+            aria-label={t('inventory.labelsPage.decreaseQty', { sku: item.sku })}
             className="w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 active:bg-gray-200 hover:text-black disabled:opacity-30 disabled:hover:bg-transparent"
             disabled={quantity <= 1}
           >
@@ -61,13 +63,13 @@ const LabelCard = memo(function LabelCard({
             max={1000}
             value={quantity}
             onChange={(e) => onSetQty(item.sku, parseInt(e.target.value, 10))}
-            aria-label={`Quantity for ${item.sku}`}
+            aria-label={t('inventory.labelsPage.quantityFor', { sku: item.sku })}
             className="w-12 sm:w-11 h-9 sm:h-7 text-sm sm:text-xs text-center font-medium border-x border-gray-300 focus:outline-none focus:bg-gray-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <button
             type="button"
             onClick={() => onBump(item.sku, 1)}
-            aria-label={`Increase quantity for ${item.sku}`}
+            aria-label={t('inventory.labelsPage.increaseQty', { sku: item.sku })}
             className="w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 active:bg-gray-200 hover:text-black disabled:opacity-30 disabled:hover:bg-transparent"
             disabled={quantity >= 1000}
           >
@@ -80,7 +82,7 @@ const LabelCard = memo(function LabelCard({
           className="w-full flex items-center justify-center gap-1.5 bg-blue-600 text-white px-2 py-2 sm:py-1.5 rounded-md text-xs font-semibold hover:bg-blue-700 active:scale-[0.98] transition-transform"
         >
           <Printer size={14} strokeWidth={2} />
-          Print {quantity > 1 ? `×${quantity}` : ''}
+          {t('common.print')} {quantity > 1 ? `×${quantity}` : ''}
         </button>
       </div>
     </div>
@@ -88,8 +90,8 @@ const LabelCard = memo(function LabelCard({
 });
 
 export default function LabelsPage() {
-  const router = useRouter();
-  const [items, setItems] = useState<Item[]>([]);
+    const { t } = useLanguage();
+    const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [printTarget, setPrintTarget] = useState<Item[] | null>(null);
@@ -189,13 +191,6 @@ export default function LabelsPage() {
           match /vehicles/search. */}
       <div className="no-print sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -203,11 +198,12 @@ export default function LabelsPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  Product Labels
+                  {t('inventory.labelsPage.title')}
                 </h1>
                 <p className="text-xs text-gray-500 truncate">
-                  {filteredItems.length} label{filteredItems.length === 1 ? '' : 's'}
-                  {query ? ` matching "${query}"` : ' ready to print'}
+                  {query
+                    ? t('inventory.labelsPage.labelsCountMatching', { count: filteredItems.length, query })
+                    : t('inventory.labelsPage.labelsCountReady', { count: filteredItems.length })}
                 </p>
               </div>
             </div>
@@ -218,7 +214,7 @@ export default function LabelsPage() {
               className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-blue-700 active:bg-blue-800 w-full sm:w-auto disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
             >
               <Printer size={18} strokeWidth={2} />
-              Print All{query ? ' Matches' : ''}
+              {query ? t('inventory.labelsPage.printAllMatches') : t('inventory.labelsPage.printAll')}
             </button>
           </div>
 
@@ -231,15 +227,15 @@ export default function LabelsPage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by SKU or name..."
-                aria-label="Search labels by SKU or name"
+                placeholder={t('inventory.labelsPage.searchPlaceholder')}
+                aria-label={t('inventory.labelsPage.searchAriaLabel')}
                 className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
               {query && (
                 <button
                   type="button"
                   onClick={() => setQuery('')}
-                  aria-label="Clear search"
+                  aria-label={t('inventory.labelsPage.clearSearch')}
                   className="text-gray-400 hover:text-blue-700 p-1 shrink-0 transition-colors"
                 >
                   <X size={14} strokeWidth={2.5} />
@@ -253,16 +249,16 @@ export default function LabelsPage() {
       {/* Content — screen view with per-item quantity + print */}
       <div className="no-print p-4 sm:p-6 pb-24 sm:pb-24 max-w-5xl mx-auto">
         {loading && (
-          <p className="text-gray-500 text-sm">Loading labels...</p>
+          <p className="text-gray-500 text-sm">{t('inventory.labelsPage.loading')}</p>
         )}
 
         {!loading && items.length === 0 && (
-          <p className="text-gray-500 text-sm">No products found.</p>
+          <p className="text-gray-500 text-sm">{t('inventory.labelsPage.noProducts')}</p>
         )}
 
         {!loading && items.length > 0 && filteredItems.length === 0 && (
           <p className="text-sm text-gray-500 bg-white border-2 border-gray-200 rounded-md p-4 text-center">
-            No labels match &quot;{query}&quot;
+            {t('inventory.labelsPage.noLabelsMatch', { query })}
           </p>
         )}
 

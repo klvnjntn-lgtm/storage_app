@@ -33,8 +33,9 @@ export class ProductService {
       name: product.name,
       category: product.category.name,
       brand: product.brand?.name ?? null,
-      totalStock: product.stocks.reduce((sum, s) => sum + s.quantity, 0),
+      totalStock: product.stocks.reduce((sum, s) => sum + Number(s.quantity), 0),
       active: product.active,
+      image: product.image,
     }));
   }
 
@@ -56,7 +57,7 @@ export class ProductService {
     return events.map((e) => ({
       id: e.id,
       type: e.type,
-      quantity: e.quantity,
+      quantity: Number(e.quantity), // Decimal serializes to a string otherwise
       createdAt: e.createdAt,
       product: e.product?.name ?? null,
       from: e.fromLocation?.name ?? null,
@@ -222,12 +223,12 @@ async create(
 
     return {
       products,
-      stocks,
+      stocks: stocks.map((s) => ({ ...s, quantity: Number(s.quantity) })), // Decimal serializes to a string otherwise
       locations,
       events: events.map((e) => ({
         id: e.id,
         type: e.type,
-        quantity: e.quantity,
+        quantity: Number(e.quantity), // Decimal serializes to a string otherwise
         createdAt: e.createdAt,
         productId: e.productId,
         product: e.product,
@@ -283,11 +284,12 @@ async create(
       name: p.name,
       sku: p.sku,
       barcode: p.barcode,
+      image: p.image,
       sellingPrice: p.sellingPrice != null ? Number(p.sellingPrice) : null,
       stockByLocation: p.stocks.map((s) => ({
         locationId: s.locationId,
         locationName: s.location.name,
-        quantity: s.quantity,
+        quantity: Number(s.quantity),
       })),
     }));
   }
@@ -304,6 +306,7 @@ async update(
     barcode?: string;
     sellingPrice?: number;
     costPrice?: number;
+    image?: string | null;
   },
   tx: Tx = this.prisma,
 ) {
@@ -349,6 +352,10 @@ async update(
       throw new BadRequestException('Cost price cannot be negative');
     }
     updateData.costPrice = data.costPrice;
+  }
+
+  if (data.image !== undefined) {
+    updateData.image = data.image;
   }
 
   if (data.category !== undefined) {

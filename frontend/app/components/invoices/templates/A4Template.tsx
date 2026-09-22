@@ -1,12 +1,15 @@
 // components/invoices/templates/A4Template.tsx
+'use client';
 
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
 import { parseCalendarDate } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function A4Template({ invoice }: { invoice: InvoiceView }) {
+  const { t } = useLanguage();
   const balanceDue =
     invoice.amountPaid != null
       ? Math.max(invoice.total - invoice.amountPaid, 0)
@@ -66,7 +69,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
 
         <div className="text-right shrink-0">
           <p className="text-lg text-black">
-            <strong>Invoice</strong> {invoice.invoiceNumber}
+            <strong>{t('sales.invoiceTemplate.invoiceWord')}</strong> {invoice.invoiceNumber}
           </p>
 
           <p className="text-black">
@@ -74,13 +77,18 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           </p>
           {invoice.dueDate && (
             <p className="text-black">
-              Due{' '}
+              {t('sales.invoiceTemplate.due')}{' '}
               {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}
             </p>
           )}
           {invoice.paymentTerms && (
             <p className="text-black text-xs">
               {invoice.paymentTerms}
+            </p>
+          )}
+          {invoice.employeeName && (
+            <p className="text-black text-xs">
+              {t('sales.invoiceTemplate.salesLabel', { name: invoice.employeeName })}
             </p>
           )}
         </div>
@@ -92,7 +100,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
         billTo) && (
         <div className="mt-6 border-t border-gray-300 pt-3">
           <p className="text-xs uppercase tracking-wide text-black font-semibold">
-            Bill to
+            {t('sales.invoiceTemplate.billTo')}
           </p>
 
           {invoice.customerName && (
@@ -123,7 +131,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
               only prints when the customer actually provided one. */}
           {invoice.customerPoNumber && (
             <p className="text-xs text-black">
-              Customer PO No.: {invoice.customerPoNumber}
+              {t('sales.invoiceTemplate.poNumberLabel', { po: invoice.customerPoNumber })}
             </p>
           )}
         </div>
@@ -133,7 +141,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       {hasVehicle && (
         <div className="mt-4 border-t border-gray-300 pt-3">
           <p className="text-xs uppercase tracking-wide text-black font-semibold">
-            Vehicle
+            {t('sales.invoiceTemplate.vehicleLabel')}
           </p>
 
           <p className="font-semibold text-base text-black">
@@ -145,13 +153,13 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
 
           {invoice.vehicleVin && (
             <p className="text-xs text-black">
-              VIN: {invoice.vehicleVin}
+              {t('sales.invoiceTemplate.vinLabel', { vin: invoice.vehicleVin })}
             </p>
           )}
 
           {invoice.vehicleOdometer != null && (
             <p className="text-xs text-black">
-              Odometer: {invoice.vehicleOdometer} km
+              {t('sales.invoiceTemplate.odometerLabel', { value: invoice.vehicleOdometer })}
             </p>
           )}
         </div>
@@ -163,12 +171,12 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       <table className="w-full border-collapse mt-6">
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">Item</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Qty</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">Price</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Discount</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">Tax</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">Total</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">{t('sales.invoiceTemplate.itemHeader')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.qtyHeader')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.priceHeader')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.discount')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.tax')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">{t('common.total')}</th>
           </tr>
         </thead>
 
@@ -209,13 +217,13 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       {/* Totals */}
       <div className="ml-auto w-1/2 mt-4">
         <div className="flex justify-between py-1 text-black">
-          <span>Subtotal</span>
+          <span>{t('common.subtotal')}</span>
           <span>{formatIDR(invoice.subtotal)}</span>
         </div>
 
         {invoice.discount > 0 && (
           <div className="flex justify-between py-1 text-black">
-            <span>Discount</span>
+            <span>{t('sales.invoiceTemplate.discount')}</span>
             <span>-{formatIDR(invoice.discount)}</span>
           </div>
         )}
@@ -235,19 +243,19 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           ))}
 
         <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2 mt-2 text-black">
-          <span>Total</span>
+          <span>{t('common.total')}</span>
           <span>{formatIDR(invoice.total)}</span>
         </div>
 
         {invoice.amountPaid != null && (
           <>
             <div className="flex justify-between py-1 text-black">
-              <span>Paid</span>
+              <span>{t('sales.invoiceTemplate.paid')}</span>
               <span>{formatIDR(invoice.amountPaid)}</span>
             </div>
 
             <div className="flex justify-between font-semibold text-black">
-              <span>Balance due</span>
+              <span>{t('sales.invoiceTemplate.balanceDue')}</span>
               <span>{formatIDR(balanceDue ?? 0)}</span>
             </div>
           </>
@@ -256,20 +264,20 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
 
       {/* Amount in words */}
       <p className="mt-4 text-xs italic text-black">
-        Terbilang: {terbilang(invoice.total)}
+        {t('sales.invoiceTemplate.amountInWords', { value: terbilang(invoice.total) })}
       </p>
 
       {/* Bank details */}
       {hasBankDetails && (
         <div className="mt-8 border-t border-gray-300 pt-3 text-xs">
           <p className="uppercase tracking-wide text-black font-semibold mb-1">
-            Payment to
+            {t('sales.invoiceTemplate.paymentTo')}
           </p>
 
           <p className="text-black">
             {invoice.bankName} — {invoice.bankAccountNumber}
             {invoice.bankAccountName
-              ? ` a.n. ${invoice.bankAccountName}`
+              ? ` ${t('sales.invoiceTemplate.onBehalfOf', { name: invoice.bankAccountName })}`
               : ''}
           </p>
         </div>
@@ -278,7 +286,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       {invoice.notes && (
         <div className="mt-6 border-t border-gray-300 pt-3 text-xs">
           <p className="uppercase tracking-wide text-black font-semibold mb-1">
-            Notes
+            {t('common.notes')}
           </p>
           <p className="text-black whitespace-pre-line">{invoice.notes}</p>
         </div>
@@ -288,7 +296,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
       <div className="mt-16 flex justify-between gap-4">
         {hasVehicle && (
           <div className="text-center w-40">
-            <p className="text-black">Driver,</p>
+            <p className="text-black">{t('sales.invoiceTemplate.driverLabel')}</p>
 
             <div className="h-20" />
 
@@ -299,7 +307,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
         )}
 
         <div className="text-center w-40">
-          <p className="text-black">Penerima,</p>
+          <p className="text-black">{t('sales.invoiceTemplate.recipientLabel')}</p>
 
           <div className="h-20" />
 
@@ -309,12 +317,12 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
         </div>
 
         <div className="text-center w-40">
-          <p className="text-black">Hormat kami,</p>
+          <p className="text-black">{t('sales.invoiceTemplate.regardsLabel')}</p>
 
           <div className="h-20" />
 
           <p className="border-t border-gray-400 pt-1 text-black">
-            {invoice.businessName ?? invoice.locationName}
+            {invoice.employeeName ?? invoice.businessName ?? invoice.locationName}
           </p>
         </div>
       </div>

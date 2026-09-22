@@ -10,10 +10,13 @@ import {
   MessageCircle,
   Mail,
   ChevronRight,
+  ChevronLeft,
+  ChevronDown,
   Menu,
   X,
   ArrowUp,
   ScanLine,
+  Check,
   Users,
   ShieldCheck,
   AlertTriangle,
@@ -26,29 +29,74 @@ import {
   ReceiptText,
 } from 'lucide-react';
 import Image from "next/image";
+import { useLanguage } from '@/app/context/LanguageContext';
+import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
-/* ─── Live scan feed (hero terminal) ───────────────────────── */
-const SCAN_LOG = [
-  { time: '09:14:02', text: 'Received 48x Brake Pad Set — Bay 3' },
-  { time: '09:14:19', text: 'Transferred 12x Alternator — Bay 3 → Rack A2' },
-  { time: '09:15:03', text: 'Scan match confirmed — SKU-88213' },
-  { time: '09:15:44', text: 'Low stock alert — Timing Belt (Rack C1)' },
-  { time: '09:16:10', text: 'User jdelacruz logged transfer #4471' },
-  { time: '09:16:58', text: 'Received 20x Oil Filter — Bay 1' },
-  { time: '09:17:22', text: 'Audit log exported by admin' },
-];
+const SECTION_COUNT = '08';
 
+/* ─── Numbered mono section tag — same "system label" language as the
+   terminal feed / marquee, applied consistently to every section so the
+   whole page reads as one technical spec sheet, not just the contact
+   block. ────────────────────────────────────────────────────────── */
+function Kicker({
+  index,
+  label,
+  variant = 'light',
+  center = false,
+  className = 'mb-2',
+}: {
+  index: string;
+  label: string;
+  variant?: 'light' | 'dark';
+  center?: boolean;
+  className?: string;
+}) {
+  const dark = variant === 'dark';
+  return (
+    <div className={`flex items-center gap-2 ${center ? 'justify-center' : ''} ${className}`}>
+      <span
+        className={`font-mono text-[10px] tracking-widest px-1.5 py-0.5 rounded border ${
+          dark
+            ? 'text-blue-300/70 border-blue-400/25 bg-blue-400/5'
+            : 'text-blue-600/70 border-blue-500/25 bg-blue-600/5'
+        }`}
+      >
+        {index}/{SECTION_COUNT}
+      </span>
+      <p
+        className={`text-xs font-semibold uppercase tracking-widest ${
+          dark ? 'text-blue-400' : 'text-blue-600'
+        }`}
+      >
+        {label}
+      </p>
+    </div>
+  );
+}
+
+/* ─── Live scan feed (hero terminal) ───────────────────────── */
 function TerminalFeed() {
+  const { t } = useLanguage();
   const [visible, setVisible] = useState(1);
 
+  const SCAN_LOG = [
+    { time: '09:14:02', text: t('landing.scanFeed.line1') },
+    { time: '09:14:19', text: t('landing.scanFeed.line2') },
+    { time: '09:15:03', text: t('landing.scanFeed.line3') },
+    { time: '09:15:44', text: t('landing.scanFeed.line4') },
+    { time: '09:16:10', text: t('landing.scanFeed.line5') },
+    { time: '09:16:58', text: t('landing.scanFeed.line6') },
+    { time: '09:17:22', text: t('landing.scanFeed.line7') },
+  ];
+
   useEffect(() => {
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       setVisible((v) => (v >= SCAN_LOG.length ? 1 : v + 1));
     }, 1400);
-    return () => clearInterval(t);
-  }, []);
+    return () => clearInterval(timer);
+  }, [SCAN_LOG.length]);
 
   return (
     <div className="border border-blue-500/20 rounded-xl overflow-hidden bg-[#0B1220] shadow-lg shadow-blue-900/10">
@@ -57,7 +105,7 @@ function TerminalFeed() {
         <span className="w-2.5 h-2.5 rounded-full bg-blue-400/20" />
         <span className="w-2.5 h-2.5 rounded-full bg-blue-400/20" />
         <span className="ml-3 text-[11px] sm:text-xs font-mono text-blue-200/40 truncate">
-          warehouse@waresys — live feed
+          {t('landing.scanFeed.terminalLabel')}
         </span>
       </div>
       <div className="px-4 sm:px-5 py-4 sm:py-5 font-mono text-[11px] sm:text-[13px] leading-6 h-[230px] sm:h-[260px] overflow-hidden">
@@ -73,17 +121,17 @@ function TerminalFeed() {
 }
 
 /* ─── Scrolling tech-capability marquee ────────────────────── */
-const TECH_TAGS = [
-  'BARCODE SCANNING',
-  'REAL-TIME SYNC',
-  'ROLE-BASED ACCESS',
-  'AUDIT TRAIL',
-  'MULTI-LOCATION TRACKING',
-  'TRANSFER HISTORY',
-  'LIVE STOCK COUNTS',
-];
-
 function TechMarquee() {
+  const { t } = useLanguage();
+  const TECH_TAGS = [
+    t('landing.techMarquee.tags.barcodeScanning'),
+    t('landing.techMarquee.tags.realTimeSync'),
+    t('landing.techMarquee.tags.roleBasedAccess'),
+    t('landing.techMarquee.tags.auditTrail'),
+    t('landing.techMarquee.tags.multiLocationTracking'),
+    t('landing.techMarquee.tags.transferHistory'),
+    t('landing.techMarquee.tags.liveStockCounts'),
+  ];
   const doubled = [...TECH_TAGS, ...TECH_TAGS];
   return (
     <div className="border-b border-blue-500/15 bg-[#0B1220] overflow-hidden">
@@ -112,84 +160,249 @@ function TechMarquee() {
   );
 }
 
-/* ─── "How it works" interactive stepper ───────────────────── */
-const STEPS = [
-  {
-    step: '01',
-    icon: Inbox,
-    title: 'Receive inventory',
-    body: 'Scan or enter parts as they arrive. Every item is timestamped and assigned to a location immediately.',
-  },
-  {
-    step: '02',
-    icon: ArrowLeftRight,
-    title: 'Move stock',
-    body: 'Transfer parts between shelves or warehouses. The system records who moved what, and when.',
-  },
-  {
-    step: '03',
-    icon: BarChart2,
-    title: 'Track everything',
-    body: 'See live stock counts per location, pull audit logs, and know exactly what you have — and where.',
-  },
-];
-
+/* ─── "How it works" connected pipeline ─────────────────────
+   Numbered nodes on a rail instead of a button grid — a different
+   mechanic from the card/list patterns used elsewhere on the page. Each
+   stage gets its own accent color, echoing the same emerald/blue/violet
+   story used in the "Who it's for" tiles. ─────────────────── */
 function HowItWorksStepper() {
+  const { t } = useLanguage();
+  const STEPS = [
+    {
+      step: '01',
+      icon: Inbox,
+      title: t('landing.howItWorks.steps.receive.title'),
+      body: t('landing.howItWorks.steps.receive.body'),
+      node: 'bg-emerald-600 border-emerald-600 shadow-emerald-600/30',
+      panel: 'border-emerald-500/30',
+      iconBg: 'bg-emerald-600/5 border-emerald-500/20',
+      iconColor: 'text-emerald-700',
+    },
+    {
+      step: '02',
+      icon: ArrowLeftRight,
+      title: t('landing.howItWorks.steps.move.title'),
+      body: t('landing.howItWorks.steps.move.body'),
+      node: 'bg-blue-600 border-blue-600 shadow-blue-600/30',
+      panel: 'border-blue-500/30',
+      iconBg: 'bg-blue-600/5 border-blue-500/20',
+      iconColor: 'text-blue-700',
+    },
+    {
+      step: '03',
+      icon: BarChart2,
+      title: t('landing.howItWorks.steps.track.title'),
+      body: t('landing.howItWorks.steps.track.body'),
+      node: 'bg-violet-600 border-violet-600 shadow-violet-600/30',
+      panel: 'border-violet-500/30',
+      iconBg: 'bg-violet-600/5 border-violet-500/20',
+      iconColor: 'text-violet-700',
+    },
+  ];
+
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (paused) return;
-    const t = setInterval(() => setActive((a) => (a + 1) % STEPS.length), 4000);
-    return () => clearInterval(t);
-  }, [paused]);
+    const timer = setInterval(() => setActive((a) => (a + 1) % STEPS.length), 4000);
+    return () => clearInterval(timer);
+  }, [paused, STEPS.length]);
 
-  const ActiveIcon = STEPS[active].icon;
+  const current = STEPS[active];
+  const ActiveIcon = current.icon;
 
   return (
     <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
-      <div className="grid sm:grid-cols-3 gap-3 mb-4">
-        {STEPS.map((s, i) => (
-          <button
-            key={s.step}
-            onClick={() => setActive(i)}
-            className={`text-left border rounded-xl px-4 py-3 transition ${
-              active === i ? 'border-blue-500/50 bg-white shadow-sm' : 'border-blue-500/15 bg-white/60 hover:border-blue-500/30'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className={`text-xs font-mono tracking-widest ${active === i ? 'text-blue-700' : 'text-gray-400'}`}>
-                {s.step}
-              </span>
-              {active === i && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />}
-            </div>
-            <p className={`text-sm font-bold ${active === i ? 'text-black' : 'text-gray-400'}`}>{s.title}</p>
-            <div className="h-0.5 bg-blue-500/10 mt-3 rounded-full overflow-hidden">
-              {active === i && <div key={active} className="h-full bg-blue-600 fillbar" />}
-            </div>
-          </button>
-        ))}
+      <div className="relative mb-6 sm:mb-8">
+        <div className="absolute top-5 left-[16.666%] right-[16.666%] h-0.5 bg-blue-500/15 hidden sm:block" />
+        <div
+          className="absolute top-5 left-[16.666%] h-0.5 bg-blue-600 transition-all duration-700 ease-out hidden sm:block"
+          style={{ width: `${(active / (STEPS.length - 1)) * 66.667}%` }}
+        />
+
+        <div className="relative grid grid-cols-3 gap-2 sm:gap-4">
+          {STEPS.map((s, i) => {
+            const isActive = i === active;
+            const isDone = i < active;
+            return (
+              <button
+                key={s.step}
+                onClick={() => setActive(i)}
+                className="flex flex-col items-center text-center group"
+              >
+                <span
+                  className={`relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 font-mono text-xs font-bold transition-all duration-300 ${
+                    isActive
+                      ? `${s.node} text-white scale-110 shadow-lg`
+                      : isDone
+                        ? `${s.node} text-white`
+                        : 'bg-white border-blue-500/25 text-gray-400 group-hover:border-blue-500/50'
+                  }`}
+                >
+                  {isDone ? <Check size={14} strokeWidth={3} /> : s.step}
+                </span>
+                <p
+                  className={`mt-2.5 text-xs sm:text-sm font-bold transition-colors ${
+                    isActive ? 'text-black' : 'text-gray-400'
+                  }`}
+                >
+                  {s.title}
+                </p>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="bg-white border border-blue-500/20 rounded-xl p-6 sm:p-8 flex items-start gap-4 sm:gap-5">
-        <div className="shrink-0 p-2.5 sm:p-3 border border-blue-500/20 rounded-lg bg-blue-600/5">
-          <ActiveIcon size={20} strokeWidth={2} className="text-blue-700" />
+      <div
+        className={`bg-white border rounded-xl p-6 sm:p-8 flex items-start gap-4 sm:gap-5 transition-colors duration-300 ${current.panel}`}
+      >
+        <div className={`shrink-0 p-2.5 sm:p-3 border rounded-lg ${current.iconBg}`}>
+          <ActiveIcon size={20} strokeWidth={2} className={current.iconColor} />
         </div>
         <div>
-          <p className="font-bold text-base mb-1.5">{STEPS[active].title}</p>
-          <p className="text-sm text-gray-500 leading-relaxed max-w-xl">{STEPS[active].body}</p>
+          <p className="font-bold text-base mb-1.5">{current.title}</p>
+          <p className="text-sm text-gray-500 leading-relaxed max-w-xl">{current.body}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Ecosystem carousel ────────────────────────────────────── */
+type EcosystemProduct = {
+  icon: typeof Inbox;
+  name: string;
+  tag: string;
+  body: string;
+  status: 'Live' | 'Coming soon';
+  statusLabel: string;
+};
+
+function EcosystemCarousel({ products }: { products: EcosystemProduct[] }) {
+  const [active, setActive] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused || products.length <= 1) return;
+    const timer = setInterval(() => setActive((a) => (a + 1) % products.length), 4500);
+    return () => clearInterval(timer);
+  }, [paused, products.length]);
+
+  const go = (i: number) => setActive(((i % products.length) + products.length) % products.length);
+
+  return (
+    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div className="relative overflow-hidden rounded-xl border border-blue-500/20 bg-white shadow-sm">
+        <div
+          className="flex transition-transform duration-500 ease-out"
+          style={{ transform: `translateX(-${active * 100}%)` }}
+        >
+          {products.map(({ icon: Icon, name, tag, body, status, statusLabel }) => (
+            <div key={name} className="w-full shrink-0 p-6 sm:p-10">
+              <div className="flex items-start justify-between gap-4 mb-5 sm:mb-6">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="shrink-0 p-2.5 border border-blue-500/20 rounded-lg bg-blue-600/5">
+                    <Icon size={22} strokeWidth={2} className="text-blue-700" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-base sm:text-lg truncate">{name}</p>
+                    <p className="text-xs text-gray-400">{tag}</p>
+                  </div>
+                </div>
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-widest px-2 py-1 rounded-md border shrink-0 ${
+                    status === 'Live'
+                      ? 'bg-green-100 text-green-800 border-green-300'
+                      : 'bg-blue-100 text-blue-800 border-blue-300'
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+              <p className="text-sm text-gray-500 leading-relaxed max-w-lg">{body}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <style jsx>{`
-        @keyframes fillbar {
-          from { width: 0%; }
-          to { width: 100%; }
-        }
-        .fillbar {
-          animation: fillbar 4s linear;
-        }
-      `}</style>
+      <div className="flex items-center justify-between mt-4">
+        <span className="font-mono text-[11px] text-gray-400 tracking-widest">
+          {String(active + 1).padStart(2, '0')} / {String(products.length).padStart(2, '0')}
+        </span>
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5">
+            {products.map((p, i) => (
+              <button
+                key={p.name}
+                onClick={() => go(i)}
+                aria-label={`Go to ${p.name}`}
+                className={`h-1.5 rounded-full transition-all ${
+                  i === active ? 'w-5 bg-blue-600' : 'w-1.5 bg-blue-500/25 hover:bg-blue-500/40'
+                }`}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => go(active - 1)}
+            aria-label="Previous"
+            className="p-1.5 rounded-md border border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/40 transition"
+          >
+            <ChevronLeft size={14} strokeWidth={2} className="text-blue-700" />
+          </button>
+          <button
+            onClick={() => go(active + 1)}
+            aria-label="Next"
+            className="p-1.5 rounded-md border border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/40 transition"
+          >
+            <ChevronRight size={14} strokeWidth={2} className="text-blue-700" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── FAQ accordion ─────────────────────────────────────────── */
+function FaqAccordion({ items }: { items: { q: string; a: string }[] }) {
+  const [open, setOpen] = useState(0);
+
+  return (
+    <div>
+      {items.map((item, i) => {
+        const isOpen = open === i;
+        return (
+          <div key={i} className="border-b border-blue-500/10 last:border-0">
+            <button
+              onClick={() => setOpen(isOpen ? -1 : i)}
+              className="w-full flex items-start gap-3 py-4 sm:py-5 text-left"
+              aria-expanded={isOpen}
+            >
+              <span className="font-mono text-[11px] text-blue-600/60 mt-0.5 shrink-0">
+                Q{String(i + 1).padStart(2, '0')}
+              </span>
+              <span className="flex-1 font-bold text-sm">{item.q}</span>
+              <ChevronDown
+                size={16}
+                strokeWidth={2}
+                className={`shrink-0 mt-0.5 text-blue-600/60 transition-transform duration-200 ${
+                  isOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+            <div
+              className={`grid transition-all duration-200 ease-out ${
+                isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+              }`}
+            >
+              <div className="overflow-hidden">
+                <p className="text-sm text-gray-500 leading-relaxed pb-4 sm:pb-5 pl-9">{item.a}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -324,6 +537,7 @@ function FloatingTechIcons() {
 
 export default function LandingPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -339,8 +553,8 @@ export default function LandingPage() {
 
       {/* ─── NAV ─────────────────────────────────────────────── */}
       <div
-        className={`sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b transition-shadow ${
-          scrolled ? 'border-blue-500/20 shadow-sm shadow-blue-900/5' : 'border-blue-500/15'
+        className={`sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] transition-shadow ${
+          scrolled ? 'border-blue-500/20' : ''
         }`}
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-8 py-3 md:py-4 flex justify-between items-center gap-3">
@@ -357,9 +571,9 @@ export default function LandingPage() {
 
           <nav className="hidden md:flex items-center gap-1 text-sm text-gray-500 font-medium">
             {[
-              { href: '#how-it-works', label: 'How it works' },
-              { href: '#faq', label: 'FAQ' },
-              { href: '#contact', label: 'Contact' },
+              { href: '#how-it-works', label: t('landing.nav.howItWorks') },
+              { href: '#faq', label: t('landing.nav.faq') },
+              { href: '#contact', label: t('landing.nav.contact') },
             ].map((link) => (
               <a
                 key={link.href}
@@ -376,17 +590,18 @@ export default function LandingPage() {
               href="#contact"
               className="hidden sm:inline-flex text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md border border-blue-500/20 text-blue-700 hover:bg-blue-50 font-medium transition whitespace-nowrap"
             >
-              Book a Demo
+              {t('landing.nav.bookDemo')}
             </a>
             <button
               onClick={() => router.push('/login')}
               className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 font-medium transition whitespace-nowrap"
             >
-              Login
+              {t('landing.nav.login')}
             </button>
+            <LanguageSwitcher className="hidden sm:block" />
             <button
               onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Toggle menu"
+              aria-label={t('landing.nav.toggleMenu')}
               className="md:hidden p-2 rounded-md border border-blue-500/20 hover:bg-blue-50 transition shrink-0"
             >
               {menuOpen ? <X size={18} /> : <Menu size={18} />}
@@ -402,9 +617,9 @@ export default function LandingPage() {
         >
           <nav className="flex flex-col px-4 sm:px-6 py-2 text-sm font-medium text-gray-600">
             {[
-              { href: '#how-it-works', label: 'How it works' },
-              { href: '#faq', label: 'FAQ' },
-              { href: '#contact', label: 'Contact' },
+              { href: '#how-it-works', label: t('landing.nav.howItWorks') },
+              { href: '#faq', label: t('landing.nav.faq') },
+              { href: '#contact', label: t('landing.nav.contact') },
             ].map((link) => (
               <a
                 key={link.href}
@@ -420,8 +635,11 @@ export default function LandingPage() {
               onClick={() => setMenuOpen(false)}
               className="py-2.5 hover:text-blue-700 transition"
             >
-              Book a Demo
+              {t('landing.nav.bookDemo')}
             </a>
+            <div className="py-2.5">
+              <LanguageSwitcher />
+            </div>
           </nav>
         </div>
       </div>
@@ -436,32 +654,31 @@ export default function LandingPage() {
           backgroundSize: '24px 24px',
         }}
       >
+        <div className="pointer-events-none absolute top-6 right-0 sm:right-10 h-72 w-72 rounded-full bg-blue-400/10 blur-[100px]" />
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 md:py-24 grid md:grid-cols-2 gap-10 md:gap-16 items-center relative">
           <div>
-            <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-4 sm:mb-5">
-              Built for spare parts businesses
-            </p>
+            <Kicker index="00" label={t('landing.hero.eyebrow')} className="mb-4 sm:mb-5" />
             <h2 className={`${display.className} text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight leading-[1.1] md:leading-[1.05] mb-5 sm:mb-6`}>
-              Stop losing track of your spare parts.
+              {t('landing.hero.headline')}
             </h2>
             <p className="text-gray-500 text-base leading-relaxed mb-3 max-w-md">
-              WareSys keeps your inventory, locations, and stock movements in one place.
+              {t('landing.hero.sub1')}
             </p>
             <p className="text-gray-500 text-base leading-relaxed mb-8 sm:mb-10 max-w-md">
-              Scan parts. Move stock. Know exactly what you have and where it is.
+              {t('landing.hero.sub2')}
             </p>
             <div className="flex gap-3 flex-wrap">
               <a
                 href="#contact"
                 className="flex items-center gap-1.5 text-sm px-5 py-3 rounded-md bg-blue-600 text-white hover:bg-blue-700 font-bold transition"
               >
-                Book a Demo <ChevronRight size={15} />
+                {t('landing.hero.ctaDemo')} <ChevronRight size={15} />
               </a>
               <a
                 href="#how-it-works"
                 className="flex items-center gap-1.5 text-sm px-5 py-3 rounded-md border border-blue-500/20 hover:bg-blue-50 font-medium transition"
               >
-                See How It Works ↓
+                {t('landing.hero.ctaHowItWorks')}
               </a>
             </div>
           </div>
@@ -475,65 +692,121 @@ export default function LandingPage() {
       <TechMarquee />
 
       {/* ─── THE PROBLEM ─────────────────────────────────────── */}
-      <section className="border-b border-blue-500/15 bg-slate-50">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-            Sound familiar?
-          </p>
-          <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12 max-w-2xl`}>
-            Still managing stock with Excel, paper, or WhatsApp?
-          </h3>
+      <section className="border-b border-blue-500/15 bg-gradient-to-b from-[#0B1220] to-[#0d1626] text-white relative overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, #60a5fa 1px, transparent 1px), linear-gradient(to bottom, #60a5fa 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
+          }}
+        />
+        <div className="pointer-events-none absolute top-0 right-1/4 h-72 w-72 rounded-full bg-red-500/10 blur-[110px]" />
+        <div className="pointer-events-none absolute bottom-0 left-10 h-64 w-64 rounded-full bg-blue-500/10 blur-[100px]" />
 
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { icon: AlertTriangle, title: 'Stock doesn\u2019t match', body: 'Manual entries create mistakes.' },
-              { icon: HelpCircle,    title: 'Parts disappear',       body: 'You know something moved, but not who moved it.' },
-              { icon: MapPin,        title: 'Nobody knows the location', body: 'Your team wastes time searching shelves.' },
-              { icon: Clock,         title: 'Inventory takes forever', body: 'Counting and updating stock manually eats hours.' },
-            ].map(({ icon: Icon, title, body }) => (
-              <div key={title} className="bg-white border border-blue-500/20 rounded-xl p-5 sm:p-6">
-                <div className="p-2 border border-blue-500/20 rounded-lg bg-blue-600/5 w-fit mb-4">
-                  <Icon size={18} strokeWidth={2} className="text-blue-700" />
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 grid md:grid-cols-2 gap-10 md:gap-16 items-center relative">
+          <div>
+            <Kicker index="01" label={t('landing.problem.eyebrow')} variant="dark" />
+            <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-7 sm:mb-8 max-w-lg`}>
+              {t('landing.problem.heading')}
+            </h3>
+
+            <div className="space-y-3">
+              {[
+                { icon: AlertTriangle, title: t('landing.problem.cards.mismatch.title'), body: t('landing.problem.cards.mismatch.body') },
+                { icon: HelpCircle,    title: t('landing.problem.cards.disappear.title'), body: t('landing.problem.cards.disappear.body') },
+                { icon: MapPin,        title: t('landing.problem.cards.location.title'), body: t('landing.problem.cards.location.body') },
+                { icon: Clock,         title: t('landing.problem.cards.forever.title'), body: t('landing.problem.cards.forever.body') },
+              ].map(({ icon: Icon, title, body }) => (
+                <div key={title} className="flex items-start gap-2.5 border-l-2 border-red-400/30 pl-3 py-0.5">
+                  <Icon size={14} strokeWidth={2} className="text-red-300/70 mt-0.5 shrink-0" />
+                  <p className="text-sm text-white/60 leading-relaxed">
+                    <span className="font-semibold text-white">{title}.</span> {body}
+                  </p>
                 </div>
-                <p className="font-bold text-sm mb-1.5">{title}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{body}</p>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          {/* mock "broken" log, the chaotic counterpart to the clean hero terminal */}
+          <div className="border border-red-500/20 rounded-xl overflow-hidden bg-[#0B1220] shadow-lg shadow-red-900/10">
+            <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-red-400/10">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-400/30" />
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400/30" />
+              <span className="w-2.5 h-2.5 rounded-full bg-white/10" />
+              <span className="ml-3 text-[11px] sm:text-xs font-mono text-red-200/40 truncate">
+                {t('landing.problem.mockLog.fileLabel')}
+              </span>
+            </div>
+            <div className="px-4 sm:px-5 py-4 sm:py-5 font-mono text-[11px] sm:text-[13px] leading-7">
+              <div className="text-white/25 line-through decoration-white/20">{t('landing.problem.mockLog.line1')}</div>
+              <div className="text-red-300/80">⚠ {t('landing.problem.mockLog.line2')}</div>
+              <div className="text-blue-200/40">{t('landing.problem.mockLog.line3')}</div>
+              <div className="text-white/20 line-through decoration-white/15">{t('landing.problem.mockLog.line4')}</div>
+              <span className="inline-block w-2 h-3.5 bg-red-400/70 align-middle animate-pulse mt-1" />
+            </div>
           </div>
         </div>
       </section>
 
       {/* ─── EVERYTHING INCLUDED ─────────────────────────────── */}
-      <section className="border-b border-blue-500/15">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-            WareSys Warehouse
-          </p>
-          <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12`}>
-            Everything your stock team needs.
+      <section className="border-b border-blue-500/15 relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-32 right-0 h-80 w-80 rounded-full bg-blue-500/10 blur-[110px]" />
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 relative">
+          <Kicker index="02" label={t('landing.features.eyebrow')} />
+          <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-10`}>
+            {t('landing.features.heading')}
           </h3>
 
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {/* hero tile — the flagship capability gets its own banner instead
+              of blending into the grid like the other five */}
+          <div className="mb-3 rounded-xl overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-800 text-white p-6 sm:p-8 relative">
+            <div
+              className="absolute inset-0 opacity-[0.07]"
+              style={{
+                backgroundImage:
+                  'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+                backgroundSize: '28px 28px',
+              }}
+            />
+            <div className="relative flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8">
+              <span className="shrink-0 inline-flex p-3.5 rounded-xl bg-white/15">
+                <ScanLine size={26} strokeWidth={2} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <p className="text-lg sm:text-xl font-bold">{t('landing.features.items.barcodeReceiving.label')}</p>
+                  <span className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded border border-white/25 bg-white/10">
+                    core
+                  </span>
+                </div>
+                <p className="text-sm text-white/75 max-w-md">{t('landing.features.items.barcodeReceiving.sub')}</p>
+              </div>
+              <span className="hidden sm:inline-flex shrink-0 font-bold text-white/90 text-xl">✓</span>
+            </div>
+          </div>
+
+          {/* supporting capabilities — a spec-sheet strip (hairline dividers,
+              no card borders) so it doesn't repeat the bordered-card recipe */}
+          <div className="grid sm:grid-cols-5 gap-px bg-blue-500/10 border border-blue-500/10 rounded-xl overflow-hidden">
             {[
-              { icon: ScanLine,       label: 'Barcode receiving',            sub: 'Scan on any device, instantly logged' },
-              { icon: ArrowLeftRight, label: 'Stock transfers',              sub: 'Between locations with full history' },
-              { icon: BarChart2,      label: 'Full inventory tracking',      sub: 'Live counts per location' },
-              { icon: Users,          label: 'Multi-user access with roles', sub: 'Admins and staff, separate views' },
-              { icon: ShieldCheck,    label: 'Complete audit logs',          sub: 'Every action timestamped' },
-              { icon: Inbox,          label: 'Same-day onboarding',          sub: 'Import your existing stock and go' },
+              { icon: ArrowLeftRight, label: t('landing.features.items.transfers.label'), sub: t('landing.features.items.transfers.sub') },
+              { icon: BarChart2,      label: t('landing.features.items.tracking.label'), sub: t('landing.features.items.tracking.sub') },
+              { icon: Users,          label: t('landing.features.items.multiUser.label'), sub: t('landing.features.items.multiUser.sub') },
+              { icon: ShieldCheck,    label: t('landing.features.items.auditLogs.label'), sub: t('landing.features.items.auditLogs.sub') },
+              { icon: Inbox,          label: t('landing.features.items.onboarding.label'), sub: t('landing.features.items.onboarding.sub') },
             ].map(({ icon: Icon, label, sub }) => (
-              <div
-                key={label}
-                className="flex items-start gap-4 border border-blue-500/20 rounded-xl p-5 hover:border-blue-500 transition"
-              >
-                <div className="shrink-0 p-2 border border-blue-500/20 rounded-lg bg-blue-600/5">
-                  <Icon size={17} strokeWidth={2} className="text-blue-700" />
+              <div key={label} className="bg-white p-4 sm:p-5 flex flex-col gap-2.5 hover:bg-blue-50/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <span className="p-1.5 rounded-md bg-blue-600/5 border border-blue-500/20">
+                    <Icon size={14} strokeWidth={2} className="text-blue-700" />
+                  </span>
+                  <span className="text-blue-600 text-xs font-bold">✓</span>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold leading-tight">{label}</p>
-                  <p className="text-xs text-gray-500 mt-1">{sub}</p>
+                <div>
+                  <p className="text-xs font-semibold leading-tight">{label}</p>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">{sub}</p>
                 </div>
-                <span className="ml-auto font-bold text-blue-600 text-sm shrink-0">✓</span>
               </div>
             ))}
           </div>
@@ -541,13 +814,19 @@ export default function LandingPage() {
       </section>
 
       {/* ─── HOW IT WORKS ────────────────────────────────────── */}
-      <section id="how-it-works" className="border-b border-blue-500/15 bg-slate-50">
+      <section
+        id="how-it-works"
+        className="border-b border-blue-500/15"
+        style={{
+          backgroundColor: '#f8fafc',
+          backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.06) 1px, transparent 0)',
+          backgroundSize: '24px 24px',
+        }}
+      >
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-            How it works
-          </p>
+          <Kicker index="03" label={t('landing.howItWorks.eyebrow')} />
           <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12`}>
-            From the dock to the shelf.
+            {t('landing.howItWorks.heading')}
           </h3>
 
           <HowItWorksStepper />
@@ -555,7 +834,7 @@ export default function LandingPage() {
       </section>
 
       {/* ─── ECOSYSTEM ────────────────────────────────────────── */}
-      <section className="border-b border-blue-500/15 bg-[#F1F5FB]">
+      <section className="border-b border-blue-500/15 bg-[#F1F5FB] relative overflow-hidden">
         <div
           className="h-1.5 w-full"
           style={{
@@ -563,88 +842,88 @@ export default function LandingPage() {
               'repeating-linear-gradient(-45deg, #2563EB 0px, #2563EB 10px, #0F172A 10px, #0F172A 20px)',
           }}
         />
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-            The bigger picture
-          </p>
+        <div className="pointer-events-none absolute top-1/3 -left-24 h-72 w-72 rounded-full bg-indigo-500/10 blur-[100px]" />
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 relative">
+          <Kicker index="04" label={t('landing.ecosystem.eyebrow')} />
           <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12 max-w-2xl`}>
-            One platform for your entire operation.
+            {t('landing.ecosystem.heading')}
           </h3>
 
-          <div className="grid sm:grid-cols-3 gap-4">
-            {[
+          <EcosystemCarousel
+            products={[
               {
                 icon: Package,
                 name: 'WareSys Warehouse',
-                tag: 'Inventory & warehouse management',
-                body: 'Track stock, locations, transfers, and every movement.',
+                tag: t('landing.ecosystem.products.warehouse.tag'),
+                body: t('landing.ecosystem.products.warehouse.body'),
                 status: 'Live',
+                statusLabel: t('landing.ecosystem.statusLive'),
               },
               {
                 icon: ReceiptText,
                 name: 'Invoice POS',
-                tag: 'Sales & invoicing',
-                body: 'Create invoices, manage products, track sales and calculate profit.',
+                tag: t('landing.ecosystem.products.invoice.tag'),
+                body: t('landing.ecosystem.products.invoice.body'),
                 status: 'Live',
+                statusLabel: t('landing.ecosystem.statusLive'),
               },
               {
                 icon: Wrench,
                 name: 'Workshop RMS',
-                tag: 'Workshop management',
-                body: 'Manage customers, vehicles, service history, reminders, invoices and workshop operations.',
-                status: 'Coming soon',
+                tag: t('landing.ecosystem.products.workshop.tag'),
+                body: t('landing.ecosystem.products.workshop.body'),
+                status: 'Live',
+                statusLabel: t('landing.ecosystem.statusLive'),
               },
-            ].map(({ icon: Icon, name, tag, body, status }) => (
-              <div key={name} className="border border-blue-500/20 rounded-xl p-5 sm:p-6 flex flex-col bg-white hover:border-blue-500 transition">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-2 border border-blue-500/20 rounded-lg bg-blue-600/5">
-                    <Icon size={18} strokeWidth={2} className="text-blue-700" />
-                  </div>
-                  <span
-                    className={`text-[10px] font-semibold uppercase tracking-widest px-2 py-1 rounded-full ${
-                      status === 'Live' ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-500'
-                    }`}
-                  >
-                    {status}
-                  </span>
-                </div>
-                <p className="font-bold text-sm">{name}</p>
-                <p className="text-xs text-gray-400 mt-0.5 mb-3">{tag}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{body}</p>
-              </div>
-            ))}
-          </div>
+            ]}
+          />
         </div>
       </section>
 
       {/* ─── WHO IT'S FOR ────────────────────────────────────── */}
       <section className="border-b border-blue-500/15 bg-white">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-            Who it&apos;s for
-          </p>
+          <Kicker index="05" label={t('landing.whoItsFor.eyebrow')} />
           <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12 max-w-2xl`}>
-            Built for businesses that move parts every day.
+            {t('landing.whoItsFor.heading')}
           </h3>
 
           <div className="grid sm:grid-cols-3 gap-4 mb-8">
             {[
-              { icon: Package,   title: 'Spare Parts Shops',         body: 'Track thousands of SKUs without losing location visibility.' },
-              { icon: Wrench,    title: 'Automotive Workshops',      body: 'Know what parts are available before starting a job.' },
-              { icon: Building2, title: 'Multi-Location Businesses', body: 'Move inventory between locations with a complete history.' },
-            ].map(({ icon: Icon, title, body }) => (
-              <div key={title} className="bg-slate-50 border border-blue-500/20 rounded-xl p-5 sm:p-6">
-                <div className="p-2 border border-blue-500/20 rounded-lg bg-blue-600/5 w-fit mb-4">
-                  <Icon size={18} strokeWidth={2} className="text-blue-700" />
-                </div>
-                <p className="font-bold text-sm mb-1.5">{title}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{body}</p>
+              {
+                icon: Package,
+                title: t('landing.whoItsFor.cards.spareParts.title'),
+                body: t('landing.whoItsFor.cards.spareParts.body'),
+                gradient: 'bg-gradient-to-br from-blue-500 to-indigo-700',
+              },
+              {
+                icon: Wrench,
+                title: t('landing.whoItsFor.cards.workshops.title'),
+                body: t('landing.whoItsFor.cards.workshops.body'),
+                gradient: 'bg-gradient-to-br from-emerald-500 to-emerald-700',
+              },
+              {
+                icon: Building2,
+                title: t('landing.whoItsFor.cards.multiLocation.title'),
+                body: t('landing.whoItsFor.cards.multiLocation.body'),
+                gradient: 'bg-gradient-to-br from-violet-500 to-purple-700',
+              },
+            ].map(({ icon: Icon, title, body, gradient }) => (
+              <div
+                key={title}
+                className={`${gradient} text-white rounded-lg p-5 sm:p-6 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200`}
+              >
+                <span className="inline-flex shrink-0 rounded-lg bg-white/15 p-2.5 mb-4">
+                  <Icon size={20} strokeWidth={2} />
+                </span>
+                <p className="font-bold text-base mb-1.5">{title}</p>
+                <p className="text-sm text-white/85 leading-relaxed">{body}</p>
               </div>
             ))}
           </div>
 
           <p className="text-sm text-gray-500 max-w-xl">
-            If your inventory is still managed through Excel, paper, or memory, WareSys is built for you.
+            {t('landing.whoItsFor.footNote')}
           </p>
         </div>
       </section>
@@ -653,31 +932,29 @@ export default function LandingPage() {
       <section className="border-b border-blue-500/15 bg-gradient-to-b from-slate-950 to-[#0B1220] text-white">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
           <div className="text-center mb-10 sm:mb-14">
-            <p className="text-xs uppercase tracking-[0.25em] text-blue-300/60 font-semibold">
-              Why WARESYS
-            </p>
+            <Kicker index="06" label={t('landing.proof.eyebrow')} variant="dark" center className="justify-center mb-0" />
             <h3 className={`${display.className} text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight mt-3`}>
-              Built for real spare-parts operations.
+              {t('landing.proof.heading')}
             </h3>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5 sm:gap-6 md:gap-8">
             {[
               {
-                title: "Know where every part is.",
-                body: "Track stock by warehouse, rack, shelf, or location.",
+                title: t('landing.proof.cards.location.title'),
+                body: t('landing.proof.cards.location.body'),
               },
               {
-                title: "Know who moved it.",
-                body: "Every stock movement is recorded.",
+                title: t('landing.proof.cards.whoMoved.title'),
+                body: t('landing.proof.cards.whoMoved.body'),
               },
               {
-                title: "Stop relying on spreadsheets.",
-                body: "Your team works from the same inventory data.",
+                title: t('landing.proof.cards.spreadsheets.title'),
+                body: t('landing.proof.cards.spreadsheets.body'),
               },
               {
-                title: "Get started without months of setup.",
-                body: "Import your existing stock and start using it.",
+                title: t('landing.proof.cards.quickStart.title'),
+                body: t('landing.proof.cards.quickStart.body'),
               },
             ].map((item) => (
               <div
@@ -695,42 +972,36 @@ export default function LandingPage() {
       </section>
 
       {/* ─── FAQ ─────────────────────────────────────────────── */}
-      <section id="faq" className="border-b border-blue-500/15">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 grid md:grid-cols-[1fr_2fr] gap-8 md:gap-16">
+      <section id="faq" className="border-b border-blue-500/15 relative overflow-hidden">
+        <div className="pointer-events-none absolute top-0 left-1/4 h-64 w-64 rounded-full bg-blue-400/10 blur-[100px]" />
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20 grid md:grid-cols-[1fr_2fr] gap-8 md:gap-16 relative">
           <div>
-            <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2">
-              Common questions
-            </p>
+            <Kicker index="07" label={t('landing.faq.eyebrow')} />
             <h3 className={`${display.className} text-2xl sm:text-3xl font-bold tracking-tight`}>
-              What owners usually ask.
+              {t('landing.faq.heading')}
             </h3>
           </div>
 
-          <div>
-            {[
+          <FaqAccordion
+            items={[
               {
-                q: 'What does it actually do?',
-                a: 'It replaces your spreadsheets. Receive parts, move them between locations, and see live stock counts — with a full history of every action.',
+                q: t('landing.faq.items.whatDoesItDo.q'),
+                a: t('landing.faq.items.whatDoesItDo.a'),
               },
               {
-                q: 'Can multiple employees use it?',
-                a: 'Yes. Each employee gets their own login. Admins see everything; staff see what they need.',
+                q: t('landing.faq.items.multipleEmployees.q'),
+                a: t('landing.faq.items.multipleEmployees.a'),
               },
               {
-                q: 'Can I track stock across multiple locations?',
-                a: 'Yes. Parts are tracked per shelf or warehouse. Every transfer is logged so you always know where a part went.',
+                q: t('landing.faq.items.multiLocation.q'),
+                a: t('landing.faq.items.multiLocation.a'),
               },
               {
-                q: 'How do I get started?',
-                a: 'Book a demo below. We will set up your account, import your existing stock, and get your team trained in one session.',
+                q: t('landing.faq.items.getStarted.q'),
+                a: t('landing.faq.items.getStarted.a'),
               },
-            ].map((item, i) => (
-              <div key={i} className="py-4 sm:py-5 border-b border-blue-500/10 last:border-0">
-                <p className="font-bold text-sm mb-1.5">{item.q}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{item.a}</p>
-              </div>
-            ))}
-          </div>
+            ]}
+          />
         </div>
       </section>
 
@@ -758,14 +1029,12 @@ export default function LandingPage() {
 
         <div className="relative max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24 grid md:grid-cols-2 gap-10 md:gap-16 items-center">
           <div>
-            <p className="text-xs font-semibold text-blue-400 uppercase tracking-widest mb-2 font-mono">
-              // Get in touch
-            </p>
+            <Kicker index="08" label={t('landing.contact.eyebrow')} variant="dark" />
             <h3 className={`${display.className} text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight mb-3 leading-tight`}>
-              Ready to take control of your stock?
+              {t('landing.contact.heading')}
             </h3>
             <p className="text-sm text-white/60 leading-relaxed max-w-sm">
-              Book a demo or reach out directly. We will get back to you the same day.
+              {t('landing.contact.sub')}
             </p>
           </div>
 
@@ -780,7 +1049,7 @@ export default function LandingPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-white">WhatsApp</p>
-                  <p className="text-xs text-white/50">Fastest response</p>
+                  <p className="text-xs text-white/50">{t('landing.contact.whatsapp.sub')}</p>
                 </div>
               </div>
               <ChevronRight size={16} className="shrink-0 text-white/40 group-hover:text-blue-400 transition" />
@@ -794,7 +1063,7 @@ export default function LandingPage() {
                   <Mail size={17} strokeWidth={2} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white">Email us</p>
+                  <p className="text-sm font-semibold text-white">{t('landing.contact.email.title')}</p>
                   <p className="text-xs text-white/50 truncate">klvnjntn@gmail.com</p>
                 </div>
               </div>
@@ -828,7 +1097,7 @@ export default function LandingPage() {
       {/* ─── FOOTER ──────────────────────────────────────────── */}
       <div className="px-5 sm:px-8 py-5 max-w-6xl mx-auto w-full flex flex-col sm:flex-row gap-2 sm:gap-0 justify-between items-center text-xs text-gray-400 text-center sm:text-left">
         <span className={`${display.className} font-bold text-blue-700 tracking-tight`}>WARESYS</span>
-        <span>© {new Date().getFullYear()} · Built for spare parts businesses</span>
+        <span>© {new Date().getFullYear()} · {t('landing.footer.tagline')}</span>
       </div>
 
       <ScrollProgressButton />

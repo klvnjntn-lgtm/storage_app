@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentOrg } from '../auth/decorators/current-org.decorator'; // TODO: verify — original file imported from './org.decorator'; confirm which actually exists in your repo (see grep below) before merging
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import type { UpdateOrganizationSettingsInput } from './organization.service';
 import { LOGO_STORAGE } from './storage/logo-storage.interface';
 import type { LogoStorage } from './storage/logo-storage.interface';

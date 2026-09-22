@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBankAccountDto, UpdateBankAccountDto } from './dto/bank-accounts.dto';
+import { BankAccountGLLinkService } from '../accounting/bank-account-gl-link.service';
 
 @Injectable()
 export class BankAccountService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private bankAccountGLLink: BankAccountGLLinkService,
+  ) {}
 
   list(organizationId: string, includeArchived = false) {
     return this.prisma.organizationBankAccount.findMany({
@@ -16,14 +20,23 @@ export class BankAccountService {
     });
   }
 
+  // Every new bank account needs a linked ChartOfAccount to post to —
+  // without this, the first Payment/Expense/SupplierPayment/Payroll
+  // against it fails at PostingRulesService's resolution step with a "no
+  // linked GL account" error, with no way to fix it short of a direct DB
+  // write (CreateBankAccountDto has no bankAccountId field for accounts).
   create(organizationId: string, dto: CreateBankAccountDto) {
-    return this.prisma.organizationBankAccount.create({
-      data: {
-        organizationId,
-        bankName: dto.bankName.trim(),
-        accountNumber: dto.accountNumber.trim(),
-        accountName: dto.accountName.trim(),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const bankAccount = await tx.organizationBankAccount.create({
+        data: {
+          organizationId,
+          bankName: dto.bankName.trim(),
+          accountNumber: dto.accountNumber.trim(),
+          accountName: dto.accountName.trim(),
+        },
+      });
+      await this.bankAccountGLLink.ensureLinkedAccount(organizationId, bankAccount, tx);
+      return bankAccount;
     });
   }
 

@@ -26,6 +26,7 @@ export type POProduct = {
   name: string;
   sku: string | null;
   barcode: string | null;
+  image: string | null;
 };
 
 // Keyed by productId — a PO has a single receiving location for the

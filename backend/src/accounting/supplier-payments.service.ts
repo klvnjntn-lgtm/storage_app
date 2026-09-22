@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from '../accounting/account-resolver.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
@@ -106,38 +106,47 @@ export class SupplierPaymentsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const outstanding = await this.getOutstanding(organizationId, dto.purchaseOrderId, tx);
-      if (outstanding <= 0) {
-        throw new BadRequestException('This purchase order has no outstanding balance to pay against');
+    // FIX — was missing the P2034 catch that the identical
+    // check-then-insert-under-Serializable pattern has in
+    // ExpensesService.recordPayment and FixedAssetsService.recordPayment.
+    // A genuine concurrent double-payment against the same PO used to
+    // surface as an unhandled 500 instead of a friendly, retryable error.
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const outstanding = await this.getOutstanding(organizationId, dto.purchaseOrderId, tx);
+        if (outstanding <= 0) {
+          throw new BadRequestException('This purchase order has no outstanding balance to pay against');
+        }
+        if (dto.amount > outstanding) {
+          throw new BadRequestException(
+            `Cannot pay ${dto.amount} — only ${outstanding} is outstanding on this purchase order`,
+          );
+        }
+
+        const payment = await tx.supplierPayment.create({
+          data: {
+            organizationId,
+            purchaseOrderId: dto.purchaseOrderId,
+            amount: dto.amount,
+            method: dto.method,
+            paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
+            note: dto.note?.trim(),
+            recordedById: userId,
+            bankAccountId: dto.method === PaymentMethod.CASH ? null : dto.bankAccountId,
+          },
+        });
+
+        await this.postingRules.postSupplierPayment(organizationId, payment.id, tx);
+
+        return payment;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('This payment conflicted with a concurrent payment against the same purchase order, please retry');
       }
-      if (dto.amount > outstanding) {
-        throw new BadRequestException(
-          `Cannot pay ${dto.amount} — only ${outstanding} is outstanding on this purchase order`,
-        );
-      }
-
-      const payment = await tx.supplierPayment.create({
-        data: {
-          organizationId,
-          purchaseOrderId: dto.purchaseOrderId,
-          amount: dto.amount,
-          method: dto.method,
-          paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-          note: dto.note?.trim(),
-          recordedById: userId,
-          bankAccountId: dto.method === PaymentMethod.CASH ? null : dto.bankAccountId,
-        },
-        
-      });
-
-      await this.postingRules.postSupplierPayment(organizationId, payment.id, tx);
-
-      return payment;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  ;
-    
+      throw e;
+    }
   }
 
   // Reverses the journal entry and deletes the row. No PAID/UNPAID status

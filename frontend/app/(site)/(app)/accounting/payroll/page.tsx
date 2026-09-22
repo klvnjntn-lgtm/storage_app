@@ -1,31 +1,24 @@
 // app/accounting/payroll/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Users,
-  Plus,
-  X,
-  Loader2,
-  ChevronDown,
-  ChevronUp,
-  Wallet,
-  Trash2,
-  Send,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { Users, Plus, X, Loader2, ChevronDown, ChevronUp, Wallet, Trash2, Send, SlidersHorizontal, Undo2, Printer } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { toCalendarDateString } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
 }
+// FIX — .toISOString() converts to UTC first, wrong for a ~7-hour window
+// after local midnight in a timezone ahead of UTC. Not just a display
+// bug: this pre-fills the actual documentDate/paidAt submitted on create.
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return toCalendarDateString(new Date());
 }
 
 type Employee = {
@@ -54,7 +47,7 @@ type PayrollRun = {
   periodYear: number;
   payType: 'MONTHLY' | 'WEEKLY';
   documentDate: string;
-  status: 'DRAFT' | 'POSTED' | 'PAID';
+  status: 'DRAFT' | 'POSTED' | 'PAID' | 'VOID';
   _count?: { items: number };
   items?: {
     id: string;
@@ -75,13 +68,21 @@ const STATUS_COLOR: Record<PayrollRun['status'], string> = {
   DRAFT: 'text-gray-600 bg-gray-100 border-gray-200',
   POSTED: 'text-blue-700 bg-blue-50 border-blue-200',
   PAID: 'text-green-700 bg-green-50 border-green-200',
+  VOID: 'text-red-700 bg-red-50 border-red-200',
+};
+
+const STATUS_LABEL_KEY: Record<PayrollRun['status'], string> = {
+  DRAFT: 'accounting.payroll.statusDraft',
+  POSTED: 'accounting.payroll.statusPosted',
+  PAID: 'accounting.payroll.statusPaid',
+  VOID: 'accounting.payroll.statusVoid',
 };
 
 type Tab = 'employees' | 'components' | 'runs';
 
 export default function PayrollPage() {
-  const router = useRouter();
-  const [tab, setTab] = useState<Tab>('runs');
+    const { t } = useLanguage();
+    const [tab, setTab] = useState<Tab>('runs');
 
   return (
     <main
@@ -93,26 +94,19 @@ export default function PayrollPage() {
       }}
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-4xl mx-auto">
-          <button
-            onClick={() => router.push('/accounting')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
+        <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2.5 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Users size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
-              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>Payroll</h1>
-              <p className="text-xs text-gray-500 truncate">Employees, salary components, and payroll runs</p>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('nav.items.payroll')}</h1>
+              <p className="text-xs text-gray-500 truncate">{t('accounting.payroll.subtitle')}</p>
             </div>
           </div>
 
           <div className="flex gap-1.5">
-            {([['runs', 'Runs'], ['employees', 'Employees'], ['components', 'Components']] as [Tab, string][]).map(
+            {([['runs', t('accounting.payroll.tabRuns')], ['employees', t('accounting.payroll.tabEmployees')], ['components', t('accounting.payroll.tabComponents')]] as [Tab, string][]).map(
               ([key, label]) => (
                 <button
                   key={key}
@@ -129,7 +123,7 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {tab === 'runs' && <RunsTab />}
         {tab === 'employees' && <EmployeesTab />}
         {tab === 'components' && <ComponentsTab />}
@@ -141,6 +135,8 @@ export default function PayrollPage() {
 // ---------------------------------------------------------------- Runs ----
 
 function RunsTab() {
+  const { t } = useLanguage();
+  const router = useRouter();
   const [runs, setRuns] = useState<PayrollRun[] | null>(null);
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[] | null>(null);
@@ -149,6 +145,10 @@ function RunsTab() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PayrollRun | null>(null);
+  // FIX — see toggleExpand() below: a ref so the in-flight fetch can
+  // check the LATEST expandedId after it resolves, not the one captured
+  // in its own closure.
+  const expandedIdRef = useRef<string | null>(null);
 
   const [showCreate, setShowCreate] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
@@ -167,6 +167,11 @@ function RunsTab() {
   const [paySaving, setPaySaving] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
 
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidSaving, setVoidSaving] = useState(false);
+  const [voidError, setVoidError] = useState<string | null>(null);
+
   const [actionError, setActionError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
 
@@ -177,12 +182,12 @@ function RunsTab() {
       const res = await apiFetch('/payroll/runs');
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setRuns(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -210,10 +215,18 @@ function RunsTab() {
   async function toggleExpand(run: PayrollRun) {
     if (expandedId === run.id) {
       setExpandedId(null);
+      expandedIdRef.current = null;
       return;
     }
     setExpandedId(run.id);
+    expandedIdRef.current = run.id;
     const res = await apiFetch(`/payroll/runs/${run.id}`);
+    // FIX — without this check, expanding run A (slow), collapsing, then
+    // expanding run B (resolves first) could let A's late response land
+    // after B's and overwrite `detail` with A's data — the render guard
+    // elsewhere (detail.id !== run.id) would then see a mismatch and
+    // strand the already-correctly-loaded B on "Loading..." forever.
+    if (expandedIdRef.current !== run.id) return;
     if (res.ok) setDetail(await res.json());
   }
 
@@ -235,14 +248,14 @@ function RunsTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setCreateError(body?.message ?? `Request failed (${res.status})`);
+        setCreateError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setShowCreate(false);
       setForm((f) => ({ ...f, employeeIds: [] }));
       await loadRuns();
     } catch {
-      setCreateError('Could not reach the server.');
+      setCreateError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setCreateSaving(false);
     }
@@ -255,7 +268,7 @@ function RunsTab() {
       const res = await apiFetch(`/payroll/runs/${id}/post`, { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.message ?? `Request failed (${res.status})`);
+        setActionError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       await loadRuns();
@@ -264,7 +277,7 @@ function RunsTab() {
         if (detailRes.ok) setDetail(await detailRes.json());
       }
     } catch {
-      setActionError('Could not reach the server.');
+      setActionError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setActingId(null);
     }
@@ -277,19 +290,20 @@ function RunsTab() {
       const res = await apiFetch(`/payroll/runs/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.message ?? `Request failed (${res.status})`);
+        setActionError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       if (expandedId === id) setExpandedId(null);
       await loadRuns();
     } catch {
-      setActionError('Could not reach the server.');
+      setActionError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setActingId(null);
     }
   }
 
   function openPayForm(id: string) {
+    setVoidingId(null); // mutually exclusive with the void form, see openVoidForm
     setPayingId(id);
     setPayError(null);
     setPayForm({ paymentMethod: 'TRANSFER', bankAccountId: '', paidAt: todayISO() });
@@ -301,7 +315,7 @@ function RunsTab() {
     if (!payingId) return;
     setPayError(null);
     if (payForm.paymentMethod !== 'CASH' && !payForm.bankAccountId) {
-      setPayError('Choose which bank account this was disbursed from.');
+      setPayError(t('accounting.payroll.chooseDisbursementBankAccount'));
       return;
     }
     setPaySaving(true);
@@ -317,15 +331,55 @@ function RunsTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setPayError(body?.message ?? `Request failed (${res.status})`);
+        setPayError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setPayingId(null);
       await loadRuns();
     } catch {
-      setPayError('Could not reach the server.');
+      setPayError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setPaySaving(false);
+    }
+  }
+
+  function openVoidForm(id: string) {
+    setPayingId(null); // mutually exclusive with the mark-paid form, see openPayForm
+    setVoidingId(id);
+    setVoidError(null);
+    setVoidReason('');
+  }
+
+  async function handleVoid(e: React.FormEvent) {
+    e.preventDefault();
+    if (!voidingId) return;
+    if (!voidReason.trim()) {
+      setVoidError(t('accounting.payroll.reasonRequired'));
+      return;
+    }
+    setVoidError(null);
+    setVoidSaving(true);
+    try {
+      const res = await apiFetch(`/payroll/runs/${voidingId}/void`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: voidReason.trim() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setVoidError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
+        return;
+      }
+      setVoidingId(null);
+      await loadRuns();
+      if (expandedId === voidingId) {
+        const detailRes = await apiFetch(`/payroll/runs/${voidingId}`);
+        if (detailRes.ok) setDetail(await detailRes.json());
+      }
+    } catch {
+      setVoidError(t('accounting.payroll.couldNotReachServer'));
+    } finally {
+      setVoidSaving(false);
     }
   }
 
@@ -347,7 +401,7 @@ function RunsTab() {
           className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
         >
           {showCreate ? <X size={15} strokeWidth={2} /> : <Plus size={15} strokeWidth={2} />}
-          {showCreate ? 'Cancel' : 'New payroll run'}
+          {showCreate ? t('common.cancel') : t('accounting.payroll.newPayrollRun')}
         </button>
       </div>
 
@@ -356,7 +410,7 @@ function RunsTab() {
           {createError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{createError}</p>}
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Month</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.month')}</label>
               <select
                 value={form.periodMonth}
                 onChange={(e) => setForm((f) => ({ ...f, periodMonth: Number(e.target.value) }))}
@@ -368,7 +422,7 @@ function RunsTab() {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Year</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.year')}</label>
               <input
                 type="number"
                 value={form.periodYear}
@@ -377,19 +431,19 @@ function RunsTab() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Pay type</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.payType')}</label>
               <select
                 value={form.payType}
                 onChange={(e) => setForm((f) => ({ ...f, payType: e.target.value as 'MONTHLY' | 'WEEKLY' }))}
                 className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
               >
-                <option value="MONTHLY">Monthly</option>
-                <option value="WEEKLY">Weekly</option>
+                <option value="MONTHLY">{t('accounting.payroll.monthly')}</option>
+                <option value="WEEKLY">{t('accounting.payroll.weekly')}</option>
               </select>
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-gray-600">Document date</label>
+            <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.documentDate')}</label>
             <input
               type="date"
               value={form.documentDate}
@@ -400,13 +454,17 @@ function RunsTab() {
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-gray-600">
-              Employees ({form.employeeIds.length === 0 ? 'all active' : `${form.employeeIds.length} selected`})
+              {t('accounting.payroll.employeesCountLabel', {
+                status: form.employeeIds.length === 0
+                  ? t('accounting.payroll.allActive')
+                  : t('accounting.payroll.selectedCount', { count: form.employeeIds.length }),
+              })}
             </label>
             <div className="border-2 border-gray-300 rounded-md bg-white max-h-40 overflow-y-auto">
               {employees === null ? (
-                <p className="text-xs text-gray-400 p-3">Loading...</p>
+                <p className="text-xs text-gray-400 p-3">{t('common.loading')}</p>
               ) : employees.length === 0 ? (
-                <p className="text-xs text-amber-700 p-3">No active employees yet — add one in the Employees tab first.</p>
+                <p className="text-xs text-amber-700 p-3">{t('accounting.payroll.noActiveEmployeesYet')}</p>
               ) : (
                 employees.map((emp) => (
                   <label key={emp.id} className="flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50">
@@ -430,21 +488,22 @@ function RunsTab() {
             className="self-start inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
             {createSaving && <Loader2 size={14} strokeWidth={2} className="animate-spin" />}
-            {createSaving ? 'Creating...' : 'Create draft run'}
+            {createSaving ? t('accounting.payroll.creating') : t('accounting.payroll.createDraftRun')}
           </button>
         </form>
       )}
 
-      {loading && <p className="text-sm text-gray-500">Loading payroll runs...</p>}
+      {loading && <p className="text-sm text-gray-500">{t('accounting.payroll.loadingRuns')}</p>}
 
       {!loading && runs && runs.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-8">No payroll runs yet.</p>
+        <p className="text-sm text-gray-400 text-center py-8">{t('accounting.payroll.noRunsYet')}</p>
       )}
 
       <div className="flex flex-col gap-2">
         {(runs ?? []).map((run) => {
           const isExpanded = expandedId === run.id;
           const isPaying = payingId === run.id;
+          const isVoiding = voidingId === run.id;
           const isActing = actingId === run.id;
 
           return (
@@ -455,13 +514,20 @@ function RunsTab() {
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${STATUS_COLOR[run.status]}`}>
-                    {run.status}
+                    {t(STATUS_LABEL_KEY[run.status])}
                   </span>
                   <span className="text-sm font-semibold">
                     {MONTH_NAMES[run.periodMonth - 1]} {run.periodYear}
                   </span>
-                  <span className="text-xs text-gray-400">{run.payType.toLowerCase()}</span>
-                  {run._count && <span className="text-xs text-gray-400">· {run._count.items} employee{run._count.items === 1 ? '' : 's'}</span>}
+                  <span className="text-xs text-gray-400">{(run.payType === 'MONTHLY' ? t('accounting.payroll.monthly') : t('accounting.payroll.weekly')).toLowerCase()}</span>
+                  {run._count && (
+                    <span className="text-xs text-gray-400">
+                      ·{' '}
+                      {run._count.items === 1
+                        ? t('accounting.payroll.employeeCountSingular', { count: run._count.items })
+                        : t('accounting.payroll.employeeCountPlural', { count: run._count.items })}
+                    </span>
+                  )}
                 </div>
                 {isExpanded ? <ChevronUp size={16} strokeWidth={2} className="text-gray-400 shrink-0" /> : <ChevronDown size={16} strokeWidth={2} className="text-gray-400 shrink-0" />}
               </button>
@@ -469,7 +535,7 @@ function RunsTab() {
               {isExpanded && (
                 <div className="border-t border-gray-100 px-3 py-3">
                   {!detail || detail.id !== run.id ? (
-                    <p className="text-xs text-gray-400">Loading...</p>
+                    <p className="text-xs text-gray-400">{t('common.loading')}</p>
                   ) : (
                     <>
                       <div className="flex flex-col gap-1.5 mb-3">
@@ -477,9 +543,18 @@ function RunsTab() {
                           <div key={item.id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 last:border-b-0">
                             <span className="text-gray-700">{item.employee.name}</span>
                             <div className="flex items-center gap-3 text-right">
-                              <span className="text-gray-400">gross {formatIDR(Number(item.grossPay))}</span>
+                              <span className="text-gray-400">{t('accounting.payroll.grossAmount', { amount: formatIDR(Number(item.grossPay)) })}</span>
                               <span className="text-gray-400">−{formatIDR(Number(item.totalDeductions))}</span>
                               <span className="font-semibold text-gray-800 w-24">{formatIDR(Number(item.netPay))}</span>
+                              {(run.status === 'POSTED' || run.status === 'PAID') && (
+                                <button
+                                  onClick={() => router.push(`/accounting/payroll/runs/${run.id}/payslip/${item.id}`)}
+                                  title={t('accounting.payroll.payslip')}
+                                  className="text-gray-400 hover:text-blue-700 shrink-0"
+                                >
+                                  <Printer size={13} strokeWidth={2} />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -494,7 +569,7 @@ function RunsTab() {
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
                             >
                               {isActing ? <Loader2 size={12} strokeWidth={2} className="animate-spin" /> : <Send size={12} strokeWidth={2} />}
-                              Post
+                              {t('accounting.payroll.post')}
                             </button>
                             <button
                               onClick={() => handleDelete(run.id)}
@@ -502,39 +577,80 @@ function RunsTab() {
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 disabled:opacity-60 transition-colors"
                             >
                               <Trash2 size={12} strokeWidth={2} />
-                              Delete
+                              {t('common.delete')}
                             </button>
                           </>
                         )}
-                        {run.status === 'POSTED' && !isPaying && (
+                        {run.status === 'POSTED' && !isPaying && !isVoiding && (
                           <button
                             onClick={() => openPayForm(run.id)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors"
                           >
                             <Wallet size={12} strokeWidth={2} />
-                            Mark paid
+                            {t('accounting.payroll.markPaid')}
+                          </button>
+                        )}
+                        {(run.status === 'POSTED' || run.status === 'PAID') && !isVoiding && (
+                          <button
+                            onClick={() => openVoidForm(run.id)}
+                            disabled={isActing}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-red-200 text-red-600 text-xs font-semibold hover:bg-red-50 disabled:opacity-60 transition-colors"
+                          >
+                            <Undo2 size={12} strokeWidth={2} />
+                            {t('accounting.payroll.void')}
                           </button>
                         )}
                       </div>
+
+                      {isVoiding && (
+                        <form onSubmit={handleVoid} className="mt-3 pt-3 border-t border-gray-100 flex flex-col gap-2.5">
+                          {voidError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{voidError}</p>}
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-semibold text-gray-600">
+                              {t('accounting.payroll.voidReasonLabel')}
+                            </label>
+                            <input
+                              type="text"
+                              value={voidReason}
+                              onChange={(e) => setVoidReason(e.target.value)}
+                              placeholder={t('accounting.payroll.voidReasonPlaceholder')}
+                              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-red-500 bg-white"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="submit"
+                              disabled={voidSaving}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-60 transition-colors"
+                            >
+                              {voidSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
+                              {t('accounting.payroll.confirmVoid')}
+                            </button>
+                            <button type="button" onClick={() => setVoidingId(null)} className="text-xs font-semibold text-gray-500 px-2">
+                              {t('common.cancel')}
+                            </button>
+                          </div>
+                        </form>
+                      )}
 
                       {isPaying && (
                         <form onSubmit={handleMarkPaid} className="mt-3 pt-3 border-t border-gray-100 flex flex-col gap-2.5">
                           {payError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{payError}</p>}
                           <div className="grid grid-cols-2 gap-2">
                             <div className="flex flex-col gap-1">
-                              <label className="text-[11px] font-semibold text-gray-600">Method</label>
+                              <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.method')}</label>
                               <select
                                 value={payForm.paymentMethod}
                                 onChange={(e) => setPayForm((f) => ({ ...f, paymentMethod: e.target.value, bankAccountId: '' }))}
                                 className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
                               >
-                                <option value="TRANSFER">Transfer</option>
-                                <option value="CASH">Cash</option>
-                                <option value="OTHER">Other</option>
+                                <option value="TRANSFER">{t('accounting.expenses.methodTransfer')}</option>
+                                <option value="CASH">{t('accounting.expenses.methodCash')}</option>
+                                <option value="OTHER">{t('accounting.expenses.methodOther')}</option>
                               </select>
                             </div>
                             <div className="flex flex-col gap-1">
-                              <label className="text-[11px] font-semibold text-gray-600">Paid on</label>
+                              <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
                               <input
                                 type="date"
                                 value={payForm.paidAt}
@@ -545,18 +661,18 @@ function RunsTab() {
                           </div>
                           {payForm.paymentMethod !== 'CASH' && (
                             <div className="flex flex-col gap-1">
-                              <label className="text-[11px] font-semibold text-gray-600">Bank account</label>
+                              <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.bankAccount')}</label>
                               {bankAccounts === null ? (
-                                <p className="text-xs text-gray-400">Loading...</p>
+                                <p className="text-xs text-gray-400">{t('common.loading')}</p>
                               ) : bankAccounts.length === 0 ? (
-                                <p className="text-xs text-amber-700">No bank accounts set up yet.</p>
+                                <p className="text-xs text-amber-700">{t('accounting.expenses.noBankAccountsYet')}</p>
                               ) : (
                                 <select
                                   value={payForm.bankAccountId}
                                   onChange={(e) => setPayForm((f) => ({ ...f, bankAccountId: e.target.value }))}
                                   className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
                                 >
-                                  <option value="">Choose...</option>
+                                  <option value="">{t('accounting.expenses.chooseEllipsis')}</option>
                                   {bankAccounts.map((b) => (
                                     <option key={b.id} value={b.id}>{b.bankName} •••{b.accountNumber.slice(-4)}</option>
                                   ))}
@@ -571,10 +687,10 @@ function RunsTab() {
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
                             >
                               {paySaving && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
-                              Confirm disbursement
+                              {t('accounting.payroll.confirmDisbursement')}
                             </button>
                             <button type="button" onClick={() => setPayingId(null)} className="text-xs font-semibold text-gray-500 px-2">
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         </form>
@@ -594,6 +710,7 @@ function RunsTab() {
 // ----------------------------------------------------------- Employees ----
 
 function EmployeesTab() {
+  const { t } = useLanguage();
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [components, setComponents] = useState<SalaryComponent[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -605,6 +722,10 @@ function EmployeesTab() {
   const [form, setForm] = useState({ name: '', position: '', baseSalary: '' });
 
   const [managingId, setManagingId] = useState<string | null>(null);
+  // FIX — see openManage() below: a ref, not state, so the in-flight
+  // fetch can check the LATEST managingId (not the one captured in its
+  // own closure) after it resolves.
+  const managingIdRef = useRef<string | null>(null);
   const [selected, setSelected] = useState<Record<string, { checked: boolean; amount: string; percentage: string }>>({});
   const [compSaving, setCompSaving] = useState(false);
   const [compError, setCompError] = useState<string | null>(null);
@@ -622,12 +743,12 @@ function EmployeesTab() {
       const res = await apiFetch('/payroll/employees');
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setEmployees(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -648,11 +769,11 @@ function EmployeesTab() {
     setFormError(null);
     const baseSalary = Number(form.baseSalary);
     if (!form.name.trim()) {
-      setFormError('Name is required.');
+      setFormError(t('accounting.payroll.nameRequired'));
       return;
     }
     if (!baseSalary || baseSalary <= 0) {
-      setFormError('Enter a base salary greater than zero.');
+      setFormError(t('accounting.payroll.enterBaseSalaryGreaterThanZero'));
       return;
     }
     setSaving(true);
@@ -664,14 +785,14 @@ function EmployeesTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setFormError(body?.message ?? `Request failed (${res.status})`);
+        setFormError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setForm({ name: '', position: '', baseSalary: '' });
       setShowAdd(false);
       await loadEmployees();
     } catch {
-      setFormError('Could not reach the server.');
+      setFormError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setSaving(false);
     }
@@ -688,11 +809,11 @@ function EmployeesTab() {
     setEditError(null);
     const baseSalary = Number(editForm.baseSalary);
     if (!editForm.name.trim()) {
-      setEditError('Name is required.');
+      setEditError(t('accounting.payroll.nameRequired'));
       return;
     }
     if (!baseSalary || baseSalary <= 0) {
-      setEditError('Enter a base salary greater than zero.');
+      setEditError(t('accounting.payroll.enterBaseSalaryGreaterThanZero'));
       return;
     }
     setEditSaving(true);
@@ -708,13 +829,13 @@ function EmployeesTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setEditError(body?.message ?? `Request failed (${res.status})`);
+        setEditError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setEditingId(null);
       await loadEmployees();
     } catch {
-      setEditError('Could not reach the server.');
+      setEditError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setEditSaving(false);
     }
@@ -725,19 +846,19 @@ function EmployeesTab() {
   // historical PayrollItem rows still reference this employee and must
   // keep displaying their name correctly.
   async function handleArchive(emp: Employee) {
-    if (!confirm(`Archive ${emp.name}? They'll no longer appear as an option for new payroll runs.`)) return;
+    if (!confirm(t('accounting.payroll.archiveConfirm', { name: emp.name }))) return;
     setArchivingId(emp.id);
     setError(null);
     try {
       const res = await apiFetch(`/payroll/employees/${emp.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       await loadEmployees();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setArchivingId(null);
     }
@@ -747,12 +868,22 @@ function EmployeesTab() {
     setEditingId(null); // mutually exclusive with edit form, see openEdit
     if (managingId === emp.id) {
       setManagingId(null);
+      managingIdRef.current = null;
       return;
     }
     setManagingId(emp.id);
+    managingIdRef.current = emp.id;
     setCompError(null);
     const res = await apiFetch(`/payroll/employees/${emp.id}`);
     const full: Employee = res.ok ? await res.json() : emp;
+    // FIX — without this check, closing employee A's panel and opening
+    // B's before A's slower fetch resolves let A's response land after
+    // B's and silently overwrite `selected` with A's data while the
+    // panel still showed B's name — a real risk of saving A's component
+    // configuration onto B's employee record. `selected` is a single
+    // shared object keyed only by componentId, not by employee, so this
+    // is the only thing preventing that.
+    if (managingIdRef.current !== emp.id) return;
     const initial: Record<string, { checked: boolean; amount: string; percentage: string }> = {};
     for (const c of components ?? []) {
       const existing = full.salaryComponents?.find((sc) => sc.componentId === c.id);
@@ -783,12 +914,12 @@ function EmployeesTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setCompError(body?.message ?? `Request failed (${res.status})`);
+        setCompError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setManagingId(null);
     } catch {
-      setCompError('Could not reach the server.');
+      setCompError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setCompSaving(false);
     }
@@ -804,7 +935,7 @@ function EmployeesTab() {
           className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
         >
           {showAdd ? <X size={15} strokeWidth={2} /> : <Plus size={15} strokeWidth={2} />}
-          {showAdd ? 'Cancel' : 'New employee'}
+          {showAdd ? t('common.cancel') : t('accounting.payroll.newEmployee')}
         </button>
       </div>
 
@@ -813,7 +944,7 @@ function EmployeesTab() {
           {formError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{formError}</p>}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Name</label>
+              <label className="text-xs font-semibold text-gray-600">{t('common.name')}</label>
               <input
                 type="text"
                 value={form.name}
@@ -822,7 +953,7 @@ function EmployeesTab() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Position (optional)</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.positionOptional')}</label>
               <input
                 type="text"
                 value={form.position}
@@ -832,7 +963,7 @@ function EmployeesTab() {
             </div>
           </div>
           <div className="flex flex-col gap-1 w-full sm:w-1/2">
-            <label className="text-xs font-semibold text-gray-600">Base salary (Rp / month)</label>
+            <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.baseSalaryPerMonth')}</label>
             <input
               type="number"
               min="0"
@@ -847,14 +978,14 @@ function EmployeesTab() {
             className="self-start inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
             {saving && <Loader2 size={14} strokeWidth={2} className="animate-spin" />}
-            {saving ? 'Adding...' : 'Add employee'}
+            {saving ? t('accounting.payroll.adding') : t('accounting.payroll.addEmployee')}
           </button>
         </form>
       )}
 
-      {loading && <p className="text-sm text-gray-500">Loading employees...</p>}
+      {loading && <p className="text-sm text-gray-500">{t('accounting.payroll.loadingEmployees')}</p>}
       {!loading && employees && employees.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-8">No employees yet.</p>
+        <p className="text-sm text-gray-400 text-center py-8">{t('accounting.payroll.noEmployeesYet')}</p>
       )}
 
       <div className="flex flex-col gap-2">
@@ -863,7 +994,7 @@ function EmployeesTab() {
             <div className="p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className={`text-sm font-semibold ${!emp.isActive ? 'text-gray-400 line-through' : ''}`}>{emp.name}</p>
-                <p className="text-xs text-gray-400">{emp.position ?? 'No position set'}</p>
+                <p className="text-xs text-gray-400">{emp.position ?? t('accounting.payroll.noPositionSet')}</p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-sm font-bold">{formatIDR(Number(emp.baseSalary))}</p>
@@ -872,14 +1003,14 @@ function EmployeesTab() {
                     onClick={() => openEdit(emp)}
                     className="text-[11px] font-semibold text-blue-700 hover:text-blue-800"
                   >
-                    Edit
+                    {t('common.edit')}
                   </button>
                   <button
                     onClick={() => openManage(emp)}
                     className="text-[11px] font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1"
                   >
                     <SlidersHorizontal size={11} strokeWidth={2} />
-                    Components
+                    {t('accounting.payroll.tabComponents')}
                   </button>
                   {emp.isActive && (
                     <button
@@ -887,7 +1018,7 @@ function EmployeesTab() {
                       disabled={archivingId === emp.id}
                       className="text-[11px] font-semibold text-gray-400 hover:text-red-600 disabled:opacity-50"
                     >
-                      {archivingId === emp.id ? '...' : 'Archive'}
+                      {archivingId === emp.id ? '...' : t('accounting.payroll.archive')}
                     </button>
                   )}
                 </div>
@@ -899,7 +1030,7 @@ function EmployeesTab() {
                 {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{editError}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[11px] font-semibold text-gray-600">Name</label>
+                    <label className="text-[11px] font-semibold text-gray-600">{t('common.name')}</label>
                     <input
                       type="text"
                       value={editForm.name}
@@ -908,7 +1039,7 @@ function EmployeesTab() {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[11px] font-semibold text-gray-600">Position</label>
+                    <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.position')}</label>
                     <input
                       type="text"
                       value={editForm.position}
@@ -918,7 +1049,7 @@ function EmployeesTab() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-1 w-full sm:w-1/2">
-                  <label className="text-[11px] font-semibold text-gray-600">Base salary (Rp)</label>
+                  <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.baseSalaryRp')}</label>
                   <input
                     type="number"
                     min="0"
@@ -934,10 +1065,10 @@ function EmployeesTab() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
                   >
                     {editSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
-                    Save
+                    {t('common.save')}
                   </button>
                   <button type="button" onClick={() => setEditingId(null)} className="text-xs font-semibold text-gray-500 px-2">
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -947,7 +1078,7 @@ function EmployeesTab() {
               <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60">
                 {compError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2 mb-2">{compError}</p>}
                 {!components || components.length === 0 ? (
-                  <p className="text-xs text-amber-700">No salary components defined yet — add some in the Components tab.</p>
+                  <p className="text-xs text-amber-700">{t('accounting.payroll.noComponentsYetHint')}</p>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {components.map((c) => {
@@ -963,12 +1094,12 @@ function EmployeesTab() {
                             className="accent-blue-600 shrink-0"
                           />
                           <span className="flex-1 min-w-0 truncate">
-                            {c.name} <span className="text-gray-400">({c.type.toLowerCase()})</span>
+                            {c.name} <span className="text-gray-400">({(c.type === 'ALLOWANCE' ? t('accounting.payroll.allowance') : t('accounting.payroll.deduction')).toLowerCase()})</span>
                           </span>
                           {state.checked && (
                             <input
                               type="number"
-                              placeholder={c.isFixed ? `default ${c.defaultAmount ?? 0}` : `default ${c.defaultPercentage ?? 0}%`}
+                              placeholder={c.isFixed ? t('accounting.payroll.defaultAmountPlaceholder', { amount: c.defaultAmount ?? 0 }) : t('accounting.payroll.defaultPercentagePlaceholder', { percentage: c.defaultPercentage ?? 0 })}
                               value={c.isFixed ? state.amount : state.percentage}
                               onChange={(e) =>
                                 setSelected((s) => ({
@@ -990,7 +1121,7 @@ function EmployeesTab() {
                       className="self-start mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
                     >
                       {compSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
-                      Save components
+                      {t('accounting.payroll.saveComponents')}
                     </button>
                   </div>
                 )}
@@ -1006,6 +1137,7 @@ function EmployeesTab() {
 // ---------------------------------------------------------- Components ----
 
 function ComponentsTab() {
+  const { t } = useLanguage();
   const [components, setComponents] = useState<SalaryComponent[] | null>(null);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1046,12 +1178,12 @@ function ComponentsTab() {
       const res = await apiFetch('/payroll/components');
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setComponents(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -1082,15 +1214,15 @@ function ComponentsTab() {
   async function handleSaveEdit(id: string) {
     setEditError(null);
     if (!editForm.name.trim()) {
-      setEditError('Name is required.');
+      setEditError(t('accounting.payroll.nameRequired'));
       return;
     }
     if (editForm.isFixed && !editForm.defaultAmount) {
-      setEditError('Enter a default amount for a fixed component.');
+      setEditError(t('accounting.payroll.enterDefaultAmountFixed'));
       return;
     }
     if (!editForm.isFixed && !editForm.defaultPercentage) {
-      setEditError('Enter a default percentage for a percentage-based component.');
+      setEditError(t('accounting.payroll.enterDefaultPercentage'));
       return;
     }
     setEditSaving(true);
@@ -1108,13 +1240,13 @@ function ComponentsTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setEditError(body?.message ?? `Request failed (${res.status})`);
+        setEditError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setEditingId(null);
       await loadComponents();
     } catch {
-      setEditError('Could not reach the server.');
+      setEditError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setEditSaving(false);
     }
@@ -1124,15 +1256,15 @@ function ComponentsTab() {
     e.preventDefault();
     setFormError(null);
     if (!form.name.trim()) {
-      setFormError('Name is required.');
+      setFormError(t('accounting.payroll.nameRequired'));
       return;
     }
     if (form.isFixed && !form.defaultAmount) {
-      setFormError('Enter a default amount for a fixed component.');
+      setFormError(t('accounting.payroll.enterDefaultAmountFixed'));
       return;
     }
     if (!form.isFixed && !form.defaultPercentage) {
-      setFormError('Enter a default percentage for a percentage-based component.');
+      setFormError(t('accounting.payroll.enterDefaultPercentage'));
       return;
     }
     setSaving(true);
@@ -1151,14 +1283,14 @@ function ComponentsTab() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setFormError(body?.message ?? `Request failed (${res.status})`);
+        setFormError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
       setForm({ name: '', type: 'ALLOWANCE', isFixed: true, defaultAmount: '', defaultPercentage: '', accountId: '' });
       setShowAdd(false);
       await loadComponents();
     } catch {
-      setFormError('Could not reach the server.');
+      setFormError(t('accounting.payroll.couldNotReachServer'));
     } finally {
       setSaving(false);
     }
@@ -1174,7 +1306,7 @@ function ComponentsTab() {
           className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
         >
           {showAdd ? <X size={15} strokeWidth={2} /> : <Plus size={15} strokeWidth={2} />}
-          {showAdd ? 'Cancel' : 'New component'}
+          {showAdd ? t('common.cancel') : t('accounting.payroll.newComponent')}
         </button>
       </div>
 
@@ -1183,24 +1315,24 @@ function ComponentsTab() {
           {formError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{formError}</p>}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Name</label>
+              <label className="text-xs font-semibold text-gray-600">{t('common.name')}</label>
               <input
                 type="text"
-                placeholder="e.g. BPJS Kesehatan"
+                placeholder={t('accounting.payroll.componentNamePlaceholder')}
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Type</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.type')}</label>
               <select
                 value={form.type}
                 onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as 'ALLOWANCE' | 'DEDUCTION', accountId: '' }))}
                 className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
               >
-                <option value="ALLOWANCE">Allowance</option>
-                <option value="DEDUCTION">Deduction</option>
+                <option value="ALLOWANCE">{t('accounting.payroll.allowance')}</option>
+                <option value="DEDUCTION">{t('accounting.payroll.deduction')}</option>
               </select>
             </div>
           </div>
@@ -1213,7 +1345,7 @@ function ComponentsTab() {
                 onChange={() => setForm((f) => ({ ...f, isFixed: true }))}
                 className="accent-blue-600"
               />
-              Fixed amount
+              {t('accounting.payroll.fixedAmount')}
             </label>
             <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
               <input
@@ -1222,13 +1354,13 @@ function ComponentsTab() {
                 onChange={() => setForm((f) => ({ ...f, isFixed: false }))}
                 className="accent-blue-600"
               />
-              % of base salary
+              {t('accounting.payroll.percentOfBaseSalary')}
             </label>
           </div>
 
           {form.isFixed ? (
             <div className="flex flex-col gap-1 w-full sm:w-1/2">
-              <label className="text-xs font-semibold text-gray-600">Default amount (Rp)</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.defaultAmountRp')}</label>
               <input
                 type="number"
                 min="0"
@@ -1239,7 +1371,7 @@ function ComponentsTab() {
             </div>
           ) : (
             <div className="flex flex-col gap-1 w-full sm:w-1/2">
-              <label className="text-xs font-semibold text-gray-600">Default percentage</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.defaultPercentage')}</label>
               <input
                 type="number"
                 min="0"
@@ -1254,19 +1386,19 @@ function ComponentsTab() {
 
           {form.type === 'DEDUCTION' && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Payable account (optional)</label>
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.payableAccountOptional')}</label>
               <select
                 value={form.accountId}
                 onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))}
                 className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
               >
-                <option value="">Payroll Deductions Payable (default)</option>
+                <option value="">{t('accounting.payroll.payrollDeductionsPayableDefault')}</option>
                 {liabilityAccounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.code} {a.name}</option>
                 ))}
               </select>
               <p className="text-[11px] text-gray-400">
-                Route this deduction to its own liability account (e.g. a specific BPJS or PPh21 Payable) instead of the generic default.
+                {t('accounting.payroll.payableAccountHint')}
               </p>
             </div>
           )}
@@ -1277,14 +1409,14 @@ function ComponentsTab() {
             className="self-start inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
             {saving && <Loader2 size={14} strokeWidth={2} className="animate-spin" />}
-            {saving ? 'Adding...' : 'Add component'}
+            {saving ? t('accounting.payroll.adding') : t('accounting.payroll.addComponent')}
           </button>
         </form>
       )}
 
-      {loading && <p className="text-sm text-gray-500">Loading components...</p>}
+      {loading && <p className="text-sm text-gray-500">{t('accounting.payroll.loadingComponents')}</p>}
       {!loading && components && components.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-8">No salary components yet.</p>
+        <p className="text-sm text-gray-400 text-center py-8">{t('accounting.payroll.noComponentsYet')}</p>
       )}
 
       <div className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
@@ -1294,7 +1426,7 @@ function ComponentsTab() {
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{c.name}</p>
                 <p className="text-xs text-gray-400">
-                  {c.type === 'ALLOWANCE' ? 'Allowance' : 'Deduction'} ·{' '}
+                  {c.type === 'ALLOWANCE' ? t('accounting.payroll.allowance') : t('accounting.payroll.deduction')} ·{' '}
                   {c.isFixed ? formatIDR(Number(c.defaultAmount ?? 0)) : `${c.defaultPercentage ?? 0}%`}
                   {c.account && ` · ${c.account.code} ${c.account.name}`}
                 </p>
@@ -1303,7 +1435,7 @@ function ComponentsTab() {
                 onClick={() => (editingId === c.id ? setEditingId(null) : openEdit(c))}
                 className="text-[11px] font-semibold text-blue-700 hover:text-blue-800 shrink-0"
               >
-                {editingId === c.id ? 'Cancel' : 'Edit'}
+                {editingId === c.id ? t('common.cancel') : t('common.edit')}
               </button>
             </div>
 
@@ -1311,7 +1443,7 @@ function ComponentsTab() {
               <div className="px-4 pb-3 flex flex-col gap-2.5 bg-gray-50/60 pt-1">
                 {editError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{editError}</p>}
                 <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-semibold text-gray-600">Name</label>
+                  <label className="text-[11px] font-semibold text-gray-600">{t('common.name')}</label>
                   <input
                     type="text"
                     value={editForm.name}
@@ -1322,16 +1454,16 @@ function ComponentsTab() {
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-600">
                     <input type="radio" checked={editForm.isFixed} onChange={() => setEditForm((f) => ({ ...f, isFixed: true }))} className="accent-blue-600" />
-                    Fixed amount
+                    {t('accounting.payroll.fixedAmount')}
                   </label>
                   <label className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-600">
                     <input type="radio" checked={!editForm.isFixed} onChange={() => setEditForm((f) => ({ ...f, isFixed: false }))} className="accent-blue-600" />
-                    % of base salary
+                    {t('accounting.payroll.percentOfBaseSalary')}
                   </label>
                 </div>
                 {editForm.isFixed ? (
                   <div className="flex flex-col gap-1 w-full sm:w-1/2">
-                    <label className="text-[11px] font-semibold text-gray-600">Default amount (Rp)</label>
+                    <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.defaultAmountRp')}</label>
                     <input
                       type="number"
                       min="0"
@@ -1342,7 +1474,7 @@ function ComponentsTab() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1 w-full sm:w-1/2">
-                    <label className="text-[11px] font-semibold text-gray-600">Default percentage</label>
+                    <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.defaultPercentage')}</label>
                     <input
                       type="number"
                       min="0"
@@ -1356,13 +1488,13 @@ function ComponentsTab() {
                 )}
                 {c.type === 'DEDUCTION' && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-[11px] font-semibold text-gray-600">Payable account</label>
+                    <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.payableAccount')}</label>
                     <select
                       value={editForm.accountId}
                       onChange={(e) => setEditForm((f) => ({ ...f, accountId: e.target.value }))}
                       className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
                     >
-                      <option value="">Payroll Deductions Payable (default)</option>
+                      <option value="">{t('accounting.payroll.payrollDeductionsPayableDefault')}</option>
                       {liabilityAccounts.map((a) => (
                         <option key={a.id} value={a.id}>{a.code} {a.name}</option>
                       ))}
@@ -1375,7 +1507,7 @@ function ComponentsTab() {
                   className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors"
                 >
                   {editSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
-                  Save
+                  {t('common.save')}
                 </button>
               </div>
             )}

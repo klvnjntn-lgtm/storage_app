@@ -1,11 +1,10 @@
 // app/(app)/vehicles/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
 import {
-  ArrowLeft,
   Car,
   Plus,
   RotateCcw,
@@ -20,7 +19,9 @@ import {
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { parseCalendarDate } from '@/lib/dates';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -84,8 +85,8 @@ function displayDateFor(inv: VehicleInvoice): Date {
 
 // A single line of display text for an invoice item — product name if it's
 // a stocked product, otherwise the free-text service description.
-function itemLabel(item: VehicleInvoiceItem): string {
-  return item.product?.name ?? item.description ?? 'Item';
+function itemLabel(item: VehicleInvoiceItem, t: (key: string) => string): string {
+  return item.product?.name ?? item.description ?? t('workshop.vehicleDetail.itemLabel');
 }
 
 // The whole point of this page per the customer's ask ("ganti barang apa
@@ -100,12 +101,13 @@ function itemLabel(item: VehicleInvoiceItem): string {
 function itemsToShow(
   items: VehicleInvoiceItem[],
   searchQuery: string,
+  t: (key: string) => string,
 ): { lines: string[]; overflow: number } {
-  if (items.length === 0) return { lines: ['No items recorded'], overflow: 0 };
+  if (items.length === 0) return { lines: [t('workshop.vehicleDetail.noItemsRecorded')], overflow: 0 };
 
   const q = searchQuery.trim().toLowerCase();
   const labels = items.map((item) => {
-    const label = itemLabel(item);
+    const label = itemLabel(item, t);
     return item.quantity > 1 ? `${item.quantity}× ${label}` : label;
   });
 
@@ -124,16 +126,18 @@ function itemsToShow(
 // Whether an invoice matches the search query — checked against the
 // invoice number itself (e.g. "ATL-20002") OR any of its item labels
 // (product name / service description). Either one is enough to match.
-function invoiceMatchesSearch(inv: VehicleInvoice, q: string): boolean {
+function invoiceMatchesSearch(inv: VehicleInvoice, q: string, t: (key: string) => string): boolean {
   if (!q) return true;
   const invoiceNumberMatch = inv.invoiceNumber?.toLowerCase().includes(q) ?? false;
   if (invoiceNumberMatch) return true;
-  return inv.items.some((item) => itemLabel(item).toLowerCase().includes(q));
+  return inv.items.some((item) => itemLabel(item, t).toLowerCase().includes(q));
 }
 
 export default function VehicleDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [vehicle, setVehicle] = useState<VehicleDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -144,14 +148,26 @@ export default function VehicleDetailPage() {
   // done to this car" view actually needs: a parts/services/invoice#
   // text search and a year filter. Payment/financial detail now lives
   // inside each invoice, not on this page.
-  const [yearFilter, setYearFilter] = useState<'ALL' | string>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'ISSUED'>('ALL');
-  const [itemSearch, setItemSearch] = useState('');
+  // Seeded from the URL so pressing the browser's Back button from an
+  // invoice opened out of this list restores the same filters/page.
+  const [yearFilter, setYearFilter] = useState<'ALL' | string>(() => getInitialParam('year', 'ALL'));
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'ISSUED'>(() =>
+    getInitialParam('status', 'ALL')
+  );
+  const [itemSearch, setItemSearch] = useState<string>(() => getInitialParam('itemSearch', ''));
 
   // Pagination — client-side, since /vehicles/:id returns the full
   // invoice list in one response rather than a paged one like /invoices.
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', PAGE_SIZE_DEFAULT));
+
+  useSyncQueryParams({
+    year: yearFilter !== 'ALL' ? yearFilter : null,
+    status: statusFilter !== 'ALL' ? statusFilter : null,
+    itemSearch: itemSearch || null,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== PAGE_SIZE_DEFAULT ? pageSize : null,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -162,13 +178,13 @@ export default function VehicleDetailPage() {
         const res = await apiFetch(`/vehicles/${params.id}`);
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          if (!cancelled) setError(body?.message ?? `Failed to load vehicle (${res.status})`);
+          if (!cancelled) setError(body?.message ?? t('workshop.vehicleDetail.loadFailed', { status: res.status }));
           return;
         }
         const data = await res.json();
         if (!cancelled) setVehicle(data);
       } catch {
-        if (!cancelled) setError('Could not reach the server.');
+        if (!cancelled) setError(t('workshop.vehicleDetail.serverError'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -177,6 +193,7 @@ export default function VehicleDetailPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
   // Lifetime service stats — deliberately NOT affected by the filter pills
@@ -218,13 +235,20 @@ export default function VehicleDetailPage() {
   const visibleInvoices = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
     if (!q) return statusAndYearFiltered;
-    return statusAndYearFiltered.filter((inv) => invoiceMatchesSearch(inv, q));
-  }, [statusAndYearFiltered, itemSearch]);
+    return statusAndYearFiltered.filter((inv) => invoiceMatchesSearch(inv, q, t));
+  }, [statusAndYearFiltered, itemSearch, t]);
 
   // Any filter change invalidates the current page — land back on page 1
   // instead of showing a stale, possibly out-of-range page. Deliberately
-  // excludes `page` itself, same as the invoices list page.
+  // excludes `page` itself, same as the invoices list page. Skips its own
+  // first run too, or a `page` restored from the URL (e.g. via the
+  // browser's Back button) would get clobbered back to 1 on mount.
+  const isFirstPageResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstPageResetRef.current) {
+      isFirstPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [statusFilter, yearFilter, itemSearch, pageSize]);
 
@@ -262,14 +286,6 @@ export default function VehicleDetailPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => (vehicle ? router.push(`/customers/${vehicle.customer.id}`) : router.push('/customers'))}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md max-w-full transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} className="shrink-0" />
-            <span className="truncate">Back to {vehicle?.customer.name ?? 'Customer'}</span>
-          </button>
-
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -277,13 +293,15 @@ export default function VehicleDetailPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  {vehicle?.plateNumber ?? 'Vehicle'}
+                  {vehicle?.plateNumber ?? t('workshop.vehicleDetail.fallbackTitle')}
                 </h1>
                 {vehicle && (
                   <p className="text-xs text-gray-500">
                     {vehicle.vehicleModel} · {vehicle.customer.name}
-                    {vehicle.vin ? ` · VIN ${vehicle.vin}` : ''}
-                    {vehicle.odometer != null ? ` · Latest Odometer ${vehicle.odometer.toLocaleString('id-ID')} km` : ''}
+                    {vehicle.vin ? ` · ${t('workshop.vehicleDetail.vinSuffix', { vin: vehicle.vin })}` : ''}
+                    {vehicle.odometer != null
+                      ? ` · ${t('workshop.vehicleDetail.latestOdometerSuffix', { value: vehicle.odometer.toLocaleString(dateLocale) })}`
+                      : ''}
                   </p>
                 )}
               </div>
@@ -299,7 +317,7 @@ export default function VehicleDetailPage() {
                 className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
               >
                 <Plus size={16} strokeWidth={2} />
-                New invoice
+                {t('workshop.vehicleDetail.newInvoice')}
               </button>
             )}
           </div>
@@ -307,7 +325,7 @@ export default function VehicleDetailPage() {
       </div>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500">{t('workshop.vehicleDetail.loading')}</p>}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
@@ -319,31 +337,31 @@ export default function VehicleDetailPage() {
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <Wrench size={11} strokeWidth={2} />
-                  Total visits
+                  {t('workshop.vehicleDetail.totalVisits')}
                 </p>
                 <p className="font-bold text-sm sm:text-base">{serviceStats.totalVisits}</p>
               </div>
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <CalendarCheck size={11} strokeWidth={2} />
-                  Last service
+                  {t('workshop.vehicleDetail.lastService')}
                 </p>
                 <p className="font-bold text-sm sm:text-base truncate">
-                  {serviceStats.lastServiceDate ? serviceStats.lastServiceDate.toLocaleDateString('id-ID') : '—'}
+                  {serviceStats.lastServiceDate ? serviceStats.lastServiceDate.toLocaleDateString(dateLocale) : '—'}
                 </p>
               </div>
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <Gauge size={11} strokeWidth={2} />
-                  Latest odometer
+                  {t('workshop.vehicleDetail.latestOdometer')}
                 </p>
                 <p className="font-bold text-sm sm:text-base truncate">
-                  {vehicle.odometer != null ? `${vehicle.odometer.toLocaleString('id-ID')} km` : '—'}
+                  {vehicle.odometer != null ? t('workshop.vehicleDetail.km', { value: vehicle.odometer.toLocaleString(dateLocale) }) : '—'}
                 </p>
               </div>
             </div>
 
-            <h2 className="text-sm font-semibold text-gray-600 mb-2">Vehicle history</h2>
+            <h2 className="text-sm font-semibold text-gray-600 mb-2">{t('workshop.vehicleDetail.vehicleHistory')}</h2>
 
             {/* Search + year + status — deliberately lightweight now that
                 payment/date-range filtering and financial totals live on
@@ -355,7 +373,7 @@ export default function VehicleDetailPage() {
                 <input
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
-                  placeholder="Search invoice #, parts/services..."
+                  placeholder={t('workshop.vehicleDetail.searchPlaceholder')}
                   className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-blue-500"
                 />
               </div>
@@ -365,7 +383,7 @@ export default function VehicleDetailPage() {
                 onChange={(e) => setYearFilter(e.target.value)}
                 className="border-2 border-gray-300 rounded-md px-3 py-2.5 sm:py-2 text-sm font-semibold outline-none focus:border-blue-500 bg-white shrink-0"
               >
-                <option value="ALL">All years</option>
+                <option value="ALL">{t('workshop.vehicleDetail.allYears')}</option>
                 {availableYears.map((y) => (
                   <option key={y} value={y}>
                     {y}
@@ -384,20 +402,24 @@ export default function VehicleDetailPage() {
                         : 'border-gray-300 text-gray-600 hover:bg-blue-50 hover:border-blue-500/40'
                     }`}
                   >
-                    {s === 'ALL' ? 'All' : s === 'DRAFT' ? 'Active drafts' : 'Issued'}
+                    {s === 'ALL'
+                      ? t('workshop.vehicleDetail.filterAll')
+                      : s === 'DRAFT'
+                        ? t('workshop.vehicleDetail.filterActiveDrafts')
+                        : t('workshop.vehicleDetail.filterIssued')}
                   </button>
                 ))}
               </div>
             </div>
 
             {visibleInvoices.length === 0 && (
-              <p className="text-sm text-gray-400">No visits match these filters.</p>
+              <p className="text-sm text-gray-400">{t('workshop.vehicleDetail.noVisits')}</p>
             )}
 
             <div className="flex flex-col gap-2">
               {paginatedInvoices.map((inv) => {
                 const overdue = isOverdue(inv);
-                const { lines, overflow } = itemsToShow(inv.items, itemSearch);
+                const { lines, overflow } = itemsToShow(inv.items, itemSearch, t);
                 return (
                   <div
                     key={inv.id}
@@ -413,17 +435,17 @@ export default function VehicleDetailPage() {
                         lives inside the invoice itself. Overdue is kept
                         as a small flag since it's actionable at a glance. */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500">{displayDateFor(inv).toLocaleDateString('id-ID')}</span>
-                      <span className="font-semibold">{inv.invoiceNumber ?? 'Unissued draft'}</span>
+                      <span className="text-xs text-gray-500">{displayDateFor(inv).toLocaleDateString(dateLocale)}</span>
+                      <span className="font-semibold">{inv.invoiceNumber ?? t('workshop.vehicleDetail.unissuedDraft')}</span>
                       {inv.status === 'VOID' && (
                         <span className="text-xs px-2 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300">
-                          VOID
+                          {t('workshop.vehicleDetail.void')}
                         </span>
                       )}
                       {overdue && (
                         <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-400">
                           <AlertCircle size={11} strokeWidth={2} />
-                          OVERDUE
+                          {t('workshop.vehicleDetail.overdue')}
                         </span>
                       )}
                     </div>
@@ -438,7 +460,7 @@ export default function VehicleDetailPage() {
                           {line}
                         </p>
                       ))}
-                      {overflow > 0 && <p className="text-xs text-gray-400">+{overflow} more</p>}
+                      {overflow > 0 && <p className="text-xs text-gray-400">{t('workshop.vehicleDetail.more', { count: overflow })}</p>}
                     </div>
 
                     {/* Row 3 — odometer, total, and either draft actions or
@@ -449,7 +471,7 @@ export default function VehicleDetailPage() {
                         {inv.odometer != null && (
                           <>
                             <Gauge size={11} strokeWidth={2} />
-                            {inv.odometer.toLocaleString('id-ID')} km
+                            {t('workshop.vehicleDetail.km', { value: inv.odometer.toLocaleString(dateLocale) })}
                           </>
                         )}
                       </span>
@@ -464,19 +486,19 @@ export default function VehicleDetailPage() {
                               className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-gray-100 active:bg-gray-200"
                             >
                               <RotateCcw size={13} strokeWidth={2} />
-                              Resume
+                              {t('workshop.vehicleDetail.resume')}
                             </button>
                             <button
                               onClick={() => discardDraft(inv.id)}
                               className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-red-50 active:bg-red-100 hover:border-red-300 text-red-600"
                             >
                               <Trash2 size={13} strokeWidth={2} />
-                              Discard
+                              {t('workshop.vehicleDetail.discard')}
                             </button>
                           </div>
                         ) : (
                           <span className="flex items-center gap-0.5 text-xs text-gray-400">
-                            View
+                            {t('workshop.vehicleDetail.view')}
                             <ChevronRight size={13} strokeWidth={2} />
                           </span>
                         )}

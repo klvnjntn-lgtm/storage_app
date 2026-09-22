@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ScanLine, CheckCircle2, AlertCircle, MapPin } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 function successFeedback() {
   const audio = new Audio('/beep-success.mp3');
@@ -29,10 +30,23 @@ type ScanLogEntry = {
   at: number;
 };
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright ("useSearchParams()
+// should be wrapped in a suspense boundary"). See login/page.tsx's
+// identical fix.
 export default function ScanPage() {
+  return (
+    <Suspense fallback={null}>
+      <ScanPageInner />
+    </Suspense>
+  );
+}
+
+function ScanPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('sessionId');
+  const { t, language } = useLanguage();
 
   const [session, setSession] = useState<any>(null);
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -93,8 +107,8 @@ export default function ScanPage() {
 
     if (missingFrom || missingTo) {
       const msg = missingFrom
-        ? `Select a ${fromLabel()} before scanning.`
-        : `Select a ${toLabel()} before scanning.`;
+        ? t('scan.selectBeforeScanning', { label: fromLabel() })
+        : t('scan.selectBeforeScanning', { label: toLabel() });
       setStatus('error');
       setErrorMsg(msg);
       errorFeedback();
@@ -113,9 +127,9 @@ export default function ScanPage() {
 
       if (!productRes.ok) {
         if (productRes.status === 404) {
-          throw new Error(`No product found for barcode "${barcode}"`);
+          throw new Error(t('scan.noProductForBarcode', { barcode }));
         }
-        throw new Error(`Lookup failed: ${productRes.status}`);
+        throw new Error(t('scan.lookupFailed', { status: productRes.status }));
       }
 
       const product = await productRes.json();
@@ -134,7 +148,7 @@ export default function ScanPage() {
 
       if (!itemRes.ok) {
         const text = await itemRes.text();
-        throw new Error(text || `Failed to add item: ${itemRes.status}`);
+        throw new Error(text || t('scan.failedToAddItem', { status: itemRes.status }));
       }
 
       successFeedback();
@@ -142,7 +156,7 @@ export default function ScanPage() {
       pushLog({ barcode, productName: product.name, ok: true });
     } catch (e: any) {
       console.error(e);
-      const msg = e.message || 'Scan failed';
+      const msg = e.message || t('scan.scanFailed');
       setStatus('error');
       setErrorMsg(msg);
       errorFeedback();
@@ -158,15 +172,15 @@ export default function ScanPage() {
 
   function fromLabel() {
     if (effectiveType === 'PICK') {
-      return type === 'MOVE' ? 'Move From Location' : 'Pick From Location';
+      return type === 'MOVE' ? t('scan.moveFromLocation') : t('scan.pickFromLocation');
     }
-    return 'Ship From Location';
+    return t('scan.shipFromLocation');
   }
 
   function toLabel() {
-    if (effectiveType === 'MOVE') return 'Move To Location';
-    if (effectiveType === 'RECEIVE') return 'Receive To Location';
-    return 'Return To Location';
+    if (effectiveType === 'MOVE') return t('scan.moveToLocation');
+    if (effectiveType === 'RECEIVE') return t('scan.receiveToLocation');
+    return t('scan.returnToLocation');
   }
 
   const handleScanRef = useRef(handleScan);
@@ -254,7 +268,7 @@ export default function ScanPage() {
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 transition-colors"
           >
             <ArrowLeft size={16} strokeWidth={2} />
-            Exit scanning
+            {t('scan.exitScanning')}
           </button>
           <div className="flex items-center gap-2 text-sm">
             <span className="px-2 py-1 rounded-md bg-blue-600/10 border border-blue-600/20 text-blue-800 font-semibold">
@@ -277,7 +291,7 @@ export default function ScanPage() {
           <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">
               <MapPin size={14} strokeWidth={2} />
-              Step 1 — Set location{showFrom && showTo ? 's' : ''}
+              {showFrom && showTo ? t('scan.step1SetLocationsPlural') : t('scan.step1SetLocationSingular')}
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -293,7 +307,7 @@ export default function ScanPage() {
                     value={fromLocationId}
                     onChange={(e) => setFromLocationId(e.target.value)}
                   >
-                    <option value="">— Select —</option>
+                    <option value="">{t('scan.selectPlaceholder')}</option>
                     {locations.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name}
@@ -307,7 +321,7 @@ export default function ScanPage() {
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-semibold text-gray-600">
                     {toLabel()} {requiresTo && <span className="text-red-600">*</span>}
-                    {!requiresTo && <span className="text-gray-400"> (optional)</span>}
+                    {!requiresTo && <span className="text-gray-400"> ({t('common.optional')})</span>}
                   </label>
                   <select
                     className={`border-2 rounded-md p-2 w-52 outline-none focus:border-blue-500 ${
@@ -316,7 +330,7 @@ export default function ScanPage() {
                     value={toLocationId}
                     onChange={(e) => setToLocationId(e.target.value)}
                   >
-                    <option value="">— Select —</option>
+                    <option value="">{t('scan.selectPlaceholder')}</option>
                     {locations.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name}
@@ -333,7 +347,7 @@ export default function ScanPage() {
         <section className="space-y-2">
           <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">
             <ScanLine size={14} strokeWidth={2} />
-            Step {(showFrom || showTo) ? '2' : '1'} — Scan
+            {(showFrom || showTo) ? t('scan.step2Scan') : t('scan.step1Scan')}
           </div>
 
           <input
@@ -342,7 +356,7 @@ export default function ScanPage() {
             onChange={(e) => setGunBuffer(e.target.value)}
             onKeyDown={handleGunKeyDown}
             disabled={!readyToScan}
-            placeholder={readyToScan ? 'Scan a barcode…' : 'Set location above to enable scanning'}
+            placeholder={readyToScan ? t('scan.scanBarcodePlaceholder') : t('scan.setLocationToEnableScanning')}
             autoFocus
             autoComplete="off"
             className={`w-full text-lg font-mono border-2 rounded-md p-4 outline-none transition-colors ${
@@ -354,7 +368,7 @@ export default function ScanPage() {
 
           {!readyToScan && (
             <p className="text-xs text-gray-500">
-              This step is locked until the required location{missingFrom && missingTo ? 's are' : ' is'} chosen above.
+              {missingFrom && missingTo ? t('scan.lockedUntilLocationsChosen') : t('scan.lockedUntilLocationChosen')}
             </p>
           )}
         </section>
@@ -362,7 +376,7 @@ export default function ScanPage() {
         {/* Live status */}
         {status === 'submitting' && (
           <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 text-blue-800 rounded-md p-3 text-sm">
-            Saving scan…
+            {t('scan.savingScan')}
           </div>
         )}
 
@@ -376,7 +390,7 @@ export default function ScanPage() {
         {status === 'idle' && lastEntry?.ok && (
           <div className="flex items-center gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
             <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
-            {lastEntry.productName} — added
+            {t('scan.addedEntry', { name: lastEntry.productName })}
           </div>
         )}
 
@@ -384,7 +398,7 @@ export default function ScanPage() {
         {log.length > 0 && (
           <section className="space-y-2">
             <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-              Recent scans
+              {t('scan.recentScans')}
             </h2>
             <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200 bg-white">
               {log.map((entry) => (
@@ -404,7 +418,7 @@ export default function ScanPage() {
                     <span className="font-medium">{entry.ok ? entry.productName : entry.message}</span>
                   </div>
                   <span className="text-xs text-gray-400">
-                    {new Date(entry.at).toLocaleTimeString()}
+                    {new Date(entry.at).toLocaleTimeString(language === 'id' ? 'id-ID' : 'en-US')}
                   </span>
                 </div>
               ))}

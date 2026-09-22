@@ -100,6 +100,7 @@ model Organization {
   fulfillmentMode        FulfillmentMode         @default(PICK_PACK_SHIP)
   posPricingEnabled      Boolean                 @default(false)
   documentSequences DocumentSequence[]
+  documentCounters DocumentCounter[]
   employees            Employee[]
   salaryComponentTypes SalaryComponentType[]
   payrolls             Payroll[]
@@ -119,6 +120,10 @@ model Organization {
   taxPercentage           Decimal?                @db.Decimal(5, 2)
   address                String?
   phone                  String?
+  // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
+  // period a journal entry posts into (business-date.ts) — was a single
+  // global ACCOUNTING_TIMEZONE env var before; now per-org.
+  timezone               String                  @default("Asia/Jakarta")
   brands                 Brand[]
   categories             Category[]
   customers              Customer[]
@@ -144,6 +149,8 @@ suppliers Supplier[]
   vehicles               Vehicle[]
   vehicleReminders       VehicleReminder[]
   bankAccounts           OrganizationBankAccount[]
+  fixedAssets            FixedAsset[]
+  mediaAssets            MediaAsset[]
 }
 
 model User {
@@ -159,6 +166,8 @@ model User {
   organizationId    String
   createdAt         DateTime             @default(now())
   currentSessionId  String?
+  avatarUrl         String?
+  mediaAssets       MediaAsset[]
   events            Event[]
     payrolls Payroll[]
   expenses Expense[]
@@ -169,6 +178,9 @@ model User {
     purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
   paymentsRecorded  Payment[]
+  expensePaymentsRecorded ExpensePayment[]
+  fixedAssets                  FixedAsset[]
+  fixedAssetPaymentsRecorded   FixedAssetPayment[]
   sessionNotes      SessionNote[]
   reopenEvents      SessionReopenEvent[]
   organization      Organization         @relation(fields: [organizationId], references: [id])
@@ -180,6 +192,34 @@ model User {
   goodsReceipts GoodsReceipt[]
 
   @@index([organizationId])
+}
+
+// Org-scoped library of every uploaded image. Consumers (Product.image,
+// User.avatarUrl) store the returned `url` directly rather than a FK to
+// this table — same "denormalized URL string" convention as
+// Organization.logoUrl — so an asset stays in the library for reuse even
+// after the product/user that picked it changes or clears its photo.
+model MediaAsset {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  uploadedById   String?
+  uploadedBy     User?        @relation(fields: [uploadedById], references: [id])
+
+  filename       String   // on-disk filename under uploads/media/
+  originalName   String?  // original upload filename — searched/displayed in the library UI
+  mimeType       String
+  sizeBytes      Int
+  width          Int?
+  height         Int?
+  url            String   // /uploads/media/<filename>
+
+  compressedAt   DateTime? // set by the scheduled hard-recompression job; null = not yet run
+
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, originalName])
 }
 
 model Installation {
@@ -215,6 +255,7 @@ model Location {
   externalWarehouseId String? // Accurate ITEM.WAREHOUSEID, for stock-import mapping
   goodsReceipts GoodsReceipt[]
 purchaseOrders PurchaseOrder[]
+  fixedAssets FixedAsset[]
   @@unique([id, organizationId])
   @@unique([organizationId, name, externalWarehouseId])
 }
@@ -284,6 +325,26 @@ model DocumentSequence {
   @@unique([organizationId, documentType])
 }
 
+// Atomic, year-scoped counters backing DocumentNumberingService.nextSequential —
+// replaces the old "count rows since Jan 1" + format pattern (nextInvoiceNumber
+// and its counterparts), which raced under concurrent issuance and produced
+// wrong sequences across a Dec 31 -> Jan 1 boundary if `count` was read with
+// the old year already rolled over. documentType is a free-form key (e.g.
+// "INVOICE", "GOODS_RECEIPT") rather than the DocumentType enum above, since
+// not every numbered document (GoodsReceipt) has an enum member there.
+model DocumentCounter {
+  id             String       @id @default(cuid())
+  organizationId String
+  documentType   String
+  year           Int
+  lastNumber     Int          @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, documentType, year])
+}
+
 model Category {
   id             String       @id @default(uuid())
   name           String
@@ -315,6 +376,7 @@ model Product {
   oem                String?
   organizationId     String
   unit               String?                  // NEW — default unit of measure (pcs, box, ltr, kg, etc.); line items may override via their own `unit`
+  image              String?                  // URL of a MediaAsset chosen via the media library; denormalized like Organization.logoUrl, not a FK
   salesQuotationItems SalesQuotationItem[]
   salesOrderItems     SalesOrderItem[]
   deliveryOrderItems  DeliveryOrderItem[]
@@ -342,7 +404,7 @@ model Stock {
   id             Int          @id @default(autoincrement())
   productId      String
   locationId     String
-  quantity       Int          @default(0)
+  quantity       Decimal      @default(0) @db.Decimal(12, 2) // FIX — was Int; SalesOrderItem/DeliveryOrderItem quantities are Decimal, so a fractional delivery would fail here at ship time
   organizationId String
   location       Location     @relation(fields: [locationId], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id])
@@ -386,7 +448,7 @@ model Event {
   id             Int          @id @default(autoincrement())
   fromLocationId String?
   toLocationId   String?
-  quantity       Int
+  quantity       Decimal      @db.Decimal(12, 2) // FIX — was Int; stockService.increase/decrease/fulfill write the same qty to Stock (now Decimal) and here in one call, so this must match
   createdAt      DateTime     @default(now())
   productId      String
   type           EventType
@@ -855,7 +917,9 @@ model OrganizationBankAccount {
    chartAccount ChartOfAccount?   // inverse of the relation above
    payments         Payment[]          // NEW
    expenses         Expense[]          // NEW
+   expensePayments  ExpensePayment[]
    supplierPayments SupplierPayment[]  // NEW (in addition to the relation already declared on SupplierPayment below)
+   fixedAssetPayments FixedAssetPayment[]
    payrolls         Payroll[]          // NEW
 
   isDefault      Boolean      @default(false)
@@ -901,6 +965,7 @@ model Invoice {
   issuedAt       DateTime?
   customerId     String?
     amountPaid     Decimal                @default(0) @db.Decimal(12, 2)   // was Int
+    creditedAmount Decimal                @default(0) @db.Decimal(12, 2)   // FIX — sum of postSalesReturn's AR reversal; AR Aging subtracts this so a return doesn't leave the invoice looking overdue for units the customer no longer owes for
 
   paymentStatus  PaymentStatus          @default(UNPAID)
   paymentTerms   String?
@@ -1365,6 +1430,7 @@ enum PayrollStatus {
   DRAFT
   POSTED
   PAID
+  VOID
 }
 
 model Payroll {
@@ -1447,6 +1513,7 @@ model Expense {
   locationId     String?
   description    String?
   amount         Decimal        @db.Decimal(12, 2)
+  amountPaid     Decimal        @default(0) @db.Decimal(12, 2) // FIX — tracks partial payments; see ExpensePayment
   expenseDate    DateTime       @db.Date
   dueDate        DateTime?
   status         ExpenseStatus  @default(UNPAID)
@@ -1461,8 +1528,100 @@ model Expense {
   category     ExpenseCategory @relation(fields: [categoryId], references: [id])
   location     Location?       @relation(fields: [locationId], references: [id])
   user         User?           @relation(fields: [userId], references: [id])
+  payments     ExpensePayment[]
 
   @@index([organizationId, expenseDate])
+}
+
+// One row per installment recorded against an Expense — mirrors Payment
+// (Invoice's equivalent). ExpensesService.recordPayment() is the only
+// writer; each row backs one postExpensePayment() ledger entry, keyed by
+// this row's own id so partial payments don't collide on one sourceId the
+// way the old markPaid()-only flow did.
+model ExpensePayment {
+  id            String        @id @default(cuid())
+  expenseId     String
+  amount        Decimal       @db.Decimal(12, 2)
+  method        PaymentMethod @default(CASH)
+  note          String?
+  recordedById  String?
+  createdAt     DateTime      @default(now())
+  bankAccountId String?
+
+  expense       Expense                   @relation(fields: [expenseId], references: [id])
+  recordedBy    User?                     @relation(fields: [recordedById], references: [id])
+  bankAccount   OrganizationBankAccount?  @relation(fields: [bankAccountId], references: [id])
+
+  @@index([expenseId])
+}
+
+enum FixedAssetStatus {
+  ACTIVE
+  DISPOSED
+}
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+}
+
+// A depreciable asset — equipment, vehicles, fixtures. Acquisition always
+// records the full cost against FIXED_ASSET_PAYABLE (mirrors Expense's
+// record-then-pay split); FixedAssetPayment rows pay that down, same as
+// ExpensePayment does for Expense. amountPaid is denormalized off those
+// rows the same way Expense.amountPaid is, for the same reason: cheap
+// "is this fully paid" reads without summing payments every time.
+//
+// accumulatedDepreciation + lastDepreciatedThrough are advanced together,
+// atomically, by FixedAssetsService.runDepreciation() — lastDepreciatedThrough
+// is what makes re-running that job for an already-caught-up asset a no-op
+// instead of double-posting.
+model FixedAsset {
+  id                      String              @id @default(uuid())
+  organizationId          String
+  name                    String
+  category                String?
+  locationId              String?
+  acquisitionDate         DateTime            @db.Date
+  cost                    Decimal             @db.Decimal(14, 2)
+  salvageValue            Decimal             @default(0) @db.Decimal(14, 2)
+  usefulLifeMonths        Int
+  depreciationMethod      DepreciationMethod  @default(STRAIGHT_LINE)
+  accumulatedDepreciation Decimal             @default(0) @db.Decimal(14, 2)
+  lastDepreciatedThrough  DateTime?           @db.Date
+  amountPaid              Decimal             @default(0) @db.Decimal(14, 2)
+  status                  FixedAssetStatus    @default(ACTIVE)
+  disposedAt              DateTime?
+  disposalProceeds        Decimal?            @db.Decimal(14, 2)
+  notes                   String?
+  userId                  String?
+  createdAt               DateTime            @default(now())
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  location     Location?           @relation(fields: [locationId], references: [id])
+  user         User?               @relation(fields: [userId], references: [id])
+  payments     FixedAssetPayment[]
+
+  @@index([organizationId, status])
+}
+
+// One row per installment paid toward a FixedAsset's acquisition cost —
+// mirrors ExpensePayment exactly, including the reason each entry keys off
+// this row's own id rather than a shared per-asset sourceId.
+model FixedAssetPayment {
+  id            String        @id @default(cuid())
+  fixedAssetId  String
+  amount        Decimal       @db.Decimal(14, 2)
+  method        PaymentMethod @default(CASH)
+  note          String?
+  recordedById  String?
+  createdAt     DateTime      @default(now())
+  bankAccountId String?
+
+  fixedAsset  FixedAsset               @relation(fields: [fixedAssetId], references: [id])
+  recordedBy  User?                    @relation(fields: [recordedById], references: [id])
+  bankAccount OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([fixedAssetId])
 }
 
 enum AccountType {
@@ -1501,6 +1660,12 @@ enum SystemAccountKey {
     INVENTORY_ADJUSTMENT      // EXPENSE, debit-normal: shrinkage, count corrections
   OPENING_BALANCE_EQUITY    // EQUITY, credit-normal: stock loaded via import
 
+  FIXED_ASSETS              // ASSET, debit-normal: cost basis of fixed assets on the books
+  ACCUMULATED_DEPRECIATION  // ASSET, credit-normal (contra-asset): depreciation taken to date
+  FIXED_ASSET_PAYABLE       // LIABILITY, credit-normal: unpaid acquisition cost, mirrors EXPENSE_PAYABLE
+  DEPRECIATION_EXPENSE      // EXPENSE, debit-normal
+  GAIN_ON_ASSET_DISPOSAL    // REVENUE, credit-normal: proceeds > net book value at disposal
+  LOSS_ON_ASSET_DISPOSAL    // EXPENSE, debit-normal: proceeds < net book value at disposal
 }
 
 model ChartOfAccount {
@@ -1561,6 +1726,9 @@ enum JournalSourceType {
   MANUAL
     STOCK_ADJUSTMENT
 
+  FIXED_ASSET_PURCHASE
+  FIXED_ASSET_DEPRECIATION
+  FIXED_ASSET_DISPOSAL
 }
 
 enum JournalEntryStatus {

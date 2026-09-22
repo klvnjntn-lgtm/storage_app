@@ -1,11 +1,12 @@
 'use client';
 
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark } from 'lucide-react';
-import { BankAccount, CartLine, Customer, DiscountType, InvoiceFormat, ServiceLine, TaxRate } from './types';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound } from 'lucide-react';
+import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -101,6 +102,9 @@ export function CartPanel({
   bankAccountId,
   onChangeBankAccountId,
   noBankAccountValue,
+  employees,
+  employeeId,
+  onChangeEmployeeId,
 }: {
   format: InvoiceFormat;
   cartLines: CartLineWithTotals[];
@@ -174,7 +178,13 @@ export function CartPanel({
   bankAccountId: string;
   onChangeBankAccountId: (id: string) => void;
   noBankAccountValue: string;
+  // Employee (sales/cashier) picker. '' means unset — the field is
+  // omitted from the payload and the invoice carries no employee.
+  employees: Employee[];
+  employeeId: string;
+  onChangeEmployeeId: (id: string) => void;
 }) {
+  const { t } = useLanguage();
   const svc = services ?? [];
   const hasEmptyServicePrice = svc.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = svc.some((s) => !s.description.trim());
@@ -192,34 +202,60 @@ export function CartPanel({
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
             <span>
-              This invoice deducts from <strong>{distinctLocationNames[0]}</strong>
+              {t('sales.invoiceCart.deductsFromSingle').split('{location}')[0]}
+              <strong>{distinctLocationNames[0]}</strong>
+              {t('sales.invoiceCart.deductsFromSingle').split('{location}')[1]}
             </span>
           ) : (
             <span>
-              Deducting from <strong>{distinctLocationNames.length} locations</strong>: {distinctLocationNames.join(', ')}
+              {t('sales.invoiceCart.deductsFromMultiple', {
+                count: distinctLocationNames.length,
+                list: distinctLocationNames.join(', '),
+              })}
             </span>
           )}
         </div>
       ) : (
         <p className="text-xs text-gray-400 mb-3">
-          Add items to start this invoice — each item's location is set automatically, and items can come from
-          different locations.
+          {t('sales.invoiceCart.addItemsHint')}
         </p>
       )}
 
       <div className="mb-3">
         <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
           <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
-          Invoice date
+          {t('sales.invoiceCart.invoiceDateLabel')}
         </label>
         <input
           type="date"
           value={invoiceDate ?? ''}
           onChange={(e) => onChangeInvoiceDate?.(e.target.value)}
-          placeholder="Today"
+          placeholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
           className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
         />
       </div>
+
+      {employees.length > 0 && (
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <UserRound size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.invoiceCart.employeeLabel')}
+          </label>
+          <select
+            value={employeeId}
+            onChange={(e) => onChangeEmployeeId(e.target.value)}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          >
+            <option value="">{t('sales.invoiceCart.noEmployee')}</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.position ? ` — ${e.position}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {usesStructuredCustomer ? (
         <CustomerPicker
@@ -232,7 +268,7 @@ export function CartPanel({
           <input
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
-            placeholder={customerNameRequired ? 'Customer name' : 'Customer name (optional)'}
+            placeholder={customerNameRequired ? t('sales.invoiceCart.customerNamePlaceholder') : t('sales.invoiceCart.customerNamePlaceholderOptional')}
             className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
               customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
             }`}
@@ -240,7 +276,7 @@ export function CartPanel({
           {customerNameRequired && !customerName.trim() && (
             <p className="flex items-start gap-1.5 text-xs text-red-600 mt-1.5">
               <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-              Customer name is required.
+              {t('sales.invoiceCart.customerNameRequired')}
             </p>
           )}
         </div>
@@ -250,7 +286,7 @@ export function CartPanel({
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
             <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-            Due date (optional)
+            {t('sales.invoiceCart.dueDateLabel')}
           </label>
           <input
             type="date"
@@ -261,7 +297,7 @@ export function CartPanel({
           {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
               <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-              Due date is before invoice date. This invoice will be considered overdue immediately.
+              {t('sales.invoiceCart.dueDateWarning')}
             </p>
           )}
         </div>
@@ -269,11 +305,11 @@ export function CartPanel({
 
       {showInvoiceInfoFields && (
         <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">Customer PO number (optional)</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.poNumberLabel')}</label>
           <input
             value={customerPoNumber ?? ''}
             onChange={(e) => onChangeCustomerPoNumber?.(e.target.value)}
-            placeholder="Customer's reference number"
+            placeholder={t('sales.invoiceCart.poNumberPlaceholder')}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
@@ -281,11 +317,11 @@ export function CartPanel({
 
       {showInvoiceInfoFields && (
         <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">Payment terms (optional)</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.paymentTermsLabel')}</label>
           <input
             value={paymentTerms ?? ''}
             onChange={(e) => onChangePaymentTerms?.(e.target.value)}
-            placeholder="e.g. Net 30, Due on receipt"
+            placeholder={t('sales.invoiceCart.paymentTermsPlaceholder')}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
@@ -298,19 +334,19 @@ export function CartPanel({
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
             <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
-            Bank account (optional)
+            {t('sales.invoiceCart.bankAccountLabel')}
           </label>
           <select
             value={bankAccountId}
             onChange={(e) => onChangeBankAccountId(e.target.value)}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           >
-            <option value="">Default bank account</option>
-            <option value={noBankAccountValue}>No bank details on this invoice</option>
+            <option value="">{t('sales.invoiceCart.defaultBankAccount')}</option>
+            <option value={noBankAccountValue}>{t('sales.invoiceCart.noBankDetails')}</option>
             {bankAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.bankName} — {a.accountNumber}
-                {a.isDefault ? ' (default)' : ''}
+                {a.isDefault ? ` ${t('sales.invoiceCart.defaultSuffix')}` : ''}
               </option>
             ))}
           </select>
@@ -319,12 +355,12 @@ export function CartPanel({
 
       {showInvoiceInfoFields && (
         <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">Notes (optional)</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.notesLabel')}</label>
           <textarea
             value={notes ?? ''}
             onChange={(e) => onChangeNotes?.(e.target.value)}
             rows={2}
-            placeholder="Printed on the invoice"
+            placeholder={t('sales.invoiceCart.notesPlaceholder')}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
           />
         </div>
@@ -332,14 +368,14 @@ export function CartPanel({
 
       {usesStructuredCustomer && hasWorkshopRms && customer && (
         <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">Vehicle (optional)</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.vehicleLabel')}</label>
           <select
             value={vehicleId ?? ''}
             onChange={(e) => onSelectVehicle?.(e.target.value || null)}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           >
             <option value="">
-              {vehiclesLoading ? 'Loading vehicles...' : 'No vehicle — general invoice'}
+              {vehiclesLoading ? t('sales.invoiceCart.loadingVehicles') : t('sales.invoiceCart.noVehicleOption')}
             </option>
             {(customerVehicles ?? []).map((v) => (
               <option key={v.id} value={v.id}>
@@ -349,19 +385,19 @@ export function CartPanel({
           </select>
           {!vehiclesLoading && (customerVehicles ?? []).length === 0 && (
             <p className="text-xs text-gray-400 mt-1">
-              This customer has no vehicles yet — add one from their customer page if this invoice is for a specific car.
+              {t('sales.invoiceCart.noVehiclesYet')}
             </p>
           )}
 
           {vehicleId && (
             <div className="mt-2">
-              <label className="text-xs text-gray-500 mb-1 block">Odometer (km)</label>
+              <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.odometerLabel')}</label>
               <input
                 type="number"
                 min={0}
                 value={odometer ?? ''}
                 onChange={(e) => onChangeOdometer?.(e.target.value)}
-                placeholder="Current odometer reading"
+                placeholder={t('sales.invoiceCart.odometerPlaceholder')}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
             </div>
@@ -375,14 +411,14 @@ export function CartPanel({
                   className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-800 underline"
                 >
                   <Bell size={12} strokeWidth={2} />
-                  Set a reminder for this vehicle
+                  {t('sales.invoiceCart.setReminderLink')}
                 </button>
               ) : (
                 <div className="border border-blue-500/20 rounded-xl p-3 mt-1">
                   <div className="flex items-center justify-between mb-2">
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
                       <Bell size={12} strokeWidth={2} className="text-blue-600/70" />
-                      Reminder
+                      {t('sales.invoiceCart.reminderHeading')}
                     </span>
                     <button onClick={onToggleReminderOpen} className="text-gray-400 hover:text-blue-700">
                       <X size={14} strokeWidth={2} />
@@ -392,17 +428,17 @@ export function CartPanel({
                   <textarea
                     value={reminderNote ?? ''}
                     onChange={(e) => onChangeReminderNote?.(e.target.value)}
-                    placeholder="e.g. Needs another oil change"
+                    placeholder={t('sales.invoiceCart.reminderPlaceholder')}
                     rows={2}
                     className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 resize-none mb-2"
                   />
 
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {[
-                      { label: '1 month', months: 1 },
-                      { label: '2 months', months: 2 },
-                      { label: '3 months', months: 3 },
-                      { label: '6 months', months: 6 },
+                      { label: t('sales.invoiceCart.preset1Month'), months: 1 },
+                      { label: t('sales.invoiceCart.preset2Months'), months: 2 },
+                      { label: t('sales.invoiceCart.preset3Months'), months: 3 },
+                      { label: t('sales.invoiceCart.preset6Months'), months: 6 },
                     ].map((preset) => (
                       <button
                         key={preset.months}
@@ -422,9 +458,9 @@ export function CartPanel({
                   />
 
                   {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
-                  {reminderSaved && <p className="text-xs text-green-700 mb-2">Reminder saved.</p>}
+                  {reminderSaved && <p className="text-xs text-green-700 mb-2">{t('sales.invoiceCart.reminderSaved')}</p>}
                   {!reminderSaved && reminderStaged && (
-                    <p className="text-xs text-gray-500 mb-2">Will be added once this invoice is created.</p>
+                    <p className="text-xs text-gray-500 mb-2">{t('sales.invoiceCart.reminderWillBeAdded')}</p>
                   )}
 
                   <button
@@ -432,7 +468,7 @@ export function CartPanel({
                     disabled={reminderSaving || reminderSaved || !reminderNote?.trim() || !reminderDueDate}
                     className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-xs font-semibold disabled:bg-gray-300 transition-colors"
                   >
-                    {reminderSaving ? 'Saving...' : reminderStaged ? 'Update reminder' : 'Set reminder'}
+                    {reminderSaving ? t('common.saving') : reminderStaged ? t('sales.invoiceCart.updateReminder') : t('sales.invoiceCart.setReminder')}
                   </button>
                 </div>
               )}
@@ -442,7 +478,7 @@ export function CartPanel({
       )}
 
       {cartLines.length === 0 && svc.length === 0 && (
-        <p className="text-sm text-gray-400">No items selected yet</p>
+        <p className="text-sm text-gray-400">{t('sales.invoiceCart.noItemsSelected')}</p>
       )}
 
       {(cartLines.length > 0 || svc.length > 0) && (
@@ -547,7 +583,7 @@ export function CartPanel({
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                   <span className="flex items-center gap-1 text-[11px] text-gray-400">
                     <Percent size={10} strokeWidth={2} />
-                    Tax
+                    {t('sales.invoiceCart.taxLabel')}
                   </span>
                   {taxRates.map((rate) => {
                     const checked = line.taxRateIds.includes(rate.id);
@@ -583,18 +619,18 @@ export function CartPanel({
           <div className="flex items-center justify-between mb-2">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
               <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
-              Services
+              {t('sales.invoiceCart.servicesLabel')}
             </span>
             <button
               onClick={onAddService}
               className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
             >
-              + Add service
+              {t('sales.invoiceCart.addService')}
             </button>
           </div>
 
           {svc.length === 0 && (
-            <p className="text-xs text-gray-400 mb-2">No services added — this invoice can be product-only, service-only, or both.</p>
+            <p className="text-xs text-gray-400 mb-2">{t('sales.invoiceCart.noServicesAdded')}</p>
           )}
 
           <div className="flex flex-col divide-y divide-blue-500/10">
@@ -606,7 +642,7 @@ export function CartPanel({
                     <textarea
                       value={line.description}
                       onChange={(e) => onChangeServiceDescription?.(line.key, e.target.value)}
-                      placeholder="What service was done? (e.g. Oil change, brake pad replacement)"
+                      placeholder={t('sales.invoiceCart.serviceDescriptionPlaceholder')}
                       rows={2}
                       className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                     />
@@ -635,13 +671,13 @@ export function CartPanel({
                       />
                     </div>
                     {priceMissing && (
-                      <span className="text-[11px] text-red-600">Enter a price — use 0 if free</span>
+                      <span className="text-[11px] text-red-600">{t('sales.invoiceCart.enterPriceZeroIfFree')}</span>
                     )}
                     <input
                       type="text"
                       value={line.unit ?? ''}
                       onChange={(e) => onChangeServiceUnit?.(line.key, e.target.value)}
-                      placeholder="Unit (optional)"
+                      placeholder={t('sales.invoiceCart.unitPlaceholder')}
                       className="w-28 border border-blue-500/20 rounded-lg px-2 py-1 text-xs outline-none focus:border-blue-500/50"
                     />
                   </div>
@@ -657,7 +693,7 @@ export function CartPanel({
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                       <span className="flex items-center gap-1 text-[11px] text-gray-400">
                         <Percent size={10} strokeWidth={2} />
-                        Tax
+                        {t('sales.invoiceCart.taxLabel')}
                       </span>
                       {taxRates.map((rate) => {
                         const checked = line.taxRateIds.includes(rate.id);
@@ -692,23 +728,23 @@ export function CartPanel({
 
       <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>Subtotal</span>
+          <span>{t('common.subtotal')}</span>
           <span>{formatIDR(subtotal)}</span>
         </div>
         {discount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Discount</span>
+            <span>{t('sales.invoiceCart.discount')}</span>
             <span>−{formatIDR(discount)}</span>
           </div>
         )}
         {taxAmount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Tax</span>
+            <span>{t('sales.invoiceCart.taxLabel')}</span>
             <span>{formatIDR(taxAmount)}</span>
           </div>
         )}
         <div className="flex justify-between items-center font-bold pt-1">
-          <span>Total</span>
+          <span>{t('common.total')}</span>
           <span>{formatIDR(total)}</span>
         </div>
       </div>
@@ -725,7 +761,7 @@ export function CartPanel({
         className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
         <Printer size={16} strokeWidth={2} />
-        {printing ? 'Printing...' : 'Create & Print Invoice'}
+        {printing ? t('sales.invoiceCart.printing') : t('sales.invoiceCart.createAndPrint')}
       </button>
 
       {error && (

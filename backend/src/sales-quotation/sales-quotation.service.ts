@@ -465,11 +465,7 @@ export class SalesQuotationService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const year = new Date().getFullYear();
-        const count = await tx.salesQuotation.count({
-          where: { organizationId, quotationNumber: { not: null }, sentAt: { gte: new Date(`${year}-01-01`) } },
-        });
-        const quotationNumber = await this.numbering.next({ prefix: 'SQ', count, year });
+        const quotationNumber = await this.numbering.nextSequential(tx, organizationId, 'SALES_QUOTATION', 'SQ');
 
         const updated = await tx.salesQuotation.update({
           where: { id: quotation.id },

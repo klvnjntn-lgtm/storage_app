@@ -9,32 +9,13 @@ export type { LocationOption } from '@/app/components/invoices/types';
 export type DeliveryOrderStatus = 'PACKED' | 'SHIPPED' | 'CANCELLED';
 
 // ---- creation form (DeliveryOrderCartPanel) ---------------------------
-
-// One line of the source sales order, annotated with how much of it is
-// still deliverable. This is what the cart panel renders and edits.
-export type DeliverableLine = {
-  salesOrderItemId: string;
-  productId: string | null;
-  productName: string;
-  unit: string | null;
-  ordered: number;
-  alreadyDelivered: number;
-  remaining: number;
-  /** Quantity the user is packing into *this* delivery order. */
-  quantityToDeliver: number;
-};
-
-export type SalesOrderForDelivery = {
-  id: string;
-  orderNumber: string | null;
-  status: string;
-  customerId: string | null;
-  customerName: string | null;
-  customerAddress: string | null;
-  customerPoNumber: string | null;
-  locationId: string | null;
-  items: DeliverableLine[];
-};
+//
+// FIX — DeliverableLine/SalesOrderForDelivery used to live here, backing
+// lib/mappers/delivery-orders-mapper.ts's mapSalesOrderToDeliverable()/
+// mapDeliverableLinesToDto()/validateDeliverableLines(). None of those
+// had a caller — DeliveryOrdersPanel.tsx has its own inline equivalent —
+// so both types and all three functions were removed together rather
+// than left as dead code with no consumer.
 
 // Matches CreateDeliveryOrderDto on the backend.
 export type CreateDeliveryOrderDto = {

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 const MAX_NAME_LENGTH = 100;
 
@@ -137,6 +138,20 @@ export class LocationService {
         throw new NotFoundException('One or more source locations not found');
       }
 
+      // Lock every source location's Stock rows before reading them, so a
+      // concurrent sale/adjustment on a source location between this read
+      // and the deleteMany below can't have its effect silently erased
+      // (the stale pre-write quantity would be what gets credited to the
+      // target, then the row is deleted outright).
+      if (uniqueSourceIds.length > 0) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM "Stock"
+          WHERE "locationId" IN (${Prisma.join(uniqueSourceIds)})
+            AND "organizationId" = ${organizationId}
+          FOR UPDATE
+        `);
+      }
+
       // Stock has @@unique([productId, locationId]) — sum into target rows
       const sourceStocks = await tx.stock.findMany({
         where: {
@@ -147,7 +162,10 @@ export class LocationService {
 
       const qtyByProduct = new Map<string, number>();
       for (const s of sourceStocks) {
-        qtyByProduct.set(s.productId, (qtyByProduct.get(s.productId) ?? 0) + s.quantity);
+        // FIX — s.quantity is a Prisma Decimal; `+` on it string-concatenates
+        // instead of adding (Decimal.valueOf() returns a string), so this
+        // must go through Number() first.
+        qtyByProduct.set(s.productId, (qtyByProduct.get(s.productId) ?? 0) + Number(s.quantity));
       }
 
       for (const [productId, qty] of qtyByProduct) {

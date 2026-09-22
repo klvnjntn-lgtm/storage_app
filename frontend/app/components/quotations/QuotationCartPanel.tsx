@@ -6,6 +6,7 @@ import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -106,6 +107,7 @@ export function QuotationCartPanel({
   onChangeBankAccountId: (id: string) => void;
   noBankAccountValue: string;
 }) {
+  const { t } = useLanguage();
   const hasEmptyServicePrice = services.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = services.some((s) => !s.description.trim());
   const nothingToQuote = cartLines.length === 0 && services.length === 0;
@@ -119,18 +121,18 @@ export function QuotationCartPanel({
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
             <span>
-              Priced from <strong>{distinctLocationNames[0]}</strong>
+              {t('sales.quotationCart.pricedFromPrefix')} <strong>{distinctLocationNames[0]}</strong>
             </span>
           ) : (
             <span>
-              Priced across <strong>{distinctLocationNames.length} locations</strong>: {distinctLocationNames.join(', ')}
+              {t('sales.quotationCart.pricedAcrossPrefix')}{' '}
+              <strong>{t('sales.quotationCart.locationsCount', { count: distinctLocationNames.length })}</strong>:{' '}
+              {distinctLocationNames.join(', ')}
             </span>
           )}
         </div>
       ) : (
-        <p className="text-xs text-gray-400 mb-3">
-          Add items to start this quotation — each item's location is set automatically.
-        </p>
+        <p className="text-xs text-gray-400 mb-3">{t('sales.quotationCart.addItemsPrompt')}</p>
       )}
 
       <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
@@ -138,7 +140,7 @@ export function QuotationCartPanel({
       <div className="mb-3">
         <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
           <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-          Valid until (optional)
+          {t('sales.quotationCart.validUntilLabel')}
         </label>
         <input
           type="date"
@@ -151,12 +153,12 @@ export function QuotationCartPanel({
       <div className="mb-3">
         <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
           <FileSignature size={12} strokeWidth={2} className="text-blue-600/70" />
-          Terms & conditions (optional)
+          {t('sales.quotationCart.termsLabel')}
         </label>
         <textarea
           value={termsAndConditions}
           onChange={(e) => onChangeTermsAndConditions(e.target.value)}
-          placeholder="Printed on the quotation, e.g. payment terms, validity conditions"
+          placeholder={t('sales.quotationCart.termsPlaceholder')}
           rows={3}
           className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
         />
@@ -168,19 +170,19 @@ export function QuotationCartPanel({
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
             <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
-            Bank account (optional)
+            {t('sales.quotationCart.bankAccountLabel')}
           </label>
           <select
             value={bankAccountId}
             onChange={(e) => onChangeBankAccountId(e.target.value)}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           >
-            <option value="">Default bank account</option>
-            <option value={noBankAccountValue}>No bank details on this quotation</option>
+            <option value="">{t('sales.quotationCart.defaultBankAccount')}</option>
+            <option value={noBankAccountValue}>{t('sales.quotationCart.noBankDetails')}</option>
             {bankAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.bankName} — {a.accountNumber}
-                {a.isDefault ? ' (default)' : ''}
+                {a.isDefault ? ` ${t('sales.quotationCart.defaultSuffix')}` : ''}
               </option>
             ))}
           </select>
@@ -188,7 +190,7 @@ export function QuotationCartPanel({
       )}
 
       {cartLines.length === 0 && services.length === 0 && (
-        <p className="text-sm text-gray-400">No items selected yet</p>
+        <p className="text-sm text-gray-400">{t('sales.quotationCart.noItemsSelected')}</p>
       )}
 
       {(cartLines.length > 0 || services.length > 0) && (
@@ -260,7 +262,7 @@ export function QuotationCartPanel({
                   {!posPricingEnabled && line.product.sellingPrice == null && (
                     <div className="flex items-center gap-1 text-[11px] text-red-600 mt-1">
                       <AlertCircle size={11} strokeWidth={2} className="shrink-0" />
-                      No selling price set for this product — set one in Inventory before quoting it.
+                      {t('sales.quotationCart.noSellingPrice')}
                     </div>
                   )}
                 </div>
@@ -299,7 +301,7 @@ export function QuotationCartPanel({
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                   <span className="flex items-center gap-1 text-[11px] text-gray-400">
                     <Percent size={10} strokeWidth={2} />
-                    Tax
+                    {t('sales.quotationCart.tax')}
                   </span>
                   {taxRates.map((rate) => {
                     const checked = line.taxRateIds.includes(rate.id);
@@ -332,20 +334,18 @@ export function QuotationCartPanel({
         <div className="flex items-center justify-between mb-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
             <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
-            Services
+            {t('sales.quotationCart.servicesLabel')}
           </span>
           <button
             onClick={onAddService}
             className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
           >
-            + Add service
+            {t('sales.quotationCart.addService')}
           </button>
         </div>
 
         {services.length === 0 && (
-          <p className="text-xs text-gray-400 mb-2">
-            No services added — this quotation can be product-only, service-only, or both.
-          </p>
+          <p className="text-xs text-gray-400 mb-2">{t('sales.quotationCart.noServicesAdded')}</p>
         )}
 
         <div className="flex flex-col divide-y divide-blue-500/10">
@@ -357,7 +357,7 @@ export function QuotationCartPanel({
                   <textarea
                     value={line.description}
                     onChange={(e) => onChangeServiceDescription(line.key, e.target.value)}
-                    placeholder="Describe the service or work being quoted"
+                    placeholder={t('sales.quotationCart.servicePlaceholder')}
                     rows={2}
                     className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                   />
@@ -385,12 +385,14 @@ export function QuotationCartPanel({
                       className="w-24 text-xs outline-none"
                     />
                   </div>
-                  {priceMissing && <span className="text-[11px] text-red-600">Enter a price — use 0 if free</span>}
+                  {priceMissing && (
+                    <span className="text-[11px] text-red-600">{t('sales.quotationCart.servicePriceRequired')}</span>
+                  )}
                   <input
                     type="text"
                     value={line.unit ?? ''}
                     onChange={(e) => onChangeServiceUnit(line.key, e.target.value)}
-                    placeholder="Unit (optional)"
+                    placeholder={t('sales.quotationCart.unitPlaceholder')}
                     className="w-28 border border-blue-500/20 rounded-lg px-2 py-1 text-xs outline-none focus:border-blue-500/50"
                   />
                 </div>
@@ -406,7 +408,7 @@ export function QuotationCartPanel({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                     <span className="flex items-center gap-1 text-[11px] text-gray-400">
                       <Percent size={10} strokeWidth={2} />
-                      Tax
+                      {t('sales.quotationCart.tax')}
                     </span>
                     {taxRates.map((rate) => {
                       const checked = line.taxRateIds.includes(rate.id);
@@ -438,23 +440,23 @@ export function QuotationCartPanel({
 
       <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>Subtotal</span>
+          <span>{t('common.subtotal')}</span>
           <span>{formatIDR(subtotal)}</span>
         </div>
         {discount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Discount</span>
+            <span>{t('sales.quotationCart.discount')}</span>
             <span>−{formatIDR(discount)}</span>
           </div>
         )}
         {taxAmount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Tax</span>
+            <span>{t('sales.quotationCart.tax')}</span>
             <span>{formatIDR(taxAmount)}</span>
           </div>
         )}
         <div className="flex justify-between items-center font-bold pt-1">
-          <span>Total</span>
+          <span>{t('common.total')}</span>
           <span>{formatIDR(total)}</span>
         </div>
       </div>
@@ -472,14 +474,11 @@ export function QuotationCartPanel({
         className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
         <Printer size={16} strokeWidth={2} />
-        {printing ? 'Printing...' : 'Create & Print Quotation'}
+        {printing ? t('sales.quotationCart.printing') : t('sales.quotationCart.createAndPrint')}
       </button>
 
       {hasUnpricedCatalogItem && (
-        <p className="text-xs text-red-600 mt-2">
-          One or more items above have no selling price set — set a price in Inventory, or switch to Custom
-          Price in Settings, before creating this quotation.
-        </p>
+        <p className="text-xs text-red-600 mt-2">{t('sales.quotationCart.unpricedWarning')}</p>
       )}
 
       {error && (

@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
-  IsInt,
+  IsNumber,
   IsOptional,
   IsPositive,
   IsString,
@@ -15,7 +15,9 @@ export class ReturnLineItemDto {
   @IsUUID()
   deliveryOrderItemId: string;
 
-  @IsInt()
+  // FIX — was @IsInt(); a return of a fractional delivery must accept a
+  // fractional quantity too, same reasoning as DeliveryOrderLineDto.
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
 }

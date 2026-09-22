@@ -1,21 +1,14 @@
 // app/(app)/sales/search/page.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  FileText,
-  ClipboardList,
-  Receipt,
-  Truck,
-  Search,
-  Loader2,
-  CornerDownLeft,
-} from 'lucide-react';
+import { FileText, ClipboardList, Receipt, Truck, Search, Loader2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -40,63 +33,86 @@ type SalesSearchPage = {
   totalPages: number;
 };
 
-// Kept in sync with TYPE_META in /sales/page.tsx.
+// Kept in sync with TYPE_META in /sales/page.tsx. Labels are resolved via
+// t() inside the component since they're locale-dependent.
 const TYPE_META: Record<
   SalesSearchResultType,
   {
-    label: string;
+    labelKey: string;
     icon: typeof FileText;
     path: string;
     accent: string;
   }
 > = {
   QUOTATION: {
-    label: 'Quotation',
+    labelKey: 'sales.search.typeQuotation',
     icon: FileText,
     path: '/sales/quotations',
     accent: 'text-sky-600 bg-sky-50',
   },
   ORDER: {
-    label: 'Order',
+    labelKey: 'sales.search.typeOrder',
     icon: ClipboardList,
     path: '/sales/orders',
     accent: 'text-violet-600 bg-violet-50',
   },
   INVOICE: {
-    label: 'Invoice',
+    labelKey: 'sales.search.typeInvoice',
     icon: Receipt,
     path: '/sales/invoices',
     accent: 'text-fuchsia-600 bg-fuchsia-50',
   },
   DELIVERY_ORDER: {
-    label: 'Delivery',
+    labelKey: 'sales.search.typeDelivery',
     icon: Truck,
     path: '/sales/delivery-orders',
     accent: 'text-emerald-600 bg-emerald-50',
   },
 };
 
-const TYPE_FILTERS: Array<{ key: 'ALL' | SalesSearchResultType; label: string }> = [
-  { key: 'ALL', label: 'All' },
-  { key: 'QUOTATION', label: 'Quotations' },
-  { key: 'ORDER', label: 'Orders' },
-  { key: 'INVOICE', label: 'Invoices' },
-  { key: 'DELIVERY_ORDER', label: 'Deliveries' },
+const TYPE_FILTERS: Array<{ key: 'ALL' | SalesSearchResultType; labelKey: string }> = [
+  { key: 'ALL', labelKey: 'sales.search.filterAll' },
+  { key: 'QUOTATION', labelKey: 'sales.search.filterQuotations' },
+  { key: 'ORDER', labelKey: 'sales.search.filterOrders' },
+  { key: 'INVOICE', labelKey: 'sales.search.filterInvoices' },
+  { key: 'DELIVERY_ORDER', labelKey: 'sales.search.filterDeliveries' },
 ];
 
 const DEBOUNCE_MS = 350;
 const RESULTS_LIMIT = 20; // same as HISTORY_LIMIT on /vehicles/search
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright. See login/page.tsx.
 export default function SalesSearchPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  return (
+    <Suspense fallback={null}>
+      <SalesSearchPageInner />
+    </Suspense>
+  );
+}
 
-  const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | SalesSearchResultType>('ALL');
+function SalesSearchPageInner() {
+  const router = useRouter();
+  const { t, language } = useLanguage();
+
+  // Seeded from the URL so pressing the browser's Back button from a
+  // result's detail page restores the same query/filter/page instead of
+  // resetting to an empty search. Also still serves the deep-link-from-
+  // /sales case (?q=...), just via the same param the round-trip uses.
+  const [query, setQuery] = useState<string>(() => getInitialParam('q', ''));
+  const [typeFilter, setTypeFilter] = useState<'ALL' | SalesSearchResultType>(() =>
+    getInitialParam('type', 'ALL')
+  );
 
   const [results, setResults] = useState<SalesSearchPage | null>(null);
-  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsPage, setResultsPage] = useState(() => getInitialNumberParam('page', 1));
   const [searching, setSearching] = useState(false);
+
+  useSyncQueryParams({
+    q: query.trim(),
+    type: typeFilter !== 'ALL' ? typeFilter : null,
+    page: resultsPage !== 1 ? resultsPage : null,
+  });
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextSearchRef = useRef(false); // set before a programmatic setQuery
@@ -120,6 +136,20 @@ export default function SalesSearchPage() {
       setSearching(false);
     }
   }
+
+  // ── Initial load — covers both a deep link from /sales (?q=...) and a
+  // query/filter/page restored from the URL via the browser's Back
+  // button, using whatever `query`/`typeFilter`/`resultsPage` were seeded
+  // to above. Marks the debounce/type-filter effects below to skip their
+  // own first run so this doesn't fire a redundant second request (and
+  // doesn't reset `resultsPage` back to 1).
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    skipNextSearchRef.current = true;
+    loadResults(trimmed, resultsPage, typeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Debounced live search as you type — resets to page 1, same as
   // selectVehicle() resetting historyPage to 1 on /vehicles/search ──────
@@ -148,23 +178,19 @@ export default function SalesSearchPage() {
   }, [query]);
 
   // Changing the type filter re-queries from page 1, same idea as a
-  // filter change resetting page on a paginated list.
+  // filter change resetting page on a paginated list. Skips its own first
+  // run too — the initial-load effect above already covers mount.
+  const isFirstTypeFilterRef = useRef(true);
   useEffect(() => {
+    if (isFirstTypeFilterRef.current) {
+      isFirstTypeFilterRef.current = false;
+      return;
+    }
     const trimmed = query.trim();
     if (!trimmed) return;
     loadResults(trimmed, 1, typeFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typeFilter]);
-
-  // ── Deep link from /sales (?q=...) ──────────────────────────────────
-  useEffect(() => {
-    const initialQ = searchParams.get('q');
-    if (!initialQ) return;
-    skipNextSearchRef.current = true;
-    setQuery(initialQ);
-    loadResults(initialQ, 1, 'ALL');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function openResult(r: SalesSearchResult) {
     router.push(`${TYPE_META[r.type].path}/${r.id}`);
@@ -193,24 +219,16 @@ export default function SalesSearchPage() {
       {/* Header — same outlined/blurred treatment as Workshop + Sales */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-3xl mx-auto">
-          <button
-            onClick={() => router.push('/sales')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Sales
-          </button>
-
           <div className="flex items-center gap-2.5 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Search size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Sales Search
+                {t('sales.search.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Search across quotations, orders, invoices, and deliveries
+                {t('sales.search.subtitle')}
               </p>
             </div>
           </div>
@@ -221,7 +239,7 @@ export default function SalesSearchPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search invoice #, order #, quotation #, DO #, or customer..."
+              placeholder={t('sales.search.searchPlaceholder')}
               autoFocus
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
@@ -232,7 +250,7 @@ export default function SalesSearchPage() {
                 onClick={() => query.trim() && loadResults(query.trim(), 1, typeFilter)}
                 className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
               >
-                Enter
+                {t('sales.search.enter')}
                 <CornerDownLeft size={11} strokeWidth={2} />
               </button>
             )}
@@ -250,7 +268,7 @@ export default function SalesSearchPage() {
                       : 'border-gray-300 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {f.label}
+                  {t(f.labelKey)}
                 </button>
               ))}
             </div>
@@ -261,14 +279,14 @@ export default function SalesSearchPage() {
       <div className="max-w-3xl mx-auto p-4 sm:p-6">
         {results && !searching && results.items.length === 0 && (
           <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md p-4 text-center">
-            No quotations, orders, invoices, or deliveries found for &quot;{query.trim()}&quot;
+            {t('sales.search.notFoundFor', { query: query.trim() })}
           </p>
         )}
 
         {!results && !searching && (
           <div className="flex flex-col items-center justify-center text-center py-16 text-gray-400">
             <Search size={32} strokeWidth={1.5} className="mb-3" />
-            <p className="text-sm">Start typing above to search across all sales documents.</p>
+            <p className="text-sm">{t('sales.search.startTyping')}</p>
           </div>
         )}
 
@@ -289,16 +307,17 @@ export default function SalesSearchPage() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold truncate">{r.number ?? 'Unnumbered'}</span>
+                        <span className="text-sm font-semibold truncate">{r.number ?? t('sales.search.unnumbered')}</span>
                         <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide shrink-0">
-                          {meta.label}
+                          {t(meta.labelKey)}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 shrink-0">
                           {r.status}
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 truncate">
-                        {r.customerName ?? 'No customer'} · {new Date(r.createdAt).toLocaleDateString('id-ID')}
+                        {r.customerName ?? t('sales.search.noCustomer')} ·{' '}
+                        {new Date(r.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
                       </p>
                     </div>
                     {r.total != null && (
@@ -314,7 +333,7 @@ export default function SalesSearchPage() {
             {results.total > 0 && (
               <div className="flex items-center justify-between mt-4 text-sm">
                 <span className="text-gray-500">
-                  Page {results.page} of {results.totalPages} · {results.total} total
+                  {t('sales.search.pageOf', { page: results.page, totalPages: results.totalPages, total: results.total })}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -322,14 +341,14 @@ export default function SalesSearchPage() {
                     disabled={resultsPage <= 1 || searching}
                     className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
                   >
-                    Previous
+                    {t('common.previous')}
                   </button>
                   <button
                     onClick={() => loadResults(query.trim(), resultsPage + 1, typeFilter)}
                     disabled={resultsPage >= totalPages || searching}
                     className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
                   >
-                    Next
+                    {t('common.next')}
                   </button>
                 </div>
               </div>

@@ -1,17 +1,18 @@
 // app/(app)/purchasing/purchase-orders/new/page.tsx
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, ClipboardList, Trash2, Plus } from 'lucide-react';
+import { ClipboardList, Trash2, Plus } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { POProductSearch } from '@/app/components/purchase-orders/POProductSearch';
 import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker';
 import { Supplier } from '@/app/components/suppliers/types';
 import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from '@/app/components/purchase-orders/types';
-import { useHasModule } from '@/lib/useHasModule';
+import { useHasModule } from '@/lib/hooks/useHasModule';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -19,10 +20,21 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright. See login/page.tsx.
 export default function PurchaseOrderFormPage() {
+  return (
+    <Suspense fallback={null}>
+      <PurchaseOrderFormPageInner />
+    </Suspense>
+  );
+}
+
+function PurchaseOrderFormPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
+  const { t } = useLanguage();
 
   const hasWarehouseOps = useHasModule('WAREHOUSE_OPS');
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -68,7 +80,7 @@ export default function PurchaseOrderFormPage() {
       try {
         const res = await apiFetch(`/purchase-orders/${editId}`);
         if (!res.ok) {
-          setError(`Could not load this purchase order (${res.status}).`);
+          setError(t('purchasing.purchaseOrderNew.loadError', { status: res.status }));
           return;
         }
         const po = await res.json();
@@ -92,7 +104,7 @@ export default function PurchaseOrderFormPage() {
         for (const item of po.items ?? []) {
           if (item.productId && item.product) {
             restoredCart[item.productId] = {
-              product: { id: item.productId, name: item.product.name, sku: item.product.sku ?? null, barcode: null },
+              product: { id: item.productId, name: item.product.name, sku: item.product.sku ?? null, barcode: null, image: null },
               quantity: Number(item.quantity),
               unitCost: Number(item.unitCost),
             };
@@ -107,11 +119,12 @@ export default function PurchaseOrderFormPage() {
         // only exist client-side until save, at which point they become
         // ordinary linked items on reload. Nothing to restore here.
       } catch {
-        setError('Could not reach the server.');
+        setError(t('purchasing.purchaseOrderNew.serverError'));
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
   function addProduct(product: POProduct) {
@@ -186,7 +199,7 @@ export default function PurchaseOrderFormPage() {
       (l) => !l.name.trim() || !l.sku.trim() || !l.category.trim(),
     );
     if (invalidNewProduct) {
-      throw new Error('Each new product needs a name, SKU, and category');
+      throw new Error(t('purchasing.purchaseOrderNew.newProductValidation'));
     }
     return {
       locationId: locationId || undefined,
@@ -214,14 +227,14 @@ export default function PurchaseOrderFormPage() {
   async function handleSave() {
     setError('');
     if (itemCount === 0) {
-      setError('Add at least one item.');
+      setError(t('purchasing.purchaseOrderNew.addAtLeastOneItem'));
       return;
     }
     let payload;
     try {
       payload = buildPayload();
     } catch (e: any) {
-      setError(e.message ?? 'Please check the new product rows.');
+      setError(e.message ?? t('purchasing.purchaseOrderNew.checkNewProductRows'));
       return;
     }
     setSaving(true);
@@ -231,12 +244,12 @@ export default function PurchaseOrderFormPage() {
         : await apiFetch('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('purchasing.purchaseOrderNew.requestFailed', { status: res.status }));
         return;
       }
       router.push(`/purchasing/purchase-orders/${body.id}`);
     } catch {
-      setError('Could not reach the server.');
+      setError(t('purchasing.purchaseOrderNew.serverError'));
     } finally {
       setSaving(false);
     }
@@ -245,7 +258,7 @@ export default function PurchaseOrderFormPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('purchasing.purchaseOrderNew.loading')}</p>
       </main>
     );
   }
@@ -254,13 +267,13 @@ export default function PurchaseOrderFormPage() {
     return (
       <main className="min-h-screen bg-white text-black p-6">
         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
-          This purchase order is no longer a draft and can't be edited here.
+          {t('purchasing.purchaseOrderNew.notEditable')}
         </p>
         <button
           onClick={() => router.push(`/purchasing/purchase-orders/${editId}`)}
           className="text-sm underline"
         >
-          View it instead
+          {t('purchasing.purchaseOrderNew.viewInstead')}
         </button>
       </main>
     );
@@ -278,19 +291,12 @@ export default function PurchaseOrderFormPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/purchasing/purchase-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
-              {editId ? 'Edit Purchase Order' : 'New Purchase Order'}
+              {editId ? t('purchasing.purchaseOrderNew.titleEdit') : t('purchasing.purchaseOrderNew.titleNew')}
             </h1>
           </div>
         </div>
@@ -301,16 +307,16 @@ export default function PurchaseOrderFormPage() {
           <POProductSearch onAddProduct={addProduct} />
 
           {cartLines.length === 0 && newProductLineTotals.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No items yet — search above to add products.</p>
+            <p className="text-sm text-gray-400 text-center py-8">{t('purchasing.purchaseOrderNew.noItemsYet')}</p>
           ) : (
             <div className="border-2 border-gray-200 rounded-md overflow-hidden bg-white">
               <table className="w-full text-sm">
                 <thead className="bg-blue-50/60 border-b-2 border-gray-200">
                   <tr>
-                    <th className="text-left font-semibold px-3 py-2">Item</th>
-                    <th className="text-right font-semibold px-3 py-2 w-20">Qty</th>
-                    <th className="text-right font-semibold px-3 py-2 w-32">Unit Cost</th>
-                    <th className="text-right font-semibold px-3 py-2 w-32">Line Total</th>
+                    <th className="text-left font-semibold px-3 py-2">{t('purchasing.purchaseOrderNew.colItem')}</th>
+                    <th className="text-right font-semibold px-3 py-2 w-20">{t('purchasing.purchaseOrderNew.colQty')}</th>
+                    <th className="text-right font-semibold px-3 py-2 w-32">{t('purchasing.purchaseOrderNew.colUnitCost')}</th>
+                    <th className="text-right font-semibold px-3 py-2 w-32">{t('purchasing.purchaseOrderNew.colLineTotal')}</th>
                     <th className="w-10"></th>
                   </tr>
                 </thead>
@@ -319,7 +325,7 @@ export default function PurchaseOrderFormPage() {
                     <tr key={l.product.id} className="border-b border-gray-100 last:border-0">
                       <td className="px-3 py-2">
                         <p className="font-medium">{l.product.name}</p>
-                        {l.product.sku && <p className="text-xs text-gray-500">SKU: {l.product.sku}</p>}
+                        {l.product.sku && <p className="text-xs text-gray-500">{t('purchasing.purchaseOrderNew.skuLabel', { sku: l.product.sku })}</p>}
                       </td>
                       <td className="px-3 py-2">
                         <input
@@ -353,7 +359,7 @@ export default function PurchaseOrderFormPage() {
                         <div className="space-y-1">
                           <input
                             type="text"
-                            placeholder="Product name"
+                            placeholder={t('purchasing.purchaseOrderNew.productNamePlaceholder')}
                             value={l.name}
                             onChange={(e) => updateNewProductLine(l.key, { name: e.target.value })}
                             className={`w-full border-2 rounded-md px-2 py-1 text-sm outline-none ${
@@ -363,7 +369,7 @@ export default function PurchaseOrderFormPage() {
                           <div className="flex gap-1">
                             <input
                               type="text"
-                              placeholder="SKU"
+                              placeholder={t('purchasing.purchaseOrderNew.skuPlaceholder')}
                               value={l.sku}
                               onChange={(e) => updateNewProductLine(l.key, { sku: e.target.value })}
                               className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
@@ -372,7 +378,7 @@ export default function PurchaseOrderFormPage() {
                             />
                             <input
                               type="text"
-                              placeholder="Category"
+                              placeholder={t('purchasing.purchaseOrderNew.categoryPlaceholder')}
                               value={l.category}
                               onChange={(e) => updateNewProductLine(l.key, { category: e.target.value })}
                               className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
@@ -380,7 +386,7 @@ export default function PurchaseOrderFormPage() {
                               }`}
                             />
                           </div>
-                          <p className="text-xs text-gray-400 italic">New product</p>
+                          <p className="text-xs text-gray-400 italic">{t('purchasing.purchaseOrderNew.newProductLabel')}</p>
                         </div>
                       </td>
                       <td className="px-3 py-2">
@@ -429,7 +435,7 @@ export default function PurchaseOrderFormPage() {
             className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-dashed border-gray-300 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 hover:bg-blue-50/40 transition-colors"
           >
             <Plus size={14} strokeWidth={2} />
-            Add new product
+            {t('purchasing.purchaseOrderNew.addNewProduct')}
           </button>
         </div>
 
@@ -439,19 +445,19 @@ export default function PurchaseOrderFormPage() {
           )}
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Supplier</label>
+            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.supplier')}</label>
             <SupplierPicker supplier={supplier} onChange={setSupplier} />
           </div>
 
           {hasWarehouseOps && (
             <div>
-              <label className="block text-sm font-semibold mb-1">Receiving Location</label>
+              <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.receivingLocation')}</label>
               <select
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
                 className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
               >
-                <option value="">Select location...</option>
+                <option value="">{t('purchasing.purchaseOrderNew.selectLocationPlaceholder')}</option>
                 {locations.map((loc) => (
                   <option key={loc.id} value={loc.id}>
                     {loc.name}
@@ -462,13 +468,13 @@ export default function PurchaseOrderFormPage() {
           )}
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Tax</label>
+            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.tax')}</label>
             <select
               value={taxRateId ?? ''}
               onChange={(e) => setTaxRateId(e.target.value || null)}
               className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
             >
-              <option value="">None</option>
+              <option value="">{t('purchasing.purchaseOrderNew.none')}</option>
               {taxRates.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name} ({r.percentage}%)
@@ -478,7 +484,7 @@ export default function PurchaseOrderFormPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Discount (flat amount)</label>
+            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
             <input
               type="number"
               min={0}
@@ -490,19 +496,19 @@ export default function PurchaseOrderFormPage() {
 
           <div className="border-t-2 border-gray-200 pt-3 space-y-1 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-500">Subtotal</span>
+              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.subtotal')}</span>
               <span>{formatIDR(subtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Discount</span>
+              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.discountRow')}</span>
               <span>-{formatIDR(clampedDiscount)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Tax</span>
+              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.taxRow')}</span>
               <span>{formatIDR(taxAmount)}</span>
             </div>
             <div className="flex justify-between font-bold text-base pt-1">
-              <span>Total</span>
+              <span>{t('purchasing.purchaseOrderNew.total')}</span>
               <span>{formatIDR(total)}</span>
             </div>
           </div>
@@ -512,7 +518,7 @@ export default function PurchaseOrderFormPage() {
             disabled={saving || itemCount === 0}
             className="w-full bg-blue-600 text-white font-semibold px-4 py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {saving ? 'Saving...' : editId ? 'Save Changes' : 'Save Draft'}
+            {saving ? t('purchasing.purchaseOrderNew.saving') : editId ? t('purchasing.purchaseOrderNew.saveChanges') : t('purchasing.purchaseOrderNew.saveDraft')}
           </button>
         </div>
       </div>

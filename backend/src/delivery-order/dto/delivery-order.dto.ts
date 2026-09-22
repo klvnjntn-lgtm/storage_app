@@ -2,7 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
-  IsInt,
+  IsNumber,
   IsOptional,
   IsPositive,
   IsString,
@@ -14,7 +14,9 @@ export class DeliveryOrderLineDto {
   @IsUUID()
   salesOrderItemId: string;
 
-  @IsInt()
+  // FIX — was @IsInt(); DeliveryOrderItem.quantity is Decimal(12,2) and
+  // Stock now supports fractional quantities too, so this must accept them.
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
 }

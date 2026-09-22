@@ -4,7 +4,6 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
-  IsInt,
   IsNotEmpty,
   IsNumber,
   IsBoolean,
@@ -33,7 +32,12 @@ export class QuotationLineItemDto {
   @IsNotEmpty()
   locationId?: string;
 
-  @IsInt()
+  // FIX — was @IsInt(); SalesQuotationItem.quantity is Decimal(12,2), same
+  // as SalesOrderItem.quantity (see sales-order.dto.ts's identical fix).
+  // Fractional quantities (e.g. 2.5 kg) are supported at the DB level and
+  // on the sales-order DTO — a product sold in fractional units couldn't
+  // be quoted first without this, breaking the quotation→order path.
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
 

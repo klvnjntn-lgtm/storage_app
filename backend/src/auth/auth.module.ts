@@ -5,7 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { JwtStrategy } from './jwt.strategy';
+import { JwtStrategy, getJwtSecret } from './jwt.strategy';
 import { MailerModule } from './mailer/mailer.module';
 
 @Module({
@@ -13,8 +13,13 @@ import { MailerModule } from './mailer/mailer.module';
     PrismaModule,
     PassportModule,
     MailerModule,
+    // FIX — was `process.env.JWT_SECRET ?? 'dev-secret-change-me'`, a
+    // hardcoded, publicly-known fallback that let any client forge a
+    // valid JWT for any user if JWT_SECRET was ever unset. Reuses
+    // jwt.strategy.ts's fail-fast getJwtSecret() instead of leaving a
+    // second, differently-guarded copy of the same secret lookup.
     JwtModule.register({
-      secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+      secret: getJwtSecret(),
       signOptions: { expiresIn: '7d' },
     }),
   ],

@@ -2,29 +2,31 @@
 
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Settings, Database, Package, ChevronRight } from 'lucide-react';
+import { Settings, Database, Package, ChevronRight } from 'lucide-react';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
-
-const ADMIN_SECTIONS = [
-  {
-    href: '/admin/database',
-    title: 'Reference Data',
-    description: 'Rename or merge locations, categories, and brands',
-    icon: Database,
-  },
-  {
-    href: '/admin/products',
-    title: 'Products',
-    description: 'Manage product catalog, SKUs, and details',
-    icon: Package,
-  },
-];
 
 export default function AdminPage() {
   const router = useRouter();
   const { authorized, loading } = useRequireAdmin();
+  const { t } = useLanguage();
+
+  const ADMIN_SECTIONS = [
+    {
+      href: '/admin/database',
+      title: t('admin.overview.referenceDataTitle'),
+      description: t('admin.overview.referenceDataDescription'),
+      icon: Database,
+    },
+    {
+      href: '/admin/products',
+      title: t('admin.overview.productsTitle'),
+      description: t('admin.overview.productsDescription'),
+      icon: Package,
+    },
+  ];
 
   if (loading || !authorized) {
     return (
@@ -37,7 +39,7 @@ export default function AdminPage() {
           backgroundSize: '24px 24px',
         }}
       >
-        <p className="text-sm text-gray-400">Checking access...</p>
+        <p className="text-sm text-gray-400">{t('admin.overview.checkingAccess')}</p>
       </main>
     );
   }
@@ -55,22 +57,15 @@ export default function AdminPage() {
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Scanner Hub
-          </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Settings size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Admin
+                {t('admin.overview.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Manage warehouse data and settings</p>
+              <p className="text-xs text-gray-500 truncate">{t('admin.overview.subtitle')}</p>
             </div>
           </div>
         </div>

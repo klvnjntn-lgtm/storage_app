@@ -1,28 +1,19 @@
 // app/(app)/sales/invoices/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Receipt,
-  Plus,
-  RotateCcw,
-  Trash2,
-  FileText,
-  AlertCircle,
-  Search,
-  X,
-} from 'lucide-react';
+import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
-import DateRangePicker from '@/app/components/DateRangePicker';
-import Pagination from '@/app/components/Pagination';
+import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
-
-type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // Which date field the From/To range filters by. Only meaningful once a
 // range is actually set — see the toggle rendered next to the date picker.
@@ -46,14 +37,6 @@ type InvoiceListItem = {
   items: { id: number }[];
 };
 
-function formatIDR(amount: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
 function statusStyle(status: string) {
   switch (status) {
     case 'DRAFT':
@@ -64,17 +47,6 @@ function statusStyle(status: string) {
       return 'bg-gray-100 text-gray-600 border-gray-300';
     default:
       return 'bg-gray-100 text-gray-600 border-gray-300';
-  }
-}
-
-function paymentStatusStyle(status: PaymentStatus) {
-  switch (status) {
-    case 'PAID':
-      return 'bg-green-50 text-green-700 border-green-300';
-    case 'PARTIAL':
-      return 'bg-amber-50 text-amber-700 border-amber-300';
-    case 'UNPAID':
-      return 'bg-red-50 text-red-700 border-red-300';
   }
 }
 
@@ -105,36 +77,86 @@ function displayDateFor(inv: InvoiceListItem): Date {
 
 const PAGE_SIZE_DEFAULT = 20;
 
-const STATUS_OPTIONS = [
-  { value: 'ALL' as const, label: 'All' },
-  { value: 'DRAFT' as const, label: 'Active drafts' },
-  { value: 'ISSUED' as const, label: 'Issued' },
-];
+const STATUS_OPTIONS = ['ALL', 'DRAFT', 'ISSUED'] as const;
 
-const PAYMENT_OPTIONS = [
-  { value: 'ALL' as const, label: 'Any' },
-  { value: 'UNPAID' as const, label: 'Unpaid' },
-  { value: 'PARTIAL' as const, label: 'Partial' },
-  { value: 'PAID' as const, label: 'Paid' },
-  { value: 'OVERDUE' as const, label: 'Overdue' },
-];
+const PAYMENT_OPTIONS = ['ALL', 'UNPAID', 'PARTIAL', 'PAID', 'OVERDUE'] as const;
 
 export default function InvoicesPage() {
   const router = useRouter();
+  const { t } = useLanguage();
+
+  function statusOptionLabel(value: (typeof STATUS_OPTIONS)[number]): string {
+    switch (value) {
+      case 'ALL':
+        return t('common.all');
+      case 'DRAFT':
+        return t('sales.invoicesList.statusActiveDrafts');
+      case 'ISSUED':
+        return t('sales.invoicesList.statusIssued');
+    }
+  }
+
+  function paymentOptionLabel(value: (typeof PAYMENT_OPTIONS)[number]): string {
+    switch (value) {
+      case 'ALL':
+        return t('sales.invoicesList.paymentAny');
+      case 'UNPAID':
+        return t('sales.invoicesList.paymentUnpaid');
+      case 'PARTIAL':
+        return t('sales.invoicesList.paymentPartial');
+      case 'PAID':
+        return t('sales.invoicesList.paymentPaid');
+      case 'OVERDUE':
+        return t('sales.invoicesList.paymentOverdue');
+    }
+  }
+
+  function statusBadgeLabel(status: string): string {
+    switch (status) {
+      case 'DRAFT':
+        return t('sales.invoicesList.statusDraftBadge');
+      case 'ISSUED':
+        return t('sales.invoicesList.statusIssuedBadge');
+      case 'VOID':
+        return t('sales.invoicesList.statusVoidBadge');
+      default:
+        return status;
+    }
+  }
+
+  function paymentBadgeLabel(status: string): string {
+    switch (status) {
+      case 'PAID':
+        return t('sales.invoicesList.paymentStatusPaidBadge');
+      case 'UNPAID':
+        return t('sales.invoicesList.paymentStatusUnpaidBadge');
+      case 'PARTIAL':
+        return t('sales.invoicesList.paymentStatusPartialBadge');
+      default:
+        return status;
+    }
+  }
 
   // No default range — the page shows every invoice until the person
-  // opts into a date filter via the picker.
-  const [from, setFrom] = useState<string | null>(null);
-  const [to, setTo] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'ISSUED'>('ALL');
-  const [paymentFilter, setPaymentFilter] = useState<'ALL' | PaymentStatus | 'OVERDUE'>('ALL');
+  // opts into a date filter via the picker. Seeded from the URL so
+  // returning via the browser's Back button (e.g. from an invoice detail
+  // page) lands back on the same filtered/searched/paged view instead of
+  // resetting to page 1 with no filters.
+  const [from, setFrom] = useState<string | null>(() => getInitialParam('from', '') || null);
+  const [to, setTo] = useState<string | null>(() => getInitialParam('to', '') || null);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DRAFT' | 'ISSUED'>(() =>
+    getInitialParam('status', 'ALL')
+  );
+  const [paymentFilter, setPaymentFilter] = useState<'ALL' | PaymentStatus | 'OVERDUE'>(() =>
+    getInitialParam('payment', 'ALL')
+  );
 
   // Search by invoice number or customer name. `search` is what the input
   // shows immediately; `debouncedSearch` is what actually drives the
   // fetch, updated 350ms after the person stops typing so each keystroke
   // doesn't fire a request.
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(() => getInitialParam('search', ''));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -143,7 +165,7 @@ export default function InvoicesPage() {
 
   // Which date the range applies to. Only surfaced in the UI once a range
   // is set — irrelevant otherwise.
-  const [dateField, setDateField] = useState<DateField>('issued');
+  const [dateField, setDateField] = useState<DateField>(() => getInitialParam('dateField', 'issued'));
 
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -155,13 +177,24 @@ export default function InvoicesPage() {
   // older overdue invoice.
   const [overdueCount, setOverdueCount] = useState<number>(0);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', PAGE_SIZE_DEFAULT));
 
   // Total row count for the *current filters*, as reported by the server —
   // drives Pagination's page-count math. Distinct from invoices.length,
   // which is only the current page.
   const [totalInvoices, setTotalInvoices] = useState(0);
+
+  useSyncQueryParams({
+    search: debouncedSearch,
+    status: statusFilter !== 'ALL' ? statusFilter : null,
+    payment: paymentFilter !== 'ALL' ? paymentFilter : null,
+    from,
+    to,
+    dateField: from && to ? dateField : null,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== PAGE_SIZE_DEFAULT ? pageSize : null,
+  });
 
   const hasDateRange = Boolean(from && to);
   const activeFilterCount =
@@ -203,7 +236,7 @@ export default function InvoicesPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.invoicesList.requestFailed', { status: res.status }));
         setInvoices([]);
         setTotalInvoices(0);
         return;
@@ -213,7 +246,7 @@ export default function InvoicesPage() {
       setInvoices(body.data);
       setTotalInvoices(body.total);
     } catch (e) {
-      setError('Could not reach the server.');
+      setError(t('sales.invoicesList.serverUnreachable'));
       setInvoices([]);
       setTotalInvoices(0);
     } finally {
@@ -233,22 +266,30 @@ export default function InvoicesPage() {
   }
 
   useEffect(() => {
-    loadInvoices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, statusFilter, dateField, paymentFilter, debouncedSearch, page, pageSize]);
-
-  useEffect(() => {
     loadOverdueCount();
   }, []);
 
   // Any filter change invalidates the current page — land back on page 1
   // instead of requesting a stale, possibly out-of-range page from the
-  // server. (Deliberately excludes `page` itself, or this would never let
-  // page actually change.)
+  // server. Merged with the load-on-every-dep effect (was two separate
+  // effects) so a filter change fires exactly one request instead of two,
+  // and — importantly — so this doesn't reset a `page` restored from the
+  // URL (e.g. via the browser's Back button) back to 1 on mount: the ref
+  // starts equal to the initial filtersKey, so the reset branch only ever
+  // fires on an actual change, never on the first render.
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${debouncedSearch}`;
+  const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
-    setPage(1);
+    if (prevFiltersKeyRef.current !== filtersKey) {
+      prevFiltersKeyRef.current = filtersKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
+    loadInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, statusFilter, dateField, paymentFilter, debouncedSearch, pageSize]);
+  }, [filtersKey, page, pageSize]);
 
   // The server now applies every filter (including payment/overdue) and
   // returns exactly one page — no client-side slicing needed.
@@ -275,14 +316,6 @@ export default function InvoicesPage() {
       {/* Header — matches Vehicle History Lookup's blue-outline + backdrop-blur treatment */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 transition-colors -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -290,9 +323,9 @@ export default function InvoicesPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  Invoices
+                  {t('sales.invoicesList.title')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">History and active drafts</p>
+                <p className="text-xs text-gray-500 truncate">{t('sales.invoicesList.subtitle')}</p>
               </div>
             </div>
 
@@ -305,7 +338,7 @@ export default function InvoicesPage() {
                 className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors w-full sm:w-auto"
               >
                 <FileText size={16} strokeWidth={2} />
-                Generate Statement
+                {t('sales.invoicesList.generateStatement')}
               </button>
 
               <button
@@ -313,7 +346,7 @@ export default function InvoicesPage() {
                 className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 active:bg-blue-800 shadow-sm transition-colors w-full sm:w-auto"
               >
                 <Plus size={16} strokeWidth={2} />
-                New Invoice
+                {t('sales.invoicesList.newInvoice')}
               </button>
             </div>
           </div>
@@ -335,14 +368,14 @@ export default function InvoicesPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search invoice # or customer"
+              placeholder={t('sales.invoicesList.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
                 className="text-gray-400 hover:text-blue-700 p-1 shrink-0"
-                aria-label="Clear search"
+                aria-label={t('sales.invoicesList.clearSearch')}
               >
                 <X size={14} strokeWidth={2.5} />
               </button>
@@ -355,18 +388,18 @@ export default function InvoicesPage() {
             {/* Date range */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Date range
+                {t('sales.invoicesList.dateRangeLabel')}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
-                <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+                <DateRangePicker from={from} to={to} onChange={(f, tt) => { setFrom(f); setTo(tt); }} />
 
                 {/* Only relevant once a range is actually applied. */}
                 {hasDateRange && (
                   <div className="flex flex-wrap gap-1.5">
                     {(
                       [
-                        { value: 'issued' as const, label: 'Issued' },
-                        { value: 'invoice' as const, label: 'Invoice date' },
+                        { value: 'issued' as const, label: t('sales.invoicesList.dateFieldIssued') },
+                        { value: 'invoice' as const, label: t('sales.invoicesList.dateFieldInvoiceDate') },
                       ]
                     ).map((opt) => (
                       <button
@@ -389,7 +422,7 @@ export default function InvoicesPage() {
             {/* Status */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Status
+                {t('sales.invoicesList.statusLabel')}
               </p>
               {/* Horizontal scroll on narrow screens instead of wrapping —
                   keeps each pill a comfortable tap target without the row
@@ -397,15 +430,15 @@ export default function InvoicesPage() {
               <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-0.5 px-0.5 sm:flex-wrap sm:overflow-visible">
                 {STATUS_OPTIONS.map((opt) => (
                   <button
-                    key={opt.value}
-                    onClick={() => setStatusFilter(opt.value)}
+                    key={opt}
+                    onClick={() => setStatusFilter(opt)}
                     className={`text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                      statusFilter === opt.value
+                      statusFilter === opt
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                     }`}
                   >
-                    {opt.label}
+                    {statusOptionLabel(opt)}
                   </button>
                 ))}
               </div>
@@ -414,26 +447,26 @@ export default function InvoicesPage() {
             {/* Payment */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Payment
+                {t('sales.invoicesList.paymentLabel')}
               </p>
               <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-0.5 px-0.5 sm:flex-wrap sm:overflow-visible">
                 {PAYMENT_OPTIONS.map((opt) => (
                   <button
-                    key={opt.value}
-                    onClick={() => setPaymentFilter(opt.value)}
+                    key={opt}
+                    onClick={() => setPaymentFilter(opt)}
                     className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                      paymentFilter === opt.value
-                        ? opt.value === 'OVERDUE'
+                      paymentFilter === opt
+                        ? opt === 'OVERDUE'
                           ? 'bg-red-600 text-white border-red-600'
                           : 'bg-blue-600 text-white border-blue-600'
-                        : opt.value === 'OVERDUE'
+                        : opt === 'OVERDUE'
                         ? 'border-red-300 text-red-700 bg-white hover:bg-red-50'
                         : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                     }`}
                   >
-                    {opt.value === 'OVERDUE' && <AlertCircle size={12} strokeWidth={2} />}
-                    {opt.label}
-                    {opt.value === 'OVERDUE' && overdueCount > 0 ? ` (${overdueCount})` : ''}
+                    {opt === 'OVERDUE' && <AlertCircle size={12} strokeWidth={2} />}
+                    {paymentOptionLabel(opt)}
+                    {opt === 'OVERDUE' && overdueCount > 0 ? ` (${overdueCount})` : ''}
                   </button>
                 ))}
               </div>
@@ -447,7 +480,7 @@ export default function InvoicesPage() {
             <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-blue-500/10">
               {hasDateRange && dateField === 'invoice' && (
                 <p className="text-xs text-gray-400">
-                  Showing invoices by the date printed on the document — this can differ from when an invoice was actually issued if it was backdated.
+                  {t('sales.invoicesList.invoiceDateFilterNote')}
                 </p>
               )}
               {activeFilterCount > 0 && (
@@ -456,7 +489,7 @@ export default function InvoicesPage() {
                   className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors py-1"
                 >
                   <X size={12} strokeWidth={2.5} />
-                  Clear filters
+                  {t('sales.invoicesList.clearFilters')}
                 </button>
               )}
             </div>
@@ -470,10 +503,10 @@ export default function InvoicesPage() {
           </p>
         )}
 
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500">{t('common.loading')}</p>}
 
         {!loading && !error && invoices.length === 0 && (
-          <p className="text-sm text-gray-400">No invoices match these filters.</p>
+          <p className="text-sm text-gray-400">{t('sales.invoicesList.noInvoicesMatch')}</p>
         )}
 
         {/* List — each row stacks into: title/badges, meta line, then amount + actions
@@ -501,31 +534,32 @@ export default function InvoicesPage() {
                   <div className="min-w-0">
                     <div className="flex items-center flex-wrap gap-1.5">
                       <span className="font-semibold truncate">
-                        {inv.invoiceNumber ?? 'Unissued draft'}
+                        {inv.invoiceNumber ?? t('sales.invoicesList.unissuedDraft')}
                       </span>
                       <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(inv.status)}`}>
-                        {inv.status}
+                        {statusBadgeLabel(inv.status)}
                       </span>
                       {inv.status !== 'DRAFT' && (
                         <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${paymentStatusStyle(inv.paymentStatus)}`}>
-                          {inv.paymentStatus}
+                          {paymentBadgeLabel(inv.paymentStatus)}
                         </span>
                       )}
                       {overdue && (
                         <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-400">
                           <AlertCircle size={11} strokeWidth={2} />
-                          OVERDUE
+                          {t('sales.invoicesList.overdueBadge')}
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {inv.location?.name ?? '—'} · {inv.items.length} item{inv.items.length === 1 ? '' : 's'}
+                      {inv.location?.name ?? '—'} · {inv.items.length}{' '}
+                      {t(inv.items.length === 1 ? 'sales.invoicesList.itemCountOne' : 'sales.invoicesList.itemCountOther')}
                       {inv.customerName ? ` · ${inv.customerName}` : ''} ·{' '}
                       {displayDateFor(inv).toLocaleDateString('id-ID')}
                       {inv.dueDate && (
                         <span className={overdue ? 'text-red-600 font-medium' : ''}>
                           {' '}
-                          · Due {parseCalendarDate(inv.dueDate).toLocaleDateString('id-ID')}
+                          · {t('sales.invoicesList.dueSeparator')} {parseCalendarDate(inv.dueDate).toLocaleDateString('id-ID')}
                         </span>
                       )}
                     </p>
@@ -543,14 +577,14 @@ export default function InvoicesPage() {
                           className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 active:bg-blue-100 transition-colors"
                         >
                           <RotateCcw size={13} strokeWidth={2} />
-                          Resume
+                          {t('sales.invoicesList.resume')}
                         </button>
                         <button
                           onClick={() => discardDraft(inv.id)}
                           className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-blue-500/20 hover:bg-red-50 active:bg-red-100 hover:border-red-300 text-red-600 transition-colors"
                         >
                           <Trash2 size={13} strokeWidth={2} />
-                          Discard
+                          {t('sales.invoicesList.discard')}
                         </button>
                       </div>
                     )}

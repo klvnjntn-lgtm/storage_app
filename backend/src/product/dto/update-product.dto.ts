@@ -34,4 +34,10 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   costPrice?: number;
+
+  // URL of a MediaAsset picked from the media library, or null to clear
+  // the product's photo. See ProductService.update.
+  @IsOptional()
+  @IsString()
+  image?: string | null;
 }

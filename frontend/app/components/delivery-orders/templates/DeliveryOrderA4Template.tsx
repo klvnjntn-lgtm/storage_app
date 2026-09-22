@@ -1,0 +1,131 @@
+// app/components/delivery-orders/template/DeliveryOrderA4Template.tsx
+'use client';
+
+import type { DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
+import { resolveUploadUrl } from '@/lib/assets';
+import { useLanguage } from '@/app/context/LanguageContext';
+
+export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView }) {
+  const { t, language } = useLanguage();
+  const logoUrl = resolveUploadUrl(order.business.logoUrl);
+
+  return (
+    <div className="bg-white text-black text-sm" style={{ width: '210mm', minHeight: '297mm', padding: '15mm' }}>
+      <div className="flex items-start justify-between pb-4 border-b-2 border-black">
+        <div className="flex items-center gap-3">
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="" className="h-14 w-14 object-contain" />
+          )}
+          <div>
+            <p className="font-bold text-lg">{order.business.legalName ?? order.business.name}</p>
+            {order.business.address && (
+              <p className="text-xs text-gray-600 whitespace-pre-line">{order.business.address}</p>
+            )}
+            {order.business.phone && <p className="text-xs text-gray-600">{order.business.phone}</p>}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-2xl font-bold tracking-wide">{t('sales.deliveryOrderTemplate.title')}</p>
+          <p className="text-sm font-semibold mt-1">{order.doNumber ?? t('sales.deliveryOrderTemplate.draft')}</p>
+        </div>
+      </div>
+
+      {/* Facts bar — Delivery Date is shippedAt (null until ship()), kept
+          distinct from the order's createdAt so it isn't mistaken for the
+          date goods actually left the warehouse.
+          NOTE: shippedAt/createdAt are real instants (not pure calendar
+          dates like a quotation's quotationDate/validUntil), so they are
+          deliberately NOT run through parseCalendarDate — new Date(...)
+          + toLocaleDateString() is the correct local-day conversion for
+          an actual timestamp. See lib/dates.ts for why calendar-only
+          fields need different handling. */}
+      <div className="grid grid-cols-3 gap-4 py-4 border-b border-gray-200">
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.deliveryDate')}</p>
+          <p className="text-sm font-semibold">
+            {order.shippedAt
+              ? new Date(order.shippedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')
+              : t('sales.deliveryOrderTemplate.pendingShipment')}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.salesOrderRef')}</p>
+          <p className="text-sm font-semibold">{order.salesOrderNumber ?? '—'}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.orderCreated')}</p>
+          <p className="text-sm">{new Date(order.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6 py-4">
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.customerInfo')}</p>
+          <p className="font-semibold">{order.customer.name ?? '—'}</p>
+          {order.customer.phone && <p className="text-xs text-gray-600">{order.customer.phone}</p>}
+          {order.customer.poNumber && (
+            <p className="text-xs text-gray-600">{t('sales.deliveryOrderTemplate.customerPoLabel', { po: order.customer.poNumber })}</p>
+          )}
+          <p className="text-xs text-gray-600">{t('sales.deliveryOrderTemplate.shipFrom', { location: order.location.name })}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.deliveryAddress')}</p>
+          <p className="text-xs text-gray-700 whitespace-pre-line">{order.deliveryAddress ?? '—'}</p>
+        </div>
+      </div>
+
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="border-y-2 border-black">
+            <th className="text-left py-2 w-8">#</th>
+            <th className="text-left py-2">{t('sales.deliveryOrderTemplate.colItem')}</th>
+            <th className="text-right py-2 w-28">{t('sales.deliveryOrderTemplate.colQtyDelivered')}</th>
+            <th className="text-left py-2 w-20 pl-3">{t('sales.deliveryOrderTemplate.colUnit')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.items.map((item, i) => (
+            <tr key={item.id} className="border-b border-gray-200">
+              <td className="py-2 text-gray-500">{i + 1}</td>
+              <td className="py-2">{item.productName}</td>
+              <td className="py-2 text-right">{item.quantity}</td>
+              <td className="py-2 pl-3">{item.unit ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {order.notes && (
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('common.notes')}</p>
+          <p className="text-xs whitespace-pre-line">{order.notes}</p>
+        </div>
+      )}
+
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mt-10">
+        {t('sales.deliveryOrderTemplate.proofOfDelivery')}
+      </p>
+      <div className="grid grid-cols-2 gap-8 mt-6">
+        <div className="text-center">
+          <div className="h-16 border-b border-gray-400 flex items-end justify-center pb-1">
+            {order.proofOfDelivery.signedAt && (
+              <span className="text-[10px] text-gray-400">
+                {t('sales.deliveryOrderTemplate.signedLabel', {
+                  date: new Date(order.proofOfDelivery.signedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US'),
+                })}
+              </span>
+            )}
+          </div>
+          <p className="text-xs font-semibold mt-1">{t('sales.deliveryOrderTemplate.deliveredBy')}</p>
+          <p className="text-xs text-gray-500">{order.proofOfDelivery.deliveredBy ?? ''}</p>
+        </div>
+        <div className="text-center">
+          <div className="h-16 border-b border-gray-400" />
+          <p className="text-xs font-semibold mt-1">{t('sales.deliveryOrderTemplate.receivedBy')}</p>
+          <p className="text-xs text-gray-500">{order.proofOfDelivery.receivedBy ?? ''}</p>
+        </div>
+      </div>
+    </div>
+  );
+}

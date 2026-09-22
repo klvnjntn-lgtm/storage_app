@@ -3,19 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  ArrowLeft,
-  MapPin,
-  Layers,
-  Award,
-  Search,
-  GitMerge,
-  AlertTriangle,
-  CheckCircle2,
-  Database,
-} from 'lucide-react';
+import { MapPin, Layers, Award, Search, GitMerge, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { useLanguage } from '@/app/context/LanguageContext';
 type EntityType = 'location' | 'category' | 'brand';
 
 type ReferenceItem = {
@@ -26,13 +17,16 @@ type ReferenceItem = {
 
 const PAGE_SIZE = 20;
 
-const ENTITY_CONFIG: Record<
-  EntityType,
-  { label: string; plural: string; icon: typeof MapPin; listPath: string; mergePath: string }
-> = {
-  location: { label: 'Location', plural: 'Locations', icon: MapPin, listPath: 'locations', mergePath: 'locations/merge' },
-  category: { label: 'Category', plural: 'Categories', icon: Layers, listPath: 'categories', mergePath: 'categories/merge' },
-  brand: { label: 'Brand', plural: 'Brands', icon: Award, listPath: 'brands', mergePath: 'brands/merge' },
+const ENTITY_ICONS: Record<EntityType, typeof MapPin> = {
+  location: MapPin,
+  category: Layers,
+  brand: Award,
+};
+
+const ENTITY_PATHS: Record<EntityType, { listPath: string; mergePath: string }> = {
+  location: { listPath: 'locations', mergePath: 'locations/merge' },
+  category: { listPath: 'categories', mergePath: 'categories/merge' },
+  brand: { listPath: 'brands', mergePath: 'brands/merge' },
 };
 
 function authHeaders(json = true) {
@@ -44,8 +38,32 @@ function authHeaders(json = true) {
 }
 
 export default function ReferenceDataPage() {
-  const router = useRouter();
-  const { authorized, loading: authLoading } = useRequireAdmin();
+    const { authorized, loading: authLoading } = useRequireAdmin();
+  const { t } = useLanguage();
+
+  const ENTITY_CONFIG: Record<
+    EntityType,
+    { label: string; plural: string; icon: typeof MapPin; listPath: string; mergePath: string }
+  > = {
+    location: {
+      label: t('admin.database.entities.location.label'),
+      plural: t('admin.database.entities.location.plural'),
+      icon: ENTITY_ICONS.location,
+      ...ENTITY_PATHS.location,
+    },
+    category: {
+      label: t('admin.database.entities.category.label'),
+      plural: t('admin.database.entities.category.plural'),
+      icon: ENTITY_ICONS.category,
+      ...ENTITY_PATHS.category,
+    },
+    brand: {
+      label: t('admin.database.entities.brand.label'),
+      plural: t('admin.database.entities.brand.plural'),
+      icon: ENTITY_ICONS.brand,
+      ...ENTITY_PATHS.brand,
+    },
+  };
 
   const [activeType, setActiveType] = useState<EntityType>('location');
   const [items, setItems] = useState<ReferenceItem[]>([]);
@@ -78,7 +96,7 @@ export default function ReferenceDataPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || `Failed to load ${config.plural.toLowerCase()}`);
+        throw new Error(data?.message || t('admin.database.failedToLoad', { plural: config.plural.toLowerCase() }));
       }
 
       const data = await res.json();
@@ -87,7 +105,7 @@ export default function ReferenceDataPage() {
       setDrafts(Object.fromEntries(list.map((i: ReferenceItem) => [i.id, i.name])));
     } catch (err: any) {
       console.error(err);
-      setError(err.message || `Could not load ${config.plural.toLowerCase()}.`);
+      setError(err.message || t('admin.database.couldNotLoad', { plural: config.plural.toLowerCase() }));
       setItems([]);
       setDrafts({});
     } finally {
@@ -158,14 +176,14 @@ export default function ReferenceDataPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Rename failed');
+        throw new Error(data?.message || t('admin.database.renameFailed'));
       }
 
       setItems((prev) => prev.map((i) => (i.id === id ? { ...i, name: trimmed } : i)));
       setDrafts((prev) => ({ ...prev, [id]: trimmed }));
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Rename failed — check the console.');
+      setError(err.message || t('admin.database.renameFailedCheckConsole'));
       // Snap the field back to the last saved name so the UI doesn't
       // show an edit that was actually rejected by the server.
       setDrafts((prev) => ({ ...prev, [id]: current.name }));
@@ -186,8 +204,10 @@ export default function ReferenceDataPage() {
     // stock events) but drop out of normal lists. "Permanently deletes"
     // overstated what actually happens here.
     const confirmed = window.confirm(
-      `Merge ${losers.map((l) => l.name).join(', ')} into "${survivor?.name}"? ` +
-      `Stock and history move onto "${survivor?.name}", and the others are archived (hidden from normal use, but not permanently deleted).`
+      t('admin.database.mergeConfirm', {
+        losers: losers.map((l) => l.name).join(', '),
+        survivor: survivor?.name ?? '',
+      })
     );
     if (!confirmed) return;
 
@@ -203,16 +223,16 @@ export default function ReferenceDataPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Merge failed');
+        throw new Error(data?.message || t('admin.database.mergeFailed'));
       }
 
-      setSuccessMsg(`Merged into "${survivor?.name}".`);
+      setSuccessMsg(t('admin.database.mergedInto', { survivor: survivor?.name ?? '' }));
       setSelected(new Set());
       setSurvivorId(null);
       await loadItems();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Merge failed — check the console.');
+      setError(err.message || t('admin.database.mergeFailedCheckConsole'));
     } finally {
       setMerging(false);
     }
@@ -221,7 +241,7 @@ export default function ReferenceDataPage() {
   if (authLoading || !authorized) {
     return (
       <main className="min-h-screen bg-white flex items-center justify-center">
-        <p className="text-sm text-gray-400">Checking access...</p>
+        <p className="text-sm text-gray-400">{t('admin.database.checkingAccess')}</p>
       </main>
     );
   }
@@ -231,18 +251,11 @@ export default function ReferenceDataPage() {
   {/* Header */}
   <div className="px-6 py-5 border-b-2 border-gray-300">
     <div className="max-w-5xl mx-auto">
-      <button
-        onClick={() => router.push('/admin')}
-        className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-3"
-      >
-        <ArrowLeft size={16} strokeWidth={2} />
-        Back to Admin
-      </button>
       <div className="flex items-center gap-2">
         <Database size={22} strokeWidth={2} className="text-gray-700" />
         <div>
-          <h1 className="text-2xl font-bold">Reference Data</h1>
-          <p className="text-xs text-gray-500">Rename or merge locations, categories, and brands</p>
+          <h1 className="text-2xl font-bold">{t('admin.database.title')}</h1>
+          <p className="text-xs text-gray-500">{t('admin.database.subtitle')}</p>
         </div>
       </div>
     </div>
@@ -278,7 +291,7 @@ export default function ReferenceDataPage() {
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder={`Search ${config.plural.toLowerCase()}...`}
+        placeholder={t('admin.database.searchPlaceholder', { plural: config.plural.toLowerCase() })}
         className="w-full border-2 border-gray-300 rounded-md pl-9 pr-3 py-2.5 sm:py-2 text-sm outline-none focus:border-black"
       />
     </div>
@@ -302,7 +315,7 @@ export default function ReferenceDataPage() {
       <div className="border-2 border-blue-300 bg-blue-50 rounded-md p-4 space-y-3">
         <p className="text-sm font-semibold text-blue-900 flex items-center gap-2">
           <GitMerge size={16} strokeWidth={2} />
-          Merge {selected.size} {config.plural.toLowerCase()} — pick which one survives:
+          {t('admin.database.mergePrompt', { count: selected.size, plural: config.plural.toLowerCase() })}
         </p>
 
         <div className="space-y-1">
@@ -315,7 +328,7 @@ export default function ReferenceDataPage() {
                 onChange={() => setSurvivorId(item.id)}
               />
               <span className="font-medium">{item.name}</span>
-              <span className="text-gray-500">({item.usageCount} in use)</span>
+              <span className="text-gray-500">{t('admin.database.inUseCount', { count: item.usageCount })}</span>
             </label>
           ))}
         </div>
@@ -325,16 +338,16 @@ export default function ReferenceDataPage() {
           disabled={!survivorId || merging}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {merging ? 'Merging...' : 'Merge'}
+          {merging ? t('admin.database.merging') : t('admin.database.merge')}
         </button>
       </div>
     )}
 
     {/* LIST */}
-    {loading && <p className="text-sm text-gray-500">Loading...</p>}
+    {loading && <p className="text-sm text-gray-500">{t('common.loading')}</p>}
 
     {!loading && filtered.length === 0 && (
-      <p className="text-sm text-gray-500">No {config.plural.toLowerCase()} found.</p>
+      <p className="text-sm text-gray-500">{t('admin.database.noneFound', { plural: config.plural.toLowerCase() })}</p>
     )}
 
     {!loading && filtered.length > 0 && (
@@ -343,8 +356,8 @@ export default function ReferenceDataPage() {
           <thead className="bg-gray-100 border-b-2 border-gray-300">
             <tr>
               <th className="w-10 p-3"></th>
-              <th className="text-left p-3 font-semibold">Name</th>
-              <th className="text-left p-3 font-semibold">In Use</th>
+              <th className="text-left p-3 font-semibold">{t('common.name')}</th>
+              <th className="text-left p-3 font-semibold">{t('admin.database.inUseHeader')}</th>
             </tr>
           </thead>
           <tbody>
@@ -372,7 +385,7 @@ export default function ReferenceDataPage() {
                     className="w-full bg-transparent border border-transparent focus:border-gray-400 focus:bg-white rounded px-2 py-1.5 font-medium outline-none"
                   />
                   {savingId === item.id && (
-                    <span className="text-xs text-gray-400 ml-2">Saving...</span>
+                    <span className="text-xs text-gray-400 ml-2">{t('common.saving')}</span>
                   )}
                 </td>
                 <td className="p-3 text-gray-600">{item.usageCount}</td>
@@ -387,8 +400,11 @@ export default function ReferenceDataPage() {
     {!loading && filtered.length > 0 && (
       <div className="flex items-center justify-between text-sm">
         <span className="text-gray-500">
-          Showing {(page - 1) * PAGE_SIZE + 1}–
-          {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+          {t('admin.database.showingRange', {
+            from: (page - 1) * PAGE_SIZE + 1,
+            to: Math.min(page * PAGE_SIZE, filtered.length),
+            total: filtered.length,
+          })}
         </span>
         <div className="flex items-center gap-2">
           <button
@@ -396,17 +412,17 @@ export default function ReferenceDataPage() {
             disabled={page === 1}
             className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
           >
-            Prev
+            {t('common.previous')}
           </button>
           <span className="text-gray-600">
-            Page {page} of {totalPages}
+            {t('admin.database.pageOf', { page, totalPages })}
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
             className="px-3 py-1.5 border-2 border-gray-300 rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
           >
-            Next
+            {t('common.next')}
           </button>
         </div>
       </div>

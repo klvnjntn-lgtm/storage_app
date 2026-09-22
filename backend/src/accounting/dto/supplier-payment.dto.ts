@@ -5,7 +5,9 @@ export class CreateSupplierPaymentDto {
   @IsUUID()
   purchaseOrderId: string;
 
-  @IsNumber()
+  // FIX — was @IsNumber() with no maxDecimalPlaces; storage is
+  // Decimal(14,2).
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount: number;
 

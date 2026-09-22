@@ -3,22 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Send,
-  CheckCircle2,
-  XCircle,
-  Printer,
-  Download,
-  ArrowRightCircle,
-  FileText,
-  Pencil,
-  Trash2,
-} from 'lucide-react';
+import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
-import { QuotationA4Template } from '@/app/components/quotations/template/QuotationA4Template';
-import { QuotationPrintView, toQuotationView } from '@/lib/quotation-mapper';
+import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
+import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -41,6 +31,7 @@ export default function QuotationDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { t, language } = useLanguage();
 
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   // Flat print-shaped data for the paper preview — separate fetch from
@@ -62,7 +53,7 @@ export default function QuotationDetailPage() {
       ]);
       if (!detailRes.ok) {
         const body = await detailRes.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${detailRes.status})`);
+        setError(body?.message ?? t('sales.quotationDetail.requestFailed', { status: detailRes.status }));
         return;
       }
       setQuotation(await detailRes.json());
@@ -74,7 +65,7 @@ export default function QuotationDetailPage() {
         setPreviewError(true);
       }
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.quotationDetail.serverUnreachable'));
     } finally {
       setLoading(false);
     }
@@ -92,12 +83,12 @@ export default function QuotationDetailPage() {
       const res = await apiFetch(path, { method });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.quotationDetail.requestFailed', { status: res.status }));
         return;
       }
       return body;
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.quotationDetail.serverUnreachable'));
     } finally {
       setActionLoading(null);
     }
@@ -113,7 +104,7 @@ export default function QuotationDetailPage() {
     if (await runAction('reject', `/sales-quotations/${id}/reject`)) load();
   }
   async function handleDiscard() {
-    if (!confirm('Discard this draft quotation? This cannot be undone.')) return;
+    if (!confirm(t('sales.quotationDetail.confirmDiscardDraft'))) return;
     const res = await apiFetch(`/sales-quotations/${id}`, { method: 'DELETE' });
     if (res.ok) router.push('/sales/quotations');
   }
@@ -149,7 +140,7 @@ export default function QuotationDetailPage() {
     try {
       const res = await apiFetch(`/sales-quotations/${quotation.id}/pdf`);
       if (!res.ok) {
-        throw new Error(`Failed to generate PDF (${res.status})`);
+        throw new Error(t('sales.quotationDetail.pdfGenerationFailed', { status: res.status }));
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -159,7 +150,7 @@ export default function QuotationDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e.message || 'Could not generate PDF.');
+      setError(e.message || t('sales.quotationDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }
@@ -168,7 +159,7 @@ export default function QuotationDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </main>
     );
   }
@@ -200,21 +191,13 @@ export default function QuotationDetailPage() {
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-3xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/quotations')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to quotations
-          </button>
-
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
-                {quotation.quotationNumber ?? 'Unissued draft'}
+                {quotation.quotationNumber ?? t('sales.quotationDetail.unissuedDraft')}
               </h1>
               <p className="text-xs text-gray-500">
-                {quotation.customer?.name ?? quotation.customerName ?? 'No customer'} ·{' '}
+                {quotation.customer?.name ?? quotation.customerName ?? t('sales.quotationDetail.noCustomer')} ·{' '}
                 {quotation.location?.name ?? '—'}
               </p>
             </div>
@@ -227,7 +210,7 @@ export default function QuotationDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
-                    Edit
+                    {t('sales.quotationDetail.edit')}
                   </button>
                   <button
                     disabled={actionLoading === 'send'}
@@ -235,14 +218,14 @@ export default function QuotationDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Send size={14} strokeWidth={2} />
-                    Send
+                    {t('sales.quotationDetail.send')}
                   </button>
                   <button
                     onClick={handleDiscard}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50"
                   >
                     <Trash2 size={14} strokeWidth={2} />
-                    Discard
+                    {t('sales.quotationDetail.discard')}
                   </button>
                 </>
               )}
@@ -255,7 +238,7 @@ export default function QuotationDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-green-600 text-white font-semibold hover:bg-green-700 disabled:opacity-50"
                   >
                     <CheckCircle2 size={14} strokeWidth={2} />
-                    Accept
+                    {t('sales.quotationDetail.accept')}
                   </button>
                   <button
                     disabled={actionLoading === 'reject'}
@@ -263,7 +246,7 @@ export default function QuotationDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50"
                   >
                     <XCircle size={14} strokeWidth={2} />
-                    Reject
+                    {t('sales.quotationDetail.reject')}
                   </button>
                 </>
               )}
@@ -275,7 +258,7 @@ export default function QuotationDetailPage() {
     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
   >
     <ArrowRightCircle size={14} strokeWidth={2} />
-    Convert to Sales Order
+    {t('sales.quotationDetail.convertToOrder')}
   </button>
 )}
 
@@ -287,7 +270,7 @@ export default function QuotationDetailPage() {
       className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
     >
       <FileText size={14} strokeWidth={2} />
-      Convert to Invoice
+      {t('sales.quotationDetail.convertToInvoice')}
     </button>
   )}
               {quotation.status !== 'DRAFT' && (
@@ -298,14 +281,14 @@ export default function QuotationDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
-                    {pdfGenerating ? 'Generating...' : 'Download PDF'}
+                    {pdfGenerating ? t('sales.quotationDetail.generatingPdf') : t('sales.quotationDetail.downloadPdf')}
                   </button>
                   <button
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
-                    Print
+                    {t('sales.quotationDetail.print')}
                   </button>
                 </>
               )}
@@ -321,10 +304,10 @@ export default function QuotationDetailPage() {
 
         {(quotation.salesOrders.length > 0 || quotation.invoices.length > 0) && (
           <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
-            <p className="font-semibold text-purple-900 mb-1">Converted documents</p>
+            <p className="font-semibold text-purple-900 mb-1">{t('sales.quotationDetail.convertedDocuments')}</p>
             {quotation.salesOrders.map((so) => (
               <p key={so.id}>
-                Sales Order{' '}
+                {t('sales.quotationDetail.salesOrderLabel')}{' '}
                 <button
                   className="underline font-medium"
                   onClick={() => router.push(`/sales/orders/${so.id}`)}
@@ -336,7 +319,7 @@ export default function QuotationDetailPage() {
             ))}
             {quotation.invoices.map((inv) => (
               <p key={inv.id}>
-                Invoice{' '}
+                {t('sales.quotationDetail.invoiceLabel')}{' '}
                 <button
                   className="underline font-medium"
                   onClick={() => router.push(`/sales/invoices/${inv.id}`)}
@@ -351,9 +334,9 @@ export default function QuotationDetailPage() {
 
         {quotation.validUntil && (
           <p className="text-sm text-gray-600">
-            Valid until{' '}
+            {t('sales.quotationDetail.validUntil')}{' '}
             <span className="font-medium">
-              {parseCalendarDate(quotation.validUntil).toLocaleDateString('id-ID')}
+              {parseCalendarDate(quotation.validUntil).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
             </span>
           </p>
         )}
@@ -376,7 +359,9 @@ export default function QuotationDetailPage() {
               className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] flex items-center justify-center text-sm text-gray-400"
               style={{ width: '210mm', height: '297mm' }}
             >
-              {previewError ? 'Could not load a print preview for this quotation.' : 'Loading preview...'}
+              {previewError
+                ? t('sales.quotationDetail.couldNotLoadPreview')
+                : t('sales.quotationDetail.loadingPreview')}
             </div>
           )}
         </div>

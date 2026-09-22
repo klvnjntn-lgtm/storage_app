@@ -1,6 +1,8 @@
 import {
   IsArray,
   IsString,
+  IsNumber,
+  Min,
   ValidateNested,
   IsOptional,
 } from 'class-validator';
@@ -23,6 +25,21 @@ class ProductRow {
   @IsOptional()
   @IsString()
   brand?: string;
+
+  // FIX — same gap as CreateProductDto: ProductService.resolveForImport()
+  // fully supports these, but the global whitelist ValidationPipe
+  // silently stripped them since they weren't declared here. Only the
+  // unvalidated /products/import-excel path (raw XLSX rows, no DTO)
+  // could actually set prices on import until now.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sellingPrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  costPrice?: number;
 }
 
 export class ImportProductDto {

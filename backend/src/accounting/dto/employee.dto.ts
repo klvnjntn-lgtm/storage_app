@@ -20,7 +20,9 @@ export class CreateEmployeeDto {
   @IsString()
   bankAccountNumber?: string;
 
-  @IsNumber()
+  // FIX — was @IsNumber() with no maxDecimalPlaces; storage is
+  // Decimal(12,2).
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   baseSalary: number;
 }
@@ -47,7 +49,7 @@ export class UpdateEmployeeDto {
   bankAccountNumber?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   baseSalary?: number;
 

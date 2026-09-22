@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Send, XCircle, Printer, Download, Pencil, ClipboardList } from 'lucide-react';
+import { Send, XCircle, Printer, Download, Pencil, ClipboardList } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { PurchaseOrderTemplate } from '@/app/components/purchase-orders/templates/PurchaseOrderTemplate';
 import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/purchase-orders/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -28,10 +29,28 @@ function statusBadgeClasses(status: string) {
   }
 }
 
+function statusDisplayLabel(status: string, t: (key: string) => string) {
+  switch (status) {
+    case 'DRAFT':
+      return t('purchasing.purchaseOrdersList.statusDraft');
+    case 'SENT':
+      return t('purchasing.purchaseOrdersList.statusSent');
+    case 'PARTIALLY_RECEIVED':
+      return t('purchasing.purchaseOrdersList.statusPartiallyReceived');
+    case 'FULLY_RECEIVED':
+      return t('purchasing.purchaseOrdersList.statusFullyReceived');
+    case 'CANCELLED':
+      return t('purchasing.purchaseOrdersList.statusCancelled');
+    default:
+      return status.replace('_', ' ');
+  }
+}
+
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { t } = useLanguage();
 
   const [po, setPo] = useState<PurchaseOrderDetail | null>(null);
   const [printView, setPrintView] = useState<PurchaseOrderPrintView | null>(null);
@@ -50,13 +69,13 @@ export default function PurchaseOrderDetailPage() {
       ]);
       if (!detailRes.ok) {
         const body = await detailRes.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${detailRes.status})`);
+        setError(body?.message ?? t('purchasing.purchaseOrderDetail.requestFailed', { status: detailRes.status }));
         return;
       }
       setPo(await detailRes.json());
       if (printRes.ok) setPrintView(await printRes.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('purchasing.purchaseOrderDetail.serverError'));
     } finally {
       setLoading(false);
     }
@@ -74,12 +93,12 @@ export default function PurchaseOrderDetailPage() {
       const res = await apiFetch(path, { method: 'POST' });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('purchasing.purchaseOrderDetail.requestFailed', { status: res.status }));
         return;
       }
       return body;
     } catch {
-      setError('Could not reach the server.');
+      setError(t('purchasing.purchaseOrderDetail.serverError'));
     } finally {
       setActionLoading(null);
     }
@@ -89,7 +108,7 @@ export default function PurchaseOrderDetailPage() {
     if (await runAction('send', `/purchase-orders/${id}/send`)) load();
   }
   async function handleCancel() {
-    if (!confirm('Cancel this purchase order? This cannot be undone.')) return;
+    if (!confirm(t('purchasing.purchaseOrderDetail.cancelConfirm'))) return;
     if (await runAction('cancel', `/purchase-orders/${id}/cancel`)) load();
   }
 
@@ -104,7 +123,7 @@ export default function PurchaseOrderDetailPage() {
     try {
       const res = await apiFetch(`/purchase-orders/${po.id}/pdf`);
       if (!res.ok) {
-        throw new Error(`Failed to generate PDF (${res.status})`);
+        throw new Error(t('purchasing.purchaseOrderDetail.pdfError', { status: res.status }));
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -114,7 +133,7 @@ export default function PurchaseOrderDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e.message || 'Could not generate PDF.');
+      setError(e.message || t('purchasing.purchaseOrderDetail.pdfErrorGeneric'));
     } finally {
       setPdfGenerating(false);
     }
@@ -123,7 +142,7 @@ export default function PurchaseOrderDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('purchasing.purchaseOrderDetail.loading')}</p>
       </main>
     );
   }
@@ -150,29 +169,21 @@ export default function PurchaseOrderDetailPage() {
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-3xl mx-auto">
-          <button
-            onClick={() => router.push('/purchasing/purchase-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to purchase orders
-          </button>
-
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2`}>
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
                   <ClipboardList size={16} strokeWidth={2} className="text-blue-700" />
                 </span>
-                {po.poNumber ?? 'Unissued draft'}
+                {po.poNumber ?? t('purchasing.purchaseOrderDetail.unissuedDraft')}
               </h1>
               <p className="text-xs text-gray-500">
-                {printView?.supplierName ?? 'No supplier'} · {printView?.locationName ?? '—'}
+                {printView?.supplierName ?? t('purchasing.purchaseOrderDetail.noSupplier')} · {printView?.locationName ?? '—'}
               </p>
               <span
                 className={`inline-block mt-1 text-xs font-semibold px-2 py-1 rounded-full ${statusBadgeClasses(po.status)}`}
               >
-                {po.status.replace('_', ' ')}
+                {statusDisplayLabel(po.status, t)}
               </span>
             </div>
 
@@ -184,7 +195,7 @@ export default function PurchaseOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
-                    Edit
+                    {t('purchasing.purchaseOrderDetail.edit')}
                   </button>
                   <button
                     disabled={actionLoading === 'send'}
@@ -192,7 +203,7 @@ export default function PurchaseOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Send size={14} strokeWidth={2} />
-                    Send
+                    {t('purchasing.purchaseOrderDetail.send')}
                   </button>
                 </>
               )}
@@ -204,7 +215,7 @@ export default function PurchaseOrderDetailPage() {
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50"
                 >
                   <XCircle size={14} strokeWidth={2} />
-                  Cancel
+                  {t('purchasing.purchaseOrderDetail.cancel')}
                 </button>
               )}
 
@@ -216,14 +227,14 @@ export default function PurchaseOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
-                    {pdfGenerating ? 'Generating...' : 'Download PDF'}
+                    {pdfGenerating ? t('purchasing.purchaseOrderDetail.generating') : t('purchasing.purchaseOrderDetail.downloadPdf')}
                   </button>
                   <button
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
-                    Print
+                    {t('purchasing.purchaseOrderDetail.print')}
                   </button>
                 </>
               )}
@@ -252,7 +263,7 @@ export default function PurchaseOrderDetailPage() {
               className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] flex items-center justify-center text-sm text-gray-400"
               style={{ width: '210mm', height: '297mm' }}
             >
-              Could not load a print preview for this purchase order.
+              {t('purchasing.purchaseOrderDetail.printPreviewMissing')}
             </div>
           )}
         </div>

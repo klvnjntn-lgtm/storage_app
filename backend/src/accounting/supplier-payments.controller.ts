@@ -6,6 +6,8 @@ import { ModuleGuard } from '../auth/guards/module.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SupplierPaymentsService } from './supplier-payments.service';
 import { CreateSupplierPaymentDto } from './dto/supplier-payment.dto';
 
@@ -39,6 +41,8 @@ export class SupplierPaymentsController {
     return this.supplierPaymentsService.create(organizationId, req.user.sub, dto);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Delete(':id')
   void(
     @CurrentOrg() organizationId: string,

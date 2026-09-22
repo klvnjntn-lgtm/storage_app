@@ -1,24 +1,17 @@
 // app/(app)/customers/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Users,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-  X,
-  Check,
-} from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
 import { useSortableData } from '@/lib/hooks/useSortableData';
-import SortableTh from '@/app/components/SortableTh';
+import SortableTh from '@/app/components/shared/SortableTh';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -39,41 +32,73 @@ const EMPTY_EDIT: EditState = { id: null, name: '', companyName: '', phone: '', 
 
 export default function CustomersPage() {
   const router = useRouter();
+  const { t } = useLanguage();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
+  // Seeded from the URL so pressing the browser's Back button from a
+  // customer's detail page restores the same search/page instead of
+  // resetting to page 1 with no search.
+  const [query, setQuery] = useState<string>(() => getInitialParam('query', ''));
 
   const [editing, setEditing] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+
+  useSyncQueryParams({
+    query: query.trim(),
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
+
+  // FIX — was missing a stale-response guard entirely. Fast typing could
+  // let an earlier request's response arrive after a later one and
+  // overwrite the list with stale results.
+  const requestIdRef = useRef(0);
 
   async function load(q?: string) {
     setLoading(true);
+    const thisRequest = ++requestIdRef.current;
     try {
       const params = q ? `?q=${encodeURIComponent(q)}` : '';
       const res = await apiFetch(`/customers${params}`);
+      if (thisRequest !== requestIdRef.current) return; // stale response, a newer request is in flight
       if (res.ok) setCustomers(await res.json());
     } finally {
-      setLoading(false);
+      if (thisRequest === requestIdRef.current) setLoading(false);
     }
   }
 
+  // FIX — was a separate mount-only effect calling load() immediately,
+  // PLUS this debounce effect also firing on mount (query starts at ''),
+  // which called load(undefined) again ~300ms later — a redundant
+  // duplicate fetch on every page load. Skipping the debounce delay on
+  // the very first run covers the initial load without the second one.
+  const isFirstLoadRef = useRef(true);
   useEffect(() => {
-    load();
-  }, []);
-
-  useEffect(() => {
+    if (isFirstLoadRef.current) {
+      isFirstLoadRef.current = false;
+      load(query.trim() || undefined);
+      return;
+    }
     const timeout = setTimeout(() => load(query.trim() || undefined), 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // Reset to page 1 whenever the result set changes underneath the current page
+  // Reset to page 1 whenever the result set changes underneath the current
+  // page — but not on the very first run, or a `page` restored from the
+  // URL (e.g. via the browser's Back button) would get clobbered back to 1
+  // before the list even finishes loading.
+  const isFirstPageResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstPageResetRef.current) {
+      isFirstPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [query]);
 
@@ -115,7 +140,7 @@ export default function CustomersPage() {
   async function save() {
     if (!editing) return;
     if (!editing.name.trim()) {
-      setError('Name is required');
+      setError(t('customers.listPage.nameRequired'));
       return;
     }
     setSaving(true);
@@ -140,20 +165,20 @@ export default function CustomersPage() {
       setEditing(null);
       load(query.trim() || undefined);
     } catch (e: any) {
-      setError(e.message || 'Could not save customer');
+      setError(e.message || t('customers.listPage.saveFailed'));
     } finally {
       setSaving(false);
     }
   }
 
   async function remove(c: Customer) {
-    if (!confirm(`Delete ${c.name}? This can't be undone.`)) return;
+    if (!confirm(t('customers.listPage.deleteConfirm', { name: c.name }))) return;
     const res = await apiFetch(`/customers/${c.id}`, { method: 'DELETE' });
     if (res.ok) {
       setCustomers((prev) => prev.filter((x) => x.id !== c.id));
     } else {
       const err = await res.json().catch(() => null);
-      alert(err?.message || `Failed to delete (${res.status})`);
+      alert(err?.message || t('customers.listPage.deleteFailed', { status: res.status }));
     }
   }
 
@@ -172,14 +197,6 @@ export default function CustomersPage() {
           lives here too, same as those pages. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Hub
-          </button>
-
           <div className="flex justify-between items-center flex-wrap gap-3 mb-4">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -187,9 +204,9 @@ export default function CustomersPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  Customers
+                  {t('customers.listPage.title')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Customer records used on A5 invoices</p>
+                <p className="text-xs text-gray-500 truncate">{t('customers.listPage.subtitle')}</p>
               </div>
             </div>
 
@@ -198,8 +215,8 @@ export default function CustomersPage() {
               className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
-              <span className="hidden xs:inline">New Customer</span>
-              <span className="xs:hidden">New</span>
+              <span className="hidden xs:inline">{t('customers.listPage.newCustomer')}</span>
+              <span className="xs:hidden">{t('customers.listPage.newShort')}</span>
             </button>
           </div>
 
@@ -209,7 +226,7 @@ export default function CustomersPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or phone..."
+              placeholder={t('customers.listPage.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
           </div>
@@ -265,12 +282,12 @@ export default function CustomersPage() {
 
           {!loading && customers.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
-              No customers found
+              {t('customers.listPage.noCustomersFound')}
             </div>
           )}
           {loading && (
             <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
-              Loading...
+              {t('common.loading')}
             </div>
           )}
         </div>
@@ -281,21 +298,21 @@ export default function CustomersPage() {
             <thead className="bg-blue-50/60 border-b-2 border-gray-300">
               <tr>
                 <SortableTh<SortKey>
-                  label="Name"
+                  label={t('common.name')}
                   columnKey="name"
                   activeKey={sort?.key ?? null}
                   direction={sort?.direction ?? null}
                   onSort={toggleSort}
                 />
                 <SortableTh<SortKey>
-                  label="Phone"
+                  label={t('common.phone')}
                   columnKey="phone"
                   activeKey={sort?.key ?? null}
                   direction={sort?.direction ?? null}
                   onSort={toggleSort}
                 />
-                <th className="text-left px-4 py-3 font-semibold">Address</th>
-                <th className="text-right px-4 py-3 font-semibold">Actions</th>
+                <th className="text-left px-4 py-3 font-semibold">{t('common.address')}</th>
+                <th className="text-right px-4 py-3 font-semibold">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -330,9 +347,9 @@ export default function CustomersPage() {
           </table>
 
           {!loading && customers.length === 0 && (
-            <div className="p-8 text-center text-sm text-gray-500">No customers found</div>
+            <div className="p-8 text-center text-sm text-gray-500">{t('customers.listPage.noCustomersFound')}</div>
           )}
-          {loading && <div className="p-8 text-center text-sm text-gray-500">Loading...</div>}
+          {loading && <div className="p-8 text-center text-sm text-gray-500">{t('common.loading')}</div>}
         </div>
 
         {!loading && customers.length > 0 && (
@@ -355,7 +372,7 @@ export default function CustomersPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-md border-2 border-gray-300 w-full max-w-sm p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-lg">{editing.id ? 'Edit customer' : 'New customer'}</h2>
+              <h2 className="font-bold text-lg">{editing.id ? t('customers.listPage.editCustomer') : t('customers.listPage.newCustomerTitle')}</h2>
               <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
                 <X size={18} strokeWidth={2} />
               </button>
@@ -365,26 +382,26 @@ export default function CustomersPage() {
               <input
                 value={editing.name}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                placeholder="Name"
+                placeholder={t('common.name')}
                 autoFocus
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.companyName}
                 onChange={(e) => setEditing({ ...editing, companyName: e.target.value })}
-                placeholder="Company name (optional)"
+                placeholder={t('customers.listPage.companyNamePlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.phone}
                 onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
-                placeholder="Phone (optional)"
+                placeholder={t('customers.listPage.phonePlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input
                 value={editing.address}
                 onChange={(e) => setEditing({ ...editing, address: e.target.value })}
-                placeholder="Address (optional)"
+                placeholder={t('customers.listPage.addressPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
             </div>
@@ -397,7 +414,7 @@ export default function CustomersPage() {
               className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2.5 text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
             >
               <Check size={16} strokeWidth={2} />
-              {saving ? 'Saving...' : editing.id ? 'Save changes' : 'Create customer'}
+              {saving ? t('common.saving') : editing.id ? t('customers.listPage.saveChanges') : t('customers.listPage.createCustomer')}
             </button>
           </div>
         </div>

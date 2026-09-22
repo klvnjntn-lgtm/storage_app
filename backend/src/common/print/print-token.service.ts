@@ -3,7 +3,6 @@ import { JwtService } from '@nestjs/jwt';
 import {
   PrintTokenPayload,
   SignPrintTokenParams,
-  VerifyPrintTokenParams,
   PrintDocumentType,
 } from './print-token-types';
 
@@ -30,25 +29,6 @@ export class PrintTokenService {
       secret: this.secret,
       expiresIn: '2m',
     });
-  }
-
-  // Use when the CALLER already knows and trusts organizationId from an
-  // authenticated context (e.g. an admin-facing endpoint checking a token
-  // against the org the logged-in user belongs to). Rejects if the token's
-  // org claim doesn't match what the caller expected.
-  verifyUserContext(token: string, expected: VerifyPrintTokenParams): PrintTokenPayload {
-    const payload = this.decode(token);
-
-    if (
-      payload.purpose !== 'document-print' ||
-      payload.documentType !== expected.documentType ||
-      payload.sub !== expected.documentId ||
-      payload.organizationId !== expected.organizationId
-    ) {
-      throw new ForbiddenException('Print token does not match the requested document');
-    }
-
-    return payload;
   }
 
   // Use when the caller does NOT yet know organizationId — e.g. an

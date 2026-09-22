@@ -17,9 +17,3 @@ export interface SignPrintTokenParams {
   documentId: string;
   organizationId: string;
 }
-
-export interface VerifyPrintTokenParams {
-  documentType: PrintDocumentType;
-  documentId: string;
-  organizationId: string;
-}

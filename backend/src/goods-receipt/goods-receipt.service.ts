@@ -4,7 +4,7 @@ import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
-import { PurchaseOrderStatus, EventType } from '@prisma/client';
+import { PurchaseOrderStatus, EventType, Prisma } from '@prisma/client';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
 
 @Injectable()
@@ -67,6 +67,13 @@ export class GoodsReceiptService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Lock the PurchaseOrder row so a concurrent receive() against the
+      // same PO blocks here until this transaction commits or rolls back —
+      // receivedQuantitiesByPoItem() below is a plain aggregate with no
+      // row lock of its own, so without this, two concurrent receives
+      // could both read the same "already received" total and both pass.
+      await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${po.id} FOR UPDATE`;
+
       const freshReceivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId, tx);
       for (const line of dto.items) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
@@ -77,11 +84,7 @@ export class GoodsReceiptService {
         }
       }
 
-      const year = new Date().getFullYear();
-      const count = await tx.goodsReceipt.count({
-        where: { organizationId, createdAt: { gte: new Date(`${year}-01-01`) } },
-      });
-      const receiptNumber = await this.numbering.next({ prefix: 'GR', count, year });
+      const receiptNumber = await this.numbering.nextSequential(tx, organizationId, 'GOODS_RECEIPT', 'GR');
 
       const receipt = await tx.goodsReceipt.create({
         data: {
@@ -154,7 +157,7 @@ export class GoodsReceiptService {
 
   private async receivedQuantitiesByPoItem(
     purchaseOrderId: string,
-    tx: any = this.prisma,
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<Map<string, number>> {
     const [receiptRows, items] = await Promise.all([
       tx.goodsReceiptItem.groupBy({

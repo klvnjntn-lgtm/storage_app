@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Package, ImageOff, Upload, Trash2, Loader2 } from 'lucide-react';
+import { Package, ImageOff, Upload, Trash2, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import Pagination from '@/app/components/Pagination';
+import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
+import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -49,12 +52,10 @@ type Product = {
 
 type OrgLocation = { id: string; name: string };
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-
 export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { t, language } = useLanguage();
 
 const eventColor = (type: string) => {
   switch (type) {
@@ -94,59 +95,40 @@ const eventColor = (type: string) => {
   // the only place with the full Change/Remove/Upload flow. Grid View on
   // the stock list has a quick preview/edit action, but it's a shortcut
   // into this same flow, not a second implementation of it.
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  //
+  // Picking a photo goes through the shared media library modal (also used
+  // by AppShell's avatar picker) rather than a direct file input — this is
+  // where reuse across products/uploads-as-library actually happens.
+  const [showLibrary, setShowLibrary] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState('');
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   function openImagePicker() {
     setImageError('');
-    imageInputRef.current?.click();
+    setShowLibrary(true);
   }
 
-  async function handleImageSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-selecting the same file later
-    if (!file || !product) return;
-
+  async function handleAssetSelected(asset: MediaAsset) {
+    if (!product) return;
     setImageError('');
-
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      setImageError('Please choose a JPG, PNG, or WEBP image.');
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setImageError('Image must be smaller than 5MB.');
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('image', file);
-
     setImageUploading(true);
     try {
-      // NOTE: apiFetch must not force a JSON Content-Type header here —
-      // the browser needs to set multipart/form-data with its own
-      // boundary for FormData bodies. If apiFetch always injects
-      // 'Content-Type: application/json', add an escape hatch for this
-      // call (e.g. an `isFormData` option) rather than setting headers
-      // manually below.
-      const res = await apiFetch(`/products/${product.id}/image`, {
-        method: 'POST',
-        body: formData,
+      const res = await apiFetch(`/products/${product.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ image: asset.url }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to upload image');
+        throw new Error(data?.message || t('inventory.stockDetail.imageUploadFailed'));
       }
 
-      const data = await res.json();
       setImageLoadFailed(false);
-      setProduct((p) => (p ? { ...p, image: data.image ?? data.url ?? null } : p));
+      setProduct((p) => (p ? { ...p, image: asset.url } : p));
     } catch (err: any) {
       console.error(err);
-      setImageError(err.message || 'Failed to upload image');
+      setImageError(err.message || t('inventory.stockDetail.imageUploadFailed'));
     } finally {
       setImageUploading(false);
     }
@@ -157,19 +139,20 @@ const eventColor = (type: string) => {
     setImageError('');
     setImageUploading(true);
     try {
-      const res = await apiFetch(`/products/${product.id}/image`, {
-        method: 'DELETE',
+      const res = await apiFetch(`/products/${product.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ image: null }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to remove image');
+        throw new Error(data?.message || t('inventory.stockDetail.imageRemoveFailed'));
       }
 
       setProduct((p) => (p ? { ...p, image: null } : p));
     } catch (err: any) {
       console.error(err);
-      setImageError(err.message || 'Failed to remove image');
+      setImageError(err.message || t('inventory.stockDetail.imageRemoveFailed'));
     } finally {
       setImageUploading(false);
     }
@@ -178,9 +161,16 @@ const eventColor = (type: string) => {
   // --- Event history pagination (client-side — the events endpoint returns
   // the full list in one shot, so we slice it here rather than round-trip
   // to the server for each page). ---
-  const [eventsPage, setEventsPage] = useState(1);
-  const [eventsPageSize, setEventsPageSize] = useState(10);
+  // Seeded from the URL so pressing the browser's Back button from a
+  // session opened out of the event history restores the same page.
+  const [eventsPage, setEventsPage] = useState(() => getInitialNumberParam('eventsPage', 1));
+  const [eventsPageSize, setEventsPageSize] = useState(() => getInitialNumberParam('eventsPageSize', 10));
   const eventsTotalPages = Math.max(1, Math.ceil(events.length / eventsPageSize));
+
+  useSyncQueryParams({
+    eventsPage: eventsPage !== 1 ? eventsPage : null,
+    eventsPageSize: eventsPageSize !== 10 ? eventsPageSize : null,
+  });
 
   useEffect(() => {
     if (eventsPage > eventsTotalPages) setEventsPage(eventsTotalPages);
@@ -266,7 +256,7 @@ const eventColor = (type: string) => {
           backgroundSize: '24px 24px',
         }}
       >
-        Loading product...
+        {t('inventory.stockDetail.loadingProduct')}
       </main>
     );
   }
@@ -288,14 +278,6 @@ const eventColor = (type: string) => {
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
-            <button
-              onClick={() => router.push('/inventory/stock')}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-            >
-              <ArrowLeft size={16} strokeWidth={2} />
-              Back to Stock
-            </button>
-
             <div className="flex items-center gap-2.5">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
                 <Package size={18} strokeWidth={2} className="text-blue-700" />
@@ -306,14 +288,14 @@ const eventColor = (type: string) => {
                 </h1>
                 <p className="text-xs text-gray-500 truncate">
                   SKU: <span className="font-mono">{product.sku}</span> ·{' '}
-                  {product.category?.name ?? 'No category'} • {product.brand?.name ?? 'No brand'}
+                  {product.category?.name ?? t('inventory.stockDetail.noCategory')} • {product.brand?.name ?? t('inventory.stockDetail.noBrand')}
                 </p>
               </div>
             </div>
           </div>
 
           <div className="px-3 py-2 rounded-md bg-blue-600/10 border border-blue-600/20 text-sm font-semibold text-blue-800 shrink-0">
-            Total: {totalStock} pcs
+            {t('inventory.stockDetail.totalPcs', { total: totalStock })}
           </div>
         </div>
       </div>
@@ -323,7 +305,7 @@ const eventColor = (type: string) => {
 
         {/* PRODUCT IMAGE */}
         <section className="border-2 border-gray-300 rounded-md p-4 bg-white">
-          <h2 className="text-lg font-bold mb-3">Product Image</h2>
+          <h2 className="text-lg font-bold mb-3">{t('inventory.stockDetail.productImage')}</h2>
 
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="w-full sm:w-40 shrink-0">
@@ -340,15 +322,14 @@ const eventColor = (type: string) => {
               ) : (
                 <div className="w-full aspect-square rounded-md bg-gray-50 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1.5 text-gray-400">
                   <ImageOff size={26} strokeWidth={1.75} />
-                  <span className="text-[11px] text-center px-2">No photo yet</span>
+                  <span className="text-[11px] text-center px-2">{t('inventory.stockDetail.noPhotoYet')}</span>
                 </div>
               )}
             </div>
 
             <div className="flex flex-col gap-2 justify-center">
               <p className="text-xs text-gray-500 max-w-xs">
-                Images are optional. When set, this is the photo shown in Grid View and at
-                point of sale.
+                {t('inventory.stockDetail.imageHint')}
               </p>
 
               {imageError && <p className="text-xs text-red-600">{imageError}</p>}
@@ -365,7 +346,7 @@ const eventColor = (type: string) => {
                   ) : (
                     <Upload size={15} strokeWidth={2.5} />
                   )}
-                  {product.image ? 'Change Photo' : 'Add Photo'}
+                  {product.image ? t('inventory.stockDetail.changePhoto') : t('inventory.stockDetail.addPhoto')}
                 </button>
 
                 {product.image && (
@@ -376,17 +357,15 @@ const eventColor = (type: string) => {
                     className="flex items-center gap-1.5 px-3 py-2 text-red-700 border-2 border-red-200 rounded-md text-sm font-semibold hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <Trash2 size={15} strokeWidth={2.5} />
-                    Remove Photo
+                    {t('inventory.stockDetail.removePhoto')}
                   </button>
                 )}
               </div>
 
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept={ACCEPTED_IMAGE_TYPES.join(',')}
-                onChange={handleImageSelected}
-                className="hidden"
+              <MediaLibraryModal
+                open={showLibrary}
+                onClose={() => setShowLibrary(false)}
+                onSelect={handleAssetSelected}
               />
             </div>
           </div>
@@ -394,7 +373,7 @@ const eventColor = (type: string) => {
 
         {/* ADJUST STOCK */}
         <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">
-          <h2 className="text-lg font-bold">Adjust Stock</h2>
+          <h2 className="text-lg font-bold">{t('inventory.stockDetail.adjustStock')}</h2>
 
           <div className="flex flex-wrap gap-3 items-end">
             {/* Location picker only shown for warehouse orgs. Non-warehouse
@@ -402,13 +381,13 @@ const eventColor = (type: string) => {
                 picker needed since there's nothing to choose between. */}
             {hasWarehouseModule ? (
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">Location</label>
+                <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.location')}</label>
                 <select
                   className="border-2 border-gray-300 rounded-md p-2 w-44 outline-none focus:border-blue-500"
                   value={locationId}
                   onChange={(e) => setLocationId(e.target.value)}
                 >
-                  <option value="">Select location</option>
+                  <option value="">{t('inventory.stockDetail.selectLocation')}</option>
                   {stock.map((s, i) => (
                     <option key={i} value={s.location.id}>
                       {s.location.name}
@@ -418,7 +397,7 @@ const eventColor = (type: string) => {
               </div>
             ) : (
               <div className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-600">Location</span>
+                <span className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.location')}</span>
                 <span className="border-2 border-gray-200 bg-gray-50 rounded-md p-2 w-44 text-gray-700 text-sm">
                   {centreLocation?.name ?? 'CENTRE'}
                 </span>
@@ -426,7 +405,7 @@ const eventColor = (type: string) => {
             )}
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">Qty (+ in / − out)</label>
+              <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.qtyInOut')}</label>
               <input
                 type="number"
                 className="border-2 border-gray-300 rounded-md p-2 w-28 outline-none focus:border-blue-500"
@@ -436,10 +415,10 @@ const eventColor = (type: string) => {
             </div>
 
             <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-              <label className="text-xs font-semibold text-gray-600">Reason</label>
+              <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.reason')}</label>
               <input
                 type="text"
-                placeholder="e.g. Cycle count correction"
+                placeholder={t('inventory.stockDetail.reasonPlaceholder')}
                 className="border-2 border-gray-300 rounded-md p-2 w-full outline-none focus:border-blue-500"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
@@ -468,7 +447,7 @@ const eventColor = (type: string) => {
                 console.log('RESPONSE:', data);
 
                 if (!res.ok) {
-                  alert(data?.message || 'Failed to adjust stock');
+                  alert(data?.message || t('inventory.stockDetail.adjustFailed'));
                   return;
                 }
 
@@ -486,7 +465,7 @@ const eventColor = (type: string) => {
                 setEventsPage(1);
               }}
             >
-              Apply
+              {t('inventory.stockDetail.apply')}
             </button>
           </div>
         </section>
@@ -494,9 +473,9 @@ const eventColor = (type: string) => {
         {/* STOCK BY LOCATION */}
         <section>
           <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
-            Stock by Location
+            {t('inventory.stockDetail.stockByLocation')}
             <span className="text-xs px-2 py-1 rounded-md bg-blue-600/10 text-blue-800 border border-blue-600/20 font-normal">
-              Total: {totalStock} pcs
+              {t('inventory.stockDetail.totalPcs', { total: totalStock })}
             </span>
           </h2>
 
@@ -504,8 +483,8 @@ const eventColor = (type: string) => {
             <table className="w-full text-base">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300 text-left">
                 <tr>
-                  <th className="p-3 font-semibold">Location</th>
-                  <th className="p-3 font-semibold">Qty</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colLocation')}</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colQty')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -525,17 +504,17 @@ const eventColor = (type: string) => {
 
         {/* EVENT HISTORY */}
         <section>
-          <h2 className="text-lg font-bold mb-3">Event History</h2>
+          <h2 className="text-lg font-bold mb-3">{t('inventory.stockDetail.eventHistory')}</h2>
 
           <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
             <table className="w-full text-sm">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300 text-left">
                 <tr>
-                  <th className="p-3 font-semibold">Type</th>
-                  <th className="p-3 font-semibold">Qty</th>
-                  <th className="p-3 font-semibold">Reason</th>
-                  <th className="p-3 font-semibold">User</th>
-                  <th className="p-3 font-semibold">Date</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colType')}</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colQty')}</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colReason')}</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colUser')}</th>
+                  <th className="p-3 font-semibold">{t('inventory.stockDetail.colDate')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -554,7 +533,7 @@ const eventColor = (type: string) => {
                             onClick={() => router.push(`/sessions/${e.sessionId}`)}
                             className="text-[10px] px-2 py-1 rounded-md border-2 border-gray-300 hover:bg-blue-50 font-semibold"
                           >
-                            VIEW SESSION
+                            {t('inventory.stockDetail.viewSession')}
                           </button>
                         )}
                       </div>
@@ -562,14 +541,16 @@ const eventColor = (type: string) => {
                     <td className="p-3 font-semibold">{e.quantity}</td>
                     <td className="p-3 text-gray-700">{e.reason ?? '-'}</td>
                     <td className="p-3 text-gray-700">{e.user?.email ?? '—'}</td>
-                    <td className="p-3 text-gray-500 text-xs">{new Date(e.createdAt).toLocaleString()}</td>
+                    <td className="p-3 text-gray-500 text-xs">
+                      {new Date(e.createdAt).toLocaleString(language === 'id' ? 'id-ID' : 'en-US')}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
             {events.length === 0 && (
-              <div className="p-8 text-center text-sm text-gray-500">No events recorded yet.</div>
+              <div className="p-8 text-center text-sm text-gray-500">{t('inventory.stockDetail.noEvents')}</div>
             )}
           </div>
 

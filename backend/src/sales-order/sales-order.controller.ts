@@ -6,6 +6,8 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SalesOrderService } from './sales-order.service';
 import { CreateSalesOrderDto, UpdateSalesOrderDto } from './dto/sales-order.dto';
 
@@ -92,6 +94,10 @@ export class SalesOrderController {
     return this.orderService.confirm(organizationId, id, req.user.sub);
   }
 
+  // Mirrors InvoiceController.voidInvoice's ADMIN gate — cancelling a
+  // confirmed order is the equivalent destructive action here.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Post(':id/cancel')
   cancel(
     @CurrentOrg() organizationId: string,

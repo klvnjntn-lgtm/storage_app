@@ -1,12 +1,16 @@
 // components/invoices/templates/A5Template.tsx
+'use client';
+
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
 import { parseCalendarDate } from '@/lib/dates';
-import { A5_CONTENT_WIDTH_MM } from '@/lib/invoice-format';
+import { A5_CONTENT_WIDTH_MM } from '@/lib/mappers/invoice-format';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function A5Template({ invoice }: { invoice: InvoiceView }) {
+  const { t } = useLanguage();
   const balanceDue =
     invoice.amountPaid != null ? Math.max(invoice.total - invoice.amountPaid, 0) : null;
 
@@ -48,12 +52,13 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
 
         <div className="text-right shrink-0">
           <p className="text-black">
-            <strong>Invoice</strong> {invoice.invoiceNumber}
+            <strong>{t('sales.invoiceTemplate.invoiceWord')}</strong> {invoice.invoiceNumber}
           </p>
           <p className="text-black">{displayDate}</p>
           {invoice.dueDate && (
-            <p className="text-black">Due {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}</p>
+            <p className="text-black">{t('sales.invoiceTemplate.due')} {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}</p>
           )}
+          {invoice.employeeName && <p className="text-black">{t('sales.invoiceTemplate.salesLabel', { name: invoice.employeeName })}</p>}
         </div>
       </div>
 
@@ -64,7 +69,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
         <div className="mt-3 border-t border-gray-300 pt-2 flex gap-6">
           {hasCustomer && (
             <div className="w-[100mm]">
-              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">Bill to</p>
+              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">{t('sales.invoiceTemplate.billTo')}</p>
               {invoice.customerName && <p className="font-semibold text-black">{invoice.customerName}</p>}
               {invoice.customerPhone && <p className="text-black">{invoice.customerPhone}</p>}
               {billTo && <p className="text-black">{billTo}</p>}
@@ -76,14 +81,14 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
               attached to a vehicle. */}
           {hasVehicle && (
             <div className="w-[80mm]">
-              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">Vehicle</p>
+              <p className="text-[10px] uppercase tracking-wide text-black font-semibold">{t('sales.invoiceTemplate.vehicleLabel')}</p>
               <p className="font-semibold text-black">
                 {invoice.vehiclePlateNumber}
                 {invoice.vehicleModel ? ` · ${invoice.vehicleModel}` : ''}
               </p>
-              {invoice.vehicleVin && <p className="text-[10px] text-black">VIN: {invoice.vehicleVin}</p>}
+              {invoice.vehicleVin && <p className="text-[10px] text-black">{t('sales.invoiceTemplate.vinLabel', { vin: invoice.vehicleVin })}</p>}
               {invoice.vehicleOdometer != null && (
-                <p className="text-[10px] text-black">Odometer: {invoice.vehicleOdometer} km</p>
+                <p className="text-[10px] text-black">{t('sales.invoiceTemplate.odometerLabel', { value: invoice.vehicleOdometer })}</p>
               )}
             </div>
           )}
@@ -96,12 +101,12 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
       <table className="w-full border-collapse mt-3">
         <thead>
           <tr>
-            <th className="text-left border-b border-gray-300 py-1 pr-2 text-black">Item</th>
-            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">Qty</th>
-            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">Price</th>
-            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">Discount</th>
-            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">Tax</th>
-            <th className="text-right border-b border-gray-300 py-1 pl-2 text-black">Total</th>
+            <th className="text-left border-b border-gray-300 py-1 pr-2 text-black">{t('sales.invoiceTemplate.itemHeader')}</th>
+            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.qtyHeader')}</th>
+            <th className="text-left border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.priceHeader')}</th>
+            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.discount')}</th>
+            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.tax')}</th>
+            <th className="text-right border-b border-gray-300 py-1 pl-2 text-black">{t('common.total')}</th>
           </tr>
         </thead>
 
@@ -141,16 +146,16 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
       
       <div className="mt-2 flex justify-between gap-6">
         <p className="text-[10px] italic text-black max-w-[60%] self-end">
-          Terbilang: {terbilang(invoice.total)}
+          {t('sales.invoiceTemplate.amountInWords', { value: terbilang(invoice.total) })}
         </p>
         <div className="w-64 shrink-0">
           <div className="flex justify-between py-0.5 text-black">
-            <span>Subtotal</span>
+            <span>{t('common.subtotal')}</span>
             <span>{formatIDR(invoice.subtotal)}</span>
           </div>
           {invoice.discount > 0 && (
             <div className="flex justify-between py-0.5 text-black">
-              <span>Discount</span>
+              <span>{t('sales.invoiceTemplate.discount')}</span>
               <span>-{formatIDR(invoice.discount)}</span>
             </div>
           )}
@@ -164,17 +169,17 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
               </div>
             ))}
           <div className="flex justify-between font-bold border-t border-black pt-1 mt-1 text-sm text-black">
-            <span>Total</span>
+            <span>{t('common.total')}</span>
             <span>{formatIDR(invoice.total)}</span>
           </div>
           {invoice.amountPaid != null && (
             <>
               <div className="flex justify-between py-0.5 text-black">
-                <span>Paid</span>
+                <span>{t('sales.invoiceTemplate.paid')}</span>
                 <span>{formatIDR(invoice.amountPaid)}</span>
               </div>
               <div className="flex justify-between font-semibold text-black">
-                <span>Balance due</span>
+                <span>{t('sales.invoiceTemplate.balanceDue')}</span>
                 <span>{formatIDR(balanceDue ?? 0)}</span>
               </div>
             </>
@@ -184,10 +189,10 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
 
       {hasBankDetails && (
         <div className="mt-3 border-t border-gray-300 pt-2 text-[10px]">
-          <p className="uppercase tracking-wide text-black font-semibold mb-0.5">Payment to</p>
+          <p className="uppercase tracking-wide text-black font-semibold mb-0.5">{t('sales.invoiceTemplate.paymentTo')}</p>
           <p className="text-black">
             {invoice.bankName} — {invoice.bankAccountNumber}
-            {invoice.bankAccountName ? ` a.n. ${invoice.bankAccountName}` : ''}
+            {invoice.bankAccountName ? ` ${t('sales.invoiceTemplate.onBehalfOf', { name: invoice.bankAccountName })}` : ''}
           </p>
         </div>
       )}
@@ -195,21 +200,21 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
       <div className="mt-6 flex justify-between gap-3">
         {hasVehicle && (
           <div className="text-center flex-1">
-            <p className="text-black">Driver,</p>
+            <p className="text-black">{t('sales.invoiceTemplate.driverLabel')}</p>
             <div className="h-14" />
             <p className="border-t border-gray-400 pt-1 text-black">&nbsp;</p>
           </div>
         )}
         <div className="text-center flex-1">
-          <p className="text-black">Penerima,</p>
+          <p className="text-black">{t('sales.invoiceTemplate.recipientLabel')}</p>
           <div className="h-14" />
           <p className="border-t border-gray-400 pt-1 text-black">&nbsp;</p>
         </div>
         <div className="text-center flex-1">
-          <p className="text-black">Hormat kami,</p>
+          <p className="text-black">{t('sales.invoiceTemplate.regardsLabel')}</p>
           <div className="h-14" />
           <p className="border-t border-gray-400 pt-1 text-black">
-            {invoice.businessName ?? invoice.locationName}
+            {invoice.employeeName ?? invoice.businessName ?? invoice.locationName}
           </p>
         </div>
       </div>

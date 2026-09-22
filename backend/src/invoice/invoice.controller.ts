@@ -6,6 +6,8 @@ import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { InvoiceService } from './invoice.service';
 import {
   CreateDraftInvoiceDto,
@@ -103,6 +105,8 @@ export class InvoiceController {
     return this.invoiceService.getIssuedInvoiceEditDetail(organizationId, id);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Patch(':id/edit')
   editIssuedInvoice(
     @Req() req,
@@ -174,6 +178,8 @@ export class InvoiceController {
   // NOTE: discardDraft's signature grew a userId param (needed so
   // reopenIfConverted can log the ACCEPTED activity event on the linked
   // quotation, if any) — req.user.sub now gets passed through.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Delete(':id')
   discard(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
     return this.invoiceService.discardDraft(organizationId, id, req.user.sub);
@@ -184,6 +190,8 @@ print(@CurrentOrg() organizationId: string, @Req() req, @Param('id') id: string)
   return this.invoiceService.issue(organizationId, id, req.user.sub);
 }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Patch(':id/void')
   async voidInvoice(
     @Param('id') id: string,

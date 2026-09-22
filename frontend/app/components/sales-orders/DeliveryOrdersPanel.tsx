@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Truck, Package, RotateCcw, AlertCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type DeliveryOrderStatus = 'PACKED' | 'SHIPPED' | 'CANCELLED' | 'PARTIALLY_RETURNED' | 'RETURNED';
 
@@ -74,6 +75,7 @@ export function DeliveryOrdersPanel({
   items: DeliverableSourceItem[];
   onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -116,13 +118,13 @@ export function DeliveryOrdersPanel({
       const res = await apiFetch(`/delivery-orders/${id}/ship`, { method: 'POST' });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.deliveryOrdersPanel.requestFailed', { status: res.status }));
         return;
       }
       await load();
       onChanged();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrdersPanel.couldNotReachServer'));
     } finally {
       setActionLoading(null);
     }
@@ -140,7 +142,7 @@ export function DeliveryOrdersPanel({
       .map(([deliveryOrderItemId, quantity]) => ({ deliveryOrderItemId, quantity }));
 
     if (returnItems.length === 0) {
-      setError('Enter a quantity for at least one item.');
+      setError(t('sales.deliveryOrdersPanel.qtyRequired'));
       return;
     }
 
@@ -153,7 +155,7 @@ export function DeliveryOrdersPanel({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.deliveryOrdersPanel.requestFailed', { status: res.status }));
         return;
       }
       setReturnQty((prev) => ({ ...prev, [doId]: {} }));
@@ -161,7 +163,7 @@ export function DeliveryOrdersPanel({
       await load();
       onChanged();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrdersPanel.couldNotReachServer'));
     } finally {
       setActionLoading(null);
     }
@@ -187,7 +189,7 @@ export function DeliveryOrdersPanel({
       .map(([salesOrderItemId, quantity]) => ({ salesOrderItemId, quantity }));
 
     if (payloadItems.length === 0) {
-      setError('Enter a quantity for at least one item.');
+      setError(t('sales.deliveryOrdersPanel.qtyRequired'));
       return;
     }
 
@@ -199,14 +201,14 @@ export function DeliveryOrdersPanel({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.deliveryOrdersPanel.requestFailed', { status: res.status }));
         return;
       }
       setCreateQty({});
       await load();
       onChanged();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrdersPanel.couldNotReachServer'));
     } finally {
       setCreating(false);
     }
@@ -236,7 +238,7 @@ export function DeliveryOrdersPanel({
                 <Truck size={14} strokeWidth={2} className="text-gray-500" />
                 <span className="text-sm font-semibold">{deliveryOrder.doNumber ?? deliveryOrder.id}</span>
                 <span className={`text-[11px] px-2 py-0.5 rounded-md border font-medium ${statusStyle(deliveryOrder.status)}`}>
-                  {deliveryOrder.status.replace('_', ' ')}
+                  {t(`sales.deliveryOrdersPanel.badge.${deliveryOrder.status}`)}
                 </span>
               </div>
 
@@ -248,7 +250,7 @@ export function DeliveryOrdersPanel({
                     className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
                   >
                     <Package size={12} strokeWidth={2} />
-                    {actionLoading === deliveryOrder.id ? 'Shipping...' : 'Ship'}
+                    {actionLoading === deliveryOrder.id ? t('sales.deliveryOrdersPanel.shipping') : t('sales.deliveryOrdersPanel.ship')}
                   </button>
                 )}
                 {canReturn && !isReturning && (
@@ -257,7 +259,7 @@ export function DeliveryOrdersPanel({
                     className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 font-semibold hover:bg-gray-50"
                   >
                     <RotateCcw size={12} strokeWidth={2} />
-                    Record return
+                    {t('sales.deliveryOrdersPanel.recordReturn')}
                   </button>
                 )}
               </div>
@@ -274,7 +276,7 @@ export function DeliveryOrdersPanel({
                       <p className="truncate">{item.productName}</p>
                       <p className="text-[11px] text-gray-400">
                         {shipped} {item.unit ?? ''}
-                        {returned > 0 && ` · ${returned} returned`}
+                        {returned > 0 && ` · ${t('sales.deliveryOrdersPanel.returnedSuffix', { n: returned })}`}
                       </p>
                     </div>
                     {isReturning && canReturn && (
@@ -302,13 +304,13 @@ export function DeliveryOrdersPanel({
                   disabled={actionLoading === deliveryOrder.id}
                   className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
                 >
-                  {actionLoading === deliveryOrder.id ? 'Recording...' : 'Confirm return'}
+                  {actionLoading === deliveryOrder.id ? t('sales.deliveryOrdersPanel.recording') : t('sales.deliveryOrdersPanel.confirmReturn')}
                 </button>
                 <button
                   onClick={() => setReturningId(null)}
                   className="text-xs px-2.5 py-1.5 rounded-md text-gray-500 hover:text-black"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             )}
@@ -321,7 +323,7 @@ export function DeliveryOrdersPanel({
         <div className="border-2 border-gray-300 rounded-md p-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
             <Truck size={12} strokeWidth={2} />
-            Create delivery order
+            {t('sales.deliveryOrdersPanel.createHeading')}
           </p>
 
           <div className="flex flex-col divide-y divide-gray-200">
@@ -331,7 +333,9 @@ export function DeliveryOrdersPanel({
                 <div key={item.id} className="flex items-center justify-between gap-3 py-2">
                   <div className="min-w-0">
                     <p className="text-sm truncate">{item.product?.name ?? item.description ?? '—'}</p>
-                    <p className="text-xs text-gray-400">{max} remaining of {item.quantity}</p>
+                    <p className="text-xs text-gray-400">
+                      {t('sales.deliveryOrdersPanel.remainingOf', { max, total: item.quantity })}
+                    </p>
                   </div>
                   <input
                     type="number"
@@ -352,7 +356,7 @@ export function DeliveryOrdersPanel({
             disabled={creating || !hasAnyCreateQty}
             className="w-full mt-3 flex items-center justify-center gap-2 bg-black text-white rounded-md p-2 text-sm font-semibold disabled:bg-gray-300"
           >
-            {creating ? 'Creating...' : 'Create Delivery Order'}
+            {creating ? t('common.creating') : t('sales.deliveryOrdersPanel.createButton')}
           </button>
         </div>
       )}

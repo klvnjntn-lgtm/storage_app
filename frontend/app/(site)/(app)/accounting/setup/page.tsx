@@ -4,16 +4,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Landmark,
-  CheckCircle2,
-  Plus,
-  X,
-  Loader2,
-  AlertTriangle,
-} from 'lucide-react';
+import { Landmark, CheckCircle2, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useAuth } from '@/app/context/AuthContext';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -28,16 +22,18 @@ type Account = {
 };
 
 const TYPE_ORDER: Account['type'][] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
-const TYPE_LABEL: Record<Account['type'], string> = {
-  ASSET: 'Assets',
-  LIABILITY: 'Liabilities',
-  EQUITY: 'Equity',
-  REVENUE: 'Revenue',
-  EXPENSE: 'Expenses',
+const TYPE_LABEL_KEY: Record<Account['type'], string> = {
+  ASSET: 'accounting.setup.typeAssets',
+  LIABILITY: 'accounting.setup.typeLiabilities',
+  EQUITY: 'accounting.setup.typeEquity',
+  REVENUE: 'accounting.setup.typeRevenue',
+  EXPENSE: 'accounting.setup.typeExpenses',
 };
 
 export default function AccountingSetupPage() {
-  const router = useRouter();
+    const { t } = useLanguage();
+    const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
 
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
@@ -57,12 +53,12 @@ export default function AccountingSetupPage() {
       const res = await apiFetch('/accounting/accounts');
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.setup.requestFailed', { status: res.status }));
         return;
       }
       setAccounts(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.setup.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -79,12 +75,12 @@ export default function AccountingSetupPage() {
       const res = await apiFetch('/accounting/accounts/seed-defaults', { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.setup.requestFailed', { status: res.status }));
         return;
       }
       await loadAccounts();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.setup.couldNotReachServer'));
     } finally {
       setSeeding(false);
     }
@@ -101,12 +97,12 @@ export default function AccountingSetupPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.setup.requestFailed', { status: res.status }));
         return;
       }
       await loadAccounts();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.setup.couldNotReachServer'));
     } finally {
       setTogglingId(null);
     }
@@ -117,7 +113,7 @@ export default function AccountingSetupPage() {
     setFormError(null);
 
     if (!form.code.trim() || !form.name.trim()) {
-      setFormError('Code and name are both required.');
+      setFormError(t('accounting.setup.codeAndNameRequired'));
       return;
     }
 
@@ -130,14 +126,14 @@ export default function AccountingSetupPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setFormError(body?.message ?? `Request failed (${res.status})`);
+        setFormError(body?.message ?? t('accounting.setup.requestFailed', { status: res.status }));
         return;
       }
       setForm({ code: '', name: '', type: 'EXPENSE', normalBalance: 'DEBIT' });
       setShowAddForm(false);
       await loadAccounts();
     } catch {
-      setFormError('Could not reach the server.');
+      setFormError(t('accounting.setup.couldNotReachServer'));
     } finally {
       setSaving(false);
     }
@@ -166,39 +162,31 @@ export default function AccountingSetupPage() {
       }}
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-3xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
+        <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Landmark size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Chart of Accounts
+                {t('nav.items.chartOfAccounts')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                The accounts every invoice, expense, and payroll run posts to
+                {t('accounting.setup.subtitle')}
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">
             {error}
           </p>
         )}
 
-        {loading && <p className="text-sm text-gray-500">Checking your setup...</p>}
+        {loading && <p className="text-sm text-gray-500">{t('accounting.setup.checkingSetup')}</p>}
 
         {/* Empty state — the actual onboarding moment */}
         {!loading && isEmpty && (
@@ -207,27 +195,29 @@ export default function AccountingSetupPage() {
               <AlertTriangle size={22} strokeWidth={2} className="text-amber-600" />
             </div>
             <h2 className={`${display.className} text-lg font-bold mb-2`}>
-              Set up your Chart of Accounts before invoicing
+              {t('accounting.setup.emptyStateTitle')}
             </h2>
             <p className="text-sm text-gray-500 max-w-md mx-auto mb-6 leading-relaxed">
-              Invoices, payments, expenses, and payroll all need somewhere to post to —
-              a Cash account, Accounts Receivable, Sales Revenue, and so on. Start with a
-              standard set you can rename or extend later.
+              {t('accounting.setup.emptyStateDescription')}
             </p>
-            <button
-              onClick={handleSeed}
-              disabled={seeding}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {seeding ? (
-                <>
-                  <Loader2 size={16} strokeWidth={2} className="animate-spin" />
-                  Setting up...
-                </>
-              ) : (
-                'Set up Chart of Accounts'
-              )}
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={handleSeed}
+                disabled={seeding}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {seeding ? (
+                  <>
+                    <Loader2 size={16} strokeWidth={2} className="animate-spin" />
+                    {t('accounting.setup.settingUp')}
+                  </>
+                ) : (
+                  t('accounting.setup.setUpChartOfAccounts')
+                )}
+              </button>
+            ) : (
+              <p className="text-xs text-gray-400">{t('accounting.setup.askAdminToSetUp')}</p>
+            )}
           </div>
         )}
 
@@ -236,23 +226,27 @@ export default function AccountingSetupPage() {
           <>
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3 mb-5">
               <CheckCircle2 size={16} strokeWidth={2} className="shrink-0" />
-              <span>Chart of Accounts is set up — invoices, expenses, and payroll can post.</span>
+              <span>{t('accounting.setup.setUpBanner')}</span>
             </div>
 
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-gray-600">
-                {accounts!.length} account{accounts!.length === 1 ? '' : 's'}
+                {accounts!.length === 1
+                  ? t('accounting.setup.accountCountSingular', { count: accounts!.length })
+                  : t('accounting.setup.accountCountPlural', { count: accounts!.length })}
               </h2>
-              <button
-                onClick={() => setShowAddForm((s) => !s)}
-                className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 px-2.5 py-1.5 rounded-md hover:bg-blue-50 active:bg-blue-100 transition-colors"
-              >
-                {showAddForm ? <X size={14} strokeWidth={2} /> : <Plus size={14} strokeWidth={2} />}
-                {showAddForm ? 'Cancel' : 'Add account'}
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAddForm((s) => !s)}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 px-2.5 py-1.5 rounded-md hover:bg-blue-50 active:bg-blue-100 transition-colors"
+                >
+                  {showAddForm ? <X size={14} strokeWidth={2} /> : <Plus size={14} strokeWidth={2} />}
+                  {showAddForm ? t('common.cancel') : t('accounting.setup.addAccount')}
+                </button>
+              )}
             </div>
 
-            {showAddForm && (
+            {isAdmin && showAddForm && (
               <form
                 onSubmit={handleAddAccount}
                 className="border-2 border-blue-500/30 rounded-md bg-blue-50/40 p-4 mb-5 flex flex-col gap-3"
@@ -264,20 +258,20 @@ export default function AccountingSetupPage() {
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-gray-600">Code</label>
+                    <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.code')}</label>
                     <input
                       type="text"
-                      placeholder="e.g. 6100"
+                      placeholder={t('accounting.setup.codePlaceholder')}
                       value={form.code}
                       onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
                       className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-gray-600">Name</label>
+                    <label className="text-xs font-semibold text-gray-600">{t('common.name')}</label>
                     <input
                       type="text"
-                      placeholder="e.g. Office Supplies"
+                      placeholder={t('accounting.setup.namePlaceholder')}
                       value={form.name}
                       onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                       className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
@@ -286,7 +280,7 @@ export default function AccountingSetupPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-gray-600">Type</label>
+                    <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.type')}</label>
                     <select
                       value={form.type}
                       onChange={(e) => {
@@ -296,20 +290,20 @@ export default function AccountingSetupPage() {
                       }}
                       className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
                     >
-                      {TYPE_ORDER.map((t) => (
-                        <option key={t} value={t}>{TYPE_LABEL[t]}</option>
+                      {TYPE_ORDER.map((accType) => (
+                        <option key={accType} value={accType}>{t(TYPE_LABEL_KEY[accType])}</option>
                       ))}
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-gray-600">Normal balance</label>
+                    <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.normalBalance')}</label>
                     <select
                       value={form.normalBalance}
                       onChange={(e) => setForm((f) => ({ ...f, normalBalance: e.target.value as 'DEBIT' | 'CREDIT' }))}
                       className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
                     >
-                      <option value="DEBIT">Debit</option>
-                      <option value="CREDIT">Credit</option>
+                      <option value="DEBIT">{t('accounting.journal.debit')}</option>
+                      <option value="CREDIT">{t('accounting.journal.credit')}</option>
                     </select>
                   </div>
                 </div>
@@ -319,7 +313,7 @@ export default function AccountingSetupPage() {
                   className="self-start inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60"
                 >
                   {saving ? <Loader2 size={14} strokeWidth={2} className="animate-spin" /> : null}
-                  {saving ? 'Adding...' : 'Add account'}
+                  {saving ? t('accounting.setup.adding') : t('accounting.setup.addAccount')}
                 </button>
               </form>
             )}
@@ -331,7 +325,7 @@ export default function AccountingSetupPage() {
                 return (
                   <div key={type} className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
                     <div className="px-4 pt-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
-                      {TYPE_LABEL[type]}
+                      {t(TYPE_LABEL_KEY[type])}
                     </div>
                     {list.map((acc) => (
                       <div
@@ -354,13 +348,13 @@ export default function AccountingSetupPage() {
                               rejects it outright, since it'd break every
                               document type that posts to it. Only custom
                               accounts get the toggle. */}
-                          {!acc.systemKey && (
+                          {isAdmin && !acc.systemKey && (
                             <button
                               onClick={() => handleToggleActive(acc)}
                               disabled={togglingId === acc.id}
                               className="text-[11px] font-semibold text-gray-400 hover:text-blue-700 disabled:opacity-50"
                             >
-                              {togglingId === acc.id ? '...' : acc.isActive ? 'Archive' : 'Reactivate'}
+                              {togglingId === acc.id ? '...' : acc.isActive ? t('accounting.setup.archive') : t('accounting.setup.reactivate')}
                             </button>
                           )}
                         </div>

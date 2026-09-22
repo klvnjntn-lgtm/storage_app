@@ -3,28 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  LayoutDashboard,
-  Search,
-  Plus,
-  ChevronDown,
-  ChevronUp,
-  Tag,
-  Hash,
-  Wallet,
-  Boxes,
-  AlertTriangle,
-  CheckCircle2,
-  List,
-  LayoutGrid,
-  ImageOff,
-  ArrowUpDown,
-} from 'lucide-react';
+import { LayoutDashboard, Search, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes, AlertTriangle, CheckCircle2, List, LayoutGrid, ImageOff, ArrowUpDown } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useSortableData } from '@/lib/hooks/useSortableData';
-import SortableTh from '@/app/components/SortableTh';
-import Pagination from '@/app/components/Pagination';
+import SortableTh from '@/app/components/shared/SortableTh';
+import Pagination from '@/app/components/shared/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -106,6 +91,7 @@ function ComboBox({
   placeholder: string;
   className?: string;
 }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -195,7 +181,7 @@ function ComboBox({
               </button>
             ))
           ) : (
-            <div className="px-3 py-2 text-gray-400">No matches</div>
+            <div className="px-3 py-2 text-gray-400">{t('inventory.stockPage.comboBoxNoMatches')}</div>
           )}
           {showCreate && (
             <button
@@ -207,7 +193,7 @@ function ComboBox({
                 highlight === filtered.length ? 'bg-blue-50' : ''
               }`}
             >
-              + Create &quot;{value.trim()}&quot;
+              {t('inventory.stockPage.comboBoxCreateOption', { value: value.trim() })}
             </button>
           )}
         </div>
@@ -247,13 +233,23 @@ function ProductThumb({ src, alt }: { src: string | null; alt: string }) {
 }
 
 export default function StockPage() {
+  const { t } = useLanguage();
   const [products, setProducts] = useState<ProductSummary[]>([]);
   const [enabledModules, setEnabledModules] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // Seeded from the URL so pressing the browser's Back button from a
+  // product's detail page restores the same search/page instead of
+  // resetting to page 1 with no search.
+  const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
   const router = useRouter();
+
+  useSyncQueryParams({
+    search,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
 
   const [categories, setCategories] = useState<Option[]>([]);
   const [brands, setBrands] = useState<Option[]>([]);
@@ -380,12 +376,24 @@ export default function StockPage() {
     },
   );
 
-  // Reset to page 1 whenever the search term or sort changes
+  // Reset to page 1 whenever the search term or sort changes — but not on
+  // the very first run, or a `page` restored from the URL (e.g. via the
+  // browser's Back button) would get clobbered back to 1 on mount.
+  const isFirstSearchResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstSearchResetRef.current) {
+      isFirstSearchResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [search]);
 
+  const isFirstSortResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstSortResetRef.current) {
+      isFirstSortResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [sort]);
 
@@ -409,11 +417,11 @@ export default function StockPage() {
   }
 
   const gridSortOptions: { key: SortKey; label: string }[] = [
-    { key: 'name', label: 'Product' },
-    { key: 'sku', label: 'SKU' },
-    { key: 'sellingPrice', label: 'Price' },
-    ...(showCostPrice ? [{ key: 'costPrice' as SortKey, label: 'Cost Price' }] : []),
-    { key: 'totalStock', label: 'Total Stock' },
+    { key: 'name', label: t('inventory.stockPage.colProduct') },
+    { key: 'sku', label: t('inventory.stockPage.colSku') },
+    { key: 'sellingPrice', label: t('common.price') },
+    ...(showCostPrice ? [{ key: 'costPrice' as SortKey, label: t('inventory.stockPage.colCostPrice') }] : []),
+    { key: 'totalStock', label: t('inventory.stockPage.colTotalStock') },
   ];
 
   // --- New Product form logic ---
@@ -467,20 +475,20 @@ export default function StockPage() {
   function validateCreateForm(): FieldErrors | null {
     const errs: FieldErrors = {};
 
-    if (!name.trim()) errs.name = 'Required';
-    if (!sku.trim()) errs.sku = 'Required';
-    if (!categoryInput.trim()) errs.category = 'Required';
+    if (!name.trim()) errs.name = t('common.required');
+    if (!sku.trim()) errs.sku = t('common.required');
+    if (!categoryInput.trim()) errs.category = t('common.required');
 
     const sellingPrice = parsePriceInput(sellingPriceInput);
-    if (sellingPrice === null) errs.sellingPrice = 'Must be a non-negative number';
+    if (sellingPrice === null) errs.sellingPrice = t('inventory.stockPage.mustBeNonNegativeNumber');
 
     if (showCostPrice) {
       const costPrice = parsePriceInput(costPriceInput);
-      if (costPrice === null) errs.costPrice = 'Must be a non-negative number';
+      if (costPrice === null) errs.costPrice = t('inventory.stockPage.mustBeNonNegativeNumber');
     }
 
     const stock = parseStockInput(stockInput);
-    if (stock === null) errs.stock = 'Must be a whole number, 0 or more';
+    if (stock === null) errs.stock = t('inventory.stockPage.mustBeWholeNumber');
 
     return Object.keys(errs).length > 0 ? errs : null;
   }
@@ -519,17 +527,17 @@ export default function StockPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to create product');
+        throw new Error(data?.message || t('inventory.stockPage.createProductFailed'));
       }
 
-      setCreateSuccessMsg(`"${name.trim()}" created.`);
+      setCreateSuccessMsg(t('inventory.stockPage.createSuccess', { name: name.trim() }));
       resetCreateForm();
       setPage(1);
 
       await Promise.all([loadProducts(), loadCategories(), loadBrands()]);
     } catch (err: any) {
       console.error(err);
-      setCreateError(err.message || 'Failed to create product');
+      setCreateError(err.message || t('inventory.stockPage.createProductFailed'));
     } finally {
       setCreating(false);
     }
@@ -597,24 +605,16 @@ export default function StockPage() {
           /vehicles/search and /labels. Search bar now lives here too. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Hub
-          </button>
-
           <div className="flex items-center gap-2.5 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <LayoutDashboard size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Stock
+                {t('inventory.stockPage.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Current stock across all locations — sorted by SKU
+                {t('inventory.stockPage.subtitle')}
               </p>
             </div>
           </div>
@@ -627,7 +627,7 @@ export default function StockPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search product name..."
+                placeholder={t('inventory.stockPage.searchPlaceholder')}
                 className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
             </div>
@@ -636,14 +636,14 @@ export default function StockPage() {
                 filter/sort/pagination, just a different row renderer. */}
             <div
               role="group"
-              aria-label="View mode"
+              aria-label={t('inventory.stockPage.viewModeGroupLabel')}
               className="flex items-center gap-0.5 rounded-xl border border-blue-500/20 bg-white p-1 shadow-sm shrink-0"
             >
               <button
                 type="button"
                 onClick={() => changeViewMode('list')}
                 aria-pressed={viewMode === 'list'}
-                title="List view"
+                title={t('inventory.stockPage.listView')}
                 className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                   viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700 hover:bg-blue-50'
                 }`}
@@ -654,7 +654,7 @@ export default function StockPage() {
                 type="button"
                 onClick={() => changeViewMode('grid')}
                 aria-pressed={viewMode === 'grid'}
-                title="Grid view"
+                title={t('inventory.stockPage.gridView')}
                 className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                   viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700 hover:bg-blue-50'
                 }`}
@@ -678,7 +678,7 @@ export default function StockPage() {
             >
               <span className="flex items-center gap-2 text-sm font-semibold">
                 <Plus size={16} strokeWidth={2.5} className="text-blue-700" />
-                New Product
+                {t('inventory.stockPage.newProduct')}
               </span>
               {formOpen ? (
                 <ChevronUp size={16} strokeWidth={2} className="text-blue-700" />
@@ -707,7 +707,7 @@ export default function StockPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Tag size={12} strokeWidth={2.5} />
-                    Identity
+                    {t('inventory.stockPage.sectionIdentity')}
                   </div>
                   <div className="grid md:grid-cols-2 gap-3">
                     <div>
@@ -717,7 +717,7 @@ export default function StockPage() {
                           setName(e.target.value);
                           if (fieldErrors.name) setFieldErrors((f) => ({ ...f, name: undefined }));
                         }}
-                        placeholder="Product name *"
+                        placeholder={t('inventory.stockPage.namePlaceholder')}
                         className={fieldClass(fieldErrors.name)}
                       />
                       {fieldErrors.name && <p className="text-xs text-red-600 mt-1">{fieldErrors.name}</p>}
@@ -726,7 +726,7 @@ export default function StockPage() {
                       <input
                         value={oem}
                         onChange={(e) => setOem(e.target.value)}
-                        placeholder="OEM number (optional)"
+                        placeholder={t('inventory.stockPage.oemPlaceholder')}
                         className={fieldClass()}
                       />
                     </div>
@@ -737,7 +737,7 @@ export default function StockPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Hash size={12} strokeWidth={2.5} />
-                    Catalog
+                    {t('inventory.stockPage.sectionCatalog')}
                   </div>
                   <div className="grid md:grid-cols-3 gap-3">
                     <div>
@@ -747,14 +747,14 @@ export default function StockPage() {
                           setSku(e.target.value);
                           if (fieldErrors.sku) setFieldErrors((f) => ({ ...f, sku: undefined }));
                         }}
-                        placeholder="SKU *"
+                        placeholder={t('inventory.stockPage.skuPlaceholder')}
                         className={fieldClass(fieldErrors.sku)}
                       />
                       {fieldErrors.sku && <p className="text-xs text-red-600 mt-1">{fieldErrors.sku}</p>}
                       {!fieldErrors.sku && duplicateSku && (
                         <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
                           <AlertTriangle size={11} strokeWidth={2.5} />
-                          SKU already exists in catalog
+                          {t('inventory.stockPage.skuDuplicate')}
                         </p>
                       )}
                     </div>
@@ -766,13 +766,13 @@ export default function StockPage() {
                           if (fieldErrors.category) setFieldErrors((f) => ({ ...f, category: undefined }));
                         }}
                         options={categories}
-                        placeholder="Category * — search or add new"
+                        placeholder={t('inventory.stockPage.categoryPlaceholder')}
                         className={fieldClass(fieldErrors.category)}
                       />
                       {fieldErrors.category ? (
                         <p className="text-xs text-red-600 mt-1">{fieldErrors.category}</p>
                       ) : (
-                        <p className="text-xs text-gray-400 mt-1">Type to search, or enter a new category</p>
+                        <p className="text-xs text-gray-400 mt-1">{t('inventory.stockPage.categoryHint')}</p>
                       )}
                     </div>
                     <div>
@@ -780,10 +780,10 @@ export default function StockPage() {
                         value={brandInput}
                         onChange={setBrandInput}
                         options={brands}
-                        placeholder="Brand (optional) — search or add new"
+                        placeholder={t('inventory.stockPage.brandPlaceholder')}
                         className={fieldClass()}
                       />
-                      <p className="text-xs text-gray-400 mt-1">Type to search, or enter a new brand</p>
+                      <p className="text-xs text-gray-400 mt-1">{t('inventory.stockPage.brandHint')}</p>
                     </div>
                   </div>
                 </div>
@@ -792,11 +792,11 @@ export default function StockPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                     <Wallet size={12} strokeWidth={2.5} />
-                    Pricing &amp; Inventory
+                    {t('inventory.stockPage.sectionPricingInventory')}
                   </div>
                   <div className={`grid gap-3 ${showCostPrice ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Selling Price (optional)</label>
+                      <label className="block text-xs text-gray-500 mb-1">{t('inventory.stockPage.sellingPriceLabel')}</label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
                           Rp
@@ -823,7 +823,7 @@ export default function StockPage() {
                         the invoicing module on, matching the same gate as the table column. */}
                     {showCostPrice && (
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Cost Price (optional)</label>
+                        <label className="block text-xs text-gray-500 mb-1">{t('inventory.stockPage.costPriceLabel')}</label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
                             Rp
@@ -850,7 +850,7 @@ export default function StockPage() {
                     <div>
                       <label className="flex items-center gap-1 text-xs text-gray-500 mb-1">
                         <Boxes size={12} strokeWidth={2.5} />
-                        Stock on hand (optional)
+                        {t('inventory.stockPage.stockOnHandLabel')}
                       </label>
                       <input
                         type="number"
@@ -877,7 +877,10 @@ export default function StockPage() {
                           : 'bg-red-50 border-red-200 text-red-800'
                       }`}
                     >
-                      Margin: {formatIDR(marginPreview.profit)} ({marginPreview.pct.toFixed(1)}%)
+                      {t('inventory.stockPage.marginPreview', {
+                        profit: formatIDR(marginPreview.profit),
+                        pct: marginPreview.pct.toFixed(1),
+                      })}
                     </div>
                   )}
                 </div>
@@ -888,16 +891,16 @@ export default function StockPage() {
                     disabled={creating}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    {creating ? 'Creating...' : 'Create Product'}
+                    {creating ? t('common.creating') : t('inventory.stockPage.createProductButton')}
                   </button>
                   <button
                     onClick={resetCreateForm}
                     disabled={creating}
                     className="px-4 py-2 text-gray-500 text-sm hover:text-blue-700 disabled:opacity-40 transition-colors"
                   >
-                    Clear
+                    {t('common.clear')}
                   </button>
-                  <span className="text-xs text-gray-400 ml-auto hidden md:inline">⌘/Ctrl + Enter to submit</span>
+                  <span className="text-xs text-gray-400 ml-auto hidden md:inline">{t('inventory.stockPage.submitHint')}</span>
                 </div>
               </div>
             )}
@@ -920,21 +923,21 @@ export default function StockPage() {
                 <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                   <tr>
                     <SortableTh<SortKey>
-                      label="SKU"
+                      label={t('inventory.stockPage.colSku')}
                       columnKey="sku"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Product"
+                      label={t('inventory.stockPage.colProduct')}
                       columnKey="name"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Price"
+                      label={t('common.price')}
                       columnKey="sellingPrice"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
@@ -942,7 +945,7 @@ export default function StockPage() {
                     />
                     {showCostPrice && (
                       <SortableTh<SortKey>
-                        label="Cost Price"
+                        label={t('inventory.stockPage.colCostPrice')}
                         columnKey="costPrice"
                         activeKey={sort?.key ?? null}
                         direction={sort?.direction ?? null}
@@ -950,7 +953,7 @@ export default function StockPage() {
                       />
                     )}
                     <SortableTh<SortKey>
-                      label="Total Stock"
+                      label={t('inventory.stockPage.colTotalStock')}
                       columnKey="totalStock"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
@@ -960,7 +963,7 @@ export default function StockPage() {
                         value — and only meaningful for orgs actually running
                         multiple locations via the warehouse module. */}
                     {showLocations && (
-                      <th className="text-left px-4 py-3 font-semibold">Locations</th>
+                      <th className="text-left px-4 py-3 font-semibold">{t('inventory.stockPage.colLocations')}</th>
                     )}
                   </tr>
                 </thead>
@@ -985,7 +988,7 @@ export default function StockPage() {
                         {product.sellingPrice != null ? (
                           formatIDR(product.sellingPrice)
                         ) : (
-                          <span className="text-gray-400">No price</span>
+                          <span className="text-gray-400">{t('inventory.stockPage.noPrice')}</span>
                         )}
                       </td>
                       {showCostPrice && (
@@ -993,7 +996,7 @@ export default function StockPage() {
                           {product.costPrice != null ? (
                             formatIDR(product.costPrice)
                           ) : (
-                            <span className="text-gray-400">No price</span>
+                            <span className="text-gray-400">{t('inventory.stockPage.noPrice')}</span>
                           )}
                         </td>
                       )}
@@ -1003,7 +1006,7 @@ export default function StockPage() {
                       {showLocations && (
                         <td className="px-4 py-3 text-xs text-gray-700">
                           {product.locations.length === 0 ? (
-                            <span className="text-gray-500">No stock</span>
+                            <span className="text-gray-500">{t('inventory.stockPage.noStock')}</span>
                           ) : (
                             product.locations.map((location, index) => (
                               <div key={index} className="whitespace-nowrap">
@@ -1021,7 +1024,7 @@ export default function StockPage() {
 
             {filteredProducts.length === 0 && (
               <div className="p-8 text-center text-sm text-gray-500">
-                {search ? 'No products match your search' : 'No products found'}
+                {search ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
               </div>
             )}
           </div>
@@ -1032,7 +1035,7 @@ export default function StockPage() {
             {filteredProducts.length > 0 && (
               <div className="flex items-center gap-2 justify-end">
                 <ArrowUpDown size={14} strokeWidth={2} className="text-gray-400" />
-                <label className="text-xs text-gray-500">Sort by</label>
+                <label className="text-xs text-gray-500">{t('inventory.stockPage.sortBy')}</label>
                 <select
                   value={sort?.key ?? ''}
                   onChange={(e) => {
@@ -1041,7 +1044,7 @@ export default function StockPage() {
                   className="text-xs border-2 border-gray-300 rounded-md px-2 py-1.5 outline-none focus:border-blue-500 bg-white"
                 >
                   <option value="" disabled>
-                    Choose column
+                    {t('inventory.stockPage.chooseColumn')}
                   </option>
                   {gridSortOptions.map((opt) => (
                     <option key={opt.key} value={opt.key}>
@@ -1053,10 +1056,10 @@ export default function StockPage() {
                   <button
                     type="button"
                     onClick={() => toggleSort(sort.key)}
-                    title="Reverse sort direction"
+                    title={t('inventory.stockPage.reverseSortDirection')}
                     className="text-xs px-2 py-1.5 rounded-md border-2 border-gray-300 hover:bg-blue-50 font-semibold text-gray-600"
                   >
-                    {sort.direction === 'asc' ? '↑ Asc' : '↓ Desc'}
+                    {sort.direction === 'asc' ? t('inventory.stockPage.sortAsc') : t('inventory.stockPage.sortDesc')}
                   </button>
                 )}
               </div>
@@ -1087,7 +1090,7 @@ export default function StockPage() {
                           : 'bg-red-50 text-red-800 border-red-200'
                       }`}
                     >
-                      {product.totalStock} pcs
+                      {product.totalStock} {t('inventory.stockPage.pcsSuffix')}
                     </span>
                   </div>
 
@@ -1107,7 +1110,7 @@ export default function StockPage() {
 
             {filteredProducts.length === 0 && (
               <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
-                {search ? 'No products match your search' : 'No products found'}
+                {search ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
               </div>
             )}
           </div>

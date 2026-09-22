@@ -5,9 +5,17 @@ import { ModuleGuard } from '../auth/guards/module.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ExpenseCategoriesService } from './expense-categories.service';
 import { ExpensesService } from './expenses.service';
-import { CreateExpenseCategoryDto, CreateExpenseDto, MarkExpensePaidDto, UpdateExpenseCategoryDto } from './dto/expense.dto';
+import {
+  CreateExpenseCategoryDto,
+  CreateExpenseDto,
+  MarkExpensePaidDto,
+  RecordExpensePaymentDto,
+  UpdateExpenseCategoryDto,
+} from './dto/expense.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
@@ -25,11 +33,15 @@ export class ExpensesController {
     return this.categoriesService.list(organizationId);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Post('categories')
   createCategory(@CurrentOrg() organizationId: string, @Body() dto: CreateExpenseCategoryDto) {
     return this.categoriesService.create(organizationId, dto);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Patch('categories/:id')
   updateCategory(
     @CurrentOrg() organizationId: string,
@@ -89,6 +101,19 @@ export class ExpensesController {
     return this.expensesService.markPaid(organizationId, id, dto);
   }
 
+  // FIX — partial-payment counterpart to mark-paid above.
+  @Post(':id/payments')
+  recordPayment(
+    @CurrentOrg() organizationId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecordExpensePaymentDto,
+    @Req() req,
+  ) {
+    return this.expensesService.recordPayment(organizationId, id, dto, req.user.sub);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Delete(':id')
   voidUnpaid(
     @CurrentOrg() organizationId: string,

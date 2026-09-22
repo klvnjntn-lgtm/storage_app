@@ -4,9 +4,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Bell, Check, Clock, Trash2, Car } from 'lucide-react';
+import { Bell, Check, Clock, Trash2, Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
+import { toCalendarDateString } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -17,24 +19,36 @@ function daysBetween(a: Date, b: Date) {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
-function formatDue(dueDate: string, status: Reminder['status']): { label: string; tone: 'overdue' | 'soon' | 'upcoming' | 'done' } {
+function formatDue(
+  dueDate: string,
+  status: Reminder['status'],
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  dateLocale: string,
+): { label: string; tone: 'overdue' | 'soon' | 'upcoming' | 'done' } {
   const due = new Date(dueDate);
   const now = new Date();
   const diff = daysBetween(due, now);
 
   if (status === 'COMPLETED') {
-    return { label: `Completed · was due ${due.toLocaleDateString('id-ID')}`, tone: 'done' };
+    return { label: t('workshop.reminders.completedWasDue', { date: due.toLocaleDateString(dateLocale) }), tone: 'done' };
   }
   if (diff < 0) {
-    return { label: `Overdue by ${Math.abs(diff)} day${Math.abs(diff) === 1 ? '' : 's'}`, tone: 'overdue' };
+    const count = Math.abs(diff);
+    return {
+      label: t(count === 1 ? 'workshop.reminders.overdueBy' : 'workshop.reminders.overdueByPlural', { count }),
+      tone: 'overdue',
+    };
   }
   if (diff === 0) {
-    return { label: 'Due today', tone: 'soon' };
+    return { label: t('workshop.reminders.dueToday'), tone: 'soon' };
   }
   if (diff <= DUE_SOON_DAYS) {
-    return { label: `Due in ${diff} day${diff === 1 ? '' : 's'}`, tone: 'soon' };
+    return {
+      label: t(diff === 1 ? 'workshop.reminders.dueIn' : 'workshop.reminders.dueInPlural', { count: diff }),
+      tone: 'soon',
+    };
   }
-  return { label: `Due ${due.toLocaleDateString('id-ID')}`, tone: 'upcoming' };
+  return { label: t('workshop.reminders.dueOn', { date: due.toLocaleDateString(dateLocale) }), tone: 'upcoming' };
 }
 
 function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
@@ -52,6 +66,8 @@ function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
 
 export default function RemindersPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,12 +83,12 @@ export default function RemindersPage() {
       const res = await apiFetch('/reminders');
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Failed to load reminders (${res.status})`);
+        setError(body?.message ?? t('workshop.reminders.loadFailed', { status: res.status }));
         return;
       }
       setReminders(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('workshop.reminders.serverError'));
     } finally {
       setLoading(false);
     }
@@ -110,14 +126,16 @@ export default function RemindersPage() {
     }
   }
 
+  // FIX — was d.toISOString().slice(0, 10), which converts to UTC first
+  // and rolls the date back one day in a timezone ahead of UTC.
   function snoozePreset(days: number) {
     const d = new Date();
     d.setDate(d.getDate() + days);
-    setSnoozeDate(d.toISOString().slice(0, 10));
+    setSnoozeDate(toCalendarDateString(d));
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this reminder? It will be hidden from this list.')) return;
+    if (!confirm(t('workshop.reminders.deleteConfirm'))) return;
     setBusyId(id);
     try {
       const res = await apiFetch(`/reminders/${id}`, { method: 'DELETE' });
@@ -138,7 +156,7 @@ export default function RemindersPage() {
   const upcoming = pending.filter((r) => daysBetween(new Date(r.dueDate), new Date()) > DUE_SOON_DAYS);
 
   function ReminderRow({ r }: { r: Reminder }) {
-    const due = formatDue(r.dueDate, r.status);
+    const due = formatDue(r.dueDate, r.status, t, dateLocale);
     const isSnoozing = snoozingId === r.id;
 
     return (
@@ -164,7 +182,7 @@ export default function RemindersPage() {
               <button
                 onClick={() => complete(r.id)}
                 disabled={busyId === r.id}
-                title="Mark complete"
+                title={t('workshop.reminders.markComplete')}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-green-50 hover:border-green-300 text-green-700 disabled:opacity-40 transition-colors"
               >
                 <Check size={14} strokeWidth={2} />
@@ -174,7 +192,7 @@ export default function RemindersPage() {
                   setSnoozingId(isSnoozing ? null : r.id);
                   setSnoozeDate('');
                 }}
-                title="Snooze"
+                title={t('workshop.reminders.snooze')}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-amber-50 hover:border-amber-300 text-amber-700 transition-colors"
               >
                 <Clock size={14} strokeWidth={2} />
@@ -182,7 +200,7 @@ export default function RemindersPage() {
               <button
                 onClick={() => remove(r.id)}
                 disabled={busyId === r.id}
-                title="Delete"
+                title={t('workshop.reminders.delete')}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 disabled:opacity-40 transition-colors"
               >
                 <Trash2 size={14} strokeWidth={2} />
@@ -197,10 +215,10 @@ export default function RemindersPage() {
             className="mt-3 pt-3 border-t border-blue-500/10 flex flex-wrap items-center gap-2"
           >
             {[
-              { label: '+1 day', days: 1 },
-              { label: '+3 days', days: 3 },
-              { label: '+1 week', days: 7 },
-              { label: '+1 month', days: 30 },
+              { label: t('workshop.reminders.plus1Day'), days: 1 },
+              { label: t('workshop.reminders.plus3Days'), days: 3 },
+              { label: t('workshop.reminders.plus1Week'), days: 7 },
+              { label: t('workshop.reminders.plus1Month'), days: 30 },
             ].map((p) => (
               <button
                 key={p.days}
@@ -221,7 +239,7 @@ export default function RemindersPage() {
               disabled={!snoozeDate || busyId === r.id}
               className="text-xs px-3 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
             >
-              Snooze
+              {t('workshop.reminders.snooze')}
             </button>
           </div>
         )}
@@ -257,44 +275,36 @@ export default function RemindersPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Hub
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Bell size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Reminders
+                {t('workshop.reminders.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Follow-ups for vehicles — oil changes, checkups, and the like</p>
+              <p className="text-xs text-gray-500 truncate">{t('workshop.reminders.subtitle')}</p>
             </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500">{t('workshop.reminders.loading')}</p>}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">{error}</p>
         )}
 
         {!loading && reminders.length === 0 && !error && (
           <p className="text-sm text-gray-400">
-            No reminders yet — set one from a vehicle's page or while creating an invoice.
+            {t('workshop.reminders.empty')}
           </p>
         )}
 
-        <Section title="Overdue" items={overdue} emptyText="" />
-        <Section title="Due soon" items={dueSoon} emptyText="" />
-        <Section title="Upcoming" items={upcoming} emptyText="" />
-        <Section title="Completed" items={completed} emptyText="" />
+        <Section title={t('workshop.reminders.overdueSection')} items={overdue} emptyText="" />
+        <Section title={t('workshop.reminders.dueSoonSection')} items={dueSoon} emptyText="" />
+        <Section title={t('workshop.reminders.upcomingSection')} items={upcoming} emptyText="" />
+        <Section title={t('workshop.reminders.completedSection')} items={completed} emptyText="" />
       </div>
     </main>
   );

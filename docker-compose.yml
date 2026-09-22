@@ -79,6 +79,13 @@ services:
       FIREBIRD_LEGACY_USER: ${FIREBIRD_LEGACY_USER}
       FIREBIRD_LEGACY_PASSWORD: ${FIREBIRD_LEGACY_PASSWORD}
 
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      MAIL_FROM: ${MAIL_FROM}
+      APP_URL: ${APP_URL}
+
     volumes:
       - backend_data:/app/data
       - backend_uploads:/app/uploads

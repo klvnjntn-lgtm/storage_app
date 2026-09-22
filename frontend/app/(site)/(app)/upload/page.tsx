@@ -4,16 +4,10 @@ import { useRef, useState, } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  UploadCloud,
-  Download,
-  AlertCircle,
-  CheckCircle2,
-  Trash2,
-} from 'lucide-react';
+import { UploadCloud, Download, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import React from 'react'
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -65,33 +59,35 @@ const MAX_LENGTHS = {
 } as const;
 
 // Returns the same rejection reason the backend would give for this
-// row, or null if the row would pass ProductService's validation.
-// Checked in the same order as the backend so the message matches.
-function getValidationError(r: Row): string | null {
+// row (as a translation-key code), or null if the row would pass
+// ProductService's validation. Checked in the same order as the backend
+// so the message matches. The code is turned into a localized message by
+// rowErrorMessage() inside the page component.
+function getValidationErrorCode(r: Row): string | null {
   const sku = r.sku?.toString().trim() ?? '';
   const name = r.name?.toString().trim() ?? '';
   const category = r.category?.toString().trim() ?? '';
   const brand = r.brand?.toString().trim();
 
-  if (!name) return 'missing name or category';
-  if (!category) return 'missing name or category';
-  if (!sku) return 'missing sku';
-  if (!(Number(r.qty) > 0)) return 'qty must be greater than 0';
+  if (!name) return 'missingNameOrCategory';
+  if (!category) return 'missingNameOrCategory';
+  if (!sku) return 'missingSku';
+  if (!(Number(r.qty) > 0)) return 'qtyMustBeGreaterThanZero';
 
   // Backend checks price sign before length limits — same order here.
-  if (r.sellingPrice != null && r.sellingPrice < 0) return 'selling price cannot be negative';
-  if (r.costPrice != null && r.costPrice < 0) return 'cost price cannot be negative';
+  if (r.sellingPrice != null && r.sellingPrice < 0) return 'sellingPriceNegative';
+  if (r.costPrice != null && r.costPrice < 0) return 'costPriceNegative';
 
-  if (sku.length > MAX_LENGTHS.sku) return 'SKU exceeds 100 characters';
-  if (name.length > MAX_LENGTHS.name) return 'Name exceeds 255 characters';
-  if (category.length > MAX_LENGTHS.category) return 'Category exceeds 100 characters';
-  if (brand && brand.length > MAX_LENGTHS.brand) return 'Brand exceeds 100 characters';
+  if (sku.length > MAX_LENGTHS.sku) return 'skuTooLong';
+  if (name.length > MAX_LENGTHS.name) return 'nameTooLong';
+  if (category.length > MAX_LENGTHS.category) return 'categoryTooLong';
+  if (brand && brand.length > MAX_LENGTHS.brand) return 'brandTooLong';
 
   return null;
 }
 
 function isRowValid(r: Row) {
-  return getValidationError(r) === null;
+  return getValidationErrorCode(r) === null;
 }
 
 // Reads the current user's email straight out of the JWT payload for
@@ -115,8 +111,13 @@ function getCurrentUserEmail(): string | null {
 }
 
 export default function ImportPage() {
-  const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useLanguage();
+
+  function rowErrorMessage(r: Row): string | null {
+    const code = getValidationErrorCode(r);
+    return code ? t(`upload.uploadPage.errors.${code}`) : null;
+  }
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -170,18 +171,30 @@ export default function ImportPage() {
 
     const reader = new FileReader();
 
+    // FIX — was no try/catch around XLSX.read()/sheet_to_json() and no
+    // reader.onerror handler at all. Selecting a corrupt file, or a
+    // non-Excel file with an .xlsx/.xls extension (the `accept`
+    // attribute is only an advisory client hint, not a real check),
+    // threw inside this callback with nothing to catch it — the UI
+    // showed no error and gave no indication the upload failed.
+    reader.onerror = () => {
+      setColumnError(t('upload.uploadPage.couldNotReadFile'));
+      setRows([]);
+    };
+
     reader.onload = (evt) => {
-      const data = evt.target?.result;
-      const workbook = XLSX.read(data, { type: 'binary' });
+      try {
+        const data = evt.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
 
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: '' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: '' });
 
-      if (json.length === 0) {
-        setColumnError('Excel file is empty');
-        setRows([]);
-        return;
-      }
+        if (json.length === 0) {
+          setColumnError(t('upload.uploadPage.excelFileEmpty'));
+          setRows([]);
+          return;
+        }
 
       const headers = Object.keys(json[0]);
 
@@ -190,7 +203,7 @@ export default function ImportPage() {
       );
 
       if (missing.length) {
-        setColumnError(`Missing columns: ${missing.join(', ')}`);
+        setColumnError(t('upload.uploadPage.missingColumns', { columns: missing.join(', ') }));
         setRows([]);
         return;
       }
@@ -214,6 +227,10 @@ export default function ImportPage() {
               : Number(r.costPrice),
         }))
       );
+      } catch {
+        setColumnError(t('upload.uploadPage.couldNotParseFile'));
+        setRows([]);
+      }
     };
 
     reader.readAsBinaryString(file);
@@ -264,7 +281,7 @@ export default function ImportPage() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setImportError(data?.message || `Import failed (status ${res.status})`);
+        setImportError(data?.message || t('upload.uploadPage.importFailedWithStatus', { status: res.status }));
         return;
       }
 
@@ -282,7 +299,7 @@ export default function ImportPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error(err);
-      setImportError('Could not reach the server — check the console for details.');
+      setImportError(t('upload.uploadPage.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -302,22 +319,15 @@ export default function ImportPage() {
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Scanner Hub
-          </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <UploadCloud size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Stock Import
+                {t('upload.uploadPage.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Upload a stock sheet (SKU, qty, location)</p>
+              <p className="text-xs text-gray-500 truncate">{t('upload.uploadPage.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -332,11 +342,11 @@ export default function ImportPage() {
             <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
-                Import complete — {importResult.accepted} added, {importResult.rejected.length} failed.
-                Choose a new file below to import more.
+                {t('upload.uploadPage.importComplete', { accepted: importResult.accepted, failed: importResult.rejected.length })}{' '}
+                {t('upload.uploadPage.chooseNewFile')}
                 {importResult.importedBy && (
                   <span className="block text-xs text-green-700 mt-1">
-                    Imported by {importResult.importedBy}
+                    {t('upload.uploadPage.importedBy', { email: importResult.importedBy })}
                   </span>
                 )}
               </span>
@@ -346,7 +356,9 @@ export default function ImportPage() {
               <div className="border border-red-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {importResult.rejected.length} row{importResult.rejected.length === 1 ? '' : 's'} could not be added
+                  {importResult.rejected.length === 1
+                    ? t('upload.uploadPage.rowsCouldNotBeAddedOne')
+                    : t('upload.uploadPage.rowsCouldNotBeAddedMany', { count: importResult.rejected.length })}
                 </div>
                 {/* Reason text can run long — without overflow-x-auto here,
                     a narrow phone would just clip it since the parent uses
@@ -356,8 +368,8 @@ export default function ImportPage() {
                     <thead className="bg-blue-50/60 border-b border-blue-500/15">
                       <tr>
                         <th className="text-left px-3 py-2 font-semibold">SKU</th>
-                        <th className="text-left px-3 py-2 font-semibold">Name</th>
-                        <th className="text-left px-3 py-2 font-semibold">Reason</th>
+                        <th className="text-left px-3 py-2 font-semibold">{t('common.name')}</th>
+                        <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadPage.reason')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -389,7 +401,7 @@ export default function ImportPage() {
         {/* IMPORT MODE */}
         <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
           <label className="block text-xs font-semibold text-gray-600">
-            Import mode — choose one
+            {t('upload.uploadPage.importModeChooseOne')}
           </label>
 
           <div className="flex flex-col sm:flex-row gap-3">
@@ -408,10 +420,10 @@ export default function ImportPage() {
                     mode === 'REPLACE' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                   }`}
                 />
-                <span className="font-semibold text-sm">Replace existing quantities</span>
+                <span className="font-semibold text-sm">{t('upload.uploadPage.replaceQuantitiesTitle')}</span>
               </div>
               <p className="text-xs text-gray-500 mt-1 ml-5">
-                Stock opname / migrating from Excel — the sheet becomes the new count for each SKU + location.
+                {t('upload.uploadPage.replaceQuantitiesDescription')}
               </p>
             </button>
 
@@ -430,10 +442,10 @@ export default function ImportPage() {
                     mode === 'INCREMENT' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                   }`}
                 />
-                <span className="font-semibold text-sm">Add to existing quantities</span>
+                <span className="font-semibold text-sm">{t('upload.uploadPage.incrementQuantitiesTitle')}</span>
               </div>
               <p className="text-xs text-gray-500 mt-1 ml-5">
-                Receiving / bulk receive — a truck arrived, add the sheet's quantities on top of current stock.
+                {t('upload.uploadPage.incrementQuantitiesDescription')}
               </p>
             </button>
           </div>
@@ -444,7 +456,7 @@ export default function ImportPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">
-                Excel file
+                {t('upload.uploadPage.excelFile')}
               </label>
               <input
                 ref={fileInputRef}
@@ -460,7 +472,7 @@ export default function ImportPage() {
               className="flex items-center justify-center gap-1.5 text-sm font-semibold border border-blue-500/20 text-blue-700 rounded-lg px-3 py-2.5 sm:py-2 hover:bg-blue-50 shrink-0 transition-colors"
             >
               <Download size={16} strokeWidth={2} />
-              Download template
+              {t('upload.uploadPage.downloadTemplate')}
             </button>
           </div>
 
@@ -472,9 +484,7 @@ export default function ImportPage() {
           )}
 
           <p className="text-xs text-gray-500">
-            Required columns: sku, name, category, location, qty (brand, sellingPrice, and costPrice are optional).
-            Location can be left blank — it'll import as "Unassigned" and you can place it later.
-            Leave sellingPrice or costPrice blank to keep an existing product's price unchanged.
+            {t('upload.uploadPage.requiredColumnsNote')}
           </p>
         </section>
 
@@ -483,13 +493,13 @@ export default function ImportPage() {
           <section className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                Preview — tap any field to edit
+                {t('upload.uploadPage.previewTapToEdit')}
               </h2>
 
               <div className="flex items-center gap-2 flex-wrap">
                 {blankLocationCount > 0 && (
                   <span className="text-xs px-2 py-1 rounded-md bg-blue-50 border border-blue-500/20 text-blue-700">
-                    {blankLocationCount} will import as Unassigned
+                    {t('upload.uploadPage.willImportAsUnassigned', { count: blankLocationCount })}
                   </span>
                 )}
 
@@ -498,7 +508,9 @@ export default function ImportPage() {
                     onClick={removeInvalidRows}
                     className="text-xs px-2 py-1 rounded-md border border-red-300 text-red-700 hover:bg-red-50 font-semibold transition-colors"
                   >
-                    Remove {invalidCount} invalid row{invalidCount === 1 ? '' : 's'}
+                    {invalidCount === 1
+                      ? t('upload.uploadPage.removeInvalidRowOne')
+                      : t('upload.uploadPage.removeInvalidRowMany', { count: invalidCount })}
                   </button>
                 )}
               </div>
@@ -507,19 +519,23 @@ export default function ImportPage() {
             {invalidCount > 0 ? (
               <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
-                {invalidCount} row{invalidCount === 1 ? '' : 's'} need attention — see the highlighted reason under each row below, or remove them.
+                {invalidCount === 1
+                  ? t('upload.uploadPage.rowsNeedAttentionOne')
+                  : t('upload.uploadPage.rowsNeedAttentionMany', { count: invalidCount })}
               </div>
             ) : (
               <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-3 text-sm">
                 <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
-                {fileName} — all {rows.length} row{rows.length === 1 ? '' : 's'} ready to import
+                {rows.length === 1
+                  ? t('upload.uploadPage.readyToImportOne', { fileName })
+                  : t('upload.uploadPage.readyToImportMany', { fileName, count: rows.length })}
               </div>
             )}
 
             {rows.length > 0 && invalidCount === 0 && !mode && (
               <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-3 text-sm">
                 <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
-                Pick an import mode above before importing.
+                {t('upload.uploadPage.pickImportModeFirst')}
               </div>
             )}
 
@@ -529,7 +545,7 @@ export default function ImportPage() {
                 entirely rather than just shrunk. */}
             <div className="sm:hidden flex flex-col gap-2">
               {rows.map((r, i) => {
-                const rowError = getValidationError(r);
+                const rowError = rowErrorMessage(r);
                 const valid = rowError === null;
                 const blankLocation = !r.location?.toString().trim();
                 const fieldClass =
@@ -554,14 +570,14 @@ export default function ImportPage() {
                       <button
                         onClick={() => removeRow(i)}
                         className="shrink-0 mt-5 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-600 transition-colors"
-                        title="Remove row"
+                        title={t('upload.uploadPage.removeRow')}
                       >
                         <Trash2 size={16} strokeWidth={2} />
                       </button>
                     </div>
 
                     <div className="mb-2">
-                      <label className="text-[10px] font-semibold text-gray-500">Name</label>
+                      <label className="text-[10px] font-semibold text-gray-500">{t('common.name')}</label>
                       <input
                         value={r.name}
                         onChange={(e) => updateRow(i, 'name', e.target.value)}
@@ -571,7 +587,7 @@ export default function ImportPage() {
 
                     <div className="grid grid-cols-2 gap-2 mb-2">
                       <div>
-                        <label className="text-[10px] font-semibold text-gray-500">Category</label>
+                        <label className="text-[10px] font-semibold text-gray-500">{t('admin.database.entities.category.label')}</label>
                         <input
                           value={r.category}
                           onChange={(e) => updateRow(i, 'category', e.target.value)}
@@ -579,7 +595,7 @@ export default function ImportPage() {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-gray-500">Brand</label>
+                        <label className="text-[10px] font-semibold text-gray-500">{t('admin.database.entities.brand.label')}</label>
                         <input
                           value={r.brand ?? ''}
                           onChange={(e) => updateRow(i, 'brand', e.target.value)}
@@ -589,18 +605,18 @@ export default function ImportPage() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="text-[10px] font-semibold text-gray-500">Location</label>
+                      <label className="text-[10px] font-semibold text-gray-500">{t('admin.database.entities.location.label')}</label>
                       <input
                         value={r.location}
                         onChange={(e) => updateRow(i, 'location', e.target.value)}
-                        placeholder="Unassigned"
+                        placeholder={t('upload.uploadPage.unassigned')}
                         className={`${fieldClass} ${blankLocation ? 'text-gray-400 italic' : ''}`}
                       />
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
                       <div>
-                        <label className="text-[10px] font-semibold text-gray-500">Qty</label>
+                        <label className="text-[10px] font-semibold text-gray-500">{t('common.quantity')}</label>
                         <input
                           type="number"
                           value={r.qty}
@@ -609,7 +625,7 @@ export default function ImportPage() {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-gray-500">Sell Price</label>
+                        <label className="text-[10px] font-semibold text-gray-500">{t('upload.uploadPage.sellPrice')}</label>
                         <input
                           type="number"
                           value={r.sellingPrice ?? ''}
@@ -619,7 +635,7 @@ export default function ImportPage() {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-gray-500">Cost Price</label>
+                        <label className="text-[10px] font-semibold text-gray-500">{t('upload.uploadPage.costPrice')}</label>
                         <input
                           type="number"
                           value={r.costPrice ?? ''}
@@ -647,20 +663,20 @@ export default function ImportPage() {
                 <thead className="bg-blue-50/60 border-b border-blue-500/15">
                   <tr>
                     <th className="text-left px-3 py-2 font-semibold">SKU</th>
-                    <th className="text-left px-3 py-2 font-semibold">Name</th>
-                    <th className="text-left px-3 py-2 font-semibold">Category</th>
-                    <th className="text-left px-3 py-2 font-semibold">Brand</th>
-                    <th className="text-left px-3 py-2 font-semibold">Location</th>
-                    <th className="text-left px-3 py-2 font-semibold">Qty</th>
-                    <th className="text-left px-3 py-2 font-semibold">Sell Price</th>
-                    <th className="text-left px-3 py-2 font-semibold">Cost Price</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('common.name')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.category.label')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.brand.label')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.location.label')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('common.quantity')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadPage.sellPrice')}</th>
+                    <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadPage.costPrice')}</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {rows.map((r, i) => {
-                    const rowError = getValidationError(r);
+                    const rowError = rowErrorMessage(r);
                     const valid = rowError === null;
                     const blankLocation = !r.location?.toString().trim();
 
@@ -709,7 +725,7 @@ export default function ImportPage() {
                             <input
                               value={r.location}
                               onChange={(e) => updateRow(i, 'location', e.target.value)}
-                              placeholder="Unassigned"
+                              placeholder={t('upload.uploadPage.unassigned')}
                               className={`w-full bg-transparent border rounded px-2 py-1 text-sm outline-none ${
                                 blankLocation
                                   ? 'border-blue-500/20 text-gray-400 italic'
@@ -747,7 +763,7 @@ export default function ImportPage() {
                             <button
                               onClick={() => removeRow(i)}
                               className="text-gray-400 hover:text-red-600 transition-colors"
-                              title="Remove row"
+                              title={t('upload.uploadPage.removeRow')}
                             >
                               <Trash2 size={16} strokeWidth={2} />
                             </button>
@@ -774,7 +790,11 @@ export default function ImportPage() {
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <UploadCloud size={18} strokeWidth={2} />
-                {loading ? 'Importing...' : `Import ${rows.length} Row${rows.length === 1 ? '' : 's'}`}
+                {loading
+                  ? t('upload.uploadPage.importing')
+                  : rows.length === 1
+                  ? t('upload.uploadPage.importButtonOne')
+                  : t('upload.uploadPage.importButtonMany', { count: rows.length })}
               </button>
             </div>
           </section>

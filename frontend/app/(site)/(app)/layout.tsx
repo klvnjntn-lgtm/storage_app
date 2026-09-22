@@ -1,4 +1,4 @@
-import AppShell from '@/app/components/AppShell';
+import AppShell from '@/app/components/shared/AppShell';
 import { AuthProvider } from '@/app/context/AuthContext';
 
 export default function AppGroupLayout({ children }: { children: React.ReactNode }) {

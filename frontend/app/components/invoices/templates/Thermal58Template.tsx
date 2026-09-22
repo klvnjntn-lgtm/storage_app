@@ -1,15 +1,18 @@
 // components/invoices/templates/Thermal58Template.tsx
+'use client';
 
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { resolveUploadUrl } from '@/lib/assets';
 import { parseCalendarDate } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 // 58mm thermal paper prints roughly 48mm wide once printer margins are
 // accounted for. This is intentionally narrower than the 80mm receipt
 // template. Item name and quantity/price are kept on separate lines so
 // long product names don't collide with the amount column.
 export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
+  const { t } = useLanguage();
   const logoUrl = resolveUploadUrl(invoice.businessLogoUrl);
 
   return (
@@ -41,6 +44,8 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
     {parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')}
           </p>
 )}
+
+        {invoice.employeeName && <p>{t('sales.invoiceTemplate.cashier', { name: invoice.employeeName })}</p>}
       </div>
 
       <div className="border-t border-dashed border-black my-1" />
@@ -48,7 +53,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
       {/* Customer */}
       {invoice.customerName && (
         <div className="mb-1">
-          <p>Customer: {invoice.customerName}</p>
+          <p>{t('sales.invoiceTemplate.customerLabel', { name: invoice.customerName })}</p>
 
           {invoice.customerPhone && (
             <p>{invoice.customerPhone}</p>
@@ -73,20 +78,20 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
 
           {item.itemDiscount > 0 && (
             <div className="flex justify-between text-gray-600">
-              <span>Disc</span>
+              <span>{t('sales.invoiceTemplate.discount')}</span>
               <span>-{formatIDR(item.itemDiscount)}</span>
             </div>
           )}
 
           {item.itemTaxAmount > 0 && (
             <div className="flex justify-between text-gray-600">
-              <span>Tax</span>
+              <span>{t('sales.invoiceTemplate.tax')}</span>
               <span>{formatIDR(item.itemTaxAmount)}</span>
             </div>
           )}
 
           <div className="flex justify-between font-semibold">
-            <span>Total</span>
+            <span>{t('common.total')}</span>
             <span>{formatIDR(item.itemTotal)}</span>
           </div>
         </div>
@@ -96,26 +101,26 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
 
       {/* Totals */}
       <div className="flex justify-between">
-        <span>Subtotal</span>
+        <span>{t('common.subtotal')}</span>
         <span>{formatIDR(invoice.subtotal)}</span>
       </div>
 
       {invoice.discount > 0 && (
         <div className="flex justify-between">
-          <span>Disc</span>
+          <span>{t('sales.invoiceTemplate.discount')}</span>
           <span>-{formatIDR(invoice.discount)}</span>
         </div>
       )}
 
       {invoice.taxAmount > 0 && (
         <div className="flex justify-between">
-          <span>Tax</span>
+          <span>{t('sales.invoiceTemplate.tax')}</span>
           <span>{formatIDR(invoice.taxAmount)}</span>
         </div>
       )}
 
       <div className="flex justify-between font-bold border-t border-dashed border-black mt-1 pt-1">
-        <span>Total</span>
+        <span>{t('common.total')}</span>
         <span>{formatIDR(invoice.total)}</span>
       </div>
 
@@ -123,12 +128,12 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
       {invoice.amountPaid != null && (
         <>
           <div className="flex justify-between">
-            <span>Paid</span>
+            <span>{t('sales.invoiceTemplate.paid')}</span>
             <span>{formatIDR(invoice.amountPaid)}</span>
           </div>
 
           <div className="flex justify-between font-bold">
-            <span>Balance</span>
+            <span>{t('sales.invoiceTemplate.balance')}</span>
             <span>
               {formatIDR(
                 Math.max(invoice.total - invoice.amountPaid, 0),
@@ -140,7 +145,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
 
       <div className="border-t border-dashed border-black my-1" />
 
-      <p className="text-center">Terima kasih</p>
+      <p className="text-center">{t('sales.invoiceTemplate.thankYou')}</p>
     </div>
   );
 }

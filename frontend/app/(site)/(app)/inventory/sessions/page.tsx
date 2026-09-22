@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, ClipboardList, Calendar, Package } from 'lucide-react';
+import { ClipboardList, Calendar, Package } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -33,6 +34,7 @@ const statusStyle = (status: string) => {
 
 export default function SessionsPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,21 +71,13 @@ export default function SessionsPage() {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Scanner Hub
-          </button>
-
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div>
-              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>Sessions</h1>
-              <p className="text-xs text-gray-500">Warehouse activity history</p>
+              <h1 className={`${display.className} text-2xl font-bold tracking-tight`}>{t('inventory.sessionsPage.title')}</h1>
+              <p className="text-xs text-gray-500">{t('inventory.sessionsPage.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -94,13 +88,13 @@ export default function SessionsPage() {
 
         {loading && (
           <div className="text-gray-500 text-sm">
-            Loading sessions...
+            {t('inventory.sessionsPage.loading')}
           </div>
         )}
 
         {!loading && sessions.length === 0 && (
           <div className="text-gray-500 text-sm">
-            No sessions found.
+            {t('inventory.sessionsPage.noSessions')}
           </div>
         )}
 
@@ -121,14 +115,14 @@ export default function SessionsPage() {
 
                   <p className="flex items-center gap-1 text-xs text-gray-500 mt-1">
                     <Calendar size={12} strokeWidth={2} />
-                    {new Date(session.createdAt).toLocaleString()}
+                    {new Date(session.createdAt).toLocaleString(language === 'id' ? 'id-ID' : 'en-US')}
                   </p>
                 </div>
 
                 <div className="text-right">
                   <p className="flex items-center justify-end gap-1 text-sm font-medium">
                     <Package size={14} strokeWidth={2} className="text-gray-500" />
-                    {session.totalItems} items
+                    {t('inventory.sessionsPage.itemsCount', { count: session.totalItems })}
                   </p>
 
                   <span

@@ -23,7 +23,7 @@ interface JwtPayload {
 // read in this file's source — i.e. any client could forge a valid JWT
 // for any user. Crashing on boot is the correct failure mode here: a
 // misconfigured secret should stop the app, not run it insecurely.
-function getJwtSecret(): string {
+export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error(
