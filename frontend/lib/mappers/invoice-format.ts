@@ -61,7 +61,7 @@ export const A5_ON_A4_MARGIN_TOP_MM = (A4_HEIGHT_MM - A5_SHEET_HEIGHT_MM) / 2; /
 export const PAGE_CSS: Record<string, string> = {
   THERMAL_58: `@page { size: 58mm 297mm; margin: ${MARGIN_MM.THERMAL_58}mm; }`,
   RECEIPT: `@page { size: 80mm 297mm; margin: ${MARGIN_MM.RECEIPT}mm; }`,
-  A5: `@page { size: 210mm 148mm; margin: ${MARGIN_MM.A5}mm; }`,
+  A5: `@page { size: A4; margin: ${A5_ON_A4_MARGIN_TOP_MM}mm ${MARGIN_MM.A5}mm; }`,
   A4: `@page { size: A4; margin: ${MARGIN_MM.A4}mm; }`,
 };
 
