@@ -33,7 +33,7 @@ export type CashFlowReport = {
   to: Date;
   openingCash: number;
   operating: CashFlowSectionTotals;
-  investing: CashFlowSectionTotals; // always empty today: no fixed-asset accounts exist to classify
+  investing: CashFlowSectionTotals; // fixed-asset purchases/disposals — see FIXED_ASSET_PURCHASE/DISPOSAL in SOURCE_CATEGORY
   financing: CashFlowSectionTotals;
   netChange: number;
   closingCash: number;
@@ -49,12 +49,30 @@ const SOURCE_CATEGORY: Record<string, Category> = {
   SUPPLIER_PAYMENT: { section: 'operating', key: 'supplier_payments', label: 'Payments to suppliers' },
   EXPENSE: { section: 'operating', key: 'operating_expenses', label: 'Operating expenses paid' },
   PAYROLL: { section: 'operating', key: 'payroll', label: 'Payroll disbursed' },
+  // FIXED_ASSET_PURCHASE covers both postFixedAssetAcquired() (never touches
+  // cash, so it never actually reaches this map) and postFixedAssetPayment()
+  // (the entry that does touch cash) — same one-sourceType-for-record-and-pay
+  // convention as EXPENSE above.
+  FIXED_ASSET_PURCHASE: { section: 'investing', key: 'fixed_asset_purchases', label: 'Purchase of fixed assets' },
+  FIXED_ASSET_DISPOSAL: { section: 'investing', key: 'fixed_asset_disposals', label: 'Proceeds from disposal of fixed assets' },
 };
 
-const MANUAL_FINANCING: Category = {
+const MANUAL_FINANCING_EQUITY: Category = {
   section: 'financing',
   key: 'owner_equity',
   label: 'Owner capital / drawings',
+};
+// A MANUAL entry hitting a liability account is never one of the operating
+// liability flows that already have their own sourceType/category (AP via
+// SUPPLIER_PAYMENT, Payroll Payable via PAYROLL, etc.) — those never reach
+// this MANUAL-only branch. So an ad-hoc entry against some other liability
+// is, by elimination, the closest thing this schema has to a loan proceed/
+// repayment, which is a financing activity. There's no dedicated Loan
+// Payable SystemAccountKey to key off of instead.
+const MANUAL_FINANCING_LIABILITY: Category = {
+  section: 'financing',
+  key: 'loans_liabilities',
+  label: 'Loan proceeds / repayments',
 };
 const MANUAL_OTHER: Category = { section: 'operating', key: 'manual_other', label: 'Other (manual entries)' };
 const OTHER_OPERATING: Category = { section: 'operating', key: 'other_operating', label: 'Other operating' };
@@ -63,8 +81,16 @@ const OTHER_OPERATING: Category = { section: 'operating', key: 'other_operating'
 // cash/bank accounts. No new write path.
 //
 // Limits: only cash that went through the ledger is visible, so payments
-// recorded before ledger posting existed are missing. Investing is always
-// empty because there are no fixed-asset accounts to recognise.
+// recorded before ledger posting existed are missing. A MANUAL entry's
+// non-cash counter-account decides its section: EQUITY -> owner
+// capital/drawings, LIABILITY -> loan proceeds/repayments (the closest fit
+// this schema has, absent a dedicated Loan Payable account), anything else
+// -> operating. Investing comes from FixedAssetsService: postFixedAssetPayment()
+// (cash paid for an asset, whether at acquisition or later) and
+// postFixedAssetDisposal() (cash received on disposal) are the only entries
+// tagged FIXED_ASSET_PURCHASE/FIXED_ASSET_DISPOSAL that touch a cash account —
+// postFixedAssetAcquired() and postFixedAssetDepreciation() never do, so they
+// never reach this report at all, direct-method being cash-only by definition.
 @Injectable()
 export class CashFlowService {
   constructor(private prisma: PrismaService) {}
@@ -146,6 +172,7 @@ export class CashFlowService {
       .filter(([, e]) => e.sourceType === JournalSourceType.MANUAL && Math.abs(e.net) >= 0.005)
       .map(([id]) => id);
     const manualTouchesEquity = new Set<string>();
+    const manualTouchesLiability = new Set<string>();
     if (manualIds.length > 0) {
       const counterLines = await this.prisma.journalEntryLine.findMany({
         where: { journalEntryId: { in: manualIds }, accountId: { notIn: cashIds } },
@@ -153,6 +180,7 @@ export class CashFlowService {
       });
       for (const c of counterLines) {
         if (c.account.type === AccountType.EQUITY) manualTouchesEquity.add(c.journalEntryId);
+        else if (c.account.type === AccountType.LIABILITY) manualTouchesLiability.add(c.journalEntryId);
       }
     }
 
@@ -162,7 +190,11 @@ export class CashFlowService {
 
       let category: Category;
       if (e.sourceType === JournalSourceType.MANUAL) {
-        category = manualTouchesEquity.has(entryId) ? MANUAL_FINANCING : MANUAL_OTHER;
+        category = manualTouchesEquity.has(entryId)
+          ? MANUAL_FINANCING_EQUITY
+          : manualTouchesLiability.has(entryId)
+          ? MANUAL_FINANCING_LIABILITY
+          : MANUAL_OTHER;
       } else {
         category = SOURCE_CATEGORY[e.sourceType] ?? OTHER_OPERATING;
       }

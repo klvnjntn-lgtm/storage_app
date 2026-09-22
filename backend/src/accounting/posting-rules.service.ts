@@ -48,8 +48,20 @@ export class PostingRulesService {
         : Promise.resolve(null),
     ]);
 
+    // A 100%-discount invoice is legitimate (comps, goodwill credits) and
+    // must still be issuable/editable — there's just nothing to post.
     const netRevenue = Number(invoice.subtotal) - Number(invoice.discount);
-    if (netRevenue <= 0) throw new BadRequestException('Invoice has no net revenue to post');
+    const total = Number(invoice.total);
+
+    // FIX — was `if (netRevenue <= 0) return null`, which skipped posting
+    // entirely — including AR and tax — for a 100%-discounted invoice
+    // that still carries tax (e.g. a promotional item where tax is still
+    // legally due). invoice.total would be > 0 (tax only) but no journal
+    // entry, and critically no AR debit, was ever created. A later
+    // payment against that invoice would then credit AR down from zero
+    // into a negative balance instead of correctly zeroing out a debited
+    // AR. Only skip when there's truly nothing to post at all.
+    if (total <= 0) return null;
 
     return this.journal.postEntry(
       organizationId,
@@ -59,13 +71,15 @@ export class PostingRulesService {
         sourceType: JournalSourceType.INVOICE,
         sourceId: invoice.id,
         lines: [
-          { accountId: ar, debit: Number(invoice.total), description: 'Total invoiced' },
-          {
-            accountId: revenue,
-            credit: netRevenue,
-            description: 'Net revenue',
-            locationId: invoice.locationId ?? undefined, // FIX
-          },
+          { accountId: ar, debit: total, description: 'Total invoiced' },
+          ...(netRevenue > 0
+            ? [{
+                accountId: revenue,
+                credit: netRevenue,
+                description: 'Net revenue',
+                locationId: invoice.locationId ?? undefined, // FIX
+              }]
+            : []),
           ...(taxPayable && Number(invoice.taxAmount) > 0
             ? [{ accountId: taxPayable, credit: Number(invoice.taxAmount), description: 'Sales tax collected' }]
             : []),
@@ -82,6 +96,15 @@ export class PostingRulesService {
   // voidInvoice directly.
   invoiceJournalSourceIds(invoiceId: string): string[] {
     return [invoiceId, `${invoiceId}:cogs:issue`];
+  }
+
+  // Centralizes the sourceId convention for a payroll run's journal entries
+  // (postPayrollRun's `payrollId` + postPayrollPaid's `${payrollId}:paid`,
+  // which only exists once the run reached PAID). voidAllForSource no-ops
+  // on a sourceId with no posted entry, so it's safe to always pass both
+  // regardless of which stage the run actually reached.
+  payrollJournalSourceIds(payrollId: string): string[] {
+    return [payrollId, `${payrollId}:paid`];
   }
 
   // COGS → Cost of Goods Sold (debit) + Inventory (credit), for the
@@ -137,13 +160,22 @@ export class PostingRulesService {
       byLocation.set(key, (byLocation.get(key) ?? 0) + l.quantity * l.unitCost!);
     }
 
+    // FIX — a per-location group whose amount rounds to 0.00 (e.g. a very
+    // low-cost line, or heavy weighted-average rounding) used to still
+    // emit a {debit:0}/{credit:0} pair. journal.validateLines() rejects
+    // any line with both debit and credit at zero, which aborted the
+    // WHOLE entry — including every other location's real amount — and
+    // with it the entire invoice-issue/delivery-ship transaction that
+    // called postCogs. Skip a zero-rounded group instead of emitting it.
     const lines = [...byLocation.entries()].flatMap(([locationId, amount]) => {
       const rounded = this.round2(amount);
+      if (rounded === 0) return [];
       return [
         { accountId: cogs, debit: rounded, description: 'Cost of goods sold', locationId: locationId ?? undefined },
         { accountId: inventory, credit: rounded, description: 'Inventory shipped', locationId: locationId ?? undefined },
       ];
     });
+    if (lines.length === 0) return null;
 
     return this.journal.postEntry(
       organizationId,
@@ -329,26 +361,35 @@ export class PostingRulesService {
     );
   }
 
-  async postExpensePaid(organizationId: string, expenseId: string, tx?: Prisma.TransactionClient) {
+  // FIX — replaces postExpensePaid below. That method posted the expense's
+  // FULL amount under one fixed sourceId (`${expenseId}:paid`), which only
+  // works for a single all-or-nothing payment: a second payment against the
+  // same expense would collide on that sourceId. This posts one entry per
+  // ExpensePayment row, for that payment's own amount, keyed by the
+  // payment's own id — the same pattern postPayment() already uses for
+  // Invoice payments.
+  async postExpensePayment(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
     const db = this.db(tx);
-    const expense = await db.expense.findFirstOrThrow({ where: { id: expenseId, organizationId } });
-    if (!expense.paymentMethod) throw new BadRequestException('Expense has no paymentMethod set');
+    const payment = await db.expensePayment.findFirstOrThrow({
+      where: { id: paymentId, expense: { organizationId } },
+      include: { expense: true },
+    });
 
     const [payable, cash] = await Promise.all([
       this.accounts.resolve(organizationId, SystemAccountKey.EXPENSE_PAYABLE, db),
-      this.resolveCashDestination(organizationId, expense.paymentMethod, expense.bankAccountId, db),
+      this.resolveCashDestination(organizationId, payment.method, payment.bankAccountId, db),
     ]);
 
     return this.journal.postEntry(
       organizationId,
       {
-        date: expense.paidAt ?? new Date(),
-        memo: `Expense paid: ${expense.id}`,
+        date: payment.createdAt,
+        memo: `Expense payment: ${payment.expense.id}`,
         sourceType: JournalSourceType.EXPENSE,
-        sourceId: `${expense.id}:paid`,
+        sourceId: payment.id,
         lines: [
-          { accountId: payable, debit: Number(expense.amount) },
-          { accountId: cash, credit: Number(expense.amount) },
+          { accountId: payable, debit: Number(payment.amount) },
+          { accountId: cash, credit: Number(payment.amount) },
         ],
       },
       tx,
@@ -440,13 +481,18 @@ export class PostingRulesService {
       byLocation.set(key, (byLocation.get(key) ?? 0) + l.quantity * l.unitCost!);
     }
 
+    // FIX — same zero-rounded-group issue as postCogs() above: skip a
+    // group whose amount rounds to 0.00 instead of emitting a
+    // {debit:0}/{credit:0} pair that would abort the whole entry.
     const lines = [...byLocation.entries()].flatMap(([locationId, amount]) => {
       const rounded = this.round2(amount);
+      if (rounded === 0) return [];
       return [
         { accountId: inventory, debit: rounded, description: 'Inventory returned', locationId: locationId ?? undefined },
         { accountId: cogs, credit: rounded, description: 'Reversal of cost of goods sold', locationId: locationId ?? undefined },
       ];
     });
+    if (lines.length === 0) return null;
 
     return this.journal.postEntry(
       organizationId,
@@ -515,6 +561,19 @@ export class PostingRulesService {
     const totalReversal = this.round2(revenueReversal + taxReversal);
     if (totalReversal <= 0) return null;
 
+    // FIX — AR Aging (getARAging) is document-based: it computes outstanding
+    // as invoice.total - amountPaid, which never otherwise learns that a
+    // return happened. Without this, aging keeps reporting the pre-return
+    // balance forever and its own reconciliation check against the ledger's
+    // AR balance trips on every return. total/amountPaid stay frozen at
+    // their original invoiced values on purpose (see recordReturn) — this
+    // is the one place that tracks "how much of that total no longer
+    // applies," same in-tx guarantee as the journal entry below.
+    await db.invoice.update({
+      where: { id: params.invoiceId },
+      data: { creditedAmount: { increment: totalReversal } },
+    });
+
     const [ar, revenue, taxPayable] = await Promise.all([
       this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_RECEIVABLE, db),
       this.accounts.resolve(organizationId, SystemAccountKey.SALES_REVENUE, db),
@@ -531,7 +590,15 @@ export class PostingRulesService {
         sourceType: JournalSourceType.INVOICE,
         sourceId: params.sourceId,
         lines: [
-          { accountId: revenue, debit: revenueReversal, description: 'Revenue reversed for return' },
+          // FIX — was unconditional. If a return's revenue portion rounds
+          // to 0.00 while tax is still nonzero, an unconditional
+          // {debit: 0} line here would be rejected by
+          // journal.validateLines(), aborting the whole return
+          // transaction — the same class of bug fixed in postCogs()/
+          // postCogsReturn() above, just on the revenue side.
+          ...(revenueReversal > 0
+            ? [{ accountId: revenue, debit: revenueReversal, description: 'Revenue reversed for return' }]
+            : []),
           ...(taxPayable && taxReversal > 0
             ? [{ accountId: taxPayable, debit: taxReversal, description: 'Sales tax reversed for return' }]
             : []),
@@ -545,7 +612,7 @@ export class PostingRulesService {
   // Payroll disbursement → Payroll Payable (debit, clears the liability) +
   // Cash/Bank (credit). Call from PayrollService.markPaid(), in the same
   // transaction as the POSTED -> PAID status flip — mirrors
-  // postExpensePaid()'s relationship to postExpenseRecorded().
+  // postExpensePayment()'s relationship to postExpenseRecorded().
   async postPayrollPaid(organizationId: string, payrollId: string, tx?: Prisma.TransactionClient) {
     const db = this.db(tx);
     const payroll = await db.payroll.findFirstOrThrow({
@@ -573,6 +640,240 @@ export class PostingRulesService {
           { accountId: payrollPayable, debit: totalNet, description: 'Clear payroll payable' },
           { accountId: cash, credit: totalNet, description: 'Net pay disbursed' },
         ],
+      },
+      tx,
+    );
+  }
+
+  // Stock quantity change (adjust()/import()) → Inventory (debit/credit
+  // depending on direction) against a counter account chosen by the caller.
+  // 'ADJUSTMENT' routes to Inventory Adjustments (a P&L expense account) —
+  // use this for anything that reflects real gain/loss on existing stock
+  // (manual adjustments, and an import that nets stock DOWN, i.e. shrinkage).
+  // 'OPENING_BALANCE' routes to Opening Balance Equity (a balance-sheet-only
+  // account P&L never queries) — use this only for an import that nets
+  // stock UP, since bulk-loading/increasing stock via import is treated as
+  // establishing/adding to a balance, not a P&L event.
+  //
+  // Valued at unitCost * |qtyDelta|; a null unitCost (product has no
+  // costPrice) or a zero qtyDelta skips posting entirely — stock still
+  // moves, but nothing hits the ledger — same policy as postCogs().
+  async postStockAdjustment(
+    organizationId: string,
+    params: {
+      sourceId: string;
+      date: Date;
+      memo: string;
+      qtyDelta: number;
+      unitCost: number | null;
+      locationId?: string | null;
+      counter: 'ADJUSTMENT' | 'OPENING_BALANCE';
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    if (params.unitCost == null || params.qtyDelta === 0) return null;
+
+    const amount = this.round2(Math.abs(params.qtyDelta) * params.unitCost);
+    if (amount <= 0) return null;
+
+    const [inventory, counterAccount] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.INVENTORY, db),
+      this.accounts.resolve(
+        organizationId,
+        params.counter === 'OPENING_BALANCE'
+          ? SystemAccountKey.OPENING_BALANCE_EQUITY
+          : SystemAccountKey.INVENTORY_ADJUSTMENT,
+        db,
+      ),
+    ]);
+
+    const locationId = params.locationId ?? undefined;
+    const increase = params.qtyDelta > 0;
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: params.memo,
+        sourceType: JournalSourceType.STOCK_ADJUSTMENT,
+        sourceId: params.sourceId,
+        lines: increase
+          ? [
+              { accountId: inventory, debit: amount, description: 'Inventory increase', locationId },
+              { accountId: counterAccount, credit: amount, description: 'Adjustment offset', locationId },
+            ]
+          : [
+              { accountId: counterAccount, debit: amount, description: 'Adjustment offset', locationId },
+              { accountId: inventory, credit: amount, description: 'Inventory decrease', locationId },
+            ],
+      },
+      tx,
+    );
+  }
+
+  // Fixed asset acquisition → Fixed Assets (debit, full cost) + Fixed
+  // Asset Payable (credit, full cost) — recorded in full regardless of
+  // payment status, same record-then-pay split as postExpenseRecorded()/
+  // postExpensePayment(). Never touches cash, so it's invisible to
+  // CashFlowService by construction; only postFixedAssetPayment() (below)
+  // moves cash and lands in Investing.
+  async postFixedAssetAcquired(organizationId: string, assetId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const asset = await db.fixedAsset.findFirstOrThrow({ where: { id: assetId, organizationId } });
+    const cost = Number(asset.cost);
+    if (cost <= 0) return null;
+
+    const [fixedAssets, payable] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.FIXED_ASSETS, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.FIXED_ASSET_PAYABLE, db),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: asset.acquisitionDate,
+        memo: `Fixed asset acquired: ${asset.name}`,
+        sourceType: JournalSourceType.FIXED_ASSET_PURCHASE,
+        sourceId: `${asset.id}:acquired`,
+        lines: [
+          { accountId: fixedAssets, debit: cost, description: 'Fixed asset cost', locationId: asset.locationId ?? undefined },
+          { accountId: payable, credit: cost, description: 'Fixed asset payable' },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Fixed Asset Payable (debit, clears part of the liability) + Cash/Bank
+  // (credit) — one entry per FixedAssetPayment row, same pattern as
+  // postExpensePayment(). This is the entry CashFlowService actually sees:
+  // whether an asset was paid in full at acquisition or over several
+  // installments, every dollar that left cash for it posts here.
+  async postFixedAssetPayment(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const payment = await db.fixedAssetPayment.findFirstOrThrow({
+      where: { id: paymentId, fixedAsset: { organizationId } },
+      include: { fixedAsset: true },
+    });
+
+    const [payable, cash] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.FIXED_ASSET_PAYABLE, db),
+      this.resolveCashDestination(organizationId, payment.method, payment.bankAccountId, db),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: payment.createdAt,
+        memo: `Payment toward fixed asset: ${payment.fixedAsset.name}`,
+        sourceType: JournalSourceType.FIXED_ASSET_PURCHASE,
+        sourceId: payment.id,
+        lines: [
+          { accountId: payable, debit: Number(payment.amount) },
+          { accountId: cash, credit: Number(payment.amount) },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Depreciation → Depreciation Expense (debit) + Accumulated Depreciation
+  // (credit, contra-asset). Call from FixedAssetsService.runDepreciation(),
+  // which computes `amount` for whatever whole months elapsed since the
+  // asset's lastDepreciatedThrough and advances that column in the same
+  // tx — that's what makes re-running depreciation for an already
+  // caught-up period a no-op instead of a double post, not this method.
+  async postFixedAssetDepreciation(
+    organizationId: string,
+    params: { sourceId: string; date: Date; assetId: string; assetName: string; locationId?: string | null; amount: number },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const amount = this.round2(params.amount);
+    if (amount <= 0) return null;
+
+    const [depreciationExpense, accumulatedDepreciation] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.DEPRECIATION_EXPENSE, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCUMULATED_DEPRECIATION, db),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: `Depreciation: ${params.assetName}`,
+        sourceType: JournalSourceType.FIXED_ASSET_DEPRECIATION,
+        sourceId: params.sourceId,
+        lines: [
+          { accountId: depreciationExpense, debit: amount, description: 'Depreciation expense', locationId: params.locationId ?? undefined },
+          { accountId: accumulatedDepreciation, credit: amount, description: 'Accumulated depreciation' },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Disposal → clears the asset off the books (credit Fixed Assets for
+  // full cost, debit Accumulated Depreciation for whatever was taken to
+  // date) against cash received (debit, if any) and a gain or loss for
+  // the difference between proceeds and net book value. Balances by
+  // construction: debits (accumDep + proceeds + loss) - credits (cost +
+  // gain) = -(cost - accumDep) + proceeds + (loss - gain), and
+  // loss - gain = NBV - proceeds by definition, so it nets to zero.
+  //
+  // Call from FixedAssetsService.dispose() after it sets status DISPOSED,
+  // disposedAt, and disposalProceeds — this reads those back rather than
+  // taking them as params, so the ledger entry always matches what's on
+  // the asset row.
+  async postFixedAssetDisposal(
+    organizationId: string,
+    assetId: string,
+    payment: { method?: PaymentMethod; bankAccountId?: string | null } | null,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const asset = await db.fixedAsset.findFirstOrThrow({ where: { id: assetId, organizationId } });
+
+    const cost = Number(asset.cost);
+    const accumulatedDep = Number(asset.accumulatedDepreciation);
+    const proceeds = Number(asset.disposalProceeds ?? 0);
+    const netBookValue = this.round2(cost - accumulatedDep);
+    const gain = this.round2(Math.max(proceeds - netBookValue, 0));
+    const loss = this.round2(Math.max(netBookValue - proceeds, 0));
+
+    const [fixedAssets, accumulatedDepreciationAcct, gainAcct, lossAcct] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.FIXED_ASSETS, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCUMULATED_DEPRECIATION, db),
+      gain > 0 ? this.accounts.resolve(organizationId, SystemAccountKey.GAIN_ON_ASSET_DISPOSAL, db) : Promise.resolve(null),
+      loss > 0 ? this.accounts.resolve(organizationId, SystemAccountKey.LOSS_ON_ASSET_DISPOSAL, db) : Promise.resolve(null),
+    ]);
+    const cash = proceeds > 0 && payment?.method
+      ? await this.resolveCashDestination(organizationId, payment.method, payment.bankAccountId, db)
+      : null;
+    if (proceeds > 0 && !cash) {
+      throw new BadRequestException('A payment method is required to record disposal proceeds');
+    }
+
+    const lines: { accountId: string; debit?: number; credit?: number; description?: string; locationId?: string }[] = [];
+    if (accumulatedDep > 0) {
+      lines.push({ accountId: accumulatedDepreciationAcct, debit: accumulatedDep, description: 'Clear accumulated depreciation' });
+    }
+    if (proceeds > 0 && cash) {
+      lines.push({ accountId: cash, debit: proceeds, description: 'Disposal proceeds received' });
+    }
+    lines.push({ accountId: fixedAssets, credit: cost, description: 'Remove asset cost', locationId: asset.locationId ?? undefined });
+    if (gain > 0 && gainAcct) lines.push({ accountId: gainAcct, credit: gain, description: 'Gain on disposal' });
+    if (loss > 0 && lossAcct) lines.push({ accountId: lossAcct, debit: loss, description: 'Loss on disposal' });
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: asset.disposedAt ?? new Date(),
+        memo: `Disposal of fixed asset: ${asset.name}`,
+        sourceType: JournalSourceType.FIXED_ASSET_DISPOSAL,
+        sourceId: `${asset.id}:disposal`,
+        lines,
       },
       tx,
     );

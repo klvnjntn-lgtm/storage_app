@@ -28,13 +28,14 @@ export class CreateSalaryComponentTypeDto {
   @IsBoolean()
   isFixed: boolean;
 
+  // FIX — was @IsNumber() with no maxDecimalPlaces; storage is Decimal(12,2)/Decimal(5,2).
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   defaultAmount?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   defaultPercentage?: number;
 
@@ -63,13 +64,14 @@ export class UpdateSalaryComponentTypeDto {
   @IsBoolean()
   isFixed?: boolean;
 
+  // FIX — was @IsNumber() with no maxDecimalPlaces; storage is Decimal(12,2)/Decimal(5,2).
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   defaultAmount?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   defaultPercentage?: number;
 
@@ -85,13 +87,14 @@ class EmployeeComponentAssignment {
   // Overrides for this employee; falls back to the component type's default
   // if omitted. At least one of amount/percentage should resolve at
   // compute-time — enforced in the service, not here.
+  // FIX — same Decimal(2dp) precision gap as CreateSalaryComponentTypeDto above.
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   amount?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   percentage?: number;
 }

@@ -1,15 +1,21 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
+import { JournalService } from '../accounting/journal.service';
 import { CreatePayrollDto, MarkPayrollPaidDto } from './dto/payroll.dto';
-import { PayrollPayType, PayrollStatus, PaymentMethod, SalaryComponentKind } from '@prisma/client';
+import { JournalSourceType, PayrollPayType, PayrollStatus, PaymentMethod, SalaryComponentKind } from '@prisma/client';
 
 @Injectable()
 export class PayrollService {
   constructor(
     private prisma: PrismaService,
     private postingRules: PostingRulesService,
+    private journal: JournalService,
   ) {}
+
+  private round2(n: number) {
+    return Math.round(n * 100) / 100;
+  }
 
   async list(organizationId: string) {
     return this.prisma.payroll.findMany({
@@ -30,6 +36,58 @@ export class PayrollService {
     });
     if (!payroll) throw new NotFoundException('Payroll run not found');
     return payroll;
+  }
+
+  // Flat, print-shaped read model for a single employee's payslip — same
+  // pattern as SalesOrderService.getPrintView: pull the tenant-scoped row
+  // plus its business letterhead fields in one query, then hand back
+  // plain numbers instead of Decimal instances.
+  async getPayslip(organizationId: string, itemId: string) {
+    const item = await this.prisma.payrollItem.findFirst({
+      where: { id: itemId, payroll: { organizationId } },
+      include: {
+        employee: true,
+        components: true,
+        payroll: { include: { organization: true } },
+      },
+    });
+    if (!item) throw new NotFoundException('Payslip not found');
+
+    const org = item.payroll.organization;
+    return {
+      id: item.id,
+
+      businessName: org.name,
+      businessLegalName: org.legalName,
+      businessNpwp: org.npwp,
+      businessLogoUrl: org.logoUrl,
+      businessAddress: org.address,
+      businessPhone: org.phone,
+
+      periodMonth: item.payroll.periodMonth,
+      periodYear: item.payroll.periodYear,
+      payType: item.payroll.payType,
+      documentDate: item.payroll.documentDate,
+      status: item.payroll.status,
+      paidAt: item.payroll.paidAt,
+      paymentMethod: item.payroll.paymentMethod,
+
+      employeeName: item.employee.name,
+      employeePosition: item.employee.position,
+      employeeNik: item.employee.nik,
+      employeeBankName: item.employee.bankName,
+      employeeBankAccountNumber: item.employee.bankAccountNumber,
+
+      baseSalary: Number(item.baseSalary),
+      grossPay: Number(item.grossPay),
+      totalDeductions: Number(item.totalDeductions),
+      netPay: Number(item.netPay),
+      components: item.components.map((c) => ({
+        name: c.name,
+        type: c.type,
+        amount: Number(c.amount),
+      })),
+    };
   }
 
   // Creates a payroll run and computes every employee's pay in one
@@ -102,15 +160,20 @@ export class PayrollService {
           };
         });
 
-        const totalAllowances = computed
+        const totalAllowances = this.round2(computed
           .filter((c) => c.type === SalaryComponentKind.ALLOWANCE)
-          .reduce((sum, c) => sum + c.amount, 0);
-        const totalDeductions = computed
+          .reduce((sum, c) => sum + c.amount, 0));
+        const totalDeductions = this.round2(computed
           .filter((c) => c.type === SalaryComponentKind.DEDUCTION)
-          .reduce((sum, c) => sum + c.amount, 0);
+          .reduce((sum, c) => sum + c.amount, 0));
 
-        const grossPay = baseSalary + totalAllowances;
-        const netPay = grossPay - totalDeductions;
+        // FIX — wasn't run through round2 like every other money
+        // computation in this codebase; relied on implicit DB-level
+        // rounding into Decimal(12,2) instead of explicit JS rounding, so
+        // float-sum drift (e.g. 0.1 + 0.2) could show a slightly
+        // different number here than what actually gets persisted.
+        const grossPay = this.round2(baseSalary + totalAllowances);
+        const netPay = this.round2(grossPay - totalDeductions);
 
         await tx.payrollItem.create({
           data: {
@@ -196,6 +259,43 @@ export class PayrollService {
       }
 
       await this.postingRules.postPayrollPaid(organizationId, id, tx);
+
+      return tx.payroll.findUniqueOrThrow({ where: { id } });
+    });
+  }
+
+  // Reverses a POSTED or PAID payroll run: voids whichever of its journal
+  // entries actually exist (postPayrollRun's bare id, and postPayrollPaid's
+  // `:paid` id if the run got that far — voidAllForSource no-ops on
+  // whichever one wasn't posted) and flips status to VOID. Mirrors
+  // InvoiceService.voidInvoice's pattern — reverse + status flip, never a
+  // delete, since a POSTED/PAID run already has real ledger history.
+  async void(organizationId: string, id: string, reason: string, userId: string) {
+    if (!reason?.trim()) {
+      throw new BadRequestException('A reason is required to void a payroll run');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const claim = await tx.payroll.updateMany({
+        where: { id, organizationId, status: { in: [PayrollStatus.POSTED, PayrollStatus.PAID] } },
+        data: { status: PayrollStatus.VOID },
+      });
+      if (claim.count === 0) {
+        const payroll = await tx.payroll.findFirst({ where: { id, organizationId } });
+        if (!payroll) throw new NotFoundException('Payroll run not found');
+        throw new BadRequestException(
+          `Only POSTED or PAID payrolls can be voided (current status: ${payroll.status})`,
+        );
+      }
+
+      await this.journal.voidAllForSource(
+        organizationId,
+        JournalSourceType.PAYROLL,
+        this.postingRules.payrollJournalSourceIds(id),
+        userId,
+        `Payroll voided: ${reason.trim()}`,
+        tx,
+      );
 
       return tx.payroll.findUniqueOrThrow({ where: { id } });
     });

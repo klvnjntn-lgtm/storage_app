@@ -1,8 +1,9 @@
 // payments/payments.service.ts
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceActivityEventType, Prisma, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { InvoiceActivityEventType, JournalSourceType, Prisma, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
+import { JournalService } from '../accounting/journal.service';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 
 const EPS = 0.005; // half a cent: amounts are 2dp, so anything smaller is float noise
@@ -11,7 +12,9 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-function deriveStatus(amountPaid: number, total: number): PaymentStatus {
+// Exported so voidPayment() below can derive the same UNPAID/PARTIAL/PAID
+// thresholds when removing a payment, instead of reimplementing them.
+export function deriveStatus(amountPaid: number, total: number): PaymentStatus {
   if (amountPaid <= 0) return PaymentStatus.UNPAID;
   if (amountPaid >= total - EPS) return PaymentStatus.PAID;
   return PaymentStatus.PARTIAL;
@@ -22,6 +25,7 @@ export class PaymentService {
   constructor(
     private prisma: PrismaService,
     private postingRules: PostingRulesService,
+    private journal: JournalService,
   ) {}
 
   async recordPayment(
@@ -143,6 +147,87 @@ export class PaymentService {
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
         throw new ConflictException('Payment conflicted with a concurrent update, please retry');
+      }
+      throw e;
+    }
+  }
+
+  // FIX — reverses a mistaken/duplicate payment: voids its posted journal
+  // entry (mirrors SupplierPaymentsService.void/ExpensesService.voidUnpaid —
+  // this codebase's established idiom is reverse-and-flag on the ledger side,
+  // hard-delete on the business row, since Payment has no status field to
+  // soft-void), then recomputes Invoice.amountPaid/paymentStatus the same
+  // way recordPayment derives them, just subtracting instead of adding.
+  // journal.voidEntry() already enforces the closed-fiscal-period guard, so
+  // this doesn't need its own copy of that check.
+  async voidPayment(
+    organizationId: string,
+    invoiceId: string,
+    paymentId: string,
+    userId?: string,
+    reason?: string,
+  ) {
+    try {
+      const updated = await this.prisma.$transaction(
+        async (tx) => {
+          const payment = await tx.payment.findFirst({
+            where: { id: paymentId, invoiceId, invoice: { organizationId } },
+            select: { id: true, amount: true },
+          });
+          if (!payment) throw new NotFoundException('Payment not found');
+
+          const invoice = await tx.invoice.findFirst({
+            where: { id: invoiceId, organizationId },
+            select: { id: true, total: true, amountPaid: true },
+          });
+          if (!invoice) throw new NotFoundException('Invoice not found');
+
+          const entry = await this.journal.findPostedBySource(
+            organizationId,
+            JournalSourceType.PAYMENT,
+            payment.id,
+            tx,
+          );
+          if (entry) {
+            await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
+          }
+
+          await tx.payment.delete({ where: { id: paymentId } });
+
+          const total = invoice.total.toNumber();
+          const alreadyPaid = invoice.amountPaid.toNumber();
+          const newAmountPaid = round2(alreadyPaid - payment.amount.toNumber());
+          const newStatus = deriveStatus(newAmountPaid, total);
+
+          const result = await tx.invoice.update({
+            where: { id: invoiceId },
+            data: { amountPaid: newAmountPaid, paymentStatus: newStatus },
+            include: { payments: { orderBy: { createdAt: 'desc' } } },
+          });
+
+          await tx.invoiceActivityEvent.create({
+            data: {
+              invoiceId,
+              organizationId,
+              userId,
+              eventType: InvoiceActivityEventType.VOIDED,
+              reason: `Payment of Rp ${payment.amount.toNumber().toLocaleString('id-ID')} voided${reason ? ` — ${reason}` : ''}`,
+            },
+          });
+
+          return result;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+
+      return {
+        ...updated,
+        amountPaid: updated.amountPaid.toNumber(),
+        payments: updated.payments.map((p) => ({ ...p, amount: p.amount.toNumber() })),
+      };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('Payment void conflicted with a concurrent update, please retry');
       }
       throw e;
     }

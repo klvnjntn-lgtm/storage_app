@@ -86,6 +86,7 @@ export type InvoicePrintView = {
   taxAmount: number;
   total: number;
   amountPaid: number;
+  creditedAmount: number;
   invoiceDate: Date | null;
   dueDate: Date | null;
   issuedAt: Date | null;
@@ -114,6 +115,14 @@ export type InvoicePrintView = {
     locationName: string;
     fulfilledQuantity: number;
   }[];
+
+  payments: {
+    id: string;
+    amount: number;
+    method: string;
+    note: string | null;
+    createdAt: Date;
+  }[];
 };
 
 // ---- invoiceDetailInclude ----
@@ -140,6 +149,7 @@ const invoiceDetailInclude = {
   },
   taxes: { select: { name: true, percentage: true, amount: true } },
   deliveryOrders: { select: { id: true, doNumber: true, status: true } },
+  payments: { orderBy: { createdAt: 'desc' } }, // FIX — lets the invoice detail page list/void individual payments
 } satisfies Prisma.InvoiceInclude;
 
 @Injectable()
@@ -843,6 +853,7 @@ async issue(
       taxAmount: toNumber(invoice.taxAmount),
       total: toNumber(invoice.total),
       amountPaid: Number(invoice.amountPaid),
+      creditedAmount: Number(invoice.creditedAmount),
       invoiceDate: invoice.invoiceDate,
       dueDate: invoice.dueDate,
       issuedAt: invoice.issuedAt,
@@ -868,6 +879,14 @@ async issue(
         lineTotal: toNumber(item.lineTotal),
         locationName: item.location?.name ?? '',
         fulfilledQuantity: Number(item.fulfilledQuantity),
+      })),
+
+      payments: invoice.payments.map((p) => ({
+        id: p.id,
+        amount: toNumber(p.amount),
+        method: p.method,
+        note: p.note,
+        createdAt: p.createdAt,
       })),
     };
   }
@@ -931,15 +950,7 @@ async issue(
     );
     if (fromImportedSequence) return fromImportedSequence;
 
-    const year = new Date().getFullYear();
-    const count = await tx.invoice.count({
-      where: {
-        organizationId,
-        status: InvoiceStatus.ISSUED,
-        issuedAt: { gte: new Date(`${year}-01-01`) },
-      },
-    });
-    return this.numbering.next({ prefix: 'INV', count, year });
+    return this.numbering.nextSequential(tx, organizationId, 'INVOICE', 'INV');
   }
 
   async getDraftDetail(organizationId: string, id: string) {
@@ -1021,7 +1032,7 @@ async getCustomerStatement(
         issuedAt: { lt: from },
         ...vehicleFilter,
       },
-      select: { total: true, amountPaid: true },
+      select: { total: true, amountPaid: true, creditedAmount: true },
     }),
     this.prisma.invoice.findMany({
       where: {
@@ -1037,6 +1048,7 @@ async getCustomerStatement(
         issuedAt: true,
         total: true,
         amountPaid: true,
+        creditedAmount: true,
         vehicleId: true,
         vehicle: { select: { plateNumber: true, vehicleModel: true } },
       },
@@ -1046,9 +1058,13 @@ async getCustomerStatement(
 
   // amountPaid is Decimal now; normalise once.
   const paid = (inv: { amountPaid: Decimal }) => Number(inv.amountPaid);
+  // FIX — same reconciliation gap as getARAging: without this, a returned
+  // invoice keeps showing a balance for units the customer no longer owes
+  // for on their statement.
+  const credited = (inv: { creditedAmount: Decimal }) => Number(inv.creditedAmount);
 
   const openingBalance = this.round2(
-    priorInvoices.reduce((sum, inv) => sum + (Number(inv.total) - paid(inv)), 0),
+    priorInvoices.reduce((sum, inv) => sum + (Number(inv.total) - paid(inv) - credited(inv)), 0),
   );
   const periodInvoiced = this.round2(
     periodInvoices.reduce((sum, inv) => sum + Number(inv.total), 0),
@@ -1074,7 +1090,7 @@ async getCustomerStatement(
       issuedAt: inv.issuedAt,
       invoiced: Number(inv.total),
       paidToDate: paid(inv),
-      balance: this.round2(Number(inv.total) - paid(inv)),
+      balance: this.round2(Number(inv.total) - paid(inv) - credited(inv)),
       vehicleId: inv.vehicleId,
       vehiclePlateNumber: inv.vehicle?.plateNumber ?? null,
       vehicleModel: inv.vehicle?.vehicleModel ?? null,
@@ -1151,6 +1167,7 @@ async editIssuedInvoice(
 
     const demandChanges: { label: string; before: number; after: number }[] = [];
     const carriedFulfilledByLineIndex = new Map<number, number>();
+    const unitCostByLineIndex = new Map<number, number | null>();
 
     for (let idx = 0; idx < lines.length; idx++) {
       const l = lines[idx];
@@ -1158,6 +1175,11 @@ async editIssuedInvoice(
 
       const key = keyOf(l);
       const oldItem = oldItemByKey.get(key);
+      // Preserve the cost basis already locked in when this line's units
+      // were fulfilled — re-pricing to today's product.costPrice would
+      // silently rewrite historical COGS for units that already shipped.
+      const oldUnitCost = oldItem?.unitCost != null ? Number(oldItem.unitCost) : null;
+      unitCostByLineIndex.set(idx, oldUnitCost ?? l.unitCost);
       const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
       const oldQty = oldItem ? Number(oldItem.quantity) : 0;
 
@@ -1193,6 +1215,18 @@ async editIssuedInvoice(
       if (newKeys.has(keyOf(item))) continue;
 
       if (hasWarehouseOps) {
+        // A line with fulfilled units can't just be dropped — the same
+        // rule as the quantity-reduction check above (l.quantity <
+        // oldFulfilled). Deleting it outright would silently sever the
+        // DeliveryOrderItem.invoiceItemId link (SetNull on delete) for
+        // stock that's already shipped, with no error and no journal
+        // reversal.
+        const fulfilled = Number(item.fulfilledQuantity);
+        if (fulfilled > 0) {
+          throw new BadRequestException(
+            `Cannot remove "${item.product?.name ?? item.description ?? keyOf(item)}" — ${fulfilled} unit(s) are already fulfilled. Process a return instead.`,
+          );
+        }
         demandChanges.push({
           label: item.product?.name ?? item.description ?? keyOf(item),
           before: Number(item.quantity),
@@ -1246,7 +1280,7 @@ async editIssuedInvoice(
             locationId: l.locationId,
             quantity: l.quantity,
             unitPrice: l.unitPrice,
-            unitCost: l.unitCost,
+            unitCost: unitCostByLineIndex.get(idx) ?? l.unitCost,
             unit: l.unit,
             lineTotal: l.lineTotal,
             discountType: l.discountType,
@@ -1446,17 +1480,33 @@ async voidInvoice(
 
   if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
     throw new BadRequestException(
-      'Cannot void an invoice with payments recorded. Refund and reconcile first.',
+      'Cannot void an invoice with payments recorded. Void the payment(s) first.',
     );
   }
 
   return this.prisma.$transaction(async (tx) => {
     // ---- Block on anything physically shipped ------------------------
+    // A SalesOrder-sourced DeliveryOrder never sets deliveryOrder.invoiceId
+    // (see DeliveryOrderService.create()) — it only carries
+    // DeliveryOrderItem.salesOrderItemId, which lines up with
+    // InvoiceItem.salesOrderItemId for whichever invoice was drafted from
+    // that SO line. Filtering on invoiceId alone let those shipped DOs slip
+    // past this guard, leaving their COGS permanently unreversed once the
+    // invoice was voided.
+    const invoiceSalesOrderItemIds = invoice.items
+      .map((item) => item.salesOrderItemId)
+      .filter((id): id is string => !!id);
+
     const shippedCount = await tx.deliveryOrder.count({
       where: {
         organizationId,
-        invoiceId: invoice.id,
         status: { in: [DeliveryOrderStatus.SHIPPED, DeliveryOrderStatus.PARTIALLY_RETURNED] },
+        OR: [
+          { invoiceId: invoice.id },
+          ...(invoiceSalesOrderItemIds.length > 0
+            ? [{ items: { some: { salesOrderItemId: { in: invoiceSalesOrderItemIds } } } }]
+            : []),
+        ],
       },
     });
     if (shippedCount > 0) {
@@ -1488,15 +1538,36 @@ async voidInvoice(
       await tx.session.update({ where: { id: session.id }, data: { status: 'CANCELLED' } });
     }
 
+    // Same invoiceId-only blind spot as the shipped guard above: a
+    // SalesOrder-sourced PACKED DO carries no deliveryOrder.invoiceId, so it
+    // needs the same salesOrderItemId-based match to be found and cancelled.
+    const invoiceItemIdBySalesOrderItemId = new Map(
+      invoice.items
+        .filter((item): item is typeof item & { salesOrderItemId: string } => !!item.salesOrderItemId)
+        .map((item) => [item.salesOrderItemId, item.id]),
+    );
+
     const packedDeliveryOrders = await tx.deliveryOrder.findMany({
-      where: { organizationId, invoiceId: invoice.id, status: DeliveryOrderStatus.PACKED },
+      where: {
+        organizationId,
+        status: DeliveryOrderStatus.PACKED,
+        OR: [
+          { invoiceId: invoice.id },
+          ...(invoiceSalesOrderItemIds.length > 0
+            ? [{ items: { some: { salesOrderItemId: { in: invoiceSalesOrderItemIds } } } }]
+            : []),
+        ],
+      },
       include: { items: true },
     });
     for (const d of packedDeliveryOrders) {
       for (const item of d.items) {
-        if (item.invoiceItemId) {
+        const invoiceItemId =
+          item.invoiceItemId ??
+          (item.salesOrderItemId ? invoiceItemIdBySalesOrderItemId.get(item.salesOrderItemId) : undefined);
+        if (invoiceItemId) {
           await tx.invoiceItem.update({
-            where: { id: item.invoiceItemId },
+            where: { id: invoiceItemId },
             data: { reservedQuantity: { decrement: Number(item.quantity) } },
           });
         }
@@ -1562,34 +1633,43 @@ async voidInvoice(
 }
 
 async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string) {
-    const quotation = await this.prisma.salesQuotation.findFirst({
-      where: { id: quotationId, organizationId },
-      include: { items: true, invoices: { select: { id: true, status: true } } },
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-
-    const invoiceableStatuses = ['SENT', 'ACCEPTED', 'CONVERTED'];
-    if (!invoiceableStatuses.includes(quotation.status)) {
-      throw new BadRequestException('Only a sent, accepted, or converted quotation can be invoiced');
-    }
-    const activeInvoices = quotation.invoices.filter((inv) => inv.status !== 'VOID');
-    if (activeInvoices.length > 0) {
-      throw new BadRequestException('This quotation has already been invoiced');
-    }
-
-    const items = quotation.items.map((i) => ({
-      productId: i.productId ?? undefined,
-      description: i.description ?? undefined,
-      locationId: i.locationId ?? undefined,
-      quantity: Number(i.quantity),
-      unitPrice: Number(i.unitPrice),
-      discountType: i.discountType ?? undefined,
-      discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-      taxRateIds: [] as string[],
-    }));
-
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Lock the quotation row for the duration of this transaction so a
+        // concurrent conversion (to a sales order via
+        // SalesOrderService.createFromQuotation, which takes the same
+        // lock, or to another invoice) against the same quotation can't
+        // both pass the "not yet converted / not yet invoiced" checks
+        // below. There is no DB unique constraint backing the P2002 catch
+        // further down — this lock is what actually closes the race.
+        await tx.$queryRaw`SELECT id FROM "SalesQuotation" WHERE id = ${quotationId} FOR UPDATE`;
+
+        const quotation = await tx.salesQuotation.findFirst({
+          where: { id: quotationId, organizationId },
+          include: { items: true, invoices: { select: { id: true, status: true } } },
+        });
+        if (!quotation) throw new NotFoundException('Quotation not found');
+
+        const invoiceableStatuses = ['SENT', 'ACCEPTED', 'CONVERTED'];
+        if (!invoiceableStatuses.includes(quotation.status)) {
+          throw new BadRequestException('Only a sent, accepted, or converted quotation can be invoiced');
+        }
+        const activeInvoices = quotation.invoices.filter((inv) => inv.status !== 'VOID');
+        if (activeInvoices.length > 0) {
+          throw new BadRequestException('This quotation has already been invoiced');
+        }
+
+        const items = quotation.items.map((i) => ({
+          productId: i.productId ?? undefined,
+          description: i.description ?? undefined,
+          locationId: i.locationId ?? undefined,
+          quantity: Number(i.quantity),
+          unitPrice: Number(i.unitPrice),
+          discountType: i.discountType ?? undefined,
+          discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
+          taxRateIds: [] as string[],
+        }));
+
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx);
         const invoice = await tx.invoice.create({
@@ -1638,50 +1718,57 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
   }
 
   async createDraftFromSalesOrder(organizationId: string, userId: string, salesOrderId: string) {
-    const order = await this.prisma.salesOrder.findFirst({
-      where: { id: salesOrderId, organizationId },
-      include: { items: true, invoices: { select: { id: true } } },
-    });
-    if (!order) throw new NotFoundException('Sales order not found');
-
     const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
     const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
-    if (hasWarehouseOps) {
-      if (order.status !== 'FULLY_DELIVERED') {
-        throw new BadRequestException(
-          order.status === 'CONFIRMED' || order.status === 'PARTIALLY_DELIVERED'
-            ? 'This order must be fully delivered before it can be invoiced — create delivery orders for the remaining items first.'
-            : 'Only a fully delivered order can be invoiced directly',
-        );
-      }
-    } else {
-      if (
-        order.status !== 'CONFIRMED' &&
-        order.status !== 'PARTIALLY_DELIVERED' &&
-        order.status !== 'FULLY_DELIVERED'
-      ) {
-        throw new BadRequestException('Only a confirmed order can be invoiced directly');
-      }
-    }
-
-    if (order.invoices.length > 0) {
-      throw new BadRequestException('This sales order has already been invoiced');
-    }
-
-    const items = order.items.map((i) => ({
-      productId: i.productId ?? undefined,
-      description: i.description ?? undefined,
-      locationId: i.locationId ?? undefined,
-      quantity: Number(i.quantity),
-      unitPrice: Number(i.unitPrice),
-      discountType: i.discountType ?? undefined,
-      discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-      taxRateIds: [] as string[],
-    }));
-
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Lock the sales order row for the duration of this transaction so
+        // two concurrent createDraftFromSalesOrder() calls against the
+        // same order can't both pass the "not yet invoiced" check below.
+        // There is no DB unique constraint backing the P2002 catch further
+        // down — this lock is what actually closes the race.
+        await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${salesOrderId} FOR UPDATE`;
+
+        const order = await tx.salesOrder.findFirst({
+          where: { id: salesOrderId, organizationId },
+          include: { items: true, invoices: { select: { id: true } } },
+        });
+        if (!order) throw new NotFoundException('Sales order not found');
+
+        if (hasWarehouseOps) {
+          if (order.status !== 'FULLY_DELIVERED') {
+            throw new BadRequestException(
+              order.status === 'CONFIRMED' || order.status === 'PARTIALLY_DELIVERED'
+                ? 'This order must be fully delivered before it can be invoiced — create delivery orders for the remaining items first.'
+                : 'Only a fully delivered order can be invoiced directly',
+            );
+          }
+        } else {
+          if (
+            order.status !== 'CONFIRMED' &&
+            order.status !== 'PARTIALLY_DELIVERED' &&
+            order.status !== 'FULLY_DELIVERED'
+          ) {
+            throw new BadRequestException('Only a confirmed order can be invoiced directly');
+          }
+        }
+
+        if (order.invoices.length > 0) {
+          throw new BadRequestException('This sales order has already been invoiced');
+        }
+
+        const items = order.items.map((i) => ({
+          productId: i.productId ?? undefined,
+          description: i.description ?? undefined,
+          locationId: i.locationId ?? undefined,
+          quantity: Number(i.quantity),
+          unitPrice: Number(i.unitPrice),
+          discountType: i.discountType ?? undefined,
+          discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
+          taxRateIds: [] as string[],
+        }));
+
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx);
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
@@ -1704,13 +1791,21 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             discount: discountAmount,
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
-            items: { create: lines.map((l) => ({
+            // lines[idx] corresponds 1:1 with order.items[idx] — priceLines()
+            // maps its `items` input to `items` output in the same order —
+            // so salesOrderItemId can be carried forward positionally. This
+            // is what lets DeliveryOrderService.resolveInvoiceItemForReturn()
+            // find the invoice item for a sales-order-sourced return, and
+            // what lets voidInvoice() detect already-shipped lines before
+            // allowing a void.
+            items: { create: lines.map((l, idx) => ({
               productId: l.productId, description: l.description, locationId: l.locationId,
               quantity: l.quantity, unitPrice: l.unitPrice, unitCost: l.unitCost,
               lineTotal: l.lineTotal,
               discountType: l.discountType, discountValue: l.discountValue,
               discountAmount: l.discountAmount, netAmount: l.netAmount,
               taxAmount: l.taxAmount, total: l.total,
+              salesOrderItemId: order.items[idx].id,
               taxes: { create: l.taxes },
             })) },
             taxes: { create: taxLines },

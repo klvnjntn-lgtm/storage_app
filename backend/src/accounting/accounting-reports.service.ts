@@ -12,6 +12,12 @@ import {
   SystemAccountKey,
 } from '@prisma/client';
 
+// Half a cent — matches the tolerance convention used everywhere else in
+// this codebase (journal.service.ts, expenses.service.ts,
+// fixed-assets.service.ts): amounts are 2dp, so anything smaller is
+// genuine float noise, not a real imbalance.
+const EPS = 0.005;
+
 export type PageParams = { page?: number; pageSize?: number };
 
 export type Pagination = { page: number; pageSize: number; total: number; totalPages: number };
@@ -30,6 +36,19 @@ export type ProfitAndLossReport = {
   totalOperatingExpenses: number;
   netProfit: number;
   netMargin: number; // percent
+  // Only present when locationId was passed. Revenue/expense lines that
+  // carry no locationId at all (payroll always, plus any expense entered
+  // without picking a location) can't be attributed to the filtered
+  // location, so they're never counted in the totals above — but they're
+  // surfaced here rather than silently dropped, so a per-location P&L
+  // doesn't read as "these costs don't exist."
+  unallocated?: {
+    revenue: ProfitAndLossLine[];
+    operatingExpenses: ProfitAndLossLine[];
+    totalRevenue: number;
+    totalOperatingExpenses: number;
+    netAmount: number;
+  };
 };
 
 export type TrialBalanceLine = {
@@ -236,7 +255,7 @@ export class AccountingReportsService {
       accounts,
       totalDebits,
       totalCredits,
-      isBalanced: Math.abs(totalDebits - totalCredits) < 0.01,
+      isBalanced: Math.abs(totalDebits - totalCredits) < EPS,
     };
   }
 
@@ -423,7 +442,7 @@ export class AccountingReportsService {
     const accumulatedEarnings = this.round2(revenueCumulative - expenseCumulative);
     const totalEquity = this.round2(totalStatedEquity + accumulatedEarnings);
     const totalLiabilitiesAndEquity = this.round2(totalLiabilities + totalEquity);
-    const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01;
+    const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < EPS;
 
     if (!isBalanced) {
       this.logger.error(
@@ -479,13 +498,17 @@ async getARAging(
       createdAt: true,
       total: true,
       amountPaid: true,
+      creditedAmount: true,
       customer: { select: { name: true } },
     },
   });
 
   const allLines: ARAgingLine[] = invoices.map((inv) => {
     const amountPaid = Number(inv.amountPaid);
-    const outstanding = this.round2(Number(inv.total) - amountPaid);
+    // FIX — subtract creditedAmount (postSalesReturn's AR reversal), or a
+    // returned invoice keeps aging on units the customer no longer owes
+    // for and this report drifts from the ledger's actual AR balance.
+    const outstanding = this.round2(Number(inv.total) - amountPaid - Number(inv.creditedAmount));
     const effectiveDueDate = inv.dueDate ?? inv.invoiceDate ?? inv.issuedAt ?? inv.createdAt;
     const daysOverdue = Math.floor((asOf.getTime() - effectiveDueDate.getTime()) / 86_400_000);
     return {
@@ -553,7 +576,7 @@ async getARAging(
   const reconciliation = {
     arLedgerBalance,
     sumOfOutstandingInvoices: totals.total,
-    matches: Math.abs(arLedgerBalance - totals.total) < 0.01,
+    matches: Math.abs(arLedgerBalance - totals.total) < EPS,
   };
   if (!reconciliation.matches) {
     this.logger.error(
@@ -702,7 +725,7 @@ async getARAging(
     const reconciliation = {
       apLedgerBalance,
       sumOfOutstandingPOs: totals.total,
-      matches: Math.abs(apLedgerBalance - totals.total) < 0.01,
+      matches: Math.abs(apLedgerBalance - totals.total) < EPS,
     };
     if (!reconciliation.matches) {
       this.logger.error(
@@ -732,7 +755,10 @@ async getARAging(
   // ---------------------------------------------------------------------
   // Profit & Loss — the only report with a location filter. Only lines
   // whose locationId was set at posting time (revenue, COGS, inventory
-  // adjustments, location-tagged expenses) are included when filtering.
+  // adjustments, location-tagged expenses) count toward the filtered
+  // totals; anything with no locationId (payroll always, plus any expense
+  // entered without a location) is broken out separately under
+  // `unallocated` rather than silently excluded — see ProfitAndLossReport.
   // ---------------------------------------------------------------------
   async getProfitAndLoss(
     organizationId: string,
@@ -748,16 +774,38 @@ async getARAging(
           entryDate: { gte: from, lte: to },
         },
         account: { type: { in: [AccountType.REVENUE, AccountType.EXPENSE] } },
-        ...(locationId && { locationId }),
       },
       select: {
         debit: true,
         credit: true,
+        locationId: true,
         account: { select: { id: true, code: true, name: true, type: true, systemKey: true } },
       },
     });
 
-    const byAccount = new Map <
+    const scoped = locationId ? lines.filter((l) => l.locationId === locationId) : lines;
+    const main = this.summarizePnlLines(scoped);
+
+    const unallocated = locationId
+      ? (() => {
+          const u = this.summarizePnlLines(lines.filter((l) => l.locationId == null));
+          return {
+            revenue: u.revenue,
+            operatingExpenses: u.operatingExpenses,
+            totalRevenue: u.totalRevenue,
+            totalOperatingExpenses: u.totalOperatingExpenses,
+            netAmount: this.round2(u.totalRevenue - u.cogs - u.totalOperatingExpenses),
+          };
+        })()
+      : undefined;
+
+    return { from, to, ...main, unallocated };
+  }
+
+  private summarizePnlLines(
+    lines: { debit: Prisma.Decimal; credit: Prisma.Decimal; account: { id: string; code: string; name: string; type: AccountType; systemKey: SystemAccountKey | null } }[],
+  ) {
+    const byAccount = new Map<
       string,
       { code: string; name: string; type: AccountType; systemKey: SystemAccountKey | null; amount: number }
     >();
@@ -799,8 +847,6 @@ async getARAging(
     const netProfit = grossProfit - totalOperatingExpenses;
 
     return {
-      from,
-      to,
       revenue,
       totalRevenue: this.round2(totalRevenue),
       cogs: this.round2(cogs),

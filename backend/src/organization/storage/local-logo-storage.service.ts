@@ -14,11 +14,35 @@ const UPLOAD_DIR = join(process.cwd(), 'uploads', 'logos');
 
 const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/svg+xml']);
 
+// SVG is XML — it can embed <script>, event-handler attributes
+// (onload=, onclick=, ...), and external references, all of which
+// execute if anyone opens the uploaded file's URL directly in a browser
+// tab (any org admin could otherwise use their own logo upload for
+// stored XSS against whoever opens that link). A real sanitizer library
+// would be more thorough, but a logo is a simple vector graphic — it has
+// no legitimate reason to contain any of these, so rejecting outright is
+// simpler and safer than trying to strip-and-repair untrusted markup.
+const DANGEROUS_SVG_PATTERN =
+  /<\s*script\b|<\s*iframe\b|<\s*embed\b|<\s*object\b|<\s*foreignobject\b|\bon[a-z]+\s*=|javascript\s*:|<\s*!entity\b/i;
+
+function assertSafeSvg(buffer: Buffer) {
+  const text = buffer.toString('utf-8');
+  if (DANGEROUS_SVG_PATTERN.test(text)) {
+    throw new BadRequestException(
+      'This SVG contains scripts or embedded content that are not allowed in a logo',
+    );
+  }
+}
+
 @Injectable()
 export class LocalLogoStorageService implements LogoStorage {
   async save(orgId: string, file: Express.Multer.File): Promise<string> {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       throw new BadRequestException('Logo must be PNG, JPEG, or SVG');
+    }
+
+    if (file.mimetype === 'image/svg+xml') {
+      assertSafeSvg(file.buffer);
     }
 
     await fs.mkdir(UPLOAD_DIR, { recursive: true });

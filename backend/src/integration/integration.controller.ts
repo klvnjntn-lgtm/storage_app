@@ -34,8 +34,12 @@ export class IntegrationController {
 
   // Step 1 — upload a file, get back headers + preview rows for the
   // column-mapping UI. Nothing is saved to the DB at this point.
+  // FIX — no size limit meant an authenticated user could upload an
+  // arbitrarily large file, buffered fully in memory by multer's default
+  // behavior and then parsed character-by-character — a memory/CPU
+  // exhaustion vector. 10MB comfortably covers any real CSV import.
   @Post('import/preview')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   previewImport(
     @UploadedFile() file: Express.Multer.File,
     @Query('connectionId') connectionId: string | undefined,

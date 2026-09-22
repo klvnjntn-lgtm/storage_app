@@ -4,8 +4,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Rows3, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Rows3, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { toCalendarDateString } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -19,32 +21,39 @@ type TrialBalanceReport = {
 };
 
 const TYPE_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
-const TYPE_LABEL: Record<string, string> = {
-  ASSET: 'Assets',
-  LIABILITY: 'Liabilities',
-  EQUITY: 'Equity',
-  REVENUE: 'Revenue',
-  EXPENSE: 'Expenses',
+const TYPE_LABEL_KEY: Record<string, string> = {
+  ASSET: 'accounting.setup.typeAssets',
+  LIABILITY: 'accounting.setup.typeLiabilities',
+  EQUITY: 'accounting.setup.typeEquity',
+  REVENUE: 'accounting.setup.typeRevenue',
+  EXPENSE: 'accounting.setup.typeExpenses',
 };
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
 }
+// FIX — these all used to build a local-midnight Date then call
+// .toISOString().slice(0,10), which converts to UTC first. In a timezone
+// ahead of UTC (this app is Indonesian/id-ID) that deterministically
+// rolls the date back one day — "Month-end" always landed on the day
+// BEFORE the actual month end, silently omitting the last day's postings
+// while isBalanced still reported "Balanced" (self-consistent for the
+// wrong date). toCalendarDateString formats using local getters instead.
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return toCalendarDateString(new Date());
 }
 function monthEndISO() {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+  return toCalendarDateString(new Date(d.getFullYear(), d.getMonth() + 1, 0));
 }
 function yearEndISO() {
   const d = new Date();
-  return new Date(d.getFullYear(), 11, 31).toISOString().slice(0, 10);
+  return toCalendarDateString(new Date(d.getFullYear(), 11, 31));
 }
 
 export default function TrialBalancePage() {
-  const router = useRouter();
-  const [asOf, setAsOf] = useState(todayISO());
+    const { t } = useLanguage();
+    const [asOf, setAsOf] = useState(todayISO());
   const [report, setReport] = useState<TrialBalanceReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,13 +65,13 @@ export default function TrialBalancePage() {
       const res = await apiFetch(`/accounting/reports/trial-balance?asOf=${asOf}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('accounting.trialBalance.requestFailed', { status: res.status }));
         setReport(null);
         return;
       }
       setReport(await res.json());
     } catch {
-      setError('Could not reach the server.');
+      setError(t('accounting.trialBalance.couldNotReachServer'));
       setReport(null);
     } finally {
       setLoading(false);
@@ -77,7 +86,7 @@ export default function TrialBalancePage() {
   const grouped = useMemo(() => {
     if (!report) return null;
     const map = new Map<string, TrialBalanceLine[]>();
-    for (const t of TYPE_ORDER) map.set(t, []);
+    for (const type of TYPE_ORDER) map.set(type, []);
     for (const acc of report.accounts) map.get(acc.type)?.push(acc);
     return map;
   }, [report]);
@@ -93,20 +102,13 @@ export default function TrialBalancePage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/accounting')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Rows3 size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
-              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>Trial Balance</h1>
-              <p className="text-xs text-gray-500 truncate">Every account&apos;s lifetime balance, as of a date</p>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('nav.items.trialBalance')}</h1>
+              <p className="text-xs text-gray-500 truncate">{t('accounting.trialBalance.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -117,7 +119,7 @@ export default function TrialBalancePage() {
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
               <Calendar size={12} strokeWidth={2} />
-              As of
+              {t('accounting.balanceSheet.asOf')}
             </label>
             <input
               type="date"
@@ -128,19 +130,19 @@ export default function TrialBalancePage() {
           </div>
           <div className="flex gap-1.5">
             <button onClick={() => setAsOf(todayISO())} className="text-xs px-3 py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-blue-50 hover:border-blue-500/40 hover:text-blue-700 transition-colors">
-              Today
+              {t('accounting.balanceSheet.today')}
             </button>
             <button onClick={() => setAsOf(monthEndISO())} className="text-xs px-3 py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-blue-50 hover:border-blue-500/40 hover:text-blue-700 transition-colors">
-              Month-end
+              {t('accounting.balanceSheet.monthEnd')}
             </button>
             <button onClick={() => setAsOf(yearEndISO())} className="text-xs px-3 py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-blue-50 hover:border-blue-500/40 hover:text-blue-700 transition-colors">
-              Year-end
+              {t('accounting.balanceSheet.yearEnd')}
             </button>
           </div>
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}
-        {loading && <p className="text-sm text-gray-500 mb-4">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500 mb-4">{t('common.loading')}</p>}
 
         {!loading && report && (
           <>
@@ -152,16 +154,16 @@ export default function TrialBalancePage() {
               {report.isBalanced ? <CheckCircle2 size={16} strokeWidth={2} className="shrink-0" /> : <AlertTriangle size={16} strokeWidth={2} className="shrink-0" />}
               <span>
                 {report.isBalanced
-                  ? `Balanced — total debits and credits both equal ${formatIDR(report.totalDebits)}.`
-                  : `Not balanced: debits ${formatIDR(report.totalDebits)} vs credits ${formatIDR(report.totalCredits)}. This indicates a posting-engine issue — please report it.`}
+                  ? t('accounting.trialBalance.balancedMessage', { amount: formatIDR(report.totalDebits) })
+                  : t('accounting.trialBalance.notBalancedMessage', { debits: formatIDR(report.totalDebits), credits: formatIDR(report.totalCredits) })}
               </span>
             </div>
 
             <div className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
               <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-200 bg-gray-50">
-                <span>Account</span>
-                <span className="text-right w-28">Debit</span>
-                <span className="text-right w-28">Credit</span>
+                <span>{t('accounting.journal.accountColumn')}</span>
+                <span className="text-right w-28">{t('accounting.journal.debit')}</span>
+                <span className="text-right w-28">{t('accounting.journal.credit')}</span>
               </div>
 
               {TYPE_ORDER.map((type) => {
@@ -170,7 +172,7 @@ export default function TrialBalancePage() {
                 return (
                   <div key={type}>
                     <div className="px-4 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100 bg-gray-50/50">
-                      {TYPE_LABEL[type]}
+                      {t(TYPE_LABEL_KEY[type])}
                     </div>
                     {list.map((acc) => (
                       <div key={acc.accountId} className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-sm border-b border-gray-50 last:border-b-0">
@@ -187,7 +189,7 @@ export default function TrialBalancePage() {
               })}
 
               <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-3 text-sm font-bold border-t-2 border-gray-300 bg-gray-50">
-                <span>Total</span>
+                <span>{t('common.total')}</span>
                 <span className="text-right w-28 tabular-nums">{formatIDR(report.totalDebits)}</span>
                 <span className="text-right w-28 tabular-nums">{formatIDR(report.totalCredits)}</span>
               </div>

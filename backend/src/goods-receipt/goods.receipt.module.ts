@@ -4,6 +4,7 @@ import { StockModule } from '../stock/stock.module';
 import { SharedDocumentsModule } from '../shared/documents/shared-documents.module';
 import { GoodsReceiptController } from './goods-receipt.controller';
 import { GoodsReceiptService } from './goods-receipt.service';
+import { AccountingModule } from 'src/accounting/accounting.module';
 
 // Adjust module names/paths above to match your actual module files —
 // these mirror what PurchaseOrderService and InvoiceService depend on
@@ -12,7 +13,7 @@ import { GoodsReceiptService } from './goods-receipt.service';
 // DocumentNumberingService live in a different shared module in your
 // repo than "SharedDocumentsModule", swap the import accordingly.
 @Module({
-  imports: [PrismaModule, StockModule, SharedDocumentsModule],
+  imports: [PrismaModule, StockModule, SharedDocumentsModule, AccountingModule],
   controllers: [GoodsReceiptController],
   providers: [GoodsReceiptService],
   exports: [GoodsReceiptService],

@@ -1,21 +1,15 @@
 // app/reports/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  TrendingUp,
-  Calendar,
-  DollarSign,
-  PackageSearch,
-  Percent,
-  Info,
-  Wallet,
-} from 'lucide-react';
+import { TrendingUp, Calendar, DollarSign, PackageSearch, Percent, Info, Wallet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import Pagination from '@/app/components/Pagination';
+import Pagination from '@/app/components/shared/Pagination';
+import { toCalendarDateString } from '@/lib/dates';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -50,21 +44,26 @@ function formatIDR(amount: number): string {
 }
 
 // Shorter form for tight mobile cards — e.g. Rp 1,2jt instead of Rp 1.200.000
+// FIX — was dividing the raw signed `amount` (not `abs`) for the two
+// smaller-magnitude branches — same sign bug as accounting's ar/ap-aging.
 function formatIDRCompact(amount: number): string {
   const abs = Math.abs(amount);
-  if (abs >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(1)}M`;
-  if (abs >= 1_000_000) return `Rp ${(amount / 1_000_000).toFixed(1)}jt`;
-  if (abs >= 1_000) return `Rp ${(amount / 1_000).toFixed(0)}rb`;
+  const sign = amount < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}Rp ${(abs / 1_000_000_000).toFixed(1)}M`;
+  if (abs >= 1_000_000) return `${sign}Rp ${(abs / 1_000_000).toFixed(1)}jt`;
+  if (abs >= 1_000) return `${sign}Rp ${(abs / 1_000).toFixed(0)}rb`;
   return formatIDR(amount);
 }
 
+// FIX — .toISOString() converts to UTC first, wrong in a timezone ahead
+// of UTC (also fixed in applyPreset below).
 function defaultFrom() {
   const d = new Date();
   d.setDate(d.getDate() - 30);
-  return d.toISOString().slice(0, 10);
+  return toCalendarDateString(d);
 }
 function defaultTo() {
-  return new Date().toISOString().slice(0, 10);
+  return toCalendarDateString(new Date());
 }
 
 const RANGE_PRESETS = [
@@ -75,16 +74,27 @@ const RANGE_PRESETS = [
 
 export default function ReportsPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
 
-  const [from, setFrom] = useState(defaultFrom());
-  const [to, setTo] = useState(defaultTo());
+  // Seeded from the URL so pressing the browser's Back button from an
+  // invoice's detail page restores the same range/page instead of
+  // resetting to the default 30-day range.
+  const [from, setFrom] = useState(() => getInitialParam('from', defaultFrom()));
+  const [to, setTo] = useState(() => getInitialParam('to', defaultTo()));
 
   const [report, setReport] = useState<RevenueReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+
+  useSyncQueryParams({
+    from,
+    to,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
 
   async function loadReport() {
     setLoading(true);
@@ -95,14 +105,14 @@ export default function ReportsPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.reports.requestFailed', { status: res.status }));
         setReport(null);
         return;
       }
 
       setReport(await res.json());
     } catch (e) {
-      setError('Could not reach the server.');
+      setError(t('sales.reports.couldNotReachServer'));
       setReport(null);
     } finally {
       setLoading(false);
@@ -114,8 +124,15 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  // New range = new result set, so always land back on page 1.
+  // New range = new result set, so always land back on page 1 — but not
+  // on the very first run, or a `page` restored from the URL (e.g. via
+  // the browser's Back button) would get clobbered back to 1 on mount.
+  const isFirstPageResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstPageResetRef.current) {
+      isFirstPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [from, to]);
 
@@ -123,8 +140,8 @@ export default function ReportsPage() {
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - days);
-    setTo(end.toISOString().slice(0, 10));
-    setFrom(start.toISOString().slice(0, 10));
+    setTo(toCalendarDateString(end));
+    setFrom(toCalendarDateString(start));
   }
 
   const margin = report && report.revenue > 0 ? (report.profit / report.revenue) * 100 : 0;
@@ -170,23 +187,15 @@ export default function ReportsPage() {
           /labels, /vehicles/search, and /inventory/stock */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <TrendingUp size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Sales Report
+                {t('sales.reports.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Revenue, cost, and profit for issued invoices</p>
+              <p className="text-xs text-gray-500 truncate">{t('sales.reports.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -206,7 +215,7 @@ export default function ReportsPage() {
             <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
               <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
                 <Calendar size={12} strokeWidth={2} />
-                From
+                {t('sales.reports.from')}
               </label>
               <input
                 type="date"
@@ -217,7 +226,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
-              <label className="text-xs font-semibold text-gray-600">To</label>
+              <label className="text-xs font-semibold text-gray-600">{t('sales.reports.to')}</label>
               <input
                 type="date"
                 value={to}
@@ -246,7 +255,7 @@ export default function ReportsPage() {
           </p>
         )}
 
-        {loading && <p className="text-sm text-gray-500 mb-4">Crunching numbers...</p>}
+        {loading && <p className="text-sm text-gray-500 mb-4">{t('sales.reports.crunchingNumbers')}</p>}
 
         {!loading && !error && report && (
           <>
@@ -255,7 +264,7 @@ export default function ReportsPage() {
               <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <DollarSign size={13} strokeWidth={2} className="shrink-0" />
-                  <span className="truncate">Revenue</span>
+                  <span className="truncate">{t('sales.reports.revenue')}</span>
                 </div>
                 <p className="text-lg sm:text-2xl font-bold leading-tight">
                   <span className="sm:hidden">{formatIDRCompact(report.revenue)}</span>
@@ -271,7 +280,9 @@ export default function ReportsPage() {
               <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <Wallet size={13} strokeWidth={2} className="shrink-0" />
-                  <span className="truncate">Paid to date ({collectionRate.toFixed(0)}%)</span>
+                  <span className="truncate">
+                    {t('sales.reports.paidToDate', { pct: collectionRate.toFixed(0) })}
+                  </span>
                 </div>
                 <p className="text-lg sm:text-2xl font-bold leading-tight">
                   <span className="sm:hidden">{formatIDRCompact(report.collected)}</span>
@@ -282,7 +293,7 @@ export default function ReportsPage() {
               <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 bg-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-500 mb-1">
                   <PackageSearch size={13} strokeWidth={2} className="shrink-0" />
-                  <span className="truncate">Cost of Goods</span>
+                  <span className="truncate">{t('sales.reports.costOfGoods')}</span>
                 </div>
                 <p className="text-lg sm:text-2xl font-bold leading-tight">
                   <span className="sm:hidden">{formatIDRCompact(report.cost)}</span>
@@ -293,7 +304,7 @@ export default function ReportsPage() {
               <div className="border-2 border-black rounded-md p-3 sm:p-4 bg-black text-white">
                 <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-gray-300 mb-1">
                   <Percent size={13} strokeWidth={2} className="shrink-0" />
-                  <span className="truncate">Profit ({margin.toFixed(1)}%)</span>
+                  <span className="truncate">{t('sales.reports.profit', { pct: margin.toFixed(1) })}</span>
                 </div>
                 <p className="text-lg sm:text-2xl font-bold leading-tight">
                   <span className="sm:hidden">{formatIDRCompact(report.profit)}</span>
@@ -303,7 +314,8 @@ export default function ReportsPage() {
             </div>
 
             <p className="text-xs text-gray-500 mb-2">
-              {report.invoiceCount} issued invoice{report.invoiceCount === 1 ? '' : 's'}
+              {report.invoiceCount}{' '}
+              {t(report.invoiceCount === 1 ? 'sales.reports.issuedInvoiceSingular' : 'sales.reports.issuedInvoicePlural')}
             </p>
 
             {/* Coverage disclosure — profit/cost only reflect items with cost data */}
@@ -311,10 +323,13 @@ export default function ReportsPage() {
               <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3 mb-2">
                 <Info size={14} strokeWidth={2} className="shrink-0 mt-0.5" />
                 <span>
-                  Cost and profit are based on {report.profitCoverage} of {report.lineItemCount} sold
-                  line item{report.lineItemCount === 1 ? '' : 's'} — the rest had no cost price set at
-                  the time of sale. Revenue is complete; profit (overall and per invoice below) is a floor,
-                  not the true number.
+                  {t('sales.reports.coverageDisclosure', {
+                    a: report.profitCoverage,
+                    b: report.lineItemCount,
+                    lineItemWord: t(
+                      report.lineItemCount === 1 ? 'sales.reports.lineItemSingular' : 'sales.reports.lineItemPlural',
+                    ),
+                  })}
                 </span>
               </div>
             )}
@@ -324,8 +339,7 @@ export default function ReportsPage() {
               <div className="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3 mb-4">
                 <Info size={14} strokeWidth={2} className="shrink-0 mt-0.5" />
                 <span>
-                  Revenue above is invoiced (accrual) value. {formatIDR(outstanding)} of it hasn't been
-                  collected yet across unpaid or partially paid invoices.
+                  {t('sales.reports.collectionDisclosure', { amount: formatIDR(outstanding) })}
                 </span>
               </div>
             )}
@@ -333,7 +347,7 @@ export default function ReportsPage() {
             {/* Per-invoice breakdown — stacked layout on mobile so metrics never
                 get squeezed into unreadable columns; grid of 4 stats under the header row */}
             {report.invoiceCount === 0 ? (
-              <p className="text-sm text-gray-400">No issued invoices in this range.</p>
+              <p className="text-sm text-gray-400">{t('sales.reports.noInvoices')}</p>
             ) : (
               <>
                 <div className="flex flex-col gap-2">
@@ -347,7 +361,7 @@ export default function ReportsPage() {
                         <span className="font-semibold truncate">{row.invoiceNumber ?? row.id}</span>
                         <span className="text-xs text-gray-500 shrink-0">
                           {row.issuedAt
-                            ? new Date(row.issuedAt).toLocaleDateString('id-ID', {
+                            ? new Date(row.issuedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', {
                                 day: '2-digit',
                                 month: 'short',
                               })
@@ -355,64 +369,64 @@ export default function ReportsPage() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 mb-2 sm:hidden">
-                        {row.unitsSold} unit{row.unitsSold === 1 ? '' : 's'}
+                        {row.unitsSold} {t(row.unitsSold === 1 ? 'sales.reports.unitSingular' : 'sales.reports.unitPlural')}
                       </p>
 
                       {/* Mobile: 2x2 stat grid. Desktop: single row, right-aligned. */}
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:hidden">
                         <div>
-                          <p className="text-[11px] text-gray-500">Revenue</p>
+                          <p className="text-[11px] text-gray-500">{t('sales.reports.revenue')}</p>
                           <p className="text-sm font-semibold">{formatIDRCompact(row.gross)}</p>
                         </div>
                         <div>
-                          <p className="text-[11px] text-gray-500">Collected</p>
+                          <p className="text-[11px] text-gray-500">{t('sales.reports.collected')}</p>
                           <p className="text-sm font-semibold">
                             {formatIDRCompact(row.collected)}
                             {row.collected < row.gross && (
                               <span className="text-amber-600 font-normal">
                                 {' '}
-                                · {formatIDRCompact(row.gross - row.collected)} due
+                                · {formatIDRCompact(row.gross - row.collected)} {t('sales.reports.due')}
                               </span>
                             )}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[11px] text-gray-500">Cost</p>
+                          <p className="text-[11px] text-gray-500">{t('sales.reports.cost')}</p>
                           <p className="text-sm font-semibold">{formatIDRCompact(row.cost)}</p>
                         </div>
                         <div>
-                          <p className="text-[11px] text-gray-500">Profit</p>
+                          <p className="text-[11px] text-gray-500">{t('sales.reports.profitLabel')}</p>
                           <p className="text-sm font-semibold text-green-700">{formatIDRCompact(row.profit)}</p>
                         </div>
                       </div>
 
                       <div className="hidden sm:flex items-center justify-between mt-0.5">
                         <p className="text-xs text-gray-500">
-                          {row.unitsSold} unit{row.unitsSold === 1 ? '' : 's'}
+                          {row.unitsSold} {t(row.unitsSold === 1 ? 'sales.reports.unitSingular' : 'sales.reports.unitPlural')}
                         </p>
                         <div className="flex items-center gap-4 text-right">
                           <div>
-                            <p className="text-xs text-gray-500">Revenue</p>
+                            <p className="text-xs text-gray-500">{t('sales.reports.revenue')}</p>
                             <p className="text-sm font-semibold">{formatIDR(row.gross)}</p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Collected</p>
+                            <p className="text-xs text-gray-500">{t('sales.reports.collected')}</p>
                             <p className="text-sm font-semibold">
                               {formatIDR(row.collected)}
                               {row.collected < row.gross && (
                                 <span className="text-amber-600 font-normal">
                                   {' '}
-                                  · {formatIDR(row.gross - row.collected)} due
+                                  · {formatIDR(row.gross - row.collected)} {t('sales.reports.due')}
                                 </span>
                               )}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Cost</p>
+                            <p className="text-xs text-gray-500">{t('sales.reports.cost')}</p>
                             <p className="text-sm font-semibold">{formatIDR(row.cost)}</p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Profit</p>
+                            <p className="text-xs text-gray-500">{t('sales.reports.profitLabel')}</p>
                             <p className="text-sm font-semibold text-green-700">{formatIDR(row.profit)}</p>
                           </div>
                         </div>

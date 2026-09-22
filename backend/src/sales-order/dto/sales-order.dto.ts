@@ -4,7 +4,6 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
-  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -35,7 +34,9 @@ export class OrderLineItemDto {
   @IsNotEmpty()
   locationId?: string;
 
-  @IsInt()
+  // FIX — was @IsInt(); SalesOrderItem.quantity is Decimal(12,2) and Stock
+  // now supports fractional quantities too, so this must accept them.
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
 

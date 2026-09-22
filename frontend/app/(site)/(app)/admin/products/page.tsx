@@ -4,28 +4,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Package,
-  AlertTriangle,
-  CheckCircle2,
-  Archive,
-  Pencil,
-  Check,
-  X,
-  Plus,
-  ChevronDown,
-  ChevronUp,
-  Tag,
-  Hash,
-  Wallet,
-  Boxes,
-} from 'lucide-react';
+import { Package, AlertTriangle, CheckCircle2, Archive, Pencil, Check, X, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
-import Pagination from '@/app/components/Pagination';
+import Pagination from '@/app/components/shared/Pagination';
 import { useSortableData } from '@/lib/hooks/useSortableData';
-import SortableTh from '@/app/components/SortableTh';
+import SortableTh from '@/app/components/shared/SortableTh';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -122,6 +107,7 @@ function ComboBox({
   placeholder: string;
   className?: string;
 }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -211,7 +197,7 @@ function ComboBox({
               </button>
             ))
           ) : (
-            <div className="px-3 py-2 text-gray-400">No matches</div>
+            <div className="px-3 py-2 text-gray-400">{t('admin.products.noMatches')}</div>
           )}
           {showCreate && (
             <button
@@ -223,7 +209,7 @@ function ComboBox({
                 highlight === filtered.length ? 'bg-blue-50' : ''
               }`}
             >
-              + Create &quot;{value.trim()}&quot;
+              {t('admin.products.createOption', { value: value.trim() })}
             </button>
           )}
         </div>
@@ -244,11 +230,12 @@ function CellText({ value, className = '' }: { value: string; className?: string
 }
 
 function StockBadge({ stock }: { stock: number | undefined }) {
+  const { t } = useLanguage();
   if (stock == null) return <span className="text-gray-400">-</span>;
   if (stock <= 0) {
     return (
       <span className="inline-block text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-300">
-        Out of stock
+        {t('admin.products.outOfStock')}
       </span>
     );
   }
@@ -256,7 +243,7 @@ function StockBadge({ stock }: { stock: number | undefined }) {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-amber-100 text-amber-800 border-amber-300">
         <AlertTriangle size={11} strokeWidth={2.5} />
-        {stock} left
+        {t('admin.products.stockLeft', { count: stock })}
       </span>
     );
   }
@@ -264,8 +251,8 @@ function StockBadge({ stock }: { stock: number | undefined }) {
 }
 
 export default function ProductsPage() {
-  const router = useRouter();
-  const { authorized, loading: authLoading } = useRequireAdmin();
+    const { authorized, loading: authLoading } = useRequireAdmin();
+  const { t } = useLanguage();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [stockByProduct, setStockByProduct] = useState<Record<string, StockSummary>>({});
@@ -471,15 +458,15 @@ export default function ProductsPage() {
   function validateCreateForm(): FieldErrors | null {
     const errs: FieldErrors = {};
 
-    if (!name.trim()) errs.name = 'Required';
-    if (!sku.trim()) errs.sku = 'Required';
-    if (!categoryInput.trim()) errs.category = 'Required';
+    if (!name.trim()) errs.name = t('common.required');
+    if (!sku.trim()) errs.sku = t('common.required');
+    if (!categoryInput.trim()) errs.category = t('common.required');
 
     const sellingPrice = parsePriceInput(sellingPriceInput);
-    if (sellingPrice === null) errs.sellingPrice = 'Must be a non-negative number';
+    if (sellingPrice === null) errs.sellingPrice = t('admin.products.mustBeNonNegativeNumber');
 
     const costPrice = parsePriceInput(costPriceInput);
-    if (costPrice === null) errs.costPrice = 'Must be a non-negative number';
+    if (costPrice === null) errs.costPrice = t('admin.products.mustBeNonNegativeNumber');
 
     return Object.keys(errs).length > 0 ? errs : null;
   }
@@ -514,17 +501,17 @@ export default function ProductsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to create product');
+        throw new Error(data?.message || t('admin.products.createFailed'));
       }
 
-      setSuccessMsg(`"${name.trim()}" created. Add its initial stock from the Stock page.`);
+      setSuccessMsg(t('admin.products.createdSuccess', { name: name.trim() }));
       resetCreateForm();
       setPage(1);
 
       await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to create product');
+      setError(err.message || t('admin.products.createFailed'));
     } finally {
       setLoading(false);
     }
@@ -559,13 +546,13 @@ export default function ProductsPage() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to archive product');
+        throw new Error(data?.message || t('admin.products.archiveFailed'));
       }
-      setSuccessMsg(`"${product?.name ?? 'Product'}" archived.`);
+      setSuccessMsg(t('admin.products.archivedSuccess', { name: product?.name ?? t('admin.products.productFallback') }));
       await loadProducts();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to archive product');
+      setError(err.message || t('admin.products.archiveFailed'));
     } finally {
       setPendingArchiveId(null);
     }
@@ -583,13 +570,13 @@ export default function ProductsPage() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to restore product');
+        throw new Error(data?.message || t('admin.products.restoreFailed'));
       }
-      setSuccessMsg(`"${product?.name ?? 'Product'}" restored.`);
+      setSuccessMsg(t('admin.products.restoredSuccess', { name: product?.name ?? t('admin.products.productFallback') }));
       await loadProducts();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to restore product');
+      setError(err.message || t('admin.products.restoreFailed'));
     }
   }
 
@@ -622,15 +609,15 @@ export default function ProductsPage() {
   function validateEditForm(): FieldErrors | null {
     const errs: FieldErrors = {};
 
-    if (!editName.trim()) errs.name = 'Required';
-    if (!editSku.trim()) errs.sku = 'Required';
-    if (!editCategory.trim()) errs.category = 'Required';
+    if (!editName.trim()) errs.name = t('common.required');
+    if (!editSku.trim()) errs.sku = t('common.required');
+    if (!editCategory.trim()) errs.category = t('common.required');
 
     const sellingPrice = parsePriceInput(editSellingPrice);
-    if (sellingPrice === null) errs.sellingPrice = 'Must be a non-negative number';
+    if (sellingPrice === null) errs.sellingPrice = t('admin.products.mustBeNonNegativeNumber');
 
     const costPrice = parsePriceInput(editCostPrice);
-    if (costPrice === null) errs.costPrice = 'Must be a non-negative number';
+    if (costPrice === null) errs.costPrice = t('admin.products.mustBeNonNegativeNumber');
 
     return Object.keys(errs).length > 0 ? errs : null;
   }
@@ -652,15 +639,15 @@ export default function ProductsPage() {
     const wantsStockAdjust = trimmedDelta !== '' && stockDeltaNum !== 0;
 
     if (trimmedDelta && Number.isNaN(stockDeltaNum)) {
-      setError('Stock adjustment must be a number');
+      setError(t('admin.products.stockAdjustMustBeNumber'));
       return;
     }
     if (wantsStockAdjust && !editStockLocationId) {
-      setError('Pick a location to apply the stock adjustment');
+      setError(t('admin.products.pickLocationForAdjust'));
       return;
     }
     if (wantsStockAdjust && !editStockReason.trim()) {
-      setError('A reason is required to adjust stock');
+      setError(t('admin.products.reasonRequiredForAdjust'));
       return;
     }
 
@@ -683,7 +670,7 @@ export default function ProductsPage() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.message || 'Failed to update product');
+        throw new Error(data?.message || t('admin.products.updateFailed'));
       }
 
       // Applied through the same endpoint the Stock page uses, so it shows
@@ -703,16 +690,16 @@ export default function ProductsPage() {
         });
         if (!stockRes.ok) {
           const data = await stockRes.json().catch(() => null);
-          throw new Error(data?.message || 'Product updated, but stock adjustment failed');
+          throw new Error(data?.message || t('admin.products.stockAdjustFailed'));
         }
       }
 
-      setSuccessMsg(`"${editName.trim() || product?.name}" updated.`);
+      setSuccessMsg(t('admin.products.updatedSuccess', { name: editName.trim() || product?.name || '' }));
       setEditingId(null);
       await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to update product');
+      setError(err.message || t('admin.products.updateFailed'));
     } finally {
       setSavingEdit(false);
     }
@@ -730,7 +717,7 @@ export default function ProductsPage() {
           backgroundSize: '24px 24px',
         }}
       >
-        <p className="text-sm text-gray-400">Checking access...</p>
+        <p className="text-sm text-gray-400">{t('admin.overview.checkingAccess')}</p>
       </main>
     );
   }
@@ -749,22 +736,15 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/admin')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Admin
-          </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Package size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Products
+                {t('admin.products.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Create and manage product catalog</p>
+              <p className="text-xs text-gray-500 truncate">{t('admin.products.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -792,7 +772,7 @@ export default function ProductsPage() {
             <div className="flex items-center gap-2">
               <Archive size={18} strokeWidth={2} className="shrink-0" />
               <span>
-                Archive <strong>{pendingProduct?.name}</strong>? It stays in history but drops out of normal use.
+                {t('admin.products.archiveConfirmPrefix')} <strong>{pendingProduct?.name}</strong>{t('admin.products.archiveConfirmSuffix')}
               </span>
             </div>
             <div className="flex gap-2 shrink-0">
@@ -800,13 +780,13 @@ export default function ProductsPage() {
                 onClick={cancelArchive}
                 className="px-3 py-1.5 rounded-md border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={confirmArchive}
                 className="px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
               >
-                Confirm Archive
+                {t('admin.products.confirmArchive')}
               </button>
             </div>
           </div>
@@ -820,7 +800,7 @@ export default function ProductsPage() {
           >
             <span className="flex items-center gap-2 text-sm font-semibold">
               <Plus size={16} strokeWidth={2.5} className="text-blue-700" />
-              New Product
+              {t('admin.products.newProduct')}
             </span>
             {formOpen ? (
               <ChevronUp size={16} strokeWidth={2} className="text-blue-700" />
@@ -835,7 +815,7 @@ export default function ProductsPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                   <Tag size={12} strokeWidth={2.5} />
-                  Identity
+                  {t('admin.products.identity')}
                 </div>
                 <div className="grid md:grid-cols-2 gap-3">
                   <div>
@@ -845,7 +825,7 @@ export default function ProductsPage() {
                         setName(e.target.value);
                         if (fieldErrors.name) setFieldErrors((f) => ({ ...f, name: undefined }));
                       }}
-                      placeholder="Product name *"
+                      placeholder={t('admin.products.namePlaceholder')}
                       autoFocus
                       className={fieldClass(fieldErrors.name)}
                     />
@@ -855,7 +835,7 @@ export default function ProductsPage() {
                     <input
                       value={oem}
                       onChange={(e) => setOem(e.target.value)}
-                      placeholder="OEM number (optional)"
+                      placeholder={t('admin.products.oemPlaceholder')}
                       className={fieldClass()}
                     />
                   </div>
@@ -866,7 +846,7 @@ export default function ProductsPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                   <Hash size={12} strokeWidth={2.5} />
-                  Catalog
+                  {t('admin.products.catalog')}
                 </div>
                 <div className="grid md:grid-cols-3 gap-3">
                   <div>
@@ -876,14 +856,14 @@ export default function ProductsPage() {
                         setSku(e.target.value);
                         if (fieldErrors.sku) setFieldErrors((f) => ({ ...f, sku: undefined }));
                       }}
-                      placeholder="SKU *"
+                      placeholder={t('admin.products.skuPlaceholder')}
                       className={fieldClass(fieldErrors.sku)}
                     />
                     {fieldErrors.sku && <p className="text-xs text-red-600 mt-1">{fieldErrors.sku}</p>}
                     {!fieldErrors.sku && duplicateSku && (
                       <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
                         <AlertTriangle size={11} strokeWidth={2.5} />
-                        SKU already exists in catalog
+                        {t('admin.products.skuExists')}
                       </p>
                     )}
                   </div>
@@ -895,13 +875,13 @@ export default function ProductsPage() {
                         if (fieldErrors.category) setFieldErrors((f) => ({ ...f, category: undefined }));
                       }}
                       options={categories}
-                      placeholder="Category * — search or add new"
+                      placeholder={t('admin.products.categoryPlaceholder')}
                       className={fieldClass(fieldErrors.category)}
                     />
                     {fieldErrors.category ? (
                       <p className="text-xs text-red-600 mt-1">{fieldErrors.category}</p>
                     ) : (
-                      <p className="text-xs text-gray-400 mt-1">Type to search, or enter a new category</p>
+                      <p className="text-xs text-gray-400 mt-1">{t('admin.products.categoryHint')}</p>
                     )}
                   </div>
                   <div>
@@ -909,10 +889,10 @@ export default function ProductsPage() {
                       value={brandInput}
                       onChange={setBrandInput}
                       options={brands}
-                      placeholder="Brand (optional) — search or add new"
+                      placeholder={t('admin.products.brandPlaceholder')}
                       className={fieldClass()}
                     />
-                    <p className="text-xs text-gray-400 mt-1">Type to search, or enter a new brand</p>
+                    <p className="text-xs text-gray-400 mt-1">{t('admin.products.brandHint')}</p>
                   </div>
                 </div>
               </div>
@@ -921,11 +901,11 @@ export default function ProductsPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
                   <Wallet size={12} strokeWidth={2.5} />
-                  Pricing
+                  {t('admin.products.pricing')}
                 </div>
                 <div className="grid md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Selling Price (optional)</label>
+                    <label className="block text-xs text-gray-500 mb-1">{t('admin.products.sellingPriceLabel')}</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
                         Rp
@@ -948,7 +928,7 @@ export default function ProductsPage() {
                     )}
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Cost Price (optional)</label>
+                    <label className="block text-xs text-gray-500 mb-1">{t('admin.products.costPriceLabel')}</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
                         Rp
@@ -978,13 +958,12 @@ export default function ProductsPage() {
                         : 'bg-red-50 border-red-200 text-red-800'
                     }`}
                   >
-                    Margin: {formatIDR(marginPreview.profit)} ({marginPreview.pct.toFixed(1)}%)
+                    {t('admin.products.marginLabel', { amount: formatIDR(marginPreview.profit), pct: marginPreview.pct.toFixed(1) })}
                   </div>
                 )}
 
                 <p className="text-xs text-gray-400">
-                  Stock isn&apos;t set here — new products start with no stock. Add inventory for a location from
-                  the Stock page, or edit the product below once it exists.
+                  {t('admin.products.stockNote')}
                 </p>
               </div>
 
@@ -994,16 +973,16 @@ export default function ProductsPage() {
                   disabled={loading}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  {loading ? 'Creating...' : 'Create Product'}
+                  {loading ? t('common.creating') : t('admin.products.createProduct')}
                 </button>
                 <button
                   onClick={resetCreateForm}
                   disabled={loading}
                   className="px-4 py-2 text-gray-500 text-sm hover:text-blue-700 disabled:opacity-40 transition-colors"
                 >
-                  Clear
+                  {t('common.clear')}
                 </button>
-                <span className="text-xs text-gray-400 ml-auto hidden md:inline">⌘/Ctrl + Enter to submit</span>
+                <span className="text-xs text-gray-400 ml-auto hidden md:inline">{t('admin.products.shortcutHint')}</span>
               </div>
             </div>
           )}
@@ -1012,11 +991,11 @@ export default function ProductsPage() {
         {/* Product Table */}
         <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
           <div className="px-4 py-3 border-b border-blue-500/15 bg-blue-50/60">
-            <h2 className="text-sm font-semibold">Product Catalog</h2>
+            <h2 className="text-sm font-semibold">{t('admin.products.productCatalog')}</h2>
           </div>
 
           {products.length === 0 ? (
-            <div className="p-6 text-center text-sm text-gray-500">No products found</div>
+            <div className="p-6 text-center text-sm text-gray-500">{t('admin.products.noProductsFound')}</div>
           ) : (
             <div className="overflow-x-auto">
               {/*
@@ -1050,28 +1029,28 @@ export default function ProductsPage() {
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Name"
+                      label={t('common.name')}
                       columnKey="name"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Category"
+                      label={t('admin.products.categoryColumn')}
                       columnKey="category"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Brand"
+                      label={t('admin.products.brandColumn')}
                       columnKey="brand"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label="Selling Price"
+                      label={t('admin.products.sellingPriceColumn')}
                       columnKey="sellingPrice"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
@@ -1079,7 +1058,7 @@ export default function ProductsPage() {
                       className="whitespace-nowrap"
                     />
                     <SortableTh<SortKey>
-                      label="Cost Price"
+                      label={t('admin.products.costPriceColumn')}
                       columnKey="costPrice"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
@@ -1091,15 +1070,15 @@ export default function ProductsPage() {
                         can't ride along here without changing that type —
                         dropped rather than forcing a cast. */}
                     <SortableTh<SortKey>
-                      label="Total Stock"
+                      label={t('admin.products.totalStockColumn')}
                       columnKey="stock"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
                       className="whitespace-nowrap"
                     />
-                    <th className="text-left px-4 py-3 font-semibold">Status</th>
-                    <th className="text-right px-4 py-3 font-semibold">Action</th>
+                    <th className="text-left px-4 py-3 font-semibold">{t('common.status')}</th>
+                    <th className="text-right px-4 py-3 font-semibold">{t('common.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1129,7 +1108,7 @@ export default function ProductsPage() {
                                   <p className="text-xs text-red-600 mt-1">{editFieldErrors.sku}</p>
                                 )}
                                 {!editFieldErrors.sku && editDuplicateSku && (
-                                  <p className="text-xs text-amber-600 mt-1">Duplicate SKU</p>
+                                  <p className="text-xs text-amber-600 mt-1">{t('admin.products.duplicateSku')}</p>
                                 )}
                               </div>
                             ) : (
@@ -1169,7 +1148,7 @@ export default function ProductsPage() {
                                       setEditFieldErrors((f) => ({ ...f, category: undefined }));
                                   }}
                                   options={categories}
-                                  placeholder="Category"
+                                  placeholder={t('admin.products.categoryColumn')}
                                   className={rowFieldClass(editFieldErrors.category)}
                                 />
                                 {editFieldErrors.category && (
@@ -1188,7 +1167,7 @@ export default function ProductsPage() {
                                   value={editBrand}
                                   onChange={setEditBrand}
                                   options={brands}
-                                  placeholder="Brand"
+                                  placeholder={t('admin.products.brandColumn')}
                                   className={rowFieldClass()}
                                 />
                               </div>
@@ -1219,7 +1198,7 @@ export default function ProductsPage() {
                             ) : product.sellingPrice != null ? (
                               <CellText value={formatIDR(product.sellingPrice)} />
                             ) : (
-                              <span className="text-gray-400">No price</span>
+                              <span className="text-gray-400">{t('admin.products.noPrice')}</span>
                             )}
                           </td>
 
@@ -1245,7 +1224,7 @@ export default function ProductsPage() {
                             ) : product.costPrice != null ? (
                               <CellText value={formatIDR(product.costPrice)} />
                             ) : (
-                              <span className="text-gray-400">No price</span>
+                              <span className="text-gray-400">{t('admin.products.noPrice')}</span>
                             )}
                           </td>
 
@@ -1253,7 +1232,7 @@ export default function ProductsPage() {
                               the panel below while editing to apply a delta. */}
                           <td
                             className={`px-4 py-3 align-top ${cellHighlight('stock')}`}
-                            title={isEditing ? undefined : 'Edit to adjust stock'}
+                            title={isEditing ? undefined : t('admin.products.editToAdjustStock')}
                           >
                             <StockBadge stock={stock} />
                           </td>
@@ -1266,7 +1245,7 @@ export default function ProductsPage() {
                                   : 'bg-gray-100 text-gray-600 border-gray-300'
                               }`}
                             >
-                              {product.active ? 'Active' : 'Archived'}
+                              {product.active ? t('admin.products.active') : t('admin.products.archived')}
                             </span>
                           </td>
 
@@ -1276,7 +1255,7 @@ export default function ProductsPage() {
                                 <button
                                   onClick={() => saveEditProduct(product.id)}
                                   disabled={savingEdit}
-                                  title="Save"
+                                  title={t('common.save')}
                                   className="p-1.5 rounded-md border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-40 transition-colors"
                                 >
                                   <Check size={14} strokeWidth={2.5} />
@@ -1284,7 +1263,7 @@ export default function ProductsPage() {
                                 <button
                                   onClick={cancelEditProduct}
                                   disabled={savingEdit}
-                                  title="Cancel"
+                                  title={t('common.cancel')}
                                   className="p-1.5 rounded-md border border-blue-500/20 text-gray-600 hover:bg-blue-50 disabled:opacity-40 transition-colors"
                                 >
                                   <X size={14} strokeWidth={2.5} />
@@ -1294,7 +1273,7 @@ export default function ProductsPage() {
                               <div className="flex flex-wrap justify-end gap-2">
                                 <button
                                   onClick={() => startEditProduct(product)}
-                                  title="Edit product"
+                                  title={t('admin.products.editProductTitle')}
                                   className="p-1.5 rounded-md border border-blue-500/20 text-gray-600 hover:bg-blue-50 transition-colors"
                                 >
                                   <Pencil size={14} strokeWidth={2} />
@@ -1304,14 +1283,14 @@ export default function ProductsPage() {
                                     onClick={() => requestArchive(product.id)}
                                     className="px-3 py-1.5 rounded-md border border-red-300 text-red-700 text-xs font-semibold hover:bg-red-50 transition-colors"
                                   >
-                                    Archive
+                                    {t('admin.products.archive')}
                                   </button>
                                 ) : (
                                   <button
                                     onClick={() => restoreProduct(product.id)}
                                     className="px-3 py-1.5 rounded-md border border-green-300 text-green-700 text-xs font-semibold hover:bg-green-50 transition-colors"
                                   >
-                                    Restore
+                                    {t('admin.products.restore')}
                                   </button>
                                 )}
                               </div>
@@ -1327,11 +1306,11 @@ export default function ProductsPage() {
                             <td colSpan={9} className="px-4 py-3">
                               <div className="flex flex-wrap items-end gap-3">
                                 <div className="flex flex-col gap-1">
-                                  <label className="text-xs font-semibold text-gray-500">OEM number</label>
+                                  <label className="text-xs font-semibold text-gray-500">{t('admin.products.oemNumberLabel')}</label>
                                   <input
                                     value={editOem}
                                     onChange={(e) => setEditOem(e.target.value)}
-                                    placeholder="optional"
+                                    placeholder={t('common.optional')}
                                     className={`${rowFieldClass()} w-40`}
                                   />
                                 </div>
@@ -1340,14 +1319,14 @@ export default function ProductsPage() {
 
                                 <div className="flex flex-col gap-1">
                                   <label className="text-xs font-semibold text-gray-500">
-                                    Adjust stock — Location
+                                    {t('admin.products.adjustStockLocationLabel')}
                                   </label>
                                   <select
                                     value={editStockLocationId}
                                     onChange={(e) => setEditStockLocationId(e.target.value)}
                                     className={`${rowFieldClass()} w-40`}
                                   >
-                                    <option value="">Select location</option>
+                                    <option value="">{t('admin.products.selectLocation')}</option>
                                     {locations.map((l) => (
                                       <option key={l.id} value={l.id}>
                                         {l.name}
@@ -1357,7 +1336,7 @@ export default function ProductsPage() {
                                 </div>
                                 <div className="flex flex-col gap-1">
                                   <label className="text-xs font-semibold text-gray-500">
-                                    Qty (+ in / − out)
+                                    {t('admin.products.qtyLabel')}
                                   </label>
                                   <input
                                     type="number"
@@ -1369,7 +1348,7 @@ export default function ProductsPage() {
                                 </div>
                                 <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
                                   <label className="text-xs font-semibold text-gray-500">
-                                    Reason (logged on the event)
+                                    {t('admin.products.reasonLabel')}
                                   </label>
                                   <input
                                     value={editStockReason}
@@ -1379,10 +1358,7 @@ export default function ProductsPage() {
                                 </div>
                               </div>
                               <p className="text-xs text-gray-400 mt-2">
-                                Leave qty at 0 to skip a stock change. Adjustments made here go through the same
-                                stock endpoint as the Stock page and show up on this product&apos;s Event History
-                                — by default tagged &quot;{DEFAULT_ADJUST_REASON}&quot; so they&apos;re easy to
-                                tell apart from warehouse-floor activity.
+                                {t('admin.products.stockAdjustNote', { reason: DEFAULT_ADJUST_REASON })}
                               </p>
                             </td>
                           </tr>

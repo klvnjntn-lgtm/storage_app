@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function RecordPaymentDialog({
   invoiceId,
@@ -16,6 +17,7 @@ export function RecordPaymentDialog({
   onRecorded: () => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   const [amount, setAmount] = useState(balanceDue);
   const [method, setMethod] = useState('CASH');
   const [note, setNote] = useState('');
@@ -26,11 +28,11 @@ export function RecordPaymentDialog({
 
   async function submit() {
     if (amount <= 0) {
-      setError('Amount must be greater than 0');
+      setError(t('sales.recordPayment.amountMustBeGreaterThanZero'));
       return;
     }
     if (exceedsBalance) {
-      setError(`Amount cannot exceed the balance due (${formatIDR(balanceDue)})`);
+      setError(t('sales.recordPayment.amountExceedsBalance', { balance: formatIDR(balanceDue) }));
       return;
     }
 
@@ -43,12 +45,12 @@ export function RecordPaymentDialog({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.message ?? 'Failed to record payment');
+        throw new Error(body.message ?? t('sales.recordPayment.failedToRecordPayment'));
       }
       onRecorded();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to record payment');
+      setError(e instanceof Error ? e.message : t('sales.recordPayment.failedToRecordPayment'));
     } finally {
       setSubmitting(false);
     }
@@ -56,9 +58,9 @@ export function RecordPaymentDialog({
 
   return (
     <div className="p-4 space-y-3">
-      <p className="text-sm text-gray-500">Balance due: {formatIDR(balanceDue)}</p>
+      <p className="text-sm text-gray-500">{t('sales.recordPayment.balanceDue', { balance: formatIDR(balanceDue) })}</p>
       <label className="block">
-        <span className="text-sm">Amount</span>
+        <span className="text-sm">{t('sales.recordPayment.amountLabel')}</span>
         <input
           type="number"
           min={1}
@@ -68,31 +70,31 @@ export function RecordPaymentDialog({
           className={`w-full border rounded px-2 py-1 ${exceedsBalance ? 'border-red-400' : ''}`}
         />
         {exceedsBalance && (
-          <span className="text-xs text-red-600">Exceeds balance due</span>
+          <span className="text-xs text-red-600">{t('sales.recordPayment.exceedsBalance')}</span>
         )}
       </label>
       <label className="block">
-        <span className="text-sm">Method</span>
+        <span className="text-sm">{t('sales.recordPayment.methodLabel')}</span>
         <select value={method} onChange={(e) => setMethod(e.target.value)} className="w-full border rounded px-2 py-1">
-          <option value="CASH">Cash</option>
-          <option value="TRANSFER">Transfer</option>
-          <option value="QRIS">QRIS</option>
-          <option value="OTHER">Other</option>
+          <option value="CASH">{t('sales.recordPayment.methodCash')}</option>
+          <option value="TRANSFER">{t('sales.recordPayment.methodTransfer')}</option>
+          <option value="QRIS">{t('sales.recordPayment.methodQris')}</option>
+          <option value="OTHER">{t('sales.recordPayment.methodOther')}</option>
         </select>
       </label>
       <label className="block">
-        <span className="text-sm">Note (optional)</span>
+        <span className="text-sm">{t('sales.recordPayment.noteLabel')}</span>
         <input value={note} onChange={(e) => setNote(e.target.value)} className="w-full border rounded px-2 py-1" />
       </label>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex justify-end gap-2">
-        <button onClick={onClose} className="px-3 py-1">Cancel</button>
+        <button onClick={onClose} className="px-3 py-1">{t('common.cancel')}</button>
         <button
           onClick={submit}
           disabled={submitting || amount <= 0 || exceedsBalance}
           className="px-3 py-1 bg-black text-white rounded disabled:bg-gray-300"
         >
-          {submitting ? 'Recording...' : 'Record payment'}
+          {submitting ? t('sales.recordPayment.recording') : t('sales.recordPayment.recordPayment')}
         </button>
       </div>
     </div>

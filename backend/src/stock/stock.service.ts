@@ -98,20 +98,26 @@ export class StockService {
   // against the SAME product+location blocks here until the first
   // transaction commits or rolls back, so whatever this call reads next is
   // guaranteed current. Returns 0 (not null) when no Stock row exists yet.
-  private async lockStockRow(
+  // Public so callers that need the same row-locked read (e.g.
+  // WarehouseService.move(), which decrements a source and increments a
+  // destination in one transaction) don't reimplement it with a plain,
+  // unlocked read.
+  async lockStockRow(
     client: Prisma.TransactionClient,
     orgId: string,
     productId: string,
     locationId: string,
   ): Promise<number> {
-    const rows = await client.$queryRaw<{ quantity: number }[]>(Prisma.sql`
+    // quantity is DECIMAL, which the pg driver returns as a string, not a
+    // number — despite what the generic type param below claims.
+    const rows = await client.$queryRaw<{ quantity: string }[]>(Prisma.sql`
       SELECT quantity FROM "Stock"
       WHERE "productId" = ${productId}
         AND "locationId" = ${locationId}
         AND "organizationId" = ${orgId}
       FOR UPDATE
     `);
-    return rows[0]?.quantity ?? 0;
+    return rows[0] ? Number(rows[0].quantity) : 0;
   }
 
   // -----------------------------
@@ -355,7 +361,7 @@ export class StockService {
         productId,
         locationId,
         qtyDelta,
-        newQuantity: stock.quantity,
+        newQuantity: Number(stock.quantity), // Decimal serializes to a string otherwise
       };
     });
   }
@@ -365,9 +371,11 @@ export class StockService {
   // -----------------------------
   // CHANGED — locks the Stock row before reading beforeQty (so a REPLACE
   // can't overwrite an in-flight sale's decrement), and posts the quantity
-  // change to the ledger against Opening Balance Equity. Cost comes from
-  // the import row's costPrice, falling back to Product.costPrice; with
-  // neither, stock moves but nothing is posted.
+  // change to the ledger: net increases against Opening Balance Equity,
+  // net decreases against Inventory Adjustments (so a REPLACE that lowers
+  // stock actually hits the P&L instead of disappearing into equity). Cost
+  // comes from the import row's costPrice, falling back to Product.costPrice;
+  // with neither, stock moves but nothing is posted.
   async import(
     orgId: string,
     userId: string,
@@ -395,6 +403,11 @@ export class StockService {
           row.qty == null
         ) {
           rejected.push({ ...row, reason: 'missing fields' });
+          continue;
+        }
+
+        if (typeof row.qty !== 'number' || Number.isNaN(row.qty) || row.qty < 0) {
+          rejected.push({ ...row, reason: 'qty must be a non-negative number' });
           continue;
         }
 
@@ -471,6 +484,10 @@ export class StockService {
           const unitCost =
             row.costPrice ?? (costRow?.costPrice != null ? Number(costRow.costPrice) : null);
 
+          // A net increase (bulk-loading/adding stock) is treated as an
+          // opening-balance event; a net decrease (a REPLACE that lowers
+          // quantity, i.e. shrinkage) must hit the P&L-relevant Inventory
+          // Adjustments account instead — same distinction adjust() makes.
           await this.postingRules.postStockAdjustment(
             orgId,
             {
@@ -480,7 +497,7 @@ export class StockService {
               qtyDelta: afterQty - beforeQty,
               unitCost,
               locationId: location.id,
-              counter: 'OPENING_BALANCE',
+              counter: afterQty - beforeQty < 0 ? 'ADJUSTMENT' : 'OPENING_BALANCE',
             },
             tx,
           );
@@ -511,10 +528,13 @@ export class StockService {
   // -----------------------------
   async get(orgId: string, productId: string) {
     await this.assertProductOwnership(orgId, productId);
-    return this.prisma.stock.findMany({
+    const rows = await this.prisma.stock.findMany({
       where: { productId, organizationId: orgId },               // 🔒
       include: { location: true },
     });
+    // quantity is Decimal, which serializes to a JSON string otherwise —
+    // the frontend stock detail page sums these client-side as numbers.
+    return rows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
   }
 
   // -----------------------------

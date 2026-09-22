@@ -11,11 +11,16 @@ export function formatIDR(amount: number): string {
 // Shorter form for tight layouts (e.g. 3-up summary cards on narrow
 // phones) — e.g. "Rp 12,3jt" instead of "Rp 12.345.678", which doesn't
 // fit three-across on a small screen without wrapping or overflowing.
+// FIX — was dividing the raw signed `amount` (not `abs`) for the two
+// smaller-magnitude branches, so a negative value would have rendered as
+// "Rp -1.5jt" instead of "-Rp 1.5jt" — same bug independently fixed in
+// every page that copy-pasted this function instead of importing it.
 export function formatIDRCompact(amount: number): string {
   const abs = Math.abs(amount);
-  if (abs >= 1_000_000_000) return `Rp ${(amount / 1_000_000_000).toFixed(1)}M`;
-  if (abs >= 1_000_000) return `Rp ${(amount / 1_000_000).toFixed(1)}jt`;
-  if (abs >= 1_000) return `Rp ${(amount / 1_000).toFixed(0)}rb`;
+  const sign = amount < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}Rp ${(abs / 1_000_000_000).toFixed(1)}M`;
+  if (abs >= 1_000_000) return `${sign}Rp ${(abs / 1_000_000).toFixed(1)}jt`;
+  if (abs >= 1_000) return `${sign}Rp ${(abs / 1_000).toFixed(0)}rb`;
   return formatIDR(amount);
 }
 

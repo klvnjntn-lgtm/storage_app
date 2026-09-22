@@ -3,19 +3,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { ArrowLeft, Save, Minus, Plus, Trash2, Pencil, Percent, Wrench, X, AlertCircle, CalendarClock, MessageSquareText } from 'lucide-react';
+import { Save, Minus, Plus, Trash2, Pencil, Percent, Wrench, X, AlertCircle, CalendarClock, MessageSquareText, UserRound } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { useHasModule } from '@/lib/useHasModule';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
+import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import {
   CartLine,
+  DiscountType,
+  Employee,
   InvoiceFormat,
   LocationOption,
   ProductSearchResult,
   ServiceLine,
   TaxRate,
 } from '@/app/components/invoices/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type RawTaxRate = TaxRate & { archivedAt: string | null };
 
@@ -23,10 +27,25 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+// Mirrors invoices/new/page.tsx's lineDiscountAmount exactly — FIXED is
+// capped at the line's gross subtotal so a mistyped discount can't push
+// a single line negative; PERCENTAGE is clamped to 0-100 in the change
+// handlers below, not here.
+function lineDiscountAmount(
+  lineSubtotal: number,
+  discountType: DiscountType | null,
+  discountValue: number | null,
+): number {
+  if (discountType === 'PERCENTAGE') return round2(lineSubtotal * ((discountValue ?? 0) / 100));
+  if (discountType === 'FIXED') return round2(Math.min(discountValue ?? 0, lineSubtotal));
+  return 0;
+}
+
 export default function EditIssuedInvoicePage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const { t } = useLanguage();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -51,6 +70,9 @@ export default function EditIssuedInvoicePage() {
 
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [posPricingEnabled, setPosPricingEnabled] = useState(false);
+
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<string>('');
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProductSearchResult[]>([]);
@@ -92,6 +114,15 @@ export default function EditIssuedInvoicePage() {
   }, []);
 
   useEffect(() => {
+    async function loadEmployees() {
+      const res = await apiFetch('/payroll/employees');
+      if (!res.ok) return;
+      setEmployees(await res.json());
+    }
+    loadEmployees();
+  }, []);
+
+  useEffect(() => {
     async function loadInvoice() {
       setLoading(true);
       setLoadError('');
@@ -99,7 +130,7 @@ export default function EditIssuedInvoicePage() {
         const res = await apiFetch(`/invoices/${params.id}/edit-detail`);
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          setLoadError(body?.message ?? `Failed to load invoice (${res.status})`);
+          setLoadError(body?.message ?? t('sales.invoiceEdit.failedToLoadInvoice', { status: res.status }));
           return;
         }
         const invoice = await res.json();
@@ -111,6 +142,7 @@ export default function EditIssuedInvoicePage() {
           invoice.vehicle ? `${invoice.vehicle.plateNumber} · ${invoice.vehicle.vehicleModel}` : null,
         );
         setDueDate(invoice.dueDate ? String(invoice.dueDate).slice(0, 10) : '');
+        setEmployeeId(invoice.employeeId ?? '');
 
         const restoredCart: Record<string, CartLine> = {};
         const restoredServices: ServiceLine[] = [];
@@ -130,6 +162,7 @@ if (item.productId) {
       sku: item.product?.sku ?? '',
       unit: item.product?.unit ?? '',
       barcode: item.product?.barcode ?? '',
+      image: null,
       sellingPrice: Number(item.unitPrice ?? 0),
       stockByLocation: [],
     },
@@ -138,8 +171,12 @@ if (item.productId) {
     locationId,
     unit: item.unit ?? null,
     locationName,
-    discountType: item.discountType ?? 'PERCENTAGE',
-    discountValue: Number(item.discountValue ?? 0),
+    // FIX — was defaulting to 'PERCENTAGE' with value 0 regardless of
+    // whether the line actually had a discount, which fabricated a
+    // discountType on lines that never had one. null means "no discount,"
+    // matching how addToCart()/new-invoice's restore both treat it.
+    discountType: item.discountType ?? null,
+    discountValue: item.discountValue != null ? Number(item.discountValue) : null,
     taxRateIds,
     // NEW — floor for changeQty()'s decrement below. The backend now
     // refuses to save a line below its fulfilledQuantity (physical stock
@@ -149,17 +186,32 @@ if (item.productId) {
     // 07-frontend-type-patches.md.
     fulfilledQuantity: item.fulfilledQuantity ?? 0,
   };
-          }
+} else {
+  // FIX — this branch never existed, so restoredServices stayed []
+  // forever and setServices([]) below silently wiped every service
+  // (labor) line off the invoice the moment it was opened for edit —
+  // saving any change then permanently dropped those lines server-side.
+  restoredServices.push({
+    key: `svc_restored_${item.id}`,
+    description: item.description ?? '',
+    unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
+    unit: item.unit ?? null,
+    discountType: item.discountType ?? null,
+    discountValue: item.discountValue != null ? Number(item.discountValue) : null,
+    taxRateIds,
+  });
+}
         }
         setCart(restoredCart);
         setServices(restoredServices);
       } catch {
-        setLoadError('Could not reach the server.');
+        setLoadError(t('sales.invoiceEdit.serverUnreachable'));
       } finally {
         setLoading(false);
       }
     }
     loadInvoice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
   useEffect(() => {
@@ -211,21 +263,33 @@ function addToCart(product: ProductSearchResult) {
   if (locationFilter) {
     target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
     if (!target || target.quantity <= 0) {
-      setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
+      setError(t('sales.invoiceEdit.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
       return;
     }
   } else {
     target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
     if (!target || target.quantity <= 0) {
-      setError(`"${product.name}" has no stock at any location.`);
+      setError(t('sales.invoiceEdit.noStockAnywhere', { name: product.name }));
       return;
     }
   }
   const resolvedTarget = target;
   const key = cartKey(product.id, resolvedTarget.locationId);
+
+  // FIX — was missing entirely, unlike invoices/new/orders/new/
+  // quotations/new, which all cap at resolvedTarget.quantity. Without
+  // this, repeatedly clicking "Add to cart" oversubscribed stock with no
+  // warning. POS mode intentionally allows overselling past this point
+  // via the stepper (see changeQty below), but the very first add should
+  // still respect real stock, same as every sibling page.
+  const nextQty = (cart[key]?.quantity ?? 0) + 1;
+  if (!posPricingEnabled && nextQty > resolvedTarget.quantity) {
+    setError(t('sales.invoiceEdit.onlyAvailable', { qty: resolvedTarget.quantity, name: product.name, location: resolvedTarget.locationName }));
+    return;
+  }
+
   setCart((prev) => {
     const existing = prev[key];
-    const nextQty = (existing?.quantity ?? 0) + 1;
     const defaultRate = taxRates.find((r) => r.isDefault);
     return {
       ...prev,
@@ -236,8 +300,11 @@ function addToCart(product: ProductSearchResult) {
         unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
         locationId: resolvedTarget.locationId,
         locationName: resolvedTarget.locationName,
-        discountType: existing?.discountType ?? 'PERCENTAGE',
-        discountValue: existing?.discountValue ?? 0,
+        // FIX — was defaulting to 'PERCENTAGE'/0, fabricating a discount
+        // on every newly-added line. null means "no discount," matching
+        // invoices/new/page.tsx's addToCart.
+        discountType: existing?.discountType ?? null,
+        discountValue: existing?.discountValue ?? null,
         taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
         // A newly added line has nothing fulfilled yet, whether or not
         // one already existed with a floor from the restored invoice —
@@ -265,8 +332,14 @@ function addToCart(product: ProductSearchResult) {
         const { [key]: _removed, ...rest } = prev;
         return rest;
       }
+      // FIX — was an unconditional ceiling with no POS bypass, while the
+      // "+" button's disabled state (below, in the JSX) already implied
+      // one (`disabled={!posPricingEnabled && line.quantity >= available}`).
+      // The button looked enabled in POS mode past available stock but
+      // silently did nothing — the "sell past stock in POS mode" feature
+      // never actually worked. Mirrors CartPanel.tsx's posModeEnabled bypass.
       const available = stockAtLineLocation(line);
-      if (nextQty > available) return prev;
+      if (!posPricingEnabled && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
     });
   }
@@ -303,6 +376,36 @@ function addToCart(product: ProductSearchResult) {
     });
   }
 
+  // NEW — this page had no discount UI/handlers at all, even though
+  // restored lines could already carry a discount from the original
+  // invoice (see loadInvoice() above). Percentage is clamped to 0-100 —
+  // unlike invoices/new's changeLineDiscount, which doesn't clamp the
+  // upper bound and can drive a line's net amount negative.
+  function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
+    setCart((prev) => {
+      const line = prev[key];
+      if (!line) return prev;
+      if (discountType === null) return { ...prev, [key]: { ...line, discountType: null, discountValue: null } };
+      const parsed = Number(rawValue);
+      const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+      const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (line.discountValue ?? 0);
+      return { ...prev, [key]: { ...line, discountType, discountValue: nextValue } };
+    });
+  }
+
+  function changeServiceDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
+    setServices((prev) =>
+      prev.map((s) => {
+        if (s.key !== key) return s;
+        if (discountType === null) return { ...s, discountType: null, discountValue: null };
+        const parsed = Number(rawValue);
+        const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+        const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (s.discountValue ?? 0);
+        return { ...s, discountType, discountValue: nextValue };
+      }),
+    );
+  }
+
 function addService() {
   serviceCounterRef.current += 1;
   const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
@@ -314,8 +417,10 @@ function addService() {
       description: '',
       unitPrice: null,
       unit: null,
-      discountType: 'PERCENTAGE',
-      discountValue: 0,
+      // FIX — was 'PERCENTAGE'/0, fabricating a discount on every newly
+      // added service. null means "no discount."
+      discountType: null,
+      discountValue: null,
       taxRateIds: defaultRate ? [defaultRate.id] : [],
     },
   ]);
@@ -354,28 +459,56 @@ function changeServiceUnit(key: string, value: string) {
     );
   }
 
+  // FIX — was computing tax on the gross lineSubtotal with no discount
+  // netted out at all, unlike invoices/new/page.tsx which explicitly nets
+  // the discount out before tax ("otherwise a 100% discounted line would
+  // still carry tax"). A discounted line showed/submitted a total ~the
+  // discount amount too high.
   const cartLines = Object.entries(cart).map(([key, line]) => {
     const lineSubtotal = line.unitPrice * line.quantity;
+    const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
+    const netAmount = round2(lineSubtotal - discAmt);
     const lineRates = taxRates.filter((r) => line.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + lineSubtotal * (r.percentage / 100), 0));
-    return { key, ...line, lineSubtotal, lineTaxAmount, lineTotal: round2(lineSubtotal + lineTaxAmount) };
+    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + netAmount * (r.percentage / 100), 0));
+    return {
+      key,
+      ...line,
+      lineSubtotal,
+      lineDiscountAmount: discAmt,
+      netAmount,
+      lineTaxAmount,
+      lineTotal: round2(netAmount + lineTaxAmount),
+    };
   });
 
   const serviceLinesWithTotals = services.map((s) => {
     const lineSubtotal = s.unitPrice ?? 0;
+    const discAmt = lineDiscountAmount(lineSubtotal, s.discountType, s.discountValue);
+    const netAmount = round2(lineSubtotal - discAmt);
     const lineRates = taxRates.filter((r) => s.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + lineSubtotal * (r.percentage / 100), 0));
-    return { ...s, lineSubtotal, lineTaxAmount, lineTotal: round2(lineSubtotal + lineTaxAmount) };
+    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + netAmount * (r.percentage / 100), 0));
+    return {
+      ...s,
+      lineSubtotal,
+      lineDiscountAmount: discAmt,
+      netAmount,
+      lineTaxAmount,
+      lineTotal: round2(netAmount + lineTaxAmount),
+    };
   });
 
   const subtotal =
     cartLines.reduce((sum, l) => sum + l.lineSubtotal, 0) +
     serviceLinesWithTotals.reduce((sum, s) => sum + s.lineSubtotal, 0);
+  const discount = round2(
+    cartLines.reduce((sum, l) => sum + l.lineDiscountAmount, 0) +
+      serviceLinesWithTotals.reduce((sum, s) => sum + s.lineDiscountAmount, 0),
+  );
   const taxAmount = round2(
     cartLines.reduce((sum, l) => sum + l.lineTaxAmount, 0) +
       serviceLinesWithTotals.reduce((sum, s) => sum + s.lineTaxAmount, 0),
   );
-  const total = subtotal + taxAmount;
+  const total = round2(subtotal - discount + taxAmount);
 
   const hasEmptyServicePrice = services.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = services.some((s) => !s.description.trim());
@@ -383,21 +516,24 @@ function changeServiceUnit(key: string, value: string) {
 
   async function handleSave() {
     if (nothingLeft) {
-      setError('An invoice needs at least one item or service.');
+      setError(t('sales.invoiceEdit.needAtLeastOneItem'));
       return;
     }
     if (hasWorkshopRms && (hasEmptyServicePrice || hasEmptyServiceDescription)) {
-      setError('Enter a description and price for every service (use 0 if free).');
+      setError(t('sales.invoiceEdit.emptyServiceError'));
       return;
     }
     if (!reason.trim()) {
-      setError('A reason is required to edit an issued invoice.');
+      setError(t('sales.invoiceEdit.reasonRequired'));
       return;
     }
 
     setSaving(true);
     setError('');
     try {
+      // FIX — both item types were missing discountType/discountValue
+      // entirely, so saving any change to a discounted invoice silently
+      // dropped the discount, permanently inflating the invoice total.
       const productItems = cartLines.map((line) => ({
         productId: line.product.id,
         quantity: line.quantity,
@@ -405,6 +541,8 @@ function changeServiceUnit(key: string, value: string) {
         unitPrice: line.unitPrice,
         unit: line.unit ?? undefined,
         taxRateIds: line.taxRateIds,
+        discountType: line.discountType ?? undefined,
+        discountValue: line.discountValue ?? undefined,
       }));
       const serviceItems = hasWorkshopRms
         ? services
@@ -412,9 +550,11 @@ function changeServiceUnit(key: string, value: string) {
             .map((s) => ({
               description: s.description.trim(),
               quantity: 1,
-              unit: s.unit ?? undefined,   
+              unit: s.unit ?? undefined,
               unitPrice: s.unitPrice as number,
               taxRateIds: s.taxRateIds,
+              discountType: s.discountType ?? undefined,
+              discountValue: s.discountValue ?? undefined,
             }))
         : [];
 
@@ -423,16 +563,17 @@ function changeServiceUnit(key: string, value: string) {
         body: JSON.stringify({
           items: [...productItems, ...serviceItems],
           dueDate: dueDate || undefined,
+          employeeId: employeeId || null,
           reason: reason.trim(),
         }),
       });
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `Failed to save changes (${res.status})`);
+        throw new Error(text || t('sales.invoiceEdit.failedToSaveChanges', { status: res.status }));
       }
       router.push(`/sales/invoices/${params.id}`);
     } catch (e: any) {
-      setError(e.message || 'Could not save changes');
+      setError(e.message || t('sales.invoiceEdit.couldNotSaveChanges'));
     } finally {
       setSaving(false);
     }
@@ -442,24 +583,17 @@ function changeServiceUnit(key: string, value: string) {
     <main className="min-h-screen bg-white text-black">
       <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-3 sm:px-6 py-3 sm:py-5 border-b-2 border-gray-300">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push(`/sales/invoices/${params.id}`)}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-black mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-gray-100 rounded-md"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to invoice
-          </button>
           <h1 className="text-xl sm:text-2xl font-bold truncate">
-            Edit {invoiceNumber ?? 'Invoice'}
+            {t('sales.invoiceEdit.editTitle', { number: invoiceNumber ?? t('sales.invoiceEdit.invoiceFallback') })}
           </h1>
           <p className="text-xs text-gray-500 truncate">
-            {customerName ?? 'No customer'}
+            {customerName ?? t('sales.invoiceEdit.noCustomer')}
             {vehicleLabel ? ` · ${vehicleLabel}` : ''}
           </p>
         </div>
       </div>
 
-      {loading && <p className="text-sm text-gray-500 p-4 sm:p-6 max-w-5xl mx-auto">Loading...</p>}
+      {loading && <p className="text-sm text-gray-500 p-4 sm:p-6 max-w-5xl mx-auto">{t('common.loading')}</p>}
       {loadError && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 m-4 sm:m-6 max-w-5xl mx-auto">
           {loadError}
@@ -484,7 +618,7 @@ function changeServiceUnit(key: string, value: string) {
             <div className="mb-3">
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
                 <CalendarClock size={12} strokeWidth={2} />
-                Due date
+                {t('sales.invoiceEdit.dueDateLabel')}
               </label>
               <input
                 type="date"
@@ -494,18 +628,40 @@ function changeServiceUnit(key: string, value: string) {
               />
             </div>
 
+            {employees.length > 0 && (
+              <div className="mb-3">
+                <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                  <UserRound size={12} strokeWidth={2} />
+                  {t('sales.invoiceEdit.employeeLabel')}
+                </label>
+                <select
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                >
+                  <option value="">{t('sales.invoiceEdit.noEmployee')}</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                      {e.position ? ` — ${e.position}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Reason for edit — required, sent as dto.reason and shown
                 later in the invoice detail page's Edit History list. */}
             <div className="mb-3">
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
                 <MessageSquareText size={12} strokeWidth={2} />
-                Reason for edit
+                {t('sales.invoiceEdit.reasonLabel')}
               </label>
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={2}
-                placeholder="e.g. Customer requested one more oil filter"
+                placeholder={t('sales.invoiceEdit.reasonPlaceholder')}
 className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focus:border-black ${
   !reason.trim() ? 'border-red-300' : 'border-gray-300'
 }`}
@@ -513,7 +669,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
             </div>
 
             {cartLines.length === 0 && services.length === 0 && (
-              <p className="text-sm text-gray-400">No items on this invoice</p>
+              <p className="text-sm text-gray-400">{t('sales.invoiceEdit.noItems')}</p>
             )}
 
             <div className="flex flex-col divide-y divide-gray-200">
@@ -531,28 +687,38 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                       <div className="min-w-0 flex-1">
                         <p className="text-sm truncate">{line.product.name}</p>
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          {editing ? (
-                            <div className="flex items-center gap-1 bg-white border-2 border-black rounded-md pl-2 pr-1 py-1">
-                              <span className="text-xs text-gray-400">Rp</span>
-                              <input
-                                type="number"
-                                min={0}
-                                autoFocus
-                                value={line.unitPrice}
-                                onChange={(e) => changeUnitPrice(line.key, e.target.value)}
-                                onBlur={() => setEditingPriceKey(null)}
-                                onKeyDown={(e) => e.key === 'Enter' && setEditingPriceKey(null)}
-                                className="w-20 text-xs outline-none"
-                              />
-                            </div>
+                          {/* FIX — was unconditionally editable regardless
+                              of POS pricing mode, unlike CartPanel.tsx's
+                              `priceEditable = posModeEnabled` gate used by
+                              the create flow. An org that locks prices
+                              outside POS mode lost that guarantee the
+                              moment a document reached this edit flow. */}
+                          {posPricingEnabled ? (
+                            editing ? (
+                              <div className="flex items-center gap-1 bg-white border-2 border-black rounded-md pl-2 pr-1 py-1">
+                                <span className="text-xs text-gray-400">Rp</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  autoFocus
+                                  value={line.unitPrice}
+                                  onChange={(e) => changeUnitPrice(line.key, e.target.value)}
+                                  onBlur={() => setEditingPriceKey(null)}
+                                  onKeyDown={(e) => e.key === 'Enter' && setEditingPriceKey(null)}
+                                  className="w-20 text-xs outline-none"
+                                />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setEditingPriceKey(line.key)}
+                                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+                              >
+                                <Pencil size={10} strokeWidth={2} className="text-gray-400" />
+                                {formatIDR(line.unitPrice)}
+                              </button>
+                            )
                           ) : (
-                            <button
-                              onClick={() => setEditingPriceKey(line.key)}
-                              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
-                            >
-                              <Pencil size={10} strokeWidth={2} className="text-gray-400" />
-                              {formatIDR(line.unitPrice)}
-                            </button>
+                            <span className="text-xs text-gray-500">{formatIDR(line.unitPrice)}</span>
                           )}
 <span className="text-xs text-gray-400">
   × {line.quantity}
@@ -563,7 +729,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                             refuse to go lower than expected. */}
                         {floor > 0 && (
                           <p className="text-xs text-amber-700 mt-1">
-                            {floor} unit{floor === 1 ? '' : 's'} already fulfilled — can't reduce below this
+                            {t(floor === 1 ? 'sales.invoiceEdit.unitFulfilledOne' : 'sales.invoiceEdit.unitFulfilledOther', { count: floor })}
                           </p>
                         )}
                       </div>
@@ -591,6 +757,12 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         </button>
                       </div>
                     </div>
+                    <LineDiscountControl
+                      discountType={line.discountType}
+                      discountValue={line.discountValue}
+                      discountAmount={line.lineDiscountAmount}
+                      onChange={(type, raw) => changeLineDiscount(line.key, type, raw)}
+                    />
                     {taxRates.length > 0 && (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <Percent size={10} strokeWidth={2} className="text-gray-400" />
@@ -611,14 +783,14 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
               <div className="mt-3 pt-3 border-t-2 border-gray-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                    <Wrench size={12} strokeWidth={2} /> Services
+                    <Wrench size={12} strokeWidth={2} /> {t('sales.invoiceEdit.servicesLabel')}
                   </span>
                   <button onClick={addService} className="text-xs px-2 py-1 rounded-md border border-gray-300 hover:border-black hover:bg-gray-50">
-                    + Add service
+                    {t('sales.invoiceEdit.addService')}
                   </button>
                 </div>
                 <div className="flex flex-col divide-y divide-gray-200">
-                  {services.map((s) => {
+                  {serviceLinesWithTotals.map((s) => {
                     const priceMissing = s.unitPrice === null;
                     return (
                       <div key={s.key} className="flex flex-col gap-2 py-2.5">
@@ -627,7 +799,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                             value={s.description}
                             onChange={(e) => changeServiceDescription(s.key, e.target.value)}
                             rows={2}
-                            placeholder="What service was done?"
+                            placeholder={t('sales.invoiceEdit.serviceDescriptionPlaceholder')}
                             className="flex-1 min-w-0 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
                           />
                           <button onClick={() => removeService(s.key)} className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0">
@@ -650,10 +822,16 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                             type="text"
                             value={s.unit ?? ''}
                             onChange={(e) => changeServiceUnit(s.key, e.target.value)}
-                            placeholder="Unit (optional)"
+                            placeholder={t('sales.invoiceEdit.unitPlaceholder')}
                             className="w-28 border-2 border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:border-black"
                           />
                         </div>
+                        <LineDiscountControl
+                          discountType={s.discountType}
+                          discountValue={s.discountValue}
+                          discountAmount={s.lineDiscountAmount}
+                          onChange={(type, raw) => changeServiceDiscount(s.key, type, raw)}
+                        />
                         {taxRates.length > 0 && (
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             <Percent size={10} strokeWidth={2} className="text-gray-400" />
@@ -674,17 +852,23 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
 
             <div className="border-t-2 border-gray-300 mt-3 pt-3 space-y-1">
               <div className="flex justify-between text-sm text-gray-600">
-                <span>Subtotal</span>
+                <span>{t('common.subtotal')}</span>
                 <span>{formatIDR(subtotal)}</span>
               </div>
+              {discount > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>{t('sales.invoiceEdit.discount')}</span>
+                  <span>−{formatIDR(discount)}</span>
+                </div>
+              )}
               {taxAmount > 0 && (
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Tax</span>
+                  <span>{t('sales.invoiceEdit.tax')}</span>
                   <span>{formatIDR(taxAmount)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold pt-1">
-                <span>Total</span>
+                <span>{t('common.total')}</span>
                 <span>{formatIDR(total)}</span>
               </div>
             </div>
@@ -695,7 +879,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
               className="w-full mt-4 flex items-center justify-center gap-2 bg-black text-white rounded-md p-3 text-sm font-semibold disabled:bg-gray-300"
             >
               <Save size={16} strokeWidth={2} />
-              {saving ? 'Saving...' : 'Save changes'}
+              {saving ? t('common.saving') : t('sales.invoiceEdit.saveChanges')}
             </button>
 
             {error && (

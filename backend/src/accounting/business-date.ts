@@ -6,31 +6,36 @@
 // entry's date or fiscal period goes through these helpers instead, so the
 // result is the same regardless of the server's own TZ.
 //
-// Timezone: ACCOUNTING_TIMEZONE env var (an IANA name), default Asia/Jakarta.
-// Read lazily so it works whether or not .env was loaded before import.
+// Timezone: per-organization (Organization.timezone, an IANA name) — these
+// helpers take no global config and read nothing from process.env. Callers
+// resolve the org's timezone first (via resolveTimezone()) and pass it in.
+// This used to be a single process-wide ACCOUNTING_TIMEZONE env var.
 
 import { BadRequestException } from '@nestjs/common';
 
-function getTimezone(): string {
-  return process.env.ACCOUNTING_TIMEZONE || 'Asia/Jakarta';
+export const DEFAULT_TIMEZONE = 'Asia/Jakarta';
+
+// Callers fetch { timezone: true } off Organization and pass the row
+// through this rather than assuming the column is always populated.
+export function resolveTimezone(org: { timezone?: string | null } | null | undefined): string {
+  return org?.timezone || DEFAULT_TIMEZONE;
 }
 
-let dateFormatter: Intl.DateTimeFormat | null = null;
-let dateFormatterTz: string | null = null;
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 
-function getDateFormatter(): Intl.DateTimeFormat {
-  const tz = getTimezone();
-  if (!dateFormatter || dateFormatterTz !== tz) {
+function getDateFormatter(tz: string): Intl.DateTimeFormat {
+  let f = dateFormatters.get(tz);
+  if (!f) {
     // Throws RangeError on an invalid zone name: fail loudly, not silently wrong.
-    dateFormatter = new Intl.DateTimeFormat('en-CA', {
+    f = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     });
-    dateFormatterTz = tz;
+    dateFormatters.set(tz, f);
   }
-  return dateFormatter;
+  return f;
 }
 
 // A Date at exactly 00:00:00.000 UTC is treated as a date-only value (what
@@ -47,23 +52,24 @@ function isDateOnly(d: Date): boolean {
 
 // Returns a Date at 00:00 UTC of the business calendar date, which is what
 // a @db.Date column stores and what getUTCFullYear()/getUTCMonth() read back.
-export function toBusinessDate(d: Date): Date {
+export function toBusinessDate(d: Date, tz: string): Date {
   if (isDateOnly(d)) {
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   }
-  const parts = getDateFormatter().formatToParts(d);
+  const parts = getDateFormatter(tz).formatToParts(d);
   const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
   return new Date(Date.UTC(get('year'), get('month') - 1, get('day')));
 }
 
 // "Today" in the business timezone: use this for default asOf/to values in
 // report controllers instead of new Date().
-export function todayBusinessDate(): Date {
-  return toBusinessDate(new Date());
+export function todayBusinessDate(tz: string): Date {
+  return toBusinessDate(new Date(), tz);
 }
 
 // Strict 'YYYY-MM-DD' -> Date at 00:00 UTC. Rejects anything else, including
 // impossible dates like 2026-02-31, with a 400 naming the offending param.
+// Timezone-independent: an explicit calendar date is unambiguous.
 export function parseDateOnly(value: string, name: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new BadRequestException(`${name} must be a date in YYYY-MM-DD format`);
@@ -77,9 +83,9 @@ export function parseDateOnly(value: string, name: string): Date {
 
 // Offset of the business timezone from UTC at a given instant, in ms
 // (positive east of UTC: Jakarta is +7h).
-function tzOffsetMs(instant: Date): number {
+function tzOffsetMs(instant: Date, tz: string): number {
   const f = new Intl.DateTimeFormat('en-US', {
-    timeZone: getTimezone(),
+    timeZone: tz,
     hourCycle: 'h23',
     year: 'numeric',
     month: '2-digit',
@@ -97,16 +103,16 @@ function tzOffsetMs(instant: Date): number {
 // The last instant (23:59:59.999) of a business calendar date, as a real
 // UTC instant. Use for reports that compare against TIMESTAMP columns
 // (invoice.issuedAt, supplierPayment.paidAt), so "as of Sep 30" includes
-// something issued at 22:00 WIB that day. Two passes keep it right across
-// DST zones; Asia/Jakarta has no DST.
-export function endOfBusinessDay(dateOnly: Date): Date {
+// something issued at 22:00 in the business timezone that day. Two passes
+// keep it right across DST zones.
+export function endOfBusinessDay(dateOnly: Date, tz: string): Date {
   const wall = Date.UTC(
     dateOnly.getUTCFullYear(),
     dateOnly.getUTCMonth(),
     dateOnly.getUTCDate(),
     23, 59, 59, 999,
   );
-  let t = wall - tzOffsetMs(new Date(wall));
-  t = wall - tzOffsetMs(new Date(t));
+  let t = wall - tzOffsetMs(new Date(wall), tz);
+  t = wall - tzOffsetMs(new Date(t), tz);
   return new Date(t);
 }

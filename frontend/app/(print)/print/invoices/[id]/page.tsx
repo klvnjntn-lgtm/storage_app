@@ -1,8 +1,8 @@
 // app/print/invoices/[id]/page.tsx
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import { InvoiceFormat } from '@/app/components/invoices/types';
-import { PAGE_CSS } from '@/lib/invoice-format';
-import { InvoicePrintView, toInvoiceView } from '@/lib/invoice-mapper';
+import { PAGE_CSS } from '@/lib/mappers/invoice-format';
+import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
 
 async function getPrintData(id: string, token: string): Promise<InvoicePrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;

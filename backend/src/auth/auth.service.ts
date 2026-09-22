@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -13,6 +14,8 @@ import { randomUUID, randomBytes, createHash } from 'crypto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -169,7 +172,15 @@ export class AuthService {
       data: { resetToken: tokenHash, resetTokenExpires: expires },
     });
 
-    await this.mailer.sendPasswordReset(user.email, rawToken);
+    // FIX — a mailer failure (bad SMTP creds, provider outage) must not
+    // bubble up as a 500: that would distinguish a real email (500) from
+    // a fake one (genericResponse below), defeating the whole point of
+    // this method returning identical responses either way.
+    try {
+      await this.mailer.sendPasswordReset(user.email, rawToken);
+    } catch (err) {
+      this.logger.error(`Failed to send password reset email to ${user.email}`, err instanceof Error ? err.stack : err);
+    }
 
     return genericResponse;
   }
@@ -204,6 +215,19 @@ export class AuthService {
     });
 
     return { message: 'Password has been reset' };
+  }
+
+  // FIX — there was no way for a user to invalidate their own token short
+  // of changing their password. JWTs are 7-day lived (auth.module.ts), so
+  // a leaked token previously stayed valid for up to 7 days with no
+  // user-triggered revocation. Nulling currentSessionId makes
+  // jwt.strategy.ts's session check reject the token on its very next use.
+  async logout(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { currentSessionId: null },
+    });
+    return { message: 'Logged out' };
   }
 
   private async issueToken(
@@ -241,6 +265,7 @@ export class AuthService {
         id: true,
         email: true,
         role: true,
+        avatarUrl: true,
         organization: {
           select: {
             id: true,
@@ -248,6 +273,14 @@ export class AuthService {
           },
         },
       },
+    });
+  }
+
+  async updateAvatar(userId: string, avatarUrl: string | null | undefined) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl: avatarUrl ?? null },
+      select: { id: true, email: true, role: true, avatarUrl: true },
     });
   }
 

@@ -2,12 +2,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ReceiveService } from '../receive/receive.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StockService } from '../stock/stock.service';
 
 @Injectable()
 export class WarehouseService {
   constructor(
     private readonly receiveService: ReceiveService,
     private readonly prisma: PrismaService,
+    private readonly stockService: StockService,
   ) {}
 
   async receive(
@@ -67,19 +69,25 @@ export class WarehouseService {
     if (!toLocation) throw new BadRequestException('Destination location not found');
 
     return this.prisma.$transaction(async (tx) => {
-      const stock = await tx.stock.findUnique({
-        where: {
-          productId_locationId: { productId, locationId: fromLocationId },
-        },
-      });
+      // Row-locked read (SELECT ... FOR UPDATE) so a concurrent move()/
+      // decrease()/fulfill()/adjust() against the same product+location
+      // can't both pass this check against a stale quantity.
+      const available = await this.stockService.lockStockRow(
+        tx,
+        organizationId,
+        productId,
+        fromLocationId,
+      );
 
-      if (!stock || stock.quantity < qty) {
+      if (available < qty) {
         throw new BadRequestException('Insufficient stock');
       }
 
       // Decrease source
       await tx.stock.update({
-        where: { id: stock.id },
+        where: {
+          productId_locationId: { productId, locationId: fromLocationId },
+        },
         data: { quantity: { decrement: qty } },
       });
 
@@ -115,7 +123,7 @@ export class WarehouseService {
   }
 
   async events(organizationId: string) {
-    return this.prisma.event.findMany({
+    const rows = await this.prisma.event.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
       take: 100, // basic pagination guard
@@ -125,6 +133,8 @@ export class WarehouseService {
         toLocation: { select: { name: true } },
       },
     });
+    // quantity is Decimal, which serializes to a JSON string otherwise.
+    return rows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
   }
 
   async getStock(organizationId: string, productId: string) {

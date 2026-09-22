@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Search, MapPin, MapPinOff, ChevronDown, Check } from 'lucide-react';
+import { Search, MapPin, MapPinOff, ChevronDown, Check, List, LayoutGrid, ImageOff } from 'lucide-react';
 import { LocationOption, ProductSearchResult } from './types';
 import { formatIDR } from '@/lib/format';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function ProductSearch({
   query,
@@ -26,8 +27,14 @@ export function ProductSearch({
   onAddToCart: (product: ProductSearchResult) => void;
   posModeEnabled: boolean;
 }) {
+  const { t } = useLanguage();
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
+  // Grid view is the only place a product's photo shows up here — the list
+  // rows stay text-only/compact, matching how this search looked before
+  // products could have images at all.
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -44,7 +51,30 @@ export function ProductSearch({
       <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
         <div className="flex items-center gap-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">
           <Search size={14} strokeWidth={2} className="text-blue-600/70" />
-          Search item
+          {t('sales.productSearch.searchItem')}
+        </div>
+
+        <div className="flex items-center gap-1 rounded-lg border border-blue-500/20 p-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            title={t('sales.productSearch.listView')}
+            className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+              viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700'
+            }`}
+          >
+            <List size={13} strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('grid')}
+            title={t('sales.productSearch.gridView')}
+            className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+              viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-700'
+            }`}
+          >
+            <LayoutGrid size={13} strokeWidth={2.5} />
+          </button>
         </div>
 
         <div className="relative" ref={locationDropdownRef}>
@@ -57,7 +87,7 @@ export function ProductSearch({
             }`}
           >
             <MapPin size={12} strokeWidth={2} />
-            {locationFilter ? locationFilter.name : 'All locations'}
+            {locationFilter ? locationFilter.name : t('sales.productSearch.allLocations')}
             <ChevronDown
               size={12}
               strokeWidth={2.5}
@@ -76,13 +106,13 @@ export function ProductSearch({
               >
                 <MapPinOff size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
                 <span className={!locationFilter ? 'font-semibold text-blue-700' : 'text-gray-700'}>
-                  All locations
+                  {t('sales.productSearch.allLocations')}
                 </span>
                 {!locationFilter && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
               </button>
 
               <div className="max-h-64 overflow-y-auto">
-                {locations.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">No locations found</p>}
+                {locations.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">{t('sales.productSearch.noLocationsFound')}</p>}
                 {locations.map((loc) => {
                   const selected = locationFilter?.id === loc.id;
                   return (
@@ -113,17 +143,17 @@ export function ProductSearch({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, SKU, or OEM..."
+          placeholder={t('sales.productSearch.searchPlaceholder')}
           autoFocus
           className="flex-1 min-w-0 text-base sm:text-sm outline-none placeholder:text-gray-400 bg-transparent"
         />
       </div>
 
-      <div className="mt-3 flex flex-col gap-2">
-        {searching && <p className="text-sm text-gray-500">Searching...</p>}
-        {!searching && query && results.length === 0 && <p className="text-sm text-gray-500">No matching items</p>}
+      <div className={viewMode === 'grid' ? 'mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2' : 'mt-3 flex flex-col gap-2'}>
+        {searching && <p className="text-sm text-gray-500">{t('sales.productSearch.searching')}</p>}
+        {!searching && query && results.length === 0 && <p className="text-sm text-gray-500">{t('sales.productSearch.noMatchingItems')}</p>}
         {!searching && !query && locationFilter && results.length === 0 && (
-          <p className="text-sm text-gray-500">Nothing stocked at {locationFilter.name}</p>
+          <p className="text-sm text-gray-500">{t('sales.productSearch.nothingStockedAt', { location: locationFilter.name })}</p>
         )}
 
         {results.map((product) => {
@@ -135,6 +165,48 @@ export function ProductSearch({
             ? product.stockByLocation.find((s) => s.locationId === locationFilter.id)?.quantity ?? 0
             : product.stockByLocation.reduce((s, l) => s + l.quantity, 0);
           const outOfStock = !posModeEnabled && relevantStock === 0;
+
+          if (viewMode === 'grid') {
+            const showImage = product.image && !brokenImageIds[product.id];
+            return (
+              <div
+                key={product.id}
+                onClick={() => {
+                  if (outOfStock) return;
+                  onAddToCart(product);
+                }}
+                className={`border rounded-xl overflow-hidden transition-colors ${
+                  outOfStock
+                    ? 'opacity-50 cursor-not-allowed border-gray-200'
+                    : 'cursor-pointer border-blue-500/15 hover:bg-blue-50/50 active:bg-blue-50 hover:border-blue-500/35'
+                }`}
+              >
+                <div className="aspect-square bg-blue-50/40 flex items-center justify-center">
+                  {showImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={product.image as string}
+                      alt={product.name}
+                      className="w-full h-full object-cover"
+                      onError={() => setBrokenImageIds((prev) => ({ ...prev, [product.id]: true }))}
+                    />
+                  ) : (
+                    <ImageOff size={22} strokeWidth={1.75} className="text-blue-200" />
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="text-xs font-medium break-words leading-snug line-clamp-2">{product.name}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{product.sku ?? '—'}</p>
+                  {!posModeEnabled && (
+                    <p className="text-xs font-semibold mt-1">
+                      {product.sellingPrice != null ? formatIDR(product.sellingPrice) : t('sales.productSearch.noPrice')}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={product.id}
@@ -160,13 +232,13 @@ export function ProductSearch({
                 </div>
                 {!posModeEnabled && (
                   <span className="text-sm font-semibold shrink-0 text-right whitespace-nowrap">
-                    {product.sellingPrice != null ? formatIDR(product.sellingPrice) : 'No price'}
+                    {product.sellingPrice != null ? formatIDR(product.sellingPrice) : t('sales.productSearch.noPrice')}
                   </span>
                 )}
               </div>
 
               <div className="flex flex-wrap gap-1.5 mt-2">
-                {product.stockByLocation.length === 0 && <span className="text-xs text-gray-400">No stock recorded</span>}
+                {product.stockByLocation.length === 0 && <span className="text-xs text-gray-400">{t('sales.productSearch.noStockRecorded')}</span>}
                 {product.stockByLocation.map((s) => (
                   <span
                     key={s.locationId}

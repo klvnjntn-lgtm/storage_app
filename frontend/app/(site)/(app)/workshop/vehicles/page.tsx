@@ -1,12 +1,14 @@
 // app/(app)/workshop/vehicles/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Car, Search } from 'lucide-react';
+import { Car, Search } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -21,13 +23,23 @@ type VehicleListItem = {
 
 export default function VehiclesPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
 
   const [vehicles, setVehicles] = useState<VehicleListItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
+  // Seeded from the URL so pressing the browser's Back button from a
+  // vehicle's detail page restores the same search/page instead of
+  // resetting to page 1 with no search.
+  const [query, setQuery] = useState<string>(() => getInitialParam('query', ''));
   const [error, setError] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+
+  useSyncQueryParams({
+    query: query.trim(),
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
 
   async function load(q?: string) {
     setLoading(true);
@@ -39,28 +51,44 @@ export default function VehiclesPage() {
         setVehicles(await res.json());
       } else {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Failed to load vehicles (${res.status})`);
+        setError(body?.message ?? t('workshop.vehiclesList.loadFailed', { status: res.status }));
       }
     } catch {
-      setError('Could not reach the server.');
+      setError(t('workshop.vehiclesList.serverError'));
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    load(query.trim() || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Skips its own first run — the mount effect above already covers the
+  // initial load, and re-running it here would fire a redundant duplicate
+  // fetch on every page load.
+  const isFirstDebounceRef = useRef(true);
   useEffect(() => {
+    if (isFirstDebounceRef.current) {
+      isFirstDebounceRef.current = false;
+      return;
+    }
     const timeout = setTimeout(() => load(query.trim() || undefined), 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   // Reset to page 1 whenever the query (and therefore the underlying
-  // result set) changes.
+  // result set) changes — but not on the very first run, or a `page`
+  // restored from the URL (e.g. via the browser's Back button) would get
+  // clobbered back to 1 before the list even finishes loading.
+  const isFirstPageResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstPageResetRef.current) {
+      isFirstPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [query]);
 
@@ -90,23 +118,15 @@ export default function VehiclesPage() {
           now lives here too, same as those pages. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Hub
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Car size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Vehicles
+                {t('workshop.vehiclesList.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Every vehicle on file, across all customers</p>
+              <p className="text-xs text-gray-500 truncate">{t('workshop.vehiclesList.subtitle')}</p>
             </div>
           </div>
 
@@ -116,7 +136,7 @@ export default function VehiclesPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by plate, model, VIN, or customer..."
+              placeholder={t('workshop.vehiclesList.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
           </div>
@@ -139,11 +159,11 @@ export default function VehiclesPage() {
             <table className="w-full text-sm min-w-[720px]">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Plate</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Car</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">Customer</th>
-                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">VIN</th>
-                  <th className="text-right px-4 py-3 font-semibold whitespace-nowrap">Latest Odometer</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">{t('workshop.vehiclesList.colPlate')}</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">{t('workshop.vehiclesList.colCar')}</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">{t('workshop.vehiclesList.colCustomer')}</th>
+                  <th className="text-left px-4 py-3 font-semibold whitespace-nowrap">{t('workshop.vehiclesList.colVin')}</th>
+                  <th className="text-right px-4 py-3 font-semibold whitespace-nowrap">{t('workshop.vehiclesList.colLatestOdometer')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -161,7 +181,9 @@ export default function VehiclesPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.vin ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-gray-600 whitespace-nowrap">
-                      {v.odometer != null ? `${v.odometer.toLocaleString('id-ID')} km` : '—'}
+                      {v.odometer != null
+                        ? t('workshop.vehiclesList.km', { value: v.odometer.toLocaleString(language === 'id' ? 'id-ID' : 'en-US') })
+                        : '—'}
                     </td>
                   </tr>
                 ))}
@@ -170,9 +192,9 @@ export default function VehiclesPage() {
           </div>
 
           {!loading && vehicles.length === 0 && (
-            <div className="p-8 text-center text-sm text-gray-500">No vehicles found</div>
+            <div className="p-8 text-center text-sm text-gray-500">{t('workshop.vehiclesList.noVehicles')}</div>
           )}
-          {loading && <div className="p-8 text-center text-sm text-gray-500">Loading...</div>}
+          {loading && <div className="p-8 text-center text-sm text-gray-500">{t('workshop.vehiclesList.loading')}</div>}
         </div>
 
         {/* Pagination */}

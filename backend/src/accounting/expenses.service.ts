@@ -1,9 +1,22 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
-import { CreateExpenseDto, MarkExpensePaidDto } from './dto/expense.dto';
-import { ExpenseStatus, JournalEntryStatus, JournalSourceType, PaymentMethod } from '@prisma/client';
+import { CreateExpenseDto, MarkExpensePaidDto, RecordExpensePaymentDto } from './dto/expense.dto';
+import { ExpenseStatus, JournalEntryStatus, JournalSourceType, PaymentMethod, Prisma } from '@prisma/client';
+
+const EPS = 0.005; // half a cent: amounts are 2dp, so anything smaller is float noise
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+function deriveExpenseStatus(amountPaid: number, total: number): ExpenseStatus {
+  if (amountPaid <= 0) return ExpenseStatus.UNPAID;
+  if (amountPaid >= total - EPS) return ExpenseStatus.PAID;
+  return ExpenseStatus.PARTIALLY_PAID;
+}
+
 @Injectable()
 export class ExpensesService {
   constructor(
@@ -140,12 +153,53 @@ async update(
 
     return updated;
   });
-}  // Posts Expense Payable (debit) + Cash/Bank (credit) in the same
-  // transaction as the status flip to PAID.
+}  // CHANGED — now a thin wrapper around recordPayment() that pays off
+  // whatever balance remains, in one shot. Kept for backward compatibility
+  // with the existing "mark paid" action; a partially-paid expense can
+  // still be finished off this way, it just no longer requires the expense
+  // to have been UNPAID going in.
   async markPaid(organizationId: string, id: string, dto: MarkExpensePaidDto) {
-    if (dto.paymentMethod !== PaymentMethod.CASH) {
+    const expense = await this.get(organizationId, id);
+    const balance = round2(Number(expense.amount) - Number(expense.amountPaid));
+    if (balance <= EPS) {
+      throw new BadRequestException('Expense is not UNPAID — it may already be paid, or does not exist');
+    }
+
+    return this.recordPayment(
+      organizationId,
+      id,
+      {
+        amount: balance,
+        method: dto.paymentMethod,
+        bankAccountId: dto.bankAccountId,
+        paidAt: dto.paidAt,
+      },
+      undefined,
+    );
+  }
+
+  // FIX — the actual partial-payment path. Mirrors PaymentService.recordPayment()
+  // almost exactly: validates the amount doesn't exceed the remaining balance,
+  // creates an ExpensePayment row (one per installment, so each gets its own
+  // ledger entry — see postExpensePayment), and derives UNPAID/PARTIALLY_PAID/PAID
+  // from the new amountPaid instead of flipping straight to PAID.
+  async recordPayment(
+    organizationId: string,
+    expenseId: string,
+    dto: RecordExpensePaymentDto,
+    userId?: string,
+  ) {
+    if (!(dto.amount > 0)) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+    if (Math.abs(round2(dto.amount) - dto.amount) > 1e-9) {
+      throw new BadRequestException('Payment amount can have at most 2 decimal places');
+    }
+
+    const method = dto.method ?? PaymentMethod.CASH;
+    if (method !== PaymentMethod.CASH) {
       if (!dto.bankAccountId) {
-        throw new BadRequestException(`bankAccountId is required for payment method ${dto.paymentMethod}`);
+        throw new BadRequestException(`bankAccountId is required for payment method ${method}`);
       }
       const bankAccount = await this.prisma.organizationBankAccount.findFirst({
         where: { id: dto.bankAccountId, organizationId, archivedAt: null },
@@ -155,24 +209,82 @@ async update(
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const claim = await tx.expense.updateMany({
-        where: { id, organizationId, status: ExpenseStatus.UNPAID },
-        data: {
-          status: ExpenseStatus.PAID,
-          paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-          paymentMethod: dto.paymentMethod,
-          bankAccountId: dto.paymentMethod === PaymentMethod.CASH ? null : dto.bankAccountId,
+    try {
+      const updated = await this.prisma.$transaction(
+        async (tx) => {
+          const expense = await tx.expense.findFirst({
+            where: { id: expenseId, organizationId },
+            select: { id: true, amount: true, amountPaid: true, status: true },
+          });
+          if (!expense) throw new NotFoundException('Expense not found');
+
+          const total = Number(expense.amount);
+          const alreadyPaid = Number(expense.amountPaid);
+          const balance = round2(total - alreadyPaid);
+
+          if (dto.amount > balance + EPS) {
+            throw new BadRequestException(
+              `Payment of ${dto.amount} exceeds balance due (${balance})`,
+            );
+          }
+
+          const newAmountPaid = round2(alreadyPaid + dto.amount);
+          const newStatus = deriveExpenseStatus(newAmountPaid, total);
+
+          const payment = await tx.expensePayment.create({
+            data: {
+              expenseId,
+              amount: dto.amount,
+              method,
+              note: dto.note,
+              recordedById: userId,
+              createdAt: dto.paidAt ? new Date(dto.paidAt) : undefined,
+              // CASH is never tied to a specific bank account, same policy as Payment.
+              bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+            },
+          });
+
+          const result = await tx.expense.update({
+            where: { id: expenseId },
+            data: {
+              amountPaid: newAmountPaid,
+              status: newStatus,
+              // Kept for backward-compatible display (e.g. "last paid via") —
+              // ExpensePayment is the source of truth for the full history.
+              paymentMethod: method,
+              bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+              // A successful payment always has newAmountPaid > 0, so
+              // newStatus is never UNPAID here — only PARTIALLY_PAID or
+              // PAID. paidAt marks when it became fully paid, not the date
+              // of the latest installment, so it stays null until then.
+              paidAt: newStatus === ExpenseStatus.PAID ? (dto.paidAt ? new Date(dto.paidAt) : new Date()) : null,
+            },
+            include: { category: true, payments: { orderBy: { createdAt: 'desc' } } },
+          });
+
+          // Cash/Bank (debit... credit) + Expense Payable, in the SAME
+          // transaction. If this throws, the whole payment rolls back.
+          await this.postingRules.postExpensePayment(organizationId, payment.id, tx);
+
+          return result;
         },
-      });
-      if (claim.count === 0) {
-        throw new BadRequestException('Expense is not UNPAID — it may already be paid, or does not exist');
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+
+      // Keep the response shape stable: amountPaid/payment amounts would
+      // otherwise serialize as strings (Prisma Decimal).
+      return {
+        ...updated,
+        amount: Number(updated.amount),
+        amountPaid: Number(updated.amountPaid),
+        payments: updated.payments.map((p) => ({ ...p, amount: Number(p.amount) })),
+      };
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('Payment conflicted with a concurrent update, please retry');
       }
-
-      await this.postingRules.postExpensePaid(organizationId, id, tx);
-
-      return tx.expense.findUniqueOrThrow({ where: { id }, include: { category: true } });
-    });
+      throw e;
+    }
   }
 
   // Reverses both postings (the "recorded" and, if it happened, the "paid"

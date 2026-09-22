@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, FiscalPeriodStatus, JournalEntryStatus, JournalSourceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { toBusinessDate } from './business-date';
+import { toBusinessDate, resolveTimezone } from './business-date';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -32,7 +32,13 @@ export type ListJournalEntriesFilters = {
   pageSize?: number;
 };
 
-const EPSILON = 0.01; // rounding tolerance for Decimal(14,2) sums
+// FIX — was 0.01. Every other money-noise tolerance in this codebase
+// (expenses.service.ts, fixed-assets.service.ts) uses half a cent, since
+// amounts are 2dp and anything smaller is genuine float noise. A full-cent
+// tolerance let a manual/posted entry that's off by up to a full cent be
+// accepted as "balanced" and posted to the ledger — small errors like
+// that compound silently over many entries with nothing else catching it.
+const EPSILON = 0.005; // rounding tolerance for Decimal(14,2) sums
 
 // The only service that writes JournalEntry/JournalEntryLine rows. Every
 // document-specific posting rule builds a set of lines and calls
@@ -126,6 +132,19 @@ export class JournalService {
       return await this.prisma.$transaction((innerTx) => this.postEntryInner(innerTx, organizationId, input));
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        // FIX — this transaction can also throw P2002 from FiscalPeriod's
+        // own unique constraint (organizationId_year_month) if two
+        // concurrent posts both race to create the same new fiscal period
+        // in getOrCreateOpenFiscalPeriod() below — not just from the
+        // entry-number assignment. Both are equally harmless (still rolls
+        // back, still safe to retry), but the error text was always wrong
+        // for the fiscal-period case.
+        const target = (err.meta?.target as string[] | undefined) ?? [];
+        if (target.some((t) => t.includes('year') || t.includes('month'))) {
+          throw new BadRequestException(
+            'Fiscal period creation conflicted with a concurrent post — please retry',
+          );
+        }
         throw new BadRequestException(
           'Journal entry number assignment conflicted with a concurrent post — please retry',
         );
@@ -137,7 +156,8 @@ export class JournalService {
   private async postEntryInner(tx: Prisma.TransactionClient, organizationId: string, input: PostEntryInput) {
     // One business calendar date drives BOTH the stored entryDate and the
     // fiscal period, so they can never disagree near a month boundary.
-    const entryDate = toBusinessDate(input.date);
+    const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+    const entryDate = toBusinessDate(input.date, resolveTimezone(org));
     const fiscalPeriod = await this.getOrCreateOpenFiscalPeriod(tx, organizationId, entryDate);
 
     // Only POSTED entries count as duplicates. A voided original AND its
@@ -230,7 +250,14 @@ export class JournalService {
       throw new BadRequestException('Journal entry is already void');
     }
     if (original.fiscalPeriod.status !== FiscalPeriodStatus.OPEN) {
-      throw new BadRequestException(`Cannot void an entry in a ${original.fiscalPeriod.status} fiscal period`);
+      const { month, year, status } = original.fiscalPeriod;
+      const hint =
+        status === FiscalPeriodStatus.LOCKED
+          ? 'Locked periods cannot be reopened.'
+          : 'Ask an admin to reopen the period first, then try again.';
+      throw new BadRequestException(
+        `Cannot void this entry — its fiscal period (${month}/${year}) is ${status}. ${hint}`,
+      );
     }
 
     const count = await tx.journalEntry.count({
@@ -335,8 +362,12 @@ async closePeriod(organizationId: string, year: number, month: number) {
     }
 
     if (period.status !== FiscalPeriodStatus.OPEN) {
+      const hint =
+        period.status === FiscalPeriodStatus.LOCKED
+          ? 'Locked periods cannot be reopened.'
+          : 'Ask an admin to reopen the period first, then try again.';
       throw new BadRequestException(
-        `Fiscal period ${month}/${year} is ${period.status} — cannot post new entries into it`,
+        `Cannot post to ${month}/${year} — this fiscal period is ${period.status}. ${hint}`,
       );
     }
 

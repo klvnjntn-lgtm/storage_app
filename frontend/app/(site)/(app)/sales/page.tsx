@@ -3,53 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  FileText,
-  ClipboardList,
-  Receipt,
-  Truck,
-  ArrowUpRight,
-  ArrowLeft,
-  ShoppingCart,
-  Search,
-  Loader2,
-  CornerDownLeft,
-} from 'lucide-react';
+import { FileText, ClipboardList, Receipt, Truck, ArrowUpRight, ShoppingCart, Search, Loader2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
-
-const SALES_ITEMS = [
-  {
-    title: 'Sales Quotation',
-    description: 'Draft and send quotes to customers',
-    href: '/sales/quotations',
-    icon: FileText,
-    gradient: 'from-sky-500 to-blue-700',
-  },
-  {
-    title: 'Sales Order',
-    description: 'Confirm orders and track fulfillment',
-    href: '/sales/orders',
-    icon: ClipboardList,
-    gradient: 'from-violet-500 to-purple-700',
-  },
-  {
-    title: 'Invoices',
-    description: 'Bill customers and track revenue',
-    href: '/sales/invoices',
-    icon: Receipt,
-    gradient: 'from-fuchsia-500 to-pink-700',
-  },
-  {
-    title: 'Delivery Order',
-    description: 'Track shipments and dispatch stock',
-    href: '/sales/delivery-orders',
-    icon: Truck,
-    gradient: 'from-emerald-500 to-teal-700',
-  },
-];
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
 
@@ -65,36 +24,37 @@ type SalesSearchResult = {
 
 // Maps a result's type to its detail route and display chrome. Keep this
 // in sync with SALES_ITEMS above if any of those hrefs change, and with
-// TYPE_META in /sales/search/page.tsx.
+// TYPE_META in /sales/search/page.tsx. Labels are resolved via t() inside
+// the component since they're locale-dependent.
 const TYPE_META: Record <
   SalesSearchResultType,
   {
-    label: string;
+    labelKey: string;
     icon: typeof FileText;
     path: string;
     accent: string;
   }
 > = {
   QUOTATION: {
-    label: 'Quotation',
+    labelKey: 'sales.overview.typeQuotation',
     icon: FileText,
     path: '/sales/quotations',
     accent: 'text-sky-600 bg-sky-50',
   },
   ORDER: {
-    label: 'Order',
+    labelKey: 'sales.overview.typeOrder',
     icon: ClipboardList,
     path: '/sales/orders',
     accent: 'text-violet-600 bg-violet-50',
   },
   INVOICE: {
-    label: 'Invoice',
+    labelKey: 'sales.overview.typeInvoice',
     icon: Receipt,
     path: '/sales/invoices',
     accent: 'text-fuchsia-600 bg-fuchsia-50',
   },
   DELIVERY_ORDER: {
-    label: 'Delivery',
+    labelKey: 'sales.overview.typeDelivery',
     icon: Truck,
     path: '/sales/delivery-orders',
     accent: 'text-emerald-600 bg-emerald-50',
@@ -104,6 +64,38 @@ const DEBOUNCE_MS = 350;
 
 export default function SalesHome() {
   const router = useRouter();
+  const { t, language } = useLanguage();
+
+  const SALES_ITEMS = [
+    {
+      title: t('sales.overview.cardQuotationTitle'),
+      description: t('sales.overview.cardQuotationDesc'),
+      href: '/sales/quotations',
+      icon: FileText,
+      gradient: 'from-sky-500 to-blue-700',
+    },
+    {
+      title: t('sales.overview.cardOrderTitle'),
+      description: t('sales.overview.cardOrderDesc'),
+      href: '/sales/orders',
+      icon: ClipboardList,
+      gradient: 'from-violet-500 to-purple-700',
+    },
+    {
+      title: t('sales.overview.cardInvoiceTitle'),
+      description: t('sales.overview.cardInvoiceDesc'),
+      href: '/sales/invoices',
+      icon: Receipt,
+      gradient: 'from-fuchsia-500 to-pink-700',
+    },
+    {
+      title: t('sales.overview.cardDeliveryTitle'),
+      description: t('sales.overview.cardDeliveryDesc'),
+      href: '/sales/delivery-orders',
+      icon: Truck,
+      gradient: 'from-emerald-500 to-teal-700',
+    },
+  ];
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SalesSearchResult[]>([]);
@@ -197,23 +189,15 @@ export default function SalesHome() {
       {/* Header — same outlined/blurred treatment as Workshop */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to dashboard
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <ShoppingCart size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Sales
+                {t('sales.overview.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Manage quotations, orders, invoices, and deliveries</p>
+              <p className="text-xs text-gray-500 truncate">{t('sales.overview.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -235,7 +219,7 @@ export default function SalesHome() {
               onKeyDown={handleKeyDown}
               onFocus={() => results.length > 0 && setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
-              placeholder="Search invoice #, order #, quotation #, DO #..."
+              placeholder={t('sales.overview.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {searching ? (
@@ -245,7 +229,7 @@ export default function SalesHome() {
                 onClick={goToSearchPage}
                 className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
               >
-                Enter
+                {t('sales.overview.enter')}
                 <CornerDownLeft size={11} strokeWidth={2} />
               </button>
             )}
@@ -270,13 +254,14 @@ export default function SalesHome() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold truncate">{r.number ?? 'Unnumbered'}</span>
+                        <span className="text-sm font-semibold truncate">{r.number ?? t('sales.overview.unnumbered')}</span>
                         <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide shrink-0">
-                          {meta.label}
+                          {t(meta.labelKey)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 truncate">
-                        {r.customerName ?? 'No customer'} · {new Date(r.createdAt).toLocaleDateString('id-ID')}
+                        {r.customerName ?? t('sales.overview.noCustomer')} ·{' '}
+                        {new Date(r.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
                       </p>
                     </div>
                     {r.total != null && (
@@ -290,7 +275,7 @@ export default function SalesHome() {
 
           {notFound && !dropdownOpen && (
             <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md p-3 mt-1.5 text-center">
-              No quotations, orders, invoices, or deliveries found for &quot;{notFound}&quot;
+              {t('sales.overview.notFoundFor', { query: notFound })}
             </p>
           )}
         </div>

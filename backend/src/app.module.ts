@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -19,6 +20,7 @@ import { LicenseModule } from './license/license.module';
 import { OrganizationModule } from './organization/organization.module';
 import { HealthModule } from './health/health.module';
 import { IntegrationModule } from './integration/integration.module';
+import { MediaModule } from './media/media.module';
 import { InvoiceModule } from './invoice/invoice.module';
 import { OrganizationModulesModule } from './organization-module/organization-modules.module';
 import { CustomersModule } from './customers/customers.module';
@@ -39,8 +41,17 @@ import { AccountingModule } from './accounting/accounting.module';
 import { SupplierPaymentsModule } from './accounting/supplier-payments.module';
 import { ExpensesModule } from './accounting/expenses.module';
 import { PayrollModule } from './accounting/payroll.module';
+import { FixedAssetsModule } from './accounting/fixed-assets.module';
 @Module({
   imports: [
+    // FIX — @nestjs/throttler was a listed dependency and @Throttle()
+    // decorators already existed on several admin/auth routes (see
+    // organization-modules.controller.ts, auth.controller.ts), but
+    // ThrottlerModule/ThrottlerGuard was never actually registered, so
+    // those decorators were silently non-functional. This is the global
+    // default (100 req/min per IP+route); tighter per-route limits via
+    // @Throttle() override it.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 100 }]),
     PrismaModule,
     WarehouseModule,
     AuthModule,
@@ -62,6 +73,7 @@ import { PayrollModule } from './accounting/payroll.module';
     SupplierPaymentsModule,
     ExpensesModule,
     PayrollModule,
+    FixedAssetsModule,
     SessionsModule,
     LicenseModule,
     OrganizationModule,
@@ -73,10 +85,15 @@ import { PayrollModule } from './accounting/payroll.module';
     TaxRateModule,
     OrganizationModulesModule,
     IntegrationModule,
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard, // 0. rate-limit before doing any auth/license work
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard, // 1. resolves the user from JWT

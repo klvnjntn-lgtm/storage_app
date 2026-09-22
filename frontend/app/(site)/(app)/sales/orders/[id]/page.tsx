@@ -3,20 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  Printer,
-  Download,
-  Pencil,
-  FileText,
-} from 'lucide-react';
+import { CheckCircle2, XCircle, Printer, Download, Pencil, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
-import { SalesOrderA4Template } from '@/app/components/sales-orders/template/SalesOrderA4Template';
-import { SalesOrderPrintView, toSalesOrderView } from '@/lib/sales-order-mapper';
+import { SalesOrderA4Template } from '@/app/components/sales-orders/templates/SalesOrderA4Template';
+import { SalesOrderPrintView, toSalesOrderView } from '@/lib/mappers/sales-order-mapper';
 import { DeliveryOrdersPanel } from '@/app/components/sales-orders/DeliveryOrdersPanel';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -72,6 +65,7 @@ const CAN_INVOICE_NO_WAREHOUSE_OPS: SalesOrderStatus[] = ['CONFIRMED', 'PARTIALL
 
 export default function SalesOrderDetailPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -102,7 +96,7 @@ export default function SalesOrderDetailPage() {
       ]);
       if (!detailRes.ok) {
         const body = await detailRes.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${detailRes.status})`);
+        setError(body?.message ?? t('sales.orderDetail.requestFailed', { status: detailRes.status }));
         return;
       }
       setOrder(await detailRes.json());
@@ -114,7 +108,7 @@ export default function SalesOrderDetailPage() {
         setPreviewError(true);
       }
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.orderDetail.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -142,12 +136,12 @@ export default function SalesOrderDetailPage() {
       const res = await apiFetch(path, { method: 'POST', ...init });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.orderDetail.requestFailed', { status: res.status }));
         return;
       }
       return body;
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.orderDetail.couldNotReachServer'));
     } finally {
       setActionLoading(null);
     }
@@ -158,10 +152,10 @@ export default function SalesOrderDetailPage() {
   }
 
   async function handleCancel() {
-    const reason = window.prompt('Reason for cancelling this order:');
+    const reason = window.prompt(t('sales.orderDetail.cancelReasonPrompt'));
     if (reason === null) return;
     if (!reason.trim()) {
-      setError('A reason is required to cancel an order.');
+      setError(t('sales.orderDetail.cancelReasonRequired'));
       return;
     }
     if (
@@ -196,7 +190,7 @@ export default function SalesOrderDetailPage() {
     try {
       const res = await apiFetch(`/sales-orders/${order.id}/pdf`);
       if (!res.ok) {
-        throw new Error(`Failed to generate PDF (${res.status})`);
+        throw new Error(t('sales.orderDetail.failedGeneratePdf', { status: res.status }));
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -206,7 +200,7 @@ export default function SalesOrderDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e.message || 'Could not generate PDF.');
+      setError(e.message || t('sales.orderDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }
@@ -215,7 +209,7 @@ export default function SalesOrderDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </main>
     );
   }
@@ -256,26 +250,18 @@ export default function SalesOrderDetailPage() {
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to sales orders
-          </button>
-
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center flex-wrap gap-2">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
-                  {order.orderNumber ?? 'Unissued draft'}
+                  {order.orderNumber ?? t('sales.orderDetail.unissuedDraft')}
                 </h1>
                 <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(order.status)}`}>
-                  {order.status.replace('_', ' ')}
+                  {t(`sales.orderDetail.badge.${order.status}`)}
                 </span>
               </div>
               <p className="text-xs text-gray-500">
-                {order.customer?.name ?? order.customerName ?? 'No customer'} ·{' '}
+                {order.customer?.name ?? order.customerName ?? t('sales.orderDetail.noCustomer')} ·{' '}
                 {order.location?.name ?? '—'}
               </p>
             </div>
@@ -288,7 +274,7 @@ export default function SalesOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
-                    Edit
+                    {t('common.edit')}
                   </button>
                   <button
                     disabled={actionLoading === 'confirm'}
@@ -296,7 +282,7 @@ export default function SalesOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <CheckCircle2 size={14} strokeWidth={2} />
-                    Confirm
+                    {t('common.confirm')}
                   </button>
                   <button
                     disabled={actionLoading === 'cancel'}
@@ -304,7 +290,7 @@ export default function SalesOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50"
                   >
                     <XCircle size={14} strokeWidth={2} />
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </>
               )}
@@ -316,7 +302,7 @@ export default function SalesOrderDetailPage() {
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                 >
                   <FileText size={14} strokeWidth={2} />
-                  Convert to Invoice
+                  {t('sales.orderDetail.convertToInvoice')}
                 </button>
               )}
 
@@ -328,14 +314,14 @@ export default function SalesOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
-                    {pdfGenerating ? 'Generating...' : 'Download PDF'}
+                    {pdfGenerating ? t('sales.orderDetail.generating') : t('sales.orderDetail.downloadPdf')}
                   </button>
                   <button
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
-                    Print
+                    {t('common.print')}
                   </button>
                 </>
               )}
@@ -348,9 +334,7 @@ export default function SalesOrderDetailPage() {
           {hasWarehouseOps &&
             !canInvoiceDirectly &&
             (order.status === 'CONFIRMED' || order.status === 'PARTIALLY_DELIVERED') && (
-              <p className="text-xs text-gray-500 mt-2">
-                This order can be invoiced once it's fully delivered — create delivery orders for the remaining items below.
-              </p>
+              <p className="text-xs text-gray-500 mt-2">{t('sales.orderDetail.invoiceHint')}</p>
             )}
         </div>
       </div>
@@ -374,10 +358,10 @@ export default function SalesOrderDetailPage() {
 
         {(order.quotation || order.deliveryOrders.length > 0 || order.invoices.length > 0) && (
           <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
-            <p className="font-semibold text-purple-900 mb-1">Related documents</p>
+            <p className="font-semibold text-purple-900 mb-1">{t('sales.orderDetail.relatedDocuments')}</p>
             {order.quotation && (
               <p>
-                From Quotation{' '}
+                {t('sales.orderDetail.fromQuotation')}{' '}
                 <button className="underline font-medium" onClick={() => router.push(`/sales/quotations/${order.quotation!.id}`)}>
                   {order.quotation.quotationNumber ?? order.quotation.id}
                 </button>{' '}
@@ -386,7 +370,7 @@ export default function SalesOrderDetailPage() {
             )}
             {order.invoices.map((inv) => (
               <p key={inv.id}>
-                Invoice{' '}
+                {t('sales.orderDetail.invoiceLabel')}{' '}
                 <button className="underline font-medium" onClick={() => router.push(`/sales/invoices/${inv.id}`)}>
                   {inv.invoiceNumber ?? inv.id}
                 </button>{' '}
@@ -397,9 +381,9 @@ export default function SalesOrderDetailPage() {
         )}
         {order.confirmedAt && (
           <p className="text-sm text-gray-600">
-            Confirmed{' '}
+            {t('sales.orderDetail.confirmedLabel')}{' '}
             <span className="font-medium">
-              {parseCalendarDate(order.confirmedAt).toLocaleDateString('id-ID')}
+              {parseCalendarDate(order.confirmedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
             </span>
           </p>
         )}
@@ -419,7 +403,7 @@ export default function SalesOrderDetailPage() {
               className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] flex items-center justify-center text-sm text-gray-400"
               style={{ width: '210mm', height: '297mm' }}
             >
-              {previewError ? 'Could not load a print preview for this order.' : 'Loading preview...'}
+              {previewError ? t('sales.orderDetail.previewError') : t('sales.orderDetail.loadingPreview')}
             </div>
           )}
         </div>

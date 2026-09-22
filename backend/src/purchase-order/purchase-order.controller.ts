@@ -45,6 +45,15 @@ export class PurchaseOrderController {
     return this.purchaseOrderService.getOne(organizationId, id);
   }
 
+  // FIX — getActivityHistory() was fully implemented and called from
+  // create/update/send/cancel, but had no route (unlike the analogous
+  // SalesOrderController.getActivityHistory/SalesQuotationController.getActivityHistory,
+  // both wired), so the PO activity log was recorded but unreachable via the API.
+  @Get(':id/activity')
+  getActivityHistory(@CurrentOrg() organizationId: string, @Param('id') id: string) {
+    return this.purchaseOrderService.getActivityHistory(organizationId, id);
+  }
+
   @Patch(':id')
   update(
     @CurrentOrg() organizationId: string,

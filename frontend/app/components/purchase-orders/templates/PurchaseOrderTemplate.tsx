@@ -1,12 +1,16 @@
 // app/components/purchase-orders/templates/PurchaseOrderTemplate.tsx
+'use client';
 
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
 import { PurchaseOrderPrintView } from '../types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
+  const { t, language } = useLanguage();
   const logoUrl = resolveUploadUrl(po.businessLogoUrl);
+  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
@@ -30,14 +34,14 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
 
         <div className="text-right shrink-0">
           <p className="text-lg text-black">
-            <strong>Purchase Order</strong> {po.poNumber ?? 'Unissued draft'}
+            <strong>{t('purchasing.purchaseOrderTemplate.purchaseOrder')}</strong> {po.poNumber ?? t('purchasing.purchaseOrderTemplate.unissuedDraft')}
           </p>
 
-          <p className="text-gray-600">{new Date(po.orderDate).toLocaleDateString('id-ID')}</p>
+          <p className="text-gray-600">{new Date(po.orderDate).toLocaleDateString(dateLocale)}</p>
 
           {po.expectedDate && (
             <p className="text-gray-600">
-              Expected {new Date(po.expectedDate).toLocaleDateString('id-ID')}
+              {t('purchasing.purchaseOrderTemplate.expected', { date: new Date(po.expectedDate).toLocaleDateString(dateLocale) })}
             </p>
           )}
         </div>
@@ -46,14 +50,14 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
       {/* Supplier + Receiving Location */}
       <div className="mt-6 border-t border-gray-300 pt-3 grid grid-cols-2 gap-6">
         <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Supplier</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">{t('purchasing.purchaseOrderTemplate.supplier')}</p>
 
           {po.supplierName ? (
             <>
               <p className="font-semibold text-base text-black">{po.supplierName}</p>
               {po.supplierAddress && <p className="text-black">{po.supplierAddress}</p>}
               {po.supplierPhone && <p className="text-black">{po.supplierPhone}</p>}
-              {po.supplierNpwp && <p className="text-xs text-gray-600">NPWP: {po.supplierNpwp}</p>}
+              {po.supplierNpwp && <p className="text-xs text-gray-600">{t('purchasing.purchaseOrderTemplate.npwp', { npwp: po.supplierNpwp })}</p>}
             </>
           ) : (
             <p className="text-gray-400">—</p>
@@ -62,7 +66,7 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
 
         <div>
           <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
-            Receiving Location
+            {t('purchasing.purchaseOrderTemplate.receivingLocation')}
           </p>
 
           <p className="font-semibold text-base text-black">{po.locationName || '—'}</p>
@@ -74,10 +78,10 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
       <table className="w-full border-collapse mt-6">
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Item</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Qty</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 text-black">Unit Cost</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 text-black">Total</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 text-black">{t('purchasing.purchaseOrderTemplate.colItem')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 text-black">{t('purchasing.purchaseOrderTemplate.colQty')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 text-black">{t('purchasing.purchaseOrderTemplate.colUnitCost')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 text-black">{t('purchasing.purchaseOrderTemplate.colTotal')}</th>
           </tr>
         </thead>
 
@@ -101,13 +105,13 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
       {/* Totals */}
       <div className="ml-auto w-1/2 mt-4">
         <div className="flex justify-between py-1 text-black">
-          <span>Subtotal</span>
+          <span>{t('purchasing.purchaseOrderTemplate.subtotal')}</span>
           <span>{formatIDR(po.subtotal)}</span>
         </div>
 
         {po.discountAmount > 0 && (
           <div className="flex justify-between py-1 text-black">
-            <span>Discount</span>
+            <span>{t('purchasing.purchaseOrderTemplate.discount')}</span>
             <span>-{formatIDR(po.discountAmount)}</span>
           </div>
         )}
@@ -123,26 +127,24 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
         )}
 
         <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2 mt-2 text-black">
-          <span>Total</span>
+          <span>{t('common.total')}</span>
           <span>{formatIDR(po.total)}</span>
         </div>
       </div>
 
-      {/* Amount in words */}
-      <p className="mt-4 text-xs italic text-gray-600">Terbilang: {terbilang(po.total)}</p>
+      <p className="mt-4 text-xs italic text-gray-600">{t('purchasing.purchaseOrderTemplate.terbilang', { amount: terbilang(po.total) })}</p>
 
       {/* Notes */}
       {po.notes && (
         <div className="mt-6 border-t border-gray-300 pt-3 text-xs">
-          <p className="uppercase tracking-wide text-gray-500 font-semibold mb-1">Notes</p>
+          <p className="uppercase tracking-wide text-gray-500 font-semibold mb-1">{t('purchasing.purchaseOrderTemplate.notes')}</p>
           <p className="text-black whitespace-pre-line">{po.notes}</p>
         </div>
       )}
 
-      {/* Signature blocks */}
       <div className="mt-16 flex justify-between gap-4">
         <div className="text-center w-40">
-          <p className="text-black">Diterima oleh,</p>
+          <p className="text-black">{t('purchasing.purchaseOrderTemplate.receivedBy')}</p>
           <div className="h-20" />
           <p className="border-t border-gray-400 pt-1 text-black">
             {po.supplierName ?? '\u00A0'}
@@ -150,7 +152,7 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
         </div>
 
         <div className="text-center w-40">
-          <p className="text-black">Dipesan oleh,</p>
+          <p className="text-black">{t('purchasing.purchaseOrderTemplate.orderedBy')}</p>
           <div className="h-20" />
           <p className="border-t border-gray-400 pt-1 text-black">
             {po.businessLegalName ?? po.businessName}

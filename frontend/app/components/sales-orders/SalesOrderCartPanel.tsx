@@ -6,6 +6,7 @@ import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -95,6 +96,7 @@ export function SalesOrderCartPanel({
   onRemoveService: (key: string) => void;
   onToggleServiceTaxRate: (key: string, taxRateId: string) => void;
 }) {
+  const { t } = useLanguage();
   const hasEmptyServicePrice = services.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = services.some((s) => !s.description.trim());
   const nothingToOrder = cartLines.length === 0 && services.length === 0;
@@ -106,35 +108,35 @@ export function SalesOrderCartPanel({
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
             <span>
-              Priced from <strong>{distinctLocationNames[0]}</strong>
+              {t('sales.orderCart.pricedFrom')} <strong>{distinctLocationNames[0]}</strong>
             </span>
           ) : (
             <span>
-              Priced across <strong>{distinctLocationNames.length} locations</strong>: {distinctLocationNames.join(', ')}
+              {t('sales.orderCart.pricedAcross')}{' '}
+              <strong>{t('sales.orderCart.locationsCount', { count: distinctLocationNames.length })}</strong>:{' '}
+              {distinctLocationNames.join(', ')}
             </span>
           )}
         </div>
       ) : (
-        <p className="text-xs text-gray-400 mb-3">
-          Add items to start this order — each item's location is set automatically.
-        </p>
+        <p className="text-xs text-gray-400 mb-3">{t('sales.orderCart.emptyHint')}</p>
       )}
 
       <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
 
       <div className="grid grid-cols-2 gap-2 mt-3">
         <div>
-          <label className="text-[11px] text-gray-500">PO Number</label>
+          <label className="text-[11px] text-gray-500">{t('sales.orderCart.poNumber')}</label>
           <input
             type="text"
             value={customerPoNumber}
             onChange={(e) => setCustomerPoNumber(e.target.value)}
-            placeholder="Optional"
+            placeholder={t('common.optional')}
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           />
         </div>
         <div>
-          <label className="text-[11px] text-gray-500">Order Date</label>
+          <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
           <input
             type="date"
             value={orderDate}
@@ -145,7 +147,7 @@ export function SalesOrderCartPanel({
       </div>
 
       {cartLines.length === 0 && services.length === 0 && (
-        <p className="text-sm text-gray-400 mt-3">No items selected yet</p>
+        <p className="text-sm text-gray-400 mt-3">{t('sales.orderCart.noItemsYet')}</p>
       )}
 
       {(cartLines.length > 0 || services.length > 0) && (
@@ -247,7 +249,7 @@ export function SalesOrderCartPanel({
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                   <span className="flex items-center gap-1 text-[11px] text-gray-400">
                     <Percent size={10} strokeWidth={2} />
-                    Tax
+                    {t('sales.orderCart.tax')}
                   </span>
                   {taxRates.map((rate) => {
                     const checked = line.taxRateIds.includes(rate.id);
@@ -283,20 +285,18 @@ export function SalesOrderCartPanel({
         <div className="flex items-center justify-between mb-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
             <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
-            Services
+            {t('sales.orderCart.services')}
           </span>
           <button
             onClick={onAddService}
             className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
           >
-            + Add service
+            {t('sales.orderCart.addService')}
           </button>
         </div>
 
         {services.length === 0 && (
-          <p className="text-xs text-gray-400 mb-2">
-            No services added — this order can be product-only, service-only, or both.
-          </p>
+          <p className="text-xs text-gray-400 mb-2">{t('sales.orderCart.noServicesHint')}</p>
         )}
 
         <div className="flex flex-col divide-y divide-blue-500/10">
@@ -308,7 +308,7 @@ export function SalesOrderCartPanel({
                   <textarea
                     value={line.description}
                     onChange={(e) => onChangeServiceDescription(line.key, e.target.value)}
-                    placeholder="Describe the service or work being ordered"
+                    placeholder={t('sales.orderCart.serviceDescPlaceholder')}
                     rows={2}
                     className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                   />
@@ -336,13 +336,15 @@ export function SalesOrderCartPanel({
                       className="w-24 text-xs outline-none"
                     />
                   </div>
-                  {priceMissing && <span className="text-[11px] text-red-600">Enter a price — use 0 if free</span>}
+                  {priceMissing && (
+                    <span className="text-[11px] text-red-600">{t('sales.orderCart.priceRequiredHint')}</span>
+                  )}
 
                   <input
                     type="text"
                     value={line.unit ?? ''}
                     onChange={(e) => onChangeServiceUnit(line.key, e.target.value)}
-                    placeholder="Unit (optional)"
+                    placeholder={t('sales.orderCart.unitPlaceholder')}
                     className="w-28 border border-blue-500/20 rounded-lg px-2 py-1 text-xs outline-none focus:border-blue-500/50"
                   />
                 </div>
@@ -358,7 +360,7 @@ export function SalesOrderCartPanel({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
                     <span className="flex items-center gap-1 text-[11px] text-gray-400">
                       <Percent size={10} strokeWidth={2} />
-                      Tax
+                      {t('sales.orderCart.tax')}
                     </span>
                     {taxRates.map((rate) => {
                       const checked = line.taxRateIds.includes(rate.id);
@@ -390,23 +392,23 @@ export function SalesOrderCartPanel({
 
       <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>Subtotal</span>
+          <span>{t('common.subtotal')}</span>
           <span>{formatIDR(subtotal)}</span>
         </div>
         {discount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Discount</span>
+            <span>{t('sales.orderCart.discount')}</span>
             <span>−{formatIDR(discount)}</span>
           </div>
         )}
         {taxAmount > 0 && (
           <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>Tax</span>
+            <span>{t('sales.orderCart.tax')}</span>
             <span>{formatIDR(taxAmount)}</span>
           </div>
         )}
         <div className="flex justify-between items-center font-bold pt-1">
-          <span>Total</span>
+          <span>{t('common.total')}</span>
           <span>{formatIDR(total)}</span>
         </div>
       </div>
@@ -417,7 +419,7 @@ export function SalesOrderCartPanel({
         className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
         <Send size={16} strokeWidth={2} />
-        {saving ? 'Saving...' : 'Save Sales Order'}
+        {saving ? t('common.saving') : t('sales.orderCart.saveOrder')}
       </button>
 
       {error && (

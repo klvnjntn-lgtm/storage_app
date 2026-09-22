@@ -5,6 +5,7 @@ export type ProductSearchResult = {
   name: string;
   sku: string | null;
   barcode: string | null;
+  image: string | null;
   sellingPrice: number | null;
   unit: string | null;
   stockByLocation: StockAtLocation[];
@@ -80,6 +81,13 @@ export type BankAccount = {
   isDefault?: boolean;
 };
 
+// A selectable Employee, as returned by GET /payroll/employees.
+export type Employee = {
+  id: string;
+  name: string;
+  position: string | null;
+};
+
 export type AppliedTax = {
   name: string;
   percentage: number;
@@ -130,6 +138,9 @@ export type InvoiceView = {
   vehicleModel: string | null;
   vehicleVin: string | null;
   vehicleOdometer: number | null;
+
+  employeeId: string | null;
+  employeeName: string | null;
 
   businessName: string;
   businessLegalName: string | null;

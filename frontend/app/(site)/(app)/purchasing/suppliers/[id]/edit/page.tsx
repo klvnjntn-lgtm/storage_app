@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Building2 } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { SupplierForm } from '@/app/components/suppliers/SupplierForm';
 import { emptySupplierFormValues, SupplierFormValues } from '@/app/components/suppliers/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -15,6 +16,7 @@ export default function EditSupplierPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { t } = useLanguage();
 
   const [values, setValues] = useState<SupplierFormValues>(emptySupplierFormValues);
   const [isActive, setIsActive] = useState(true);
@@ -30,7 +32,7 @@ export default function EditSupplierPage() {
       try {
         const res = await apiFetch(`/suppliers/${id}`);
         if (!res.ok) {
-          setLoadError(`Could not load this supplier (${res.status}).`);
+          setLoadError(t('purchasing.supplierEdit.loadError', { status: res.status }));
           return;
         }
         const s = await res.json();
@@ -45,11 +47,12 @@ export default function EditSupplierPage() {
         });
         setIsActive(!!s.isActive);
       } catch {
-        setLoadError('Could not reach the server.');
+        setLoadError(t('purchasing.supplierEdit.serverError'));
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function handleSubmit() {
@@ -71,12 +74,12 @@ export default function EditSupplierPage() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('purchasing.supplierEdit.requestFailed', { status: res.status }));
         return;
       }
       router.push('/purchasing/suppliers');
     } catch {
-      setError('Could not reach the server.');
+      setError(t('purchasing.supplierEdit.serverError'));
     } finally {
       setSubmitting(false);
     }
@@ -85,7 +88,7 @@ export default function EditSupplierPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('purchasing.supplierEdit.loading')}</p>
       </main>
     );
   }
@@ -110,19 +113,11 @@ export default function EditSupplierPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-2xl mx-auto">
-          <button
-            onClick={() => router.push('/purchasing/suppliers')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to suppliers
-          </button>
-
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Building2 size={18} strokeWidth={2} className="text-blue-700" />
             </span>
-            <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>Edit Supplier</h1>
+            <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>{t('purchasing.supplierEdit.title')}</h1>
           </div>
         </div>
       </div>
@@ -135,7 +130,7 @@ export default function EditSupplierPage() {
             onChange={(e) => setIsActive(e.target.checked)}
             className="w-4 h-4 accent-blue-600"
           />
-          Active
+          {t('purchasing.supplierEdit.active')}
         </label>
 
         <SupplierForm
@@ -143,7 +138,7 @@ export default function EditSupplierPage() {
           onChange={setValues}
           onSubmit={handleSubmit}
           submitting={submitting}
-          submitLabel="Save Changes"
+          submitLabel={t('purchasing.supplierEdit.submitLabel')}
           error={error}
         />
       </div>

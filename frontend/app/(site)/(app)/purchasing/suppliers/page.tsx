@@ -4,10 +4,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Building2, Search, Plus, Pencil, Trash2, Power, PowerOff } from 'lucide-react';
+import { Building2, Search, Plus, Pencil, Trash2, Power, PowerOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Supplier } from '@/app/components/suppliers/types';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -17,11 +19,24 @@ type StatusFilter = 'active' | 'inactive' | 'all';
 
 export default function SuppliersListPage() {
   const router = useRouter();
+  const { t } = useLanguage();
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // Seeded from the URL so pressing the browser's Back button from a
+  // supplier's edit page restores the same search/filter/page instead of
+  // resetting to page 1.
+  const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() =>
+    getInitialParam('status', 'active')
+  );
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+
+  useSyncQueryParams({
+    search: search.trim(),
+    status: statusFilter !== 'active' ? statusFilter : null,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [total, setTotal] = useState(0);
@@ -43,14 +58,14 @@ export default function SuppliersListPage() {
       const res = await apiFetch(`/suppliers?${params.toString()}`);
       if (thisRequest !== requestIdRef.current) return; // stale response, a newer request is in flight
       if (!res.ok) {
-        setError(`Request failed (${res.status})`);
+        setError(t('purchasing.suppliersList.requestFailed', { status: res.status }));
         return;
       }
       const body = await res.json();
       setSuppliers(body.data);
       setTotal(body.total);
     } catch {
-      if (thisRequest === requestIdRef.current) setError('Could not reach the server.');
+      if (thisRequest === requestIdRef.current) setError(t('purchasing.suppliersList.serverError'));
     } finally {
       if (thisRequest === requestIdRef.current) setLoading(false);
     }
@@ -62,7 +77,16 @@ export default function SuppliersListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, statusFilter, page, pageSize]);
 
+  // Skips the very first run — otherwise a `page` restored from the URL
+  // (e.g. via the browser's Back button) would get reset to 1 on mount,
+  // since this effect's deps "change" from their initial undefined state
+  // just like any other render.
+  const isFirstPageResetRef = useRef(true);
   useEffect(() => {
+    if (isFirstPageResetRef.current) {
+      isFirstPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [search, statusFilter]);
 
@@ -81,18 +105,18 @@ async function toggleActive(supplier: Supplier) {
         });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.message ?? `Request failed (${res.status})`);
+      setError(body?.message ?? t('purchasing.suppliersList.requestFailed', { status: res.status }));
       return;
     }
     load();
   } catch {
-    setError('Could not reach the server.');
+    setError(t('purchasing.suppliersList.serverError'));
   } finally {
     setActionId(null);
   }
 }
   async function handleDelete(supplier: Supplier) {
-    if (!confirm(`Delete "${supplier.name}"? This cannot be undone.`)) return;
+    if (!confirm(t('purchasing.suppliersList.deleteConfirm', { name: supplier.name }))) return;
     setActionId(supplier.id);
     setError('');
     try {
@@ -101,12 +125,12 @@ async function toggleActive(supplier: Supplier) {
         const body = await res.json().catch(() => null);
         // Backend refuses to delete a supplier with PO history and
         // tells you to deactivate instead — surface that message as-is.
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('purchasing.suppliersList.requestFailed', { status: res.status }));
         return;
       }
       load();
     } catch {
-      setError('Could not reach the server.');
+      setError(t('purchasing.suppliersList.serverError'));
     } finally {
       setActionId(null);
     }
@@ -129,14 +153,6 @@ async function toggleActive(supplier: Supplier) {
           status filter now live here too, same as those pages. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/purchasing')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -144,9 +160,9 @@ async function toggleActive(supplier: Supplier) {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  Suppliers
+                  {t('purchasing.suppliersList.title')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Manage suppliers for purchasing</p>
+                <p className="text-xs text-gray-500 truncate">{t('purchasing.suppliersList.subtitle')}</p>
               </div>
             </div>
 
@@ -155,7 +171,7 @@ async function toggleActive(supplier: Supplier) {
               className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
-              New Supplier
+              {t('purchasing.suppliersList.newSupplier')}
             </button>
           </div>
 
@@ -167,7 +183,7 @@ async function toggleActive(supplier: Supplier) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, phone, or email..."
+                placeholder={t('purchasing.suppliersList.searchPlaceholder')}
                 className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
             </div>
@@ -181,7 +197,11 @@ async function toggleActive(supplier: Supplier) {
                     statusFilter === s ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-blue-700'
                   }`}
                 >
-                  {s}
+                  {s === 'active'
+                    ? t('purchasing.suppliersList.statusActive')
+                    : s === 'inactive'
+                      ? t('purchasing.suppliersList.statusInactive')
+                      : t('purchasing.suppliersList.statusAll')}
                 </button>
               ))}
             </div>
@@ -195,21 +215,21 @@ async function toggleActive(supplier: Supplier) {
         )}
 
         {loading ? (
-          <p className="text-sm text-gray-500 py-8 text-center">Loading...</p>
+          <p className="text-sm text-gray-500 py-8 text-center">{t('purchasing.suppliersList.loading')}</p>
         ) : suppliers.length === 0 ? (
-          <p className="text-sm text-gray-500 py-8 text-center">No suppliers found.</p>
+          <p className="text-sm text-gray-500 py-8 text-center">{t('purchasing.suppliersList.empty')}</p>
         ) : (
           <div className="border-2 border-gray-200 rounded-md overflow-hidden bg-white">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-blue-50/60 border-b-2 border-gray-200">
                   <tr>
-                    <th className="text-left font-semibold px-4 py-2.5">Name</th>
-                    <th className="text-left font-semibold px-4 py-2.5 hidden sm:table-cell">Contact</th>
-                    <th className="text-left font-semibold px-4 py-2.5 hidden md:table-cell">Phone</th>
-                    <th className="text-left font-semibold px-4 py-2.5 hidden md:table-cell">Email</th>
-                    <th className="text-left font-semibold px-4 py-2.5">Status</th>
-                    <th className="text-right font-semibold px-4 py-2.5">Actions</th>
+                    <th className="text-left font-semibold px-4 py-2.5">{t('purchasing.suppliersList.colName')}</th>
+                    <th className="text-left font-semibold px-4 py-2.5 hidden sm:table-cell">{t('purchasing.suppliersList.colContact')}</th>
+                    <th className="text-left font-semibold px-4 py-2.5 hidden md:table-cell">{t('purchasing.suppliersList.colPhone')}</th>
+                    <th className="text-left font-semibold px-4 py-2.5 hidden md:table-cell">{t('purchasing.suppliersList.colEmail')}</th>
+                    <th className="text-left font-semibold px-4 py-2.5">{t('purchasing.suppliersList.colStatus')}</th>
+                    <th className="text-right font-semibold px-4 py-2.5">{t('purchasing.suppliersList.colActions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -225,20 +245,20 @@ async function toggleActive(supplier: Supplier) {
                             s.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
                           }`}
                         >
-                          {s.isActive ? 'Active' : 'Inactive'}
+                          {s.isActive ? t('purchasing.suppliersList.active') : t('purchasing.suppliersList.inactive')}
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-end gap-1">
                           <button
-                            title="Edit"
+                            title={t('purchasing.suppliersList.edit')}
                             onClick={() => router.push(`/purchasing/suppliers/${s.id}/edit`)}
                             className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50"
                           >
                             <Pencil size={15} strokeWidth={2} />
                           </button>
                           <button
-                            title={s.isActive ? 'Deactivate' : 'Reactivate'}
+                            title={s.isActive ? t('purchasing.suppliersList.deactivate') : t('purchasing.suppliersList.reactivate')}
                             disabled={actionId === s.id}
                             onClick={() => toggleActive(s)}
                             className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50"
@@ -250,7 +270,7 @@ async function toggleActive(supplier: Supplier) {
                             )}
                           </button>
                           <button
-                            title="Delete"
+                            title={t('purchasing.suppliersList.delete')}
                             disabled={actionId === s.id}
                             onClick={() => handleDelete(s)}
                             className="p-1.5 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 disabled:opacity-50"

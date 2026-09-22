@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search, UserPlus, X, Check, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Supplier } from '@/app/components/suppliers/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -17,10 +18,12 @@ export function SupplierPicker({
   onChange: (supplier: Supplier | null) => void;
   hasError?: boolean;
 }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Supplier[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -48,6 +51,7 @@ export function SupplierPicker({
     if (!open || quickAddOpen) return;
     const timeout = setTimeout(async () => {
       setSearching(true);
+      setSearchError('');
       try {
         const q = query.trim();
         const params = new URLSearchParams({ isActive: 'true', pageSize: '10' });
@@ -57,11 +61,18 @@ export function SupplierPicker({
           const body = await res.json();
           setResults(body.data);
         }
+      } catch {
+        // FIX — see CustomerPicker.tsx's identical fix: was missing
+        // entirely, turning a network failure or expired session into
+        // an unhandled rejection with nothing shown to the user.
+        setResults([]);
+        setSearchError(t('purchasing.supplierPicker.searchFailed'));
       } finally {
         setSearching(false);
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, open, quickAddOpen]);
 
   function openQuickAdd() {
@@ -76,7 +87,7 @@ export function SupplierPicker({
 
   async function submitQuickAdd() {
     if (!newName.trim()) {
-      setSaveError('Name is required');
+      setSaveError(t('purchasing.supplierPicker.nameRequired'));
       return;
     }
     setSaving(true);
@@ -94,7 +105,7 @@ export function SupplierPicker({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `Failed to create supplier (${res.status})`);
+        throw new Error(body?.message || t('purchasing.supplierPicker.createFailed', { status: res.status }));
       }
       const created: Supplier = await res.json();
       onChange(created);
@@ -102,7 +113,7 @@ export function SupplierPicker({
       setQuickAddOpen(false);
       setQuery('');
     } catch (e: any) {
-      setSaveError(e.message || 'Could not create supplier');
+      setSaveError(e.message || t('purchasing.supplierPicker.createFailedGeneric'));
     } finally {
       setSaving(false);
     }
@@ -122,7 +133,7 @@ export function SupplierPicker({
           onClick={() => onChange(null)}
           className="text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 shrink-0"
         >
-          Change
+          {t('purchasing.supplierPicker.change')}
         </button>
       </div>
     );
@@ -144,7 +155,7 @@ export function SupplierPicker({
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search supplier by name or phone..."
+          placeholder={t('purchasing.supplierPicker.searchPlaceholder')}
           className="w-full text-sm outline-none"
         />
       </div>
@@ -154,7 +165,7 @@ export function SupplierPicker({
           {quickAddOpen ? (
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">New supplier</p>
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('purchasing.supplierPicker.newSupplierLabel')}</p>
                 <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-black">
                   <X size={14} strokeWidth={2} />
                 </button>
@@ -162,32 +173,32 @@ export function SupplierPicker({
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Name"
+                placeholder={t('purchasing.supplierPicker.namePlaceholder')}
                 autoFocus
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
               />
               <input
                 value={newContactName}
                 onChange={(e) => setNewContactName(e.target.value)}
-                placeholder="Contact person (optional)"
+                placeholder={t('purchasing.supplierPicker.contactPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
               />
               <input
                 value={newPhone}
                 onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="Phone (optional)"
+                placeholder={t('purchasing.supplierPicker.phonePlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
               />
               <input
                 value={newAddress}
                 onChange={(e) => setNewAddress(e.target.value)}
-                placeholder="Address (optional)"
+                placeholder={t('purchasing.supplierPicker.addressPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
               />
               <input
                 value={newNpwp}
                 onChange={(e) => setNewNpwp(e.target.value)}
-                placeholder="NPWP (optional)"
+                placeholder={t('purchasing.supplierPicker.npwpPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
               />
               {saveError && <p className="text-xs text-red-600 mb-2">{saveError}</p>}
@@ -197,16 +208,19 @@ export function SupplierPicker({
                 className="w-full flex items-center justify-center gap-1.5 bg-black text-white rounded-md p-2 text-sm font-semibold disabled:bg-gray-300"
               >
                 <Check size={14} strokeWidth={2} />
-                {saving ? 'Saving...' : 'Add & select'}
+                {saving ? t('purchasing.supplierPicker.saving') : t('purchasing.supplierPicker.addAndSelect')}
               </button>
             </div>
           ) : (
             <>
               <div className="max-h-56 overflow-y-auto">
-                {searching && <p className="px-3 py-2 text-xs text-gray-400">Loading...</p>}
-                {!searching && results.length === 0 && (
+                {searching && <p className="px-3 py-2 text-xs text-gray-400">{t('purchasing.supplierPicker.loading')}</p>}
+                {!searching && searchError && (
+                  <p className="px-3 py-2 text-xs text-red-600">{searchError}</p>
+                )}
+                {!searching && !searchError && results.length === 0 && (
                   <p className="px-3 py-2 text-xs text-gray-400">
-                    {query.trim() ? 'No matching suppliers' : 'No suppliers yet'}
+                    {query.trim() ? t('purchasing.supplierPicker.noMatching') : t('purchasing.supplierPicker.noneYet')}
                   </p>
                 )}
                 {results.map((s) => (
@@ -229,7 +243,9 @@ export function SupplierPicker({
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-gray-50 border-t-2 border-gray-100 font-medium"
               >
                 <UserPlus size={14} strokeWidth={2} />
-                {query.trim() ? `Add "${query.trim()}" as new supplier` : 'Add new supplier'}
+                {query.trim()
+                  ? t('purchasing.supplierPicker.addAsNew', { name: query.trim() })
+                  : t('purchasing.supplierPicker.addNew')}
               </button>
             </>
           )}

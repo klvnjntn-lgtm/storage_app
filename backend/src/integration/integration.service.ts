@@ -10,7 +10,11 @@ export class IntegrationService {
   // Step 1: customer uploads a file. We just parse headers + a preview
   // of rows so the UI can show a column-mapping screen. Nothing is
   // written to the DB yet.
-  previewFile(fileBuffer: Buffer, connectionId: string | undefined, organizationId: string) {
+  // FIX — was missing `async`/`await` on the getSavedMapping() call, so
+  // savedMapping always serialized to `{}` (JSON.stringify on a bare
+  // Promise) instead of the real mapping or null. The "pre-fill saved
+  // mapping" feature silently never worked.
+  async previewFile(fileBuffer: Buffer, connectionId: string | undefined, organizationId: string) {
     const text = fileBuffer.toString('utf-8');
     const rows = parseCsv(text);
 
@@ -26,7 +30,7 @@ export class IntegrationService {
       totalRows: rows.length,
       // if we already have a saved mapping for this connection, return it
       // so the UI can pre-fill instead of asking again
-      savedMapping: connectionId ? this.getSavedMapping(connectionId, organizationId) : null,
+      savedMapping: connectionId ? await this.getSavedMapping(connectionId, organizationId) : null,
       rawRows: rows, // frontend sends this back in confirmImport
     };
   }

@@ -43,11 +43,6 @@ summary(
     return this.sessionsService.findOne(organizationId, id);
   }
 
-  // TODO: confirm whether addNote should stay ungated. Every other
-  // write on this controller requires WAREHOUSE_OPS; this is currently
-  // the one exception and the original rationale for that wasn't
-  // available when this file was last edited.
-// src/sessions/sessions.controller.ts — only this route changes
 @UseGuards(ModuleGuard)
 @RequireModule(ModuleKey.WAREHOUSE_OPS)
 @Post(':id/notes')

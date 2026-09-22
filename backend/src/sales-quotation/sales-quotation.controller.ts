@@ -18,6 +18,8 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SalesQuotationService } from './sales-quotation.service';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
 
@@ -111,9 +113,10 @@ export class SalesQuotationController {
 
   // NEW — discardDraft() existed on the service with no route either.
   // DELETE fits the semantics (draft is being removed) better than a
-  // POST :id/discard action route, but either is defensible — pick
-  // whichever matches your other draft-delete routes (e.g. does invoice
-  // use DELETE for discardDraft? mirror that for consistency).
+  // POST :id/discard action route. ADMIN-gated to mirror
+  // InvoiceController.discard, its equivalent draft-delete route.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Delete(':id')
   discardDraft(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
     return this.quotationService.discardDraft(organizationId, id, req.user.sub);

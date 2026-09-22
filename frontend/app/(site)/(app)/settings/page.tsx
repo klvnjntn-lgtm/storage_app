@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, Percent, Landmark } from 'lucide-react';
+import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, Percent, Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
+import { useLanguage } from '@/app/context/LanguageContext';
+import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -50,7 +52,8 @@ type OrgBankAccount = {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { profile, loading: authLoading } = useAuth();
+  const { profile, loading: authLoading, error: authError } = useAuth();
+  const { t } = useLanguage();
 
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode | null>(null);
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean | null>(null);
@@ -59,8 +62,20 @@ export default function SettingsPage() {
   const [business, setBusiness] = useState<BusinessDetails | null>(null);
   const [businessForm, setBusinessForm] = useState<Partial<BusinessDetails>>({});
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [showLogoLibrary, setShowLogoLibrary] = useState(false);
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [businessSaved, setBusinessSaved] = useState(false);
+
+  // Drives which calendar day/fiscal period a journal entry posts into
+  // (backend/src/accounting/business-date.ts) — was a single global env
+  // var before, now per-org. Kept separate from BusinessDetails/
+  // saveBusinessDetails since it's not "shown on invoices" like those
+  // fields are, even though it's saved through the same PATCH endpoint.
+  const [timezone, setTimezone] = useState<string | null>(null);
+  const [timezoneForm, setTimezoneForm] = useState('');
+  const [savingTimezone, setSavingTimezone] = useState(false);
+  const [timezoneSaved, setTimezoneSaved] = useState(false);
+  const [timezoneError, setTimezoneError] = useState('');
 
   // Tax — backed by full CRUD on /organization/tax-rates (GET/POST list,
   // PATCH/DELETE :id). Any number of rates, each independently active or
@@ -93,14 +108,24 @@ export default function SettingsPage() {
   // reason to fire the request or render the form first).
   useEffect(() => {
     if (authLoading) return;
+    // FIX — was redirecting to /login whenever `profile` was null, which
+    // conflated "genuinely not logged in" with "the /auth/me call hit a
+    // transient error" (a real 401 already redirects on its own via
+    // apiFetch — this component doesn't need to react to that case at
+    // all). authError distinguishes the two; on a transient failure we
+    // just don't render the gated form rather than force-logging out a
+    // valid admin.
     if (!profile) {
-      router.replace('/login');
+      if (!authError) router.replace('/login');
       return;
     }
     if (profile.role !== 'ADMIN') {
-      router.replace('/stock');
+      // FIX — was '/stock', which doesn't exist (real route is
+      // '/inventory/stock'); every non-admin who landed on /settings got
+      // bounced to a 404 instead of a working page.
+      router.replace('/inventory/stock');
     }
-  }, [authLoading, profile, router]);
+  }, [authLoading, profile, authError, router]);
 
   useEffect(() => {
     if (authLoading || profile?.role !== 'ADMIN') return;
@@ -119,23 +144,26 @@ export default function SettingsPage() {
         };
         setBusiness(details);
         setBusinessForm(details);
+        setTimezone(data.timezone ?? 'Asia/Jakarta');
+        setTimezoneForm(data.timezone ?? 'Asia/Jakarta');
       })
-      .catch(() => setError('Could not load settings'));
+      .catch(() => setError(t('settings.couldNotLoadSettings')));
 
     apiFetch('/organizations/modules/status')
       .then((res) => res.json())
       .then((data: ModuleStatus[]) => setModules(data))
-      .catch(() => setError('Could not load modules'));
+      .catch(() => setError(t('settings.couldNotLoadModules')));
 
     apiFetch('/organization/tax-rates')
       .then((res) => res.json())
-      .then((data: OrgTaxRate[]) => setTaxRates(data.filter((t) => !t.archivedAt)))
-      .catch(() => setError('Could not load tax rates'));
+      .then((data: OrgTaxRate[]) => setTaxRates(data.filter((rate) => !rate.archivedAt)))
+      .catch(() => setError(t('settings.couldNotLoadTaxRates')));
 
     apiFetch('/organization/bank-accounts')
       .then((res) => res.json())
       .then((data: OrgBankAccount[]) => setBankAccounts(data.filter((b) => !b.archivedAt)))
-      .catch(() => setError('Could not load bank accounts'));
+      .catch(() => setError(t('settings.couldNotLoadBankAccounts')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, profile]);
 
   async function saveFulfillmentMode(newMode: FulfillmentMode) {
@@ -153,7 +181,7 @@ export default function SettingsPage() {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setFulfillmentMode(prev); // roll back
-        setError(data?.message || 'Failed to update settings');
+        setError(data?.message || t('settings.updateSettingsFailed'));
         return;
       }
       setFulfillmentMode(data.fulfillmentMode);
@@ -178,7 +206,7 @@ export default function SettingsPage() {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setPosPricingEnabled(prev); // roll back
-        setError(data?.message || 'Failed to update POS pricing');
+        setError(data?.message || t('settings.updatePosPricingFailed'));
         return;
       }
       setPosPricingEnabled(data.posPricingEnabled);
@@ -194,11 +222,11 @@ export default function SettingsPage() {
     const percentage = Number(newTaxPercentage);
 
     if (!name) {
-      setTaxError('Enter a tax name');
+      setTaxError(t('settings.taxRates.enterTaxName'));
       return;
     }
     if (newTaxPercentage.trim() === '' || Number.isNaN(percentage) || percentage < 0 || percentage > 100) {
-      setTaxError('Percentage must be a number between 0 and 100');
+      setTaxError(t('settings.taxRates.percentageRange'));
       return;
     }
 
@@ -211,7 +239,7 @@ export default function SettingsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setTaxError(data?.message || 'Failed to add tax rate');
+        setTaxError(data?.message || t('settings.taxRates.addFailed'));
         return;
       }
       setTaxRates((prev) => [...(prev ?? []), data]);
@@ -237,16 +265,16 @@ export default function SettingsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setTaxError(data?.message || (isDefault ? 'Failed to set default' : 'Failed to unset default'));
+        setTaxError(data?.message || (isDefault ? t('settings.taxRates.setDefaultFailed') : t('settings.taxRates.unsetDefaultFailed')));
         return;
       }
       setTaxRates(
         (prev) =>
-          prev?.map((t) => {
-            if (t.id === id) return { ...t, isDefault };
+          prev?.map((rate) => {
+            if (rate.id === id) return { ...rate, isDefault };
             // When promoting a new default, every other rate loses the flag.
             // When just unsetting one, leave the others untouched.
-            return isDefault ? { ...t, isDefault: false } : t;
+            return isDefault ? { ...rate, isDefault: false } : rate;
           }) ?? prev,
       );
     } finally {
@@ -261,10 +289,10 @@ export default function SettingsPage() {
       const res = await apiFetch(`/organization/tax-rates/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setTaxError(data?.message || 'Failed to remove tax rate');
+        setTaxError(data?.message || t('settings.taxRates.removeFailed'));
         return;
       }
-      setTaxRates((prev) => prev?.filter((t) => t.id !== id) ?? prev);
+      setTaxRates((prev) => prev?.filter((rate) => rate.id !== id) ?? prev);
     } finally {
       setSavingTaxId(null);
     }
@@ -277,7 +305,7 @@ export default function SettingsPage() {
     const accountName = newAccountName.trim();
 
     if (!bankName || !accountNumber || !accountName) {
-      setBankError('Fill in bank name, account number, and account holder name');
+      setBankError(t('settings.bankAccounts.fillRequiredFields'));
       return;
     }
 
@@ -290,7 +318,7 @@ export default function SettingsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setBankError(data?.message || 'Failed to add bank account');
+        setBankError(data?.message || t('settings.bankAccounts.addFailed'));
         return;
       }
       setBankAccounts((prev) => [...(prev ?? []), data]);
@@ -316,7 +344,7 @@ export default function SettingsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setBankError(data?.message || (isDefault ? 'Failed to set default' : 'Failed to unset default'));
+        setBankError(data?.message || (isDefault ? t('settings.bankAccounts.setDefaultFailed') : t('settings.bankAccounts.unsetDefaultFailed')));
         return;
       }
       setBankAccounts(
@@ -338,7 +366,7 @@ export default function SettingsPage() {
       const res = await apiFetch(`/organization/bank-accounts/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setBankError(data?.message || 'Failed to remove bank account');
+        setBankError(data?.message || t('settings.bankAccounts.removeFailed'));
         return;
       }
       setBankAccounts((prev) => prev?.filter((b) => b.id !== id) ?? prev);
@@ -347,15 +375,16 @@ export default function SettingsPage() {
     }
   }
 
-  async function uploadLogo(file: File) {
+  async function selectLogoFromLibrary(asset: MediaAsset) {
     setUploadingLogo(true);
     try {
-      const body = new FormData();
-      body.append('logo', file);
-      const res = await apiFetch('/organization/logo', { method: 'POST', body });
+      const res = await apiFetch('/organization/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logoUrl: asset.url }),
+      });
       if (res.ok) {
-        const { logoUrl } = await res.json();
-        setBusinessForm((f) => ({ ...f, logoUrl }));
+        setBusinessForm((f) => ({ ...f, logoUrl: asset.url }));
       }
     } finally {
       setUploadingLogo(false);
@@ -367,26 +396,59 @@ export default function SettingsPage() {
     setBusinessSaved(false);
     setError('');
     try {
+      // FIX — was `businessForm.legalName || undefined` etc. The backend
+      // (organization.service.ts) treats undefined as "leave unchanged"
+      // and only clears a field when it's explicitly sent as '' (it does
+      // `.trim()` on whatever's sent, so `null` would crash it — hence
+      // the `?? ''` below, not a bare pass-through). Since this button
+      // saves the whole form (not a per-field partial patch), every
+      // field should always be sent as its actual current value —
+      // clearing a field to empty and saving used to silently send
+      // undefined instead, so the backend kept the old value while the
+      // UI optimistically showed "saved" and the field reappeared on the
+      // next reload.
       const res = await apiFetch('/organization/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          legalName: businessForm.legalName || undefined,
-          npwp: businessForm.npwp || undefined,
-          logoUrl: businessForm.logoUrl || undefined,
-          address: businessForm.address || undefined,
-          phone: businessForm.phone || undefined,
+          legalName: businessForm.legalName ?? '',
+          npwp: businessForm.npwp ?? '',
+          logoUrl: businessForm.logoUrl ?? '',
+          address: businessForm.address ?? '',
+          phone: businessForm.phone ?? '',
         }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.message || 'Failed to save business details');
+        setError(data?.message || t('settings.businessIdentity.saveFailed'));
         return;
       }
       setBusiness((b) => (b ? { ...b, ...businessForm } : b));
       setBusinessSaved(true);
     } finally {
       setSavingBusiness(false);
+    }
+  }
+
+  async function saveTimezone() {
+    setSavingTimezone(true);
+    setTimezoneSaved(false);
+    setTimezoneError('');
+    try {
+      const res = await apiFetch('/organization/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: timezoneForm }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setTimezoneError(data?.message || t('settings.timezone.saveFailed'));
+        return;
+      }
+      setTimezone(timezoneForm);
+      setTimezoneSaved(true);
+    } finally {
+      setSavingTimezone(false);
     }
   }
 
@@ -414,22 +476,15 @@ export default function SettingsPage() {
     >
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Scanner Hub
-          </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <SettingsIcon size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Settings
+                {t('settings.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Organization-wide warehouse settings</p>
+              <p className="text-xs text-gray-500 truncate">{t('settings.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -442,10 +497,10 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {(saved || businessSaved) && (
+        {(saved || businessSaved || timezoneSaved) && (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
             <CheckCircle2 size={18} strokeWidth={2} />
-            Settings saved
+            {t('settings.settingsSaved')}
           </div>
         )}
 
@@ -453,10 +508,9 @@ export default function SettingsPage() {
         {hasInvoicePos && business && (
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div>
-              <h2 className="font-bold">Business Identity</h2>
+              <h2 className="font-bold">{t('settings.businessIdentity.heading')}</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Shown on printed invoices — logo, legal name, NPWP, and address. Bank details for
-                customers paying by transfer live in the Bank Accounts section below.
+                {t('settings.businessIdentity.description')}
               </p>
             </div>
 
@@ -470,47 +524,52 @@ export default function SettingsPage() {
                         ? businessForm.logoUrl
                         : `/api${businessForm.logoUrl}`
                     }
-                    alt="Logo"
+                    alt={t('settings.businessIdentity.logoAlt')}
                     className="w-full h-full object-contain"
                   />
                 ) : (
                   <ImageIcon size={20} className="text-blue-300" />
                 )}
               </div>
-              <label className="text-xs px-3 py-2 rounded-md border border-blue-500/20 text-blue-700 hover:bg-blue-50 cursor-pointer font-medium transition-colors">
-                {uploadingLogo ? 'Uploading...' : 'Upload logo'}
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/svg+xml"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
-                />
-              </label>
+              <button
+                type="button"
+                onClick={() => setShowLogoLibrary(true)}
+                disabled={uploadingLogo}
+                className="text-xs px-3 py-2 rounded-md border border-blue-500/20 text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-medium transition-colors"
+              >
+                {uploadingLogo ? t('settings.businessIdentity.uploading') : t('settings.businessIdentity.uploadLogo')}
+              </button>
             </div>
+
+            <MediaLibraryModal
+              open={showLogoLibrary}
+              onClose={() => setShowLogoLibrary(false)}
+              onSelect={selectLogoFromLibrary}
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <input
                 value={businessForm.legalName ?? ''}
                 onChange={(e) => setBusinessForm((f) => ({ ...f, legalName: e.target.value }))}
-                placeholder="Legal business name (optional)"
+                placeholder={t('settings.businessIdentity.legalNamePlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
               />
               <input
                 value={businessForm.npwp ?? ''}
                 onChange={(e) => setBusinessForm((f) => ({ ...f, npwp: e.target.value }))}
-                placeholder="NPWP (optional)"
+                placeholder={t('settings.businessIdentity.npwpPlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
               />
               <input
                 value={businessForm.address ?? ''}
                 onChange={(e) => setBusinessForm((f) => ({ ...f, address: e.target.value }))}
-                placeholder="Business address (optional)"
+                placeholder={t('settings.businessIdentity.addressPlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all sm:col-span-2"
               />
               <input
                 value={businessForm.phone ?? ''}
                 onChange={(e) => setBusinessForm((f) => ({ ...f, phone: e.target.value }))}
-                placeholder="Business phone (optional)"
+                placeholder={t('settings.businessIdentity.phonePlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
               />
             </div>
@@ -520,8 +579,54 @@ export default function SettingsPage() {
               disabled={savingBusiness}
               className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
             >
-              {savingBusiness ? 'Saving...' : 'Save business details'}
+              {savingBusiness ? t('common.saving') : t('settings.businessIdentity.saveButton')}
             </button>
+          </section>
+        )}
+
+        {/* Timezone — drives which calendar day/fiscal period a journal
+            entry posts into, not just cosmetic date display. Shown
+            whenever INVOICE_POS is purchased, same gate as Business
+            Identity, since accounting itself requires that module. */}
+        {hasInvoicePos && timezone !== null && (
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
+            <div>
+              <h2 className="font-bold">{t('settings.timezone.heading')}</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                {t('settings.timezone.description')}
+              </p>
+            </div>
+
+            {timezoneError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{timezoneError}</p>
+            )}
+
+            <select
+              value={timezoneForm}
+              onChange={(e) => {
+                setTimezoneForm(e.target.value);
+                setTimezoneSaved(false);
+              }}
+              className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all w-full sm:w-auto"
+            >
+              <option value="Asia/Jakarta">{t('settings.timezone.wib')}</option>
+              <option value="Asia/Makassar">{t('settings.timezone.wita')}</option>
+              <option value="Asia/Jayapura">{t('settings.timezone.wit')}</option>
+              {timezoneForm && !['Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura'].includes(timezoneForm) && (
+                <option value={timezoneForm}>{timezoneForm}</option>
+              )}
+            </select>
+
+            <div>
+              <button
+                type="button"
+                onClick={saveTimezone}
+                disabled={savingTimezone || timezoneForm === timezone}
+                className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
+              >
+                {savingTimezone ? t('common.saving') : t('settings.timezone.saveButton')}
+              </button>
+            </div>
           </section>
         )}
 
@@ -534,11 +639,10 @@ export default function SettingsPage() {
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div className="flex items-center gap-2">
               <Landmark size={16} strokeWidth={2} className="text-blue-700" />
-              <h2 className="font-bold">Bank Accounts</h2>
+              <h2 className="font-bold">{t('settings.bankAccounts.heading')}</h2>
             </div>
             <p className="text-sm text-gray-600 max-w-md">
-              Add every account you accept transfers into. The one marked Default is what shows on
-              printed invoices.
+              {t('settings.bankAccounts.description')}
             </p>
 
             {bankError && <p className="text-xs text-red-700">{bankError}</p>}
@@ -552,7 +656,7 @@ export default function SettingsPage() {
                     <span className="text-sm text-gray-500 ml-2">({account.accountName})</span>
                     {account.isDefault && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 font-medium ml-2">
-                        Default
+                        {t('settings.default')}
                       </span>
                     )}
                   </div>
@@ -563,7 +667,7 @@ export default function SettingsPage() {
                       disabled={savingBankId === account.id}
                       className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 disabled:opacity-50 transition-colors"
                     >
-                      {account.isDefault ? 'Unset default' : 'Set default'}
+                      {account.isDefault ? t('settings.unsetDefault') : t('settings.setDefault')}
                     </button>
                     <button
                       type="button"
@@ -571,13 +675,13 @@ export default function SettingsPage() {
                       disabled={savingBankId === account.id}
                       className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50 transition-colors"
                     >
-                      Remove
+                      {t('common.remove')}
                     </button>
                   </div>
                 </div>
               ))}
               {bankAccounts?.length === 0 && (
-                <p className="text-sm text-gray-400 py-2">No bank accounts yet.</p>
+                <p className="text-sm text-gray-400 py-2">{t('settings.bankAccounts.noneYet')}</p>
               )}
             </div>
 
@@ -585,19 +689,19 @@ export default function SettingsPage() {
               <input
                 value={newBankName}
                 onChange={(e) => setNewBankName(e.target.value)}
-                placeholder="Bank name"
+                placeholder={t('settings.bankAccounts.bankNamePlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
               />
               <input
                 value={newAccountNumber}
                 onChange={(e) => setNewAccountNumber(e.target.value)}
-                placeholder="Account number"
+                placeholder={t('settings.bankAccounts.accountNumberPlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
               />
               <input
                 value={newAccountName}
                 onChange={(e) => setNewAccountName(e.target.value)}
-                placeholder="Account holder name"
+                placeholder={t('settings.bankAccounts.accountHolderPlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
               />
               <button
@@ -606,7 +710,7 @@ export default function SettingsPage() {
                 disabled={savingBankId === 'new'}
                 className="text-sm px-4 py-2.5 sm:py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 whitespace-nowrap transition-colors"
               >
-                {savingBankId === 'new' ? 'Adding...' : 'Add account'}
+                {savingBankId === 'new' ? t('settings.bankAccounts.adding') : t('settings.bankAccounts.addButton')}
               </button>
             </div>
           </section>
@@ -622,11 +726,10 @@ export default function SettingsPage() {
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div className="flex items-center gap-2">
               <Percent size={16} strokeWidth={2} className="text-blue-700" />
-              <h2 className="font-bold">Tax Rates</h2>
+              <h2 className="font-bold">{t('settings.taxRates.heading')}</h2>
             </div>
             <p className="text-sm text-gray-600 max-w-md">
-              Add as many tax rates as you need (e.g. PPN 11%, a service charge, a local levy).
-              Staff choose which of these apply per item when creating an invoice.
+              {t('settings.taxRates.description')}
             </p>
 
             {taxError && <p className="text-xs text-red-700">{taxError}</p>}
@@ -639,7 +742,7 @@ export default function SettingsPage() {
                     <span className="text-sm text-gray-500 ml-2">{rate.percentage}%</span>
                     {rate.isDefault && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 font-medium ml-2">
-                        Default
+                        {t('settings.default')}
                       </span>
                     )}
                   </div>
@@ -650,7 +753,7 @@ export default function SettingsPage() {
                       disabled={savingTaxId === rate.id}
                       className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 disabled:opacity-50 transition-colors"
                     >
-                      {rate.isDefault ? 'Unset default' : 'Set default'}
+                      {rate.isDefault ? t('settings.unsetDefault') : t('settings.setDefault')}
                     </button>
                     <button
                       type="button"
@@ -658,13 +761,13 @@ export default function SettingsPage() {
                       disabled={savingTaxId === rate.id}
                       className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50 transition-colors"
                     >
-                      Remove
+                      {t('common.remove')}
                     </button>
                   </div>
                 </div>
               ))}
               {taxRates?.length === 0 && (
-                <p className="text-sm text-gray-400 py-2">No tax rates yet.</p>
+                <p className="text-sm text-gray-400 py-2">{t('settings.taxRates.noneYet')}</p>
               )}
             </div>
 
@@ -672,7 +775,7 @@ export default function SettingsPage() {
               <input
                 value={newTaxName}
                 onChange={(e) => setNewTaxName(e.target.value)}
-                placeholder="Tax name (e.g. PPN)"
+                placeholder={t('settings.taxRates.taxNamePlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
               />
               <div className="relative">
@@ -693,7 +796,7 @@ export default function SettingsPage() {
                 disabled={savingTaxId === 'new'}
                 className="text-sm px-4 py-2.5 sm:py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
               >
-                {savingTaxId === 'new' ? 'Adding...' : 'Add tax rate'}
+                {savingTaxId === 'new' ? t('settings.taxRates.adding') : t('settings.taxRates.addButton')}
               </button>
             </div>
           </section>
@@ -704,10 +807,10 @@ export default function SettingsPage() {
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div className="flex items-center gap-2">
               <Tag size={16} strokeWidth={2} className="text-blue-700" />
-              <h2 className="font-bold">Invoice Pricing</h2>
+              <h2 className="font-bold">{t('settings.invoicePricing.heading')}</h2>
             </div>
             <p className="text-sm text-gray-600 max-w-md">
-              Choose how prices are set when staff create an invoice.
+              {t('settings.invoicePricing.description')}
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-1">
@@ -727,10 +830,10 @@ export default function SettingsPage() {
                       posPricingEnabled === true ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
-                  <span className="font-semibold text-sm">Custom Price</span>
+                  <span className="font-semibold text-sm">{t('settings.invoicePricing.customPriceTitle')}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1 ml-5">
-                  Staff type a price per item at checkout. Catalog prices aren't shown.
+                  {t('settings.invoicePricing.customPriceDescription')}
                 </p>
               </button>
 
@@ -750,10 +853,10 @@ export default function SettingsPage() {
                       posPricingEnabled === false ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
-                  <span className="font-semibold text-sm">Database / Import Price</span>
+                  <span className="font-semibold text-sm">{t('settings.invoicePricing.catalogPriceTitle')}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1 ml-5">
-                  Always use each item's catalog price — set manually or via Excel import.
+                  {t('settings.invoicePricing.catalogPriceDescription')}
                 </p>
               </button>
             </div>
@@ -764,9 +867,9 @@ export default function SettingsPage() {
         {hasWarehouseOps && (
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
             <div>
-              <h2 className="font-bold">Fulfillment Workflow</h2>
+              <h2 className="font-bold">{t('settings.fulfillment.heading')}</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Choose how fulfillment sessions move through stages.
+                {t('settings.fulfillment.description')}
               </p>
             </div>
 
@@ -787,10 +890,10 @@ export default function SettingsPage() {
                       fulfillmentMode === 'PICK_PACK_SHIP' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
-                  <span className="font-semibold text-sm">Pick → Pack → Ship</span>
+                  <span className="font-semibold text-sm">{t('settings.fulfillment.pickPackShipTitle')}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1 ml-5">
-                  Full three-stage flow — best if picking and packing happen separately.
+                  {t('settings.fulfillment.pickPackShipDescription')}
                 </p>
               </button>
 
@@ -810,24 +913,23 @@ export default function SettingsPage() {
                       fulfillmentMode === 'PICK_SHIP' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
                     }`}
                   />
-                  <span className="font-semibold text-sm">Pick → Ship</span>
+                  <span className="font-semibold text-sm">{t('settings.fulfillment.pickShipTitle')}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1 ml-5">
-                  Skip packing — good for small stores where one person handles the whole order.
+                  {t('settings.fulfillment.pickShipDescription')}
                 </p>
               </button>
             </div>
 
             <p className="text-xs text-gray-400 pt-1">
-              This applies to new fulfillment sessions going forward. Sessions already
-              in progress keep the stage list they started with.
+              {t('settings.fulfillment.note')}
             </p>
           </section>
         )}
 
         {loaded && !hasWarehouseOps && !hasInvoicePos && (
           <div className="text-sm text-gray-500 border border-dashed border-blue-500/25 rounded-xl p-5 text-center bg-white/60">
-            No optional modules are active on this organization yet.
+            {t('settings.noModulesActive')}
           </div>
         )}
       </div>

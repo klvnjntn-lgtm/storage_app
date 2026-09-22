@@ -2,30 +2,32 @@
 
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ClipboardList, Building2, ArrowUpRight, ArrowLeft, Package } from 'lucide-react';
+import { ClipboardList, Building2, ArrowUpRight, Package } from 'lucide-react';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
-// Brighter, more saturated stops (400 -> 600), matching inventory/page.tsx.
-const PURCHASING_ITEMS = [
-  {
-    title: 'Purchase Orders',
-    description: 'Create and track orders placed with suppliers',
-    href: '/purchasing/purchase-orders',
-    icon: ClipboardList,
-    gradient: 'from-amber-400 to-orange-600',
-  },
-  {
-    title: 'Suppliers',
-    description: 'Manage supplier contacts and details',
-    href: '/purchasing/suppliers',
-    icon: Building2,
-    gradient: 'from-slate-400 to-gray-600',
-  },
-];
-
 export default function PurchasingHome() {
   const router = useRouter();
+  const { t } = useLanguage();
+
+  // Brighter, more saturated stops (400 -> 600), matching inventory/page.tsx.
+  const PURCHASING_ITEMS = [
+    {
+      title: t('purchasing.overview.poCardTitle'),
+      description: t('purchasing.overview.poCardDescription'),
+      href: '/purchasing/purchase-orders',
+      icon: ClipboardList,
+      gradient: 'from-amber-400 to-orange-600',
+    },
+    {
+      title: t('purchasing.overview.suppliersCardTitle'),
+      description: t('purchasing.overview.suppliersCardDescription'),
+      href: '/purchasing/suppliers',
+      icon: Building2,
+      gradient: 'from-slate-400 to-gray-600',
+    },
+  ];
 
   return (
     <main
@@ -39,24 +41,16 @@ export default function PurchasingHome() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to dashboard
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Package size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Purchasing
+                {t('purchasing.overview.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Manage suppliers and purchase orders
+                {t('purchasing.overview.subtitle')}
               </p>
             </div>
           </div>

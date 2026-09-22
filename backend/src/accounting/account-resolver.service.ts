@@ -36,15 +36,4 @@ export class AccountResolverService {
     }
     return account.id;
   }
-
-  async resolveMany(
-    organizationId: string,
-    keys: SystemAccountKey[],
-    tx: Db = this.prisma,
-  ): Promise<Record<string, string>> {
-    const entries = await Promise.all(
-      keys.map((k) => this.resolve(organizationId, k, tx).then((id) => [k, id] as const)),
-    );
-    return Object.fromEntries(entries);
-  }
 }

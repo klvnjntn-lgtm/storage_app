@@ -5,9 +5,10 @@ import { WarehouseService } from './warehouse.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ReceiveModule } from '../receive/receive.module';
 import { GuardsModule } from '../auth/guards/guards.module';
+import { StockModule } from '../stock/stock.module';
 
 @Module({
-  imports: [PrismaModule, ReceiveModule, GuardsModule],
+  imports: [PrismaModule, ReceiveModule, GuardsModule, StockModule],
   controllers: [WarehouseController],
   providers: [WarehouseService],
 })

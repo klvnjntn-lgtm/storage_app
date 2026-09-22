@@ -4,14 +4,14 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, User, Car, Plus, X, Check } from 'lucide-react';
+import { User, Car, Plus, X, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { useHasModule } from '@/lib/useHasModule';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
+import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
-
-type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 type CustomerInvoice = {
   id: string;
@@ -42,29 +42,12 @@ type NewVehicleState = {
 
 const EMPTY_VEHICLE: NewVehicleState = { plateNumber: '', vehicleModel: '', vin: '', odometer: '' };
 
-function formatIDR(amount: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function paymentStatusStyle(status: PaymentStatus) {
-  switch (status) {
-    case 'PAID':
-      return 'bg-green-50 text-green-700 border-green-300';
-    case 'PARTIAL':
-      return 'bg-amber-50 text-amber-700 border-amber-300';
-    case 'UNPAID':
-      return 'bg-red-50 text-red-700 border-red-300';
-  }
-}
-
 export default function CustomerDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,13 +69,13 @@ export default function CustomerDetailPage() {
         const res = await apiFetch(`/customers/${params.id}`);
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          if (!cancelled) setError(body?.message ?? `Failed to load customer (${res.status})`);
+          if (!cancelled) setError(body?.message ?? t('customers.detailPage.loadFailed', { status: res.status }));
           return;
         }
         const data = await res.json();
         if (!cancelled) setCustomer(data);
       } catch {
-        if (!cancelled) setError('Could not reach the server.');
+        if (!cancelled) setError(t('customers.detailPage.serverUnreachable'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,6 +84,7 @@ export default function CustomerDetailPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
   async function loadVehicles() {
@@ -121,11 +105,11 @@ export default function CustomerDetailPage() {
 
   async function saveVehicle() {
     if (!newVehicle.plateNumber.trim()) {
-      setVehicleError('Plate number is required');
+      setVehicleError(t('customers.detailPage.plateNumberRequired'));
       return;
     }
     if (!newVehicle.vehicleModel.trim()) {
-      setVehicleError('Car is required');
+      setVehicleError(t('customers.detailPage.carRequired'));
       return;
     }
     setVehicleSaving(true);
@@ -148,7 +132,7 @@ export default function CustomerDetailPage() {
       setNewVehicle({ ...EMPTY_VEHICLE });
       loadVehicles();
     } catch (e: any) {
-      setVehicleError(e.message || 'Could not save vehicle');
+      setVehicleError(e.message || t('customers.detailPage.saveVehicleFailed'));
     } finally {
       setVehicleSaving(false);
     }
@@ -181,21 +165,13 @@ export default function CustomerDetailPage() {
           /customers, /vehicles/search, and /inventory/stock */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/customers')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Customers
-          </button>
-
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <User size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                {customer?.name ?? 'Customer'}
+                {customer?.name ?? t('customers.detailPage.customerFallback')}
               </h1>
               {customer && (
                 <p className="text-xs text-gray-500 truncate">
@@ -217,7 +193,7 @@ export default function CustomerDetailPage() {
         {customer && hasWorkshopRms && (
           <>
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-gray-600">Vehicles</h2>
+              <h2 className="text-sm font-semibold text-gray-600">{t('customers.detailPage.vehicles')}</h2>
               <button
                 onClick={() => {
                   setVehicleError('');
@@ -226,14 +202,14 @@ export default function CustomerDetailPage() {
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
               >
                 <Plus size={13} strokeWidth={2} />
-                Add vehicle
+                {t('customers.detailPage.addVehicle')}
               </button>
             </div>
 
             {addingVehicle && (
               <div className="border-2 border-gray-300 rounded-md p-3 mb-3 bg-white">
                 <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-xs font-semibold text-gray-500">New vehicle</span>
+                  <span className="text-xs font-semibold text-gray-500">{t('customers.detailPage.newVehicle')}</span>
                   <button onClick={() => setAddingVehicle(false)} className="text-gray-400 hover:text-blue-700">
                     <X size={15} strokeWidth={2} />
                   </button>
@@ -242,26 +218,26 @@ export default function CustomerDetailPage() {
                   <input
                     value={newVehicle.plateNumber}
                     onChange={(e) => setNewVehicle({ ...newVehicle, plateNumber: e.target.value })}
-                    placeholder="Plate number"
+                    placeholder={t('customers.detailPage.plateNumberPlaceholder')}
                     autoFocus
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.vehicleModel}
                     onChange={(e) => setNewVehicle({ ...newVehicle, vehicleModel: e.target.value })}
-                    placeholder="Car (make / model)"
+                    placeholder={t('customers.detailPage.carPlaceholder')}
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.vin}
                     onChange={(e) => setNewVehicle({ ...newVehicle, vin: e.target.value })}
-                    placeholder="VIN (optional)"
+                    placeholder={t('customers.detailPage.vinPlaceholder')}
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
                   <input
                     value={newVehicle.odometer}
                     onChange={(e) => setNewVehicle({ ...newVehicle, odometer: e.target.value })}
-                    placeholder="Odometer (optional)"
+                    placeholder={t('customers.detailPage.odometerPlaceholder')}
                     type="number"
                     inputMode="numeric"
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
@@ -274,14 +250,14 @@ export default function CustomerDetailPage() {
                   className="w-full mt-3 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2 text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
                 >
                   <Check size={15} strokeWidth={2} />
-                  {vehicleSaving ? 'Saving...' : 'Add vehicle'}
+                  {vehicleSaving ? t('common.saving') : t('customers.detailPage.addVehicle')}
                 </button>
               </div>
             )}
 
-            {vehiclesLoading && <p className="text-sm text-gray-500">Loading vehicles...</p>}
+            {vehiclesLoading && <p className="text-sm text-gray-500">{t('customers.detailPage.loadingVehicles')}</p>}
             {!vehiclesLoading && vehicles.length === 0 && !addingVehicle && (
-              <p className="text-sm text-gray-400 mb-6">No vehicles on file for this customer yet.</p>
+              <p className="text-sm text-gray-400 mb-6">{t('customers.detailPage.noVehicles')}</p>
             )}
 
             <div className="flex flex-col gap-2 mb-6">
@@ -295,8 +271,8 @@ export default function CustomerDetailPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">{v.plateNumber} · {v.vehicleModel}</p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {v.vin ? `VIN ${v.vin}` : 'No VIN on file'}
-                      {v.odometer != null ? ` · ${v.odometer.toLocaleString('id-ID')} km` : ''}
+                      {v.vin ? t('customers.detailPage.vinLabel', { vin: v.vin }) : t('customers.detailPage.noVin')}
+                      {v.odometer != null ? ` · ${v.odometer.toLocaleString(dateLocale)} km` : ''}
                     </p>
                   </div>
                 </div>
@@ -309,23 +285,23 @@ export default function CustomerDetailPage() {
           <>
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
-                <p className="text-xs text-gray-500">Total invoiced</p>
+                <p className="text-xs text-gray-500">{t('customers.detailPage.totalInvoiced')}</p>
                 <p className="font-bold">{formatIDR(totals.total)}</p>
               </div>
               <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
-                <p className="text-xs text-gray-500">Total paid</p>
+                <p className="text-xs text-gray-500">{t('customers.detailPage.totalPaid')}</p>
                 <p className="font-bold text-green-700">{formatIDR(totals.paid)}</p>
               </div>
               <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
-                <p className="text-xs text-gray-500">Outstanding</p>
+                <p className="text-xs text-gray-500">{t('customers.detailPage.outstanding')}</p>
                 <p className="font-bold text-red-700">{formatIDR(totals.outstanding)}</p>
               </div>
             </div>
 
-            <h2 className="text-sm font-semibold text-gray-600 mb-2">Invoice history</h2>
+            <h2 className="text-sm font-semibold text-gray-600 mb-2">{t('customers.detailPage.invoiceHistory')}</h2>
 
             {customer.invoices.length === 0 && (
-              <p className="text-sm text-gray-400">No invoices for this customer yet.</p>
+              <p className="text-sm text-gray-400">{t('customers.detailPage.noInvoices')}</p>
             )}
 
             <div className="flex flex-col gap-2">
@@ -337,7 +313,7 @@ export default function CustomerDetailPage() {
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold">{inv.invoiceNumber ?? 'Unissued draft'}</span>
+                      <span className="font-semibold">{inv.invoiceNumber ?? t('customers.detailPage.unissuedDraft')}</span>
                       {inv.status !== 'DRAFT' && (
                         <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${paymentStatusStyle(inv.paymentStatus)}`}>
                           {inv.paymentStatus}
@@ -345,12 +321,12 @@ export default function CustomerDetailPage() {
                       )}
                       {inv.status === 'VOID' && (
                         <span className="text-xs px-2 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300">
-                          VOID
+                          {t('customers.detailPage.voidLabel')}
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {new Date(inv.issuedAt ?? inv.createdAt).toLocaleString('id-ID')}
+                      {new Date(inv.issuedAt ?? inv.createdAt).toLocaleString(dateLocale)}
                     </p>
                   </div>
                   <span className="font-semibold">{formatIDR(Number(inv.total))}</span>

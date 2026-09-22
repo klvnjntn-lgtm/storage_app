@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, FileText, ShoppingCart } from 'lucide-react';
+import { FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
 import { SalesOrderCartPanel } from '@/app/components/sales-orders/SalesOrderCartPanel';
+import { useLanguage } from '@/app/context/LanguageContext';
 import {
   CartLine,
   Customer,
@@ -44,8 +45,19 @@ function hasSaveableContent(cart: Record<string, CartLine>, services: ServiceLin
   return Object.keys(cart).length > 0 || services.some((s) => s.description.trim());
 }
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright. See login/page.tsx.
 export default function SalesOrderFormPage() {
+  return (
+    <Suspense fallback={null}>
+      <SalesOrderFormPageInner />
+    </Suspense>
+  );
+}
+
+function SalesOrderFormPageInner() {
   const router = useRouter();
+  const { t } = useLanguage();
   const searchParams = useSearchParams();
   const urlDraftId = searchParams.get('draftId');
 
@@ -168,6 +180,7 @@ export default function SalesOrderFormPage() {
               sku: item.product?.sku ?? null,
               unit: item.product?.unit ?? item.unit ?? null,
               barcode: item.product?.barcode ?? null,
+              image: null,
               sellingPrice: Number(item.unitPrice),
               stockByLocation: [],
             },
@@ -203,7 +216,7 @@ export default function SalesOrderFormPage() {
       setServices(restoredServices);
       setCurrentDraftId(id);
     } else {
-      setError('Could not load this draft.');
+      setError(t('sales.ordersNew.couldNotLoadDraft'));
     }
     setLoading(false);
   }
@@ -268,13 +281,13 @@ export default function SalesOrderFormPage() {
     if (locationFilter) {
       target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
+        setError(t('sales.ordersNew.notStockedAt', { product: product.name, location: locationFilter.name }));
         return;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" has no stock at any location.`);
+        setError(t('sales.ordersNew.noStockAnywhere', { product: product.name }));
         return;
       }
     }
@@ -355,13 +368,17 @@ export default function SalesOrderFormPage() {
 
   // Per-line discount setter. discountType === null clears the
   // discount entirely (back to "None" in the UI).
+  // FIX — PERCENTAGE was unclamped above 100, letting a mistyped
+  // discount (e.g. 500) drive netAmount negative and submit a negative
+  // line/document total with no client-side rejection.
   function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
       if (discountType === null) return { ...prev, [key]: { ...line, discountType: null, discountValue: null } };
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (line.discountValue ?? 0);
+      const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+      const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (line.discountValue ?? 0);
       return { ...prev, [key]: { ...line, discountType, discountValue: nextValue } };
     });
   }
@@ -372,7 +389,8 @@ export default function SalesOrderFormPage() {
         if (s.key !== key) return s;
         if (discountType === null) return { ...s, discountType: null, discountValue: null };
         const parsed = Number(rawValue);
-        const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (s.discountValue ?? 0);
+        const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+        const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (s.discountValue ?? 0);
         return { ...s, discountType, discountValue: nextValue };
       }),
     );
@@ -632,12 +650,12 @@ export default function SalesOrderFormPage() {
     setError('');
     if (totalLineCount === 0) return;
     if (!customer) {
-      setError('Select a customer for this order.');
+      setError(t('sales.ordersNew.selectCustomer'));
       return;
     }
     const hasEmptyService = services.some((s) => !s.description.trim() || s.unitPrice === null);
     if (hasEmptyService) {
-      setError('Enter a description and price for every service (use 0 if free).');
+      setError(t('sales.ordersNew.serviceDescriptionPriceRequired'));
       return;
     }
 
@@ -658,13 +676,13 @@ export default function SalesOrderFormPage() {
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         savedRef.current = false;
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.ordersNew.requestFailed', { status: res.status }));
         return;
       }
       router.push(`/sales/orders/${body.id}`);
     } catch {
       savedRef.current = false;
-      setError('Could not reach the server.');
+      setError(t('sales.ordersNew.couldNotReachServer'));
     } finally {
       setSaving(false);
     }
@@ -680,7 +698,7 @@ export default function SalesOrderFormPage() {
           backgroundSize: '24px 24px',
         }}
       >
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </main>
     );
   }
@@ -696,14 +714,6 @@ export default function SalesOrderFormPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -711,9 +721,9 @@ export default function SalesOrderFormPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  {currentDraftId ? 'Edit Sales Order Draft' : 'New Sales Order'}
+                  {currentDraftId ? t('sales.ordersNew.editTitle') : t('sales.ordersNew.newTitle')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Search items, build and save an order</p>
+                <p className="text-xs text-gray-500 truncate">{t('sales.ordersNew.subtitle')}</p>
               </div>
             </div>
 
@@ -722,7 +732,7 @@ export default function SalesOrderFormPage() {
                 onClick={() => router.push('/sales/orders')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
-                History
+                {t('sales.ordersNew.history')}
               </button>
 
               <span className="text-sm px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-600/20 text-blue-700 font-medium">
@@ -793,9 +803,9 @@ export default function SalesOrderFormPage() {
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />
-            {totalLineCount} item{totalLineCount === 1 ? '' : 's'}
+            {totalLineCount} {t(totalLineCount === 1 ? 'sales.ordersNew.itemSingular' : 'sales.ordersNew.itemPlural')}
           </span>
-          <span className="text-sm font-bold">{formatIDR(total)} · Review</span>
+          <span className="text-sm font-bold">{formatIDR(total)} · {t('sales.ordersNew.review')}</span>
         </button>
       )}
     </main>

@@ -1,14 +1,17 @@
 // app/(app)/sales/delivery-orders/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Truck, Search, X } from 'lucide-react';
+import { Truck, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import DateRangePicker from '@/app/components/DateRangePicker';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import Pagination from '@/app/components/shared/Pagination';
 import type { DeliveryOrderListItem, DeliveryOrderStatus } from '@/app/components/delivery-orders/types';
+import { mapDeliveryOrderToListItem } from '@/lib/mappers/delivery-orders-mapper';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -30,22 +33,28 @@ function statusStyle(status: DeliveryOrderStatus) {
 const PAGE_SIZE_DEFAULT = 20;
 
 const STATUS_OPTIONS = [
-  { value: 'ALL' as const, label: 'All' },
-  { value: 'PACKED' as const, label: 'Packed' },
-  { value: 'SHIPPED' as const, label: 'Shipped' },
-  { value: 'CANCELLED' as const, label: 'Cancelled' },
+  { value: 'ALL' as const, labelKey: 'sales.deliveryOrders.statusAll' },
+  { value: 'PACKED' as const, labelKey: 'sales.deliveryOrders.statusPacked' },
+  { value: 'SHIPPED' as const, labelKey: 'sales.deliveryOrders.statusShipped' },
+  { value: 'CANCELLED' as const, labelKey: 'sales.deliveryOrders.statusCancelled' },
 ];
 
 export default function DeliveryOrdersPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
 
-  const [from, setFrom] = useState<string | null>(null);
-  const [to, setTo] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'ALL' | DeliveryOrderStatus>('ALL');
-  const [dateField, setDateField] = useState<DateField>('created');
+  // Seeded from the URL so pressing the browser's Back button from a
+  // delivery order's detail page restores the same filters/search/page
+  // instead of resetting to page 1 with no filters.
+  const [from, setFrom] = useState<string | null>(() => getInitialParam('from', '') || null);
+  const [to, setTo] = useState<string | null>(() => getInitialParam('to', '') || null);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | DeliveryOrderStatus>(() =>
+    getInitialParam('status', 'ALL')
+  );
+  const [dateField, setDateField] = useState<DateField>(() => getInitialParam('dateField', 'created'));
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(() => getInitialParam('search', ''));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -56,9 +65,19 @@ export default function DeliveryOrdersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', PAGE_SIZE_DEFAULT));
   const [total, setTotal] = useState(0);
+
+  useSyncQueryParams({
+    search: debouncedSearch,
+    status: statusFilter !== 'ALL' ? statusFilter : null,
+    from,
+    to,
+    dateField: from && to ? dateField : null,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== PAGE_SIZE_DEFAULT ? pageSize : null,
+  });
 
   const hasDateRange = Boolean(from && to);
   const activeFilterCount =
@@ -89,17 +108,20 @@ export default function DeliveryOrdersPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.deliveryOrders.requestFailed', { status: res.status }));
         setOrders([]);
         setTotal(0);
         return;
       }
 
       const body = await res.json();
-      setOrders(body.data);
+      // FIX — was a bare `body.data` assignment trusting the raw fetch
+      // response's shape at face value. mapDeliveryOrderToListItem was
+      // defined for exactly this and had zero callers anywhere.
+      setOrders(body.data.map(mapDeliveryOrderToListItem));
       setTotal(body.total);
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrders.couldNotReachServer'));
       setOrders([]);
       setTotal(0);
     } finally {
@@ -107,15 +129,24 @@ export default function DeliveryOrdersPage() {
     }
   }
 
+  // Merged with the reset-page-on-filter-change effect (was two separate
+  // effects) so a filter change fires exactly one request instead of two,
+  // and so a `page` restored from the URL (e.g. via the browser's Back
+  // button) doesn't get reset to 1 on mount — the ref starts equal to the
+  // initial filtersKey, so the reset branch only fires on an actual change.
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${debouncedSearch}`;
+  const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
+    if (prevFiltersKeyRef.current !== filtersKey) {
+      prevFiltersKeyRef.current = filtersKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, statusFilter, dateField, debouncedSearch, page, pageSize]);
-
-  useEffect(() => {
-    setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, statusFilter, dateField, debouncedSearch, pageSize]);
+  }, [filtersKey, page, pageSize]);
 
   return (
     <main
@@ -129,24 +160,16 @@ export default function DeliveryOrdersPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Truck size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Delivery Orders
+                {t('sales.deliveryOrders.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Created from sales orders — open an order to pack a new delivery.
+                {t('sales.deliveryOrders.subtitle')}
               </p>
             </div>
           </div>
@@ -161,14 +184,14 @@ export default function DeliveryOrdersPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by DO number or customer name"
+              placeholder={t('sales.deliveryOrders.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
                 className="text-gray-400 hover:text-blue-700 p-0.5 shrink-0"
-                aria-label="Clear search"
+                aria-label={t('sales.deliveryOrders.clearSearch')}
               >
                 <X size={14} strokeWidth={2.5} />
               </button>
@@ -178,16 +201,16 @@ export default function DeliveryOrdersPage() {
           <div className="grid sm:grid-cols-[auto_1fr] gap-x-6 gap-y-3">
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Date range
+                {t('sales.deliveryOrders.dateRange')}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
-                <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+                <DateRangePicker from={from} to={to} onChange={(f, tv) => { setFrom(f); setTo(tv); }} />
                 {hasDateRange && (
                   <div className="flex gap-1.5">
                     {(
                       [
-                        { value: 'created' as const, label: 'Created' },
-                        { value: 'shipped' as const, label: 'Shipped' },
+                        { value: 'created' as const, labelKey: 'sales.deliveryOrders.dateFieldCreated' },
+                        { value: 'shipped' as const, labelKey: 'sales.deliveryOrders.dateFieldShipped' },
                       ]
                     ).map((opt) => (
                       <button
@@ -199,7 +222,7 @@ export default function DeliveryOrdersPage() {
                             : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                         }`}
                       >
-                        {opt.label}
+                        {t(opt.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -209,7 +232,7 @@ export default function DeliveryOrdersPage() {
 
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Status
+                {t('common.status')}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {STATUS_OPTIONS.map((opt) => (
@@ -222,7 +245,7 @@ export default function DeliveryOrdersPage() {
                         : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
                     }`}
                   >
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </button>
                 ))}
               </div>
@@ -236,7 +259,7 @@ export default function DeliveryOrdersPage() {
                 className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors"
               >
                 <X size={12} strokeWidth={2.5} />
-                Clear filters
+                {t('sales.deliveryOrders.clearFilters')}
               </button>
             </div>
           )}
@@ -248,10 +271,10 @@ export default function DeliveryOrdersPage() {
           </p>
         )}
 
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500">{t('common.loading')}</p>}
 
         {!loading && !error && orders.length === 0 && (
-          <p className="text-sm text-gray-400">No delivery orders match these filters.</p>
+          <p className="text-sm text-gray-400">{t('sales.deliveryOrders.noMatch')}</p>
         )}
 
         <div className="flex flex-col gap-2">
@@ -266,14 +289,14 @@ export default function DeliveryOrdersPage() {
                   <div className="flex items-center flex-wrap gap-1.5">
                     <span className="font-semibold truncate">{o.doNumber ?? o.id}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(o.status)}`}>
-                      {o.status}
+                      {t(`sales.deliveryOrders.badge.${o.status}`)}
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {o.salesOrder?.orderNumber ? `SO ${o.salesOrder.orderNumber} · ` : ''}
-                    {o.items.length} item{o.items.length === 1 ? '' : 's'}
+                    {o.items.length} {t(o.items.length === 1 ? 'sales.deliveryOrders.itemSingular' : 'sales.deliveryOrders.itemPlural')}
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
-                    {new Date(o.shippedAt ?? o.createdAt).toLocaleDateString('id-ID')}
+                    {new Date(o.shippedAt ?? o.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
                   </p>
                 </div>
               </div>

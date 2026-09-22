@@ -1,10 +1,12 @@
 // payments/payments.controller.ts
-import { Body, Controller, Param, Post, UseGuards, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, UseGuards, Req } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { PaymentService } from './payment.service';
 import { RecordPaymentDto } from './dto/record-payment.dto';
@@ -29,5 +31,19 @@ export class PaymentController {
     @Req() req,
   ) {
     return this.payments.recordPayment(organizationId, invoiceId, dto, req.user?.sub);
+  }
+
+  // FIX — reverses a mistaken/duplicate payment.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Delete(':paymentId')
+  void(
+    @CurrentOrg() organizationId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Param('paymentId') paymentId: string,
+    @Body('reason') reason: string | undefined,
+    @Req() req,
+  ) {
+    return this.payments.voidPayment(organizationId, invoiceId, paymentId, req.user?.sub, reason);
   }
 }

@@ -4,34 +4,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { Car, Bell, ArrowUpRight, ArrowLeft, Wrench, Search, CornerDownLeft, Loader2 } from 'lucide-react';
+import { Car, Bell, ArrowUpRight, Wrench, Search, CornerDownLeft, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
-
-const WORKSHOP_ITEMS = [
-  {
-    title: 'Vehicles',
-    description: 'Track vehicles and service history',
-    href: '/workshop/vehicles',
-    icon: Car,
-    gradient: 'from-sky-500 to-blue-700',
-  },
-  {
-    title: 'Vehicle Lookup',
-    description: 'Jump straight to a plate\'s history',
-    href: '/workshop/vehicles/search',
-    icon: Search,
-    gradient: 'from-blue-600 to-indigo-800',
-  },
-  {
-    title: 'Reminders',
-    description: 'Service due dates and follow-ups',
-    href: '/workshop/reminders',
-    icon: Bell,
-    gradient: 'from-amber-500 to-orange-700',
-  },
-];
 
 type SearchResult = {
   id: string;
@@ -44,6 +21,31 @@ const DEBOUNCE_MS = 350;
 
 export default function WorkshopHome() {
   const router = useRouter();
+  const { t } = useLanguage();
+
+  const WORKSHOP_ITEMS = [
+    {
+      title: t('workshop.overview.vehiclesCardTitle'),
+      description: t('workshop.overview.vehiclesCardDescription'),
+      href: '/workshop/vehicles',
+      icon: Car,
+      gradient: 'from-sky-500 to-blue-700',
+    },
+    {
+      title: t('workshop.overview.lookupCardTitle'),
+      description: t('workshop.overview.lookupCardDescription'),
+      href: '/workshop/vehicles/search',
+      icon: Search,
+      gradient: 'from-blue-600 to-indigo-800',
+    },
+    {
+      title: t('workshop.overview.remindersCardTitle'),
+      description: t('workshop.overview.remindersCardDescription'),
+      href: '/workshop/reminders',
+      icon: Bell,
+      gradient: 'from-amber-500 to-orange-700',
+    },
+  ];
 
   // Quick lookup — shows a live dropdown as you type (same /vehicles/search
   // API the lookup page itself uses), but this box never resolves/loads a
@@ -136,23 +138,15 @@ export default function WorkshopHome() {
           white/gray-300 border, to read as "techy" rather than plain */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1.5 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to dashboard
-          </button>
-
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Wrench size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Workshop
+                {t('workshop.overview.title')}
               </h1>
-              <p className="text-xs text-gray-500 truncate">Vehicles, service jobs, and reminders</p>
+              <p className="text-xs text-gray-500 truncate">{t('workshop.overview.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -173,7 +167,7 @@ export default function WorkshopHome() {
               onKeyDown={handleKeyDown}
               onFocus={() => results.length > 0 && setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
-              placeholder="Look up a vehicle — plate, model, VIN..."
+              placeholder={t('workshop.overview.quickLookupPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {searching ? (
@@ -183,7 +177,7 @@ export default function WorkshopHome() {
                 onClick={() => goToLookup()}
                 className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
               >
-                Enter
+                {t('workshop.overview.enter')}
                 <CornerDownLeft size={11} strokeWidth={2} />
               </button>
             )}

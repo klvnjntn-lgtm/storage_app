@@ -14,7 +14,7 @@ import { CreateSalesOrderDto, UpdateSalesOrderDto } from './dto/sales-order.dto'
 // Prisma enum, unlike InvoiceActivityEventType / SalesQuotationActivityEventType)
 // — keep these values as the single source of truth for what gets written,
 // so callers/readers agree on the vocabulary without a schema migration.
-export const SalesOrderActivityEventType = {
+const SalesOrderActivityEventType = {
   CREATED: 'CREATED',
   EDITED: 'EDITED',
   CONFIRMED: 'CONFIRMED',
@@ -234,36 +234,45 @@ await this.logActivity(tx, {
   // quotation and conversion, and a sales order should reflect current
   // pricing, not a stale snapshot.
   async createFromQuotation(organizationId: string, userId: string, quotationId: string) {
-    const quotation = await this.prisma.salesQuotation.findFirst({
-      where: { id: quotationId, organizationId },
-      include: { items: true },
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
-      throw new BadRequestException('Only a sent or accepted quotation can be converted to an order');
-    }
-    // NOTE: no separate "does an active SalesOrder already exist" check
-    // here, unlike Invoice's guard — status gating already covers it
-    // correctly. Once converted, status becomes CONVERTED (blocking this
-    // check on its own), and cancel()'s reopenIfConverted() flips it back
-    // to ACCEPTED specifically to allow a legitimate re-conversion after a
-    // cancelled order. Adding a raw "any salesOrders exist" check would
-    // break that flow, since a cancelled order would still count.
-
-    const items = quotation.items.map((i) => ({
-      productId: i.productId ?? undefined,
-      description: i.description ?? undefined,
-      locationId: i.locationId ?? undefined,
-      quantity: Number(i.quantity),
-      unitPrice: Number(i.unitPrice),
-      unit: i.unit ?? undefined,
-      discountType: i.discountType ?? undefined,
-      discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-      taxRateIds: [] as string[],
-    }));
-
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Lock the quotation row for the duration of this transaction so a
+        // concurrent conversion (to an invoice via
+        // InvoiceService.createDraftFromQuotation, which takes the same
+        // lock, or to another sales order) against the same quotation
+        // can't both pass the status check below. There is no DB unique
+        // constraint backing the P2002 catch further down — this lock is
+        // what actually closes the race.
+        await tx.$queryRaw`SELECT id FROM "SalesQuotation" WHERE id = ${quotationId} FOR UPDATE`;
+
+        const quotation = await tx.salesQuotation.findFirst({
+          where: { id: quotationId, organizationId },
+          include: { items: true },
+        });
+        if (!quotation) throw new NotFoundException('Quotation not found');
+        if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
+          throw new BadRequestException('Only a sent or accepted quotation can be converted to an order');
+        }
+        // NOTE: no separate "does an active SalesOrder already exist" check
+        // here, unlike Invoice's guard — status gating already covers it
+        // correctly. Once converted, status becomes CONVERTED (blocking this
+        // check on its own), and cancel()'s reopenIfConverted() flips it back
+        // to ACCEPTED specifically to allow a legitimate re-conversion after a
+        // cancelled order. Adding a raw "any salesOrders exist" check would
+        // break that flow, since a cancelled order would still count.
+
+        const items = quotation.items.map((i) => ({
+          productId: i.productId ?? undefined,
+          description: i.description ?? undefined,
+          locationId: i.locationId ?? undefined,
+          quantity: Number(i.quantity),
+          unitPrice: Number(i.unitPrice),
+          unit: i.unit ?? undefined,
+          discountType: i.discountType ?? undefined,
+          discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
+          taxRateIds: [] as string[],
+        }));
+
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx);
 
@@ -521,9 +530,8 @@ await this.logActivity(tx, {
     }
   }
 
-  // Mirrors InvoiceService.issue: assigns the order number and decreases
-  // stock here, unless WAREHOUSE_OPS is enabled, in which case fulfillment
-  // (and the stock movement) happens through a Session instead.
+  // Assigns the order number. Does not move stock — see the comment inside
+  // the method body for why.
 async confirm(organizationId: string, id: string, userId: string) {
   const order = await this.getDraftOrThrow(organizationId, id);
   if (order.items.length === 0) {
@@ -551,11 +559,7 @@ async confirm(organizationId: string, id: string, userId: string) {
         throw new BadRequestException('Order is no longer a draft — it may have already been confirmed');
       }
 
-      const year = new Date().getFullYear();
-      const count = await tx.salesOrder.count({
-        where: { organizationId, orderNumber: { not: null }, confirmedAt: { gte: new Date(`${year}-01-01`) } },
-      });
-      const orderNumber = await this.numbering.next({ prefix: 'SO', count, year });
+      const orderNumber = await this.numbering.nextSequential(tx, organizationId, 'SALES_ORDER', 'SO');
 
       const updated = await tx.salesOrder.update({
         where: { id: order.id },
@@ -587,6 +591,13 @@ async confirm(organizationId: string, id: string, userId: string) {
   // Reason is now required, same as InvoiceService.voidInvoice and
   // SalesQuotationService.cancel — "who cancelled this and why" should
   // always be answerable from the activity log, not left to memory.
+  //
+  // CHANGED — a CONFIRMED order with zero deliveries and zero invoices
+  // against it can now be cancelled too, not just DRAFT. confirm() itself
+  // doesn't touch stock (see its own comment), so there's nothing to
+  // reverse in that case. Once anything has shipped or been invoiced, the
+  // order is no longer cancellable this way — process a return/void on
+  // whatever was already created instead.
   async cancel(organizationId: string, id: string, userId: string, reason: string) {
     if (!reason?.trim()) {
       throw new BadRequestException('A reason is required to cancel an order');
@@ -594,11 +605,28 @@ async confirm(organizationId: string, id: string, userId: string) {
 
     const order = await this.prisma.salesOrder.findFirst({ where: { id, organizationId } });
     if (!order) throw new NotFoundException('Order not found');
-    if (order.status !== SalesOrderStatus.DRAFT) {
-      throw new BadRequestException('Only a draft order can be cancelled directly');
+    if (order.status !== SalesOrderStatus.DRAFT && order.status !== SalesOrderStatus.CONFIRMED) {
+      throw new BadRequestException('Only a draft or confirmed order can be cancelled directly');
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Lock the order row so a concurrent DeliveryOrderService.create()
+      // (which takes the same lock on this order) or another cancel()
+      // can't race the deliveries/invoices check below.
+      await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${id} FOR UPDATE`;
+
+      const fresh = await tx.salesOrder.findFirst({
+        where: { id, organizationId },
+        include: { invoices: { select: { id: true } }, deliveryOrders: { select: { id: true } } },
+      });
+      if (!fresh) throw new NotFoundException('Order not found');
+      if (fresh.status !== SalesOrderStatus.DRAFT && fresh.status !== SalesOrderStatus.CONFIRMED) {
+        throw new BadRequestException('Order status changed concurrently — please retry');
+      }
+      if (fresh.status === SalesOrderStatus.CONFIRMED && (fresh.invoices.length > 0 || fresh.deliveryOrders.length > 0)) {
+        throw new BadRequestException('Cannot cancel a confirmed order that already has deliveries or invoices against it');
+      }
+
       const cancelled = await tx.salesOrder.update({ where: { id }, data: { status: SalesOrderStatus.CANCELLED } });
 
       if (order.quotationId) {

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { DiscountType, TaxRate } from '@/app/components/invoices/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function BulkApplyBar({
   taxRates,
@@ -14,12 +15,13 @@ export function BulkApplyBar({
 }) {
   const [discType, setDiscType] = useState<DiscountType>('PERCENTAGE');
   const [discValue, setDiscValue] = useState('');
+  const { t } = useLanguage();
 
   return (
     <div className="mb-3 p-2.5 bg-blue-600/5 rounded-lg border border-blue-500/15 space-y-2">
       {taxRates.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-gray-500 shrink-0">Tax, all lines:</span>
+          <span className="text-[11px] text-gray-500 shrink-0">{t('shared.bulkApplyBar.taxAllLines')}</span>
           {taxRates.map((rate) => (
             <button
               key={rate.id}
@@ -35,13 +37,13 @@ export function BulkApplyBar({
             onClick={() => taxRates.forEach((r) => onApplyTaxToAll(r.id, false))}
             className="text-[11px] px-2 py-1 rounded-md text-gray-400 hover:text-red-600"
           >
-            Clear
+            {t('common.clear')}
           </button>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-gray-500 shrink-0">Discount, all lines:</span>
+        <span className="text-[11px] text-gray-500 shrink-0">{t('shared.bulkApplyBar.discountAllLines')}</span>
         <select
           value={discType}
           onChange={(e) => setDiscType(e.target.value as DiscountType)}
@@ -66,7 +68,7 @@ export function BulkApplyBar({
           }}
           className="text-[11px] px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-white transition-colors"
         >
-          Apply
+          {t('common.apply')}
         </button>
         <button
           type="button"
@@ -76,7 +78,7 @@ export function BulkApplyBar({
           }}
           className="text-[11px] px-2 py-1 rounded-md text-gray-400 hover:text-red-600"
         >
-          Clear
+          {t('common.clear')}
         </button>
       </div>
     </div>

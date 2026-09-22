@@ -43,11 +43,20 @@ export class CreatePayrollDto {
   employeeIds?: string[];
 }
 
+export class VoidPayrollDto {
+  @IsString()
+  reason: string;
+}
+
 export class MarkPayrollPaidDto {
   @IsEnum(PaymentMethod)
   paymentMethod: PaymentMethod;
+
+  // FIX — was @IsString(), inconsistent with every other bankAccountId
+  // field in this directory (RecordExpensePaymentDto, CreateSupplierPaymentDto,
+  // etc. all use @IsUUID()).
   @IsOptional()
-  @IsString()
+  @IsUUID()
   bankAccountId?: string;
 
   @IsOptional()

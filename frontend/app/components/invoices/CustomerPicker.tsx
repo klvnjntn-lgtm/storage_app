@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search, UserPlus, X, Check, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from './types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -16,10 +17,12 @@ export function CustomerPicker({
   onChange: (customer: Customer | null) => void;
   hasError?: boolean;
 }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Customer[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -46,15 +49,26 @@ export function CustomerPicker({
     if (!open || quickAddOpen) return;
     const timeout = setTimeout(async () => {
       setSearching(true);
+      setSearchError('');
       try {
         const q = query.trim();
         const res = await apiFetch(q ? `/customers?q=${encodeURIComponent(q)}` : '/customers');
         if (res.ok) setResults(await res.json());
+      } catch {
+        // FIX — was missing entirely. apiFetch throws on a network
+        // failure or an expired session (its own 401 handler), which
+        // became an unhandled promise rejection with nothing shown —
+        // the picker just silently fell back to stale/empty results.
+        // This component is reused across every invoice/quotation/
+        // sales-order creation flow, so the blast radius was broad.
+        setResults([]);
+        setSearchError(t('sales.customerPicker.searchFailed'));
       } finally {
         setSearching(false);
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, open, quickAddOpen]);
 
   function openQuickAdd() {
@@ -68,7 +82,7 @@ export function CustomerPicker({
 
   async function submitQuickAdd() {
     if (!newName.trim()) {
-      setSaveError('Name is required');
+      setSaveError(t('sales.customerPicker.nameRequired'));
       return;
     }
     setSaving(true);
@@ -85,7 +99,7 @@ export function CustomerPicker({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `Failed to create customer (${res.status})`);
+        throw new Error(body?.message || t('sales.customerPicker.failedToCreateCustomer', { status: res.status }));
       }
       const created: Customer = await res.json();
       onChange(created);
@@ -93,7 +107,7 @@ export function CustomerPicker({
       setQuickAddOpen(false);
       setQuery('');
     } catch (e: any) {
-      setSaveError(e.message || 'Could not create customer');
+      setSaveError(e.message || t('sales.customerPicker.couldNotCreateCustomer'));
     } finally {
       setSaving(false);
     }
@@ -113,7 +127,7 @@ export function CustomerPicker({
           onClick={() => onChange(null)}
           className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-blue-700 hover:bg-white shrink-0 transition-colors"
         >
-          Change
+          {t('sales.customerPicker.change')}
         </button>
       </div>
     );
@@ -135,7 +149,7 @@ export function CustomerPicker({
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search customer by name or phone..."
+          placeholder={t('sales.customerPicker.searchPlaceholder')}
           className="w-full text-sm outline-none bg-transparent"
         />
       </div>
@@ -145,7 +159,7 @@ export function CustomerPicker({
           {quickAddOpen ? (
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">New customer</p>
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('sales.customerPicker.newCustomer')}</p>
                 <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-blue-700">
                   <X size={14} strokeWidth={2} />
                 </button>
@@ -153,26 +167,26 @@ export function CustomerPicker({
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Name"
+                placeholder={t('sales.customerPicker.namePlaceholder')}
                 autoFocus
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newPhone}
                 onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="Phone (optional)"
+                placeholder={t('sales.customerPicker.phonePlaceholder')}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newAddress}
                 onChange={(e) => setNewAddress(e.target.value)}
-                placeholder="Address (optional)"
+                placeholder={t('sales.customerPicker.addressPlaceholder')}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               <input
                 value={newNpwp}
                 onChange={(e) => setNewNpwp(e.target.value)}
-                placeholder="NPWP (optional, for B2B tax invoices)"
+                placeholder={t('sales.customerPicker.npwpPlaceholder')}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
               {saveError && <p className="text-xs text-red-600 mb-2">{saveError}</p>}
@@ -182,16 +196,19 @@ export function CustomerPicker({
                 className="w-full flex items-center justify-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-sm font-semibold disabled:bg-gray-300 transition-colors"
               >
                 <Check size={14} strokeWidth={2} />
-                {saving ? 'Saving...' : 'Add & select'}
+                {saving ? t('common.saving') : t('sales.customerPicker.addAndSelect')}
               </button>
             </div>
           ) : (
             <>
               <div className="max-h-56 overflow-y-auto">
-                {searching && <p className="px-3 py-2 text-xs text-gray-400">Loading...</p>}
-                {!searching && results.length === 0 && (
+                {searching && <p className="px-3 py-2 text-xs text-gray-400">{t('common.loading')}</p>}
+                {!searching && searchError && (
+                  <p className="px-3 py-2 text-xs text-red-600">{searchError}</p>
+                )}
+                {!searching && !searchError && results.length === 0 && (
                   <p className="px-3 py-2 text-xs text-gray-400">
-                    {query.trim() ? 'No matching customers' : 'No customers yet'}
+                    {query.trim() ? t('sales.customerPicker.noMatchingCustomers') : t('sales.customerPicker.noCustomersYet')}
                   </p>
                 )}
                 {results.map((c) => (
@@ -214,7 +231,7 @@ export function CustomerPicker({
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-blue-700 hover:bg-blue-50/60 border-t border-blue-500/15 font-medium"
               >
                 <UserPlus size={14} strokeWidth={2} />
-                {query.trim() ? `Add "${query.trim()}" as new customer` : 'Add new customer'}
+                {query.trim() ? t('sales.customerPicker.addAsNewCustomer', { query: query.trim() }) : t('sales.customerPicker.addNewCustomer')}
               </button>
             </>
           )}

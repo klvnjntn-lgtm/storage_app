@@ -1,39 +1,49 @@
 // app/(app)/purchasing/purchase-orders/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, ClipboardList, Plus, Search, X } from 'lucide-react';
+import { ClipboardList, Plus, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { parseCalendarDate } from '@/lib/dates';
-import DateRangePicker from '@/app/components/DateRangePicker';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import Pagination from '@/app/components/shared/Pagination';
 import { PurchaseOrderListItem, PurchaseOrderStatus } from '@/app/components/purchase-orders/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
 
-const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: 'ALL', label: 'All' },
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'SENT', label: 'Sent' },
-  { value: 'PARTIALLY_RECEIVED', label: 'Partially Received' },
-  { value: 'FULLY_RECEIVED', label: 'Fully Received' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-];
+function useStatusOptions(t: (key: string) => string): { value: StatusFilter; label: string }[] {
+  return [
+    { value: 'ALL', label: t('purchasing.purchaseOrdersList.statusAll') },
+    { value: 'DRAFT', label: t('purchasing.purchaseOrdersList.statusDraft') },
+    { value: 'SENT', label: t('purchasing.purchaseOrdersList.statusSent') },
+    { value: 'PARTIALLY_RECEIVED', label: t('purchasing.purchaseOrdersList.statusPartiallyReceived') },
+    { value: 'FULLY_RECEIVED', label: t('purchasing.purchaseOrdersList.statusFullyReceived') },
+    { value: 'CANCELLED', label: t('purchasing.purchaseOrdersList.statusCancelled') },
+  ];
+}
 
-function statusLabel(status: PurchaseOrderStatus) {
-  switch (status) {
-    case 'PARTIALLY_RECEIVED':
-      return 'Partially Received';
-    case 'FULLY_RECEIVED':
-      return 'Fully Received';
-    default:
-      return status.charAt(0) + status.slice(1).toLowerCase();
-  }
+function useStatusLabel(t: (key: string) => string) {
+  return (status: PurchaseOrderStatus) => {
+    switch (status) {
+      case 'DRAFT':
+        return t('purchasing.purchaseOrdersList.statusDraft');
+      case 'SENT':
+        return t('purchasing.purchaseOrdersList.statusSent');
+      case 'PARTIALLY_RECEIVED':
+        return t('purchasing.purchaseOrdersList.statusPartiallyReceived');
+      case 'FULLY_RECEIVED':
+        return t('purchasing.purchaseOrdersList.statusFullyReceived');
+      case 'CANCELLED':
+        return t('purchasing.purchaseOrdersList.statusCancelled');
+    }
+  };
 }
 
 function statusStyle(status: PurchaseOrderStatus) {
@@ -55,13 +65,19 @@ const PAGE_SIZE_DEFAULT = 20;
 
 export default function PurchaseOrdersListPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
+  const STATUS_OPTIONS = useStatusOptions(t);
+  const statusLabel = useStatusLabel(t);
 
-  const [from, setFrom] = useState<string | null>(null);
-  const [to, setTo] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  // Seeded from the URL so pressing the browser's Back button from a PO's
+  // detail page restores the same filters/search/page instead of
+  // resetting to page 1 with no filters.
+  const [from, setFrom] = useState<string | null>(() => getInitialParam('from', '') || null);
+  const [to, setTo] = useState<string | null>(() => getInitialParam('to', '') || null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => getInitialParam('status', 'ALL'));
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(() => getInitialParam('search', ''));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -73,8 +89,17 @@ export default function PurchaseOrdersListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', PAGE_SIZE_DEFAULT));
+
+  useSyncQueryParams({
+    search: debouncedSearch,
+    status: statusFilter !== 'ALL' ? statusFilter : null,
+    from,
+    to,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== PAGE_SIZE_DEFAULT ? pageSize : null,
+  });
 
   const hasDateRange = Boolean(from && to);
   const activeFilterCount =
@@ -87,9 +112,16 @@ export default function PurchaseOrdersListPage() {
     setSearch('');
   }
 
+  // FIX — was missing entirely, unlike the near-identical Suppliers list
+  // page's requestIdRef guard. A slow response to an older filter
+  // combination could resolve after a newer one and clobber the table
+  // with stale results.
+  const requestIdRef = useRef(0);
+
   async function load() {
     setLoading(true);
     setError('');
+    const thisRequest = ++requestIdRef.current;
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
@@ -100,8 +132,9 @@ export default function PurchaseOrdersListPage() {
       if (debouncedSearch) params.set('search', debouncedSearch);
 
       const res = await apiFetch(`/purchase-orders?${params.toString()}`);
+      if (thisRequest !== requestIdRef.current) return; // stale response, a newer request is in flight
       if (!res.ok) {
-        setError(`Request failed (${res.status})`);
+        setError(t('purchasing.purchaseOrdersList.requestFailed', { status: res.status }));
         setOrders([]);
         setTotal(0);
         return;
@@ -110,23 +143,32 @@ export default function PurchaseOrdersListPage() {
       setOrders(body.data);
       setTotal(body.total);
     } catch {
-      setError('Could not reach the server.');
-      setOrders([]);
-      setTotal(0);
+      if (thisRequest === requestIdRef.current) {
+        setError(t('purchasing.purchaseOrdersList.serverError'));
+        setOrders([]);
+        setTotal(0);
+      }
     } finally {
-      setLoading(false);
+      if (thisRequest === requestIdRef.current) setLoading(false);
     }
   }
 
+  // FIX — was two separate effects (load-on-every-dep + reset-page-on-
+  // filter-change), firing two requests per filter change. See
+  // accounting/ledger/page.tsx's identical fix.
+  const filtersKey = `${statusFilter}|${from}|${to}|${debouncedSearch}`;
+  const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
+    if (prevFiltersKeyRef.current !== filtersKey) {
+      prevFiltersKeyRef.current = filtersKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, from, to, debouncedSearch, page, pageSize]);
-
-  useEffect(() => {
-    setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, from, to, debouncedSearch, pageSize]);
+  }, [filtersKey, page, pageSize]);
 
   return (
     <main
@@ -140,14 +182,6 @@ export default function PurchaseOrdersListPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/purchasing')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -155,9 +189,9 @@ export default function PurchaseOrdersListPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  Purchase Orders
+                  {t('purchasing.purchaseOrdersList.title')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Orders placed with suppliers</p>
+                <p className="text-xs text-gray-500 truncate">{t('purchasing.purchaseOrdersList.subtitle')}</p>
               </div>
             </div>
 
@@ -166,7 +200,7 @@ export default function PurchaseOrdersListPage() {
               className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 active:bg-blue-800 shadow-sm w-full sm:w-auto transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
-              New PO
+              {t('purchasing.purchaseOrdersList.newPo')}
             </button>
           </div>
         </div>
@@ -180,14 +214,14 @@ export default function PurchaseOrdersListPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by PO number or supplier name"
+              placeholder={t('purchasing.purchaseOrdersList.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
                 className="text-gray-400 hover:text-blue-700 p-0.5 shrink-0"
-                aria-label="Clear search"
+                aria-label={t('purchasing.purchaseOrdersList.clearSearch')}
               >
                 <X size={14} strokeWidth={2.5} />
               </button>
@@ -197,14 +231,14 @@ export default function PurchaseOrdersListPage() {
           <div className="grid sm:grid-cols-[auto_1fr] gap-x-6 gap-y-3">
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Date range
+                {t('purchasing.purchaseOrdersList.dateRange')}
               </p>
               <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
             </div>
 
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                Status
+                {t('purchasing.purchaseOrdersList.status')}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {STATUS_OPTIONS.map((opt) => (
@@ -231,7 +265,7 @@ export default function PurchaseOrdersListPage() {
                 className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors"
               >
                 <X size={12} strokeWidth={2.5} />
-                Clear filters
+                {t('purchasing.purchaseOrdersList.clearFilters')}
               </button>
             </div>
           )}
@@ -241,10 +275,10 @@ export default function PurchaseOrdersListPage() {
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">{error}</p>
         )}
 
-        {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading...</p>}
+        {loading && <p className="text-sm text-gray-500 py-8 text-center">{t('purchasing.purchaseOrdersList.loading')}</p>}
 
         {!loading && !error && orders.length === 0 && (
-          <p className="text-sm text-gray-400 py-8 text-center">No purchase orders match these filters.</p>
+          <p className="text-sm text-gray-400 py-8 text-center">{t('purchasing.purchaseOrdersList.empty')}</p>
         )}
 
         {/* Card list — same treatment as Invoices/Quotations/Sales Orders:
@@ -263,7 +297,7 @@ export default function PurchaseOrdersListPage() {
                 <div className="min-w-0">
                   <div className="flex items-center flex-wrap gap-1.5">
                     <span className="font-semibold truncate">
-                      {po.poNumber ?? 'Unissued draft'}
+                      {po.poNumber ?? t('purchasing.purchaseOrdersList.unissuedDraft')}
                     </span>
                     <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(po.status)}`}>
                       {statusLabel(po.status)}
@@ -272,7 +306,7 @@ export default function PurchaseOrdersListPage() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {po.supplier?.name ?? '—'}
                     {po.location?.name ? ` · ${po.location.name}` : ''} ·{' '}
-                    {parseCalendarDate(po.createdAt).toLocaleDateString('id-ID')}
+                    {parseCalendarDate(po.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
                   </p>
                 </div>
 

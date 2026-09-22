@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 
 export class CreateExpenseCategoryDto {
@@ -36,7 +36,10 @@ export class CreateExpenseDto {
   @IsString()
   description?: string;
 
-  @IsNumber()
+  // FIX — was @IsNumber() with no maxDecimalPlaces; storage is
+  // Decimal(14,2), so excess-precision input was silently rounded by
+  // Postgres at insert rather than rejected up front.
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount: number;
 
@@ -61,4 +64,32 @@ export class MarkExpensePaidDto {
   @IsOptional()
   @IsUUID()
   bankAccountId?: string;
+}
+
+// FIX — mirrors payments/dto/record-payment.dto.ts's RecordPaymentDto.
+// Lets a caller record a partial or full payment against an expense,
+// via ExpensesService.recordPayment(), instead of only the old
+// all-or-nothing markPaid().
+export class RecordExpensePaymentDto {
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  amount: number;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod = PaymentMethod.CASH;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  note?: string;
+
+  // Required whenever method isn't CASH — see ExpensesService.recordPayment().
+  @IsOptional()
+  @IsUUID()
+  bankAccountId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  paidAt?: string;
 }

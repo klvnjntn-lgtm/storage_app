@@ -1,6 +1,7 @@
 // app/print/quotations/[id]/page.tsx
-import { QuotationA4Template } from '@/app/components/quotations/template/QuotationA4Template';
-import { QuotationPrintView, toQuotationView } from '@/lib/quotation-mapper';
+import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
+import { QuotationPrintError } from '@/app/components/quotations/templates/QuotationPrintError';
+import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
 
 async function getPrintData(id: string, token: string): Promise<QuotationPrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
@@ -21,7 +22,7 @@ export default async function PrintQuotationPage({
 
   const raw = await getPrintData(id, token ?? '');
   if (!raw) {
-    return <div style={{ padding: 24 }}>Unable to load quotation for printing.</div>;
+    return <QuotationPrintError />;
   }
 
   const quotation = toQuotationView(raw);

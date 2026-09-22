@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Receipt, PackageCheck, ShoppingCart } from 'lucide-react';
+import { Receipt, PackageCheck, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { useHasModule } from '@/lib/useHasModule';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
 import { CartPanel } from '@/app/components/invoices/CartPanel';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
@@ -15,6 +15,7 @@ import {
   CartLine,
   Customer,
   DiscountType,
+  Employee,
   InvoiceFormat,
   InvoiceView,
   LocationOption,
@@ -22,7 +23,9 @@ import {
   ServiceLine,
   TaxRate,
 } from '@/app/components/invoices/types';
-import { PAGE_CSS } from '@/lib/invoice-format';
+import { PAGE_CSS } from '@/lib/mappers/invoice-format';
+import { toCalendarDateString } from '@/lib/dates';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -67,17 +70,24 @@ function hasSaveableContent(
   );
 }
 
-async function extractErrorMessage(res: Response): Promise<string> {
+async function extractErrorMessage(res: Response, t: (key: string, vars?: Record<string, string | number>) => string): Promise<string> {
   try {
     const data = await res.json();
     return data?.message || JSON.stringify(data);
   } catch {
-    return res.statusText || `Request failed (${res.status})`;
+    return res.statusText || t('sales.invoicesNew.requestFailed', { status: res.status });
   }
 }
 
+// FIX — NewInvoicePage uses useSearchParams(), which requires a Suspense
+// boundary for static prerendering, or `next build` fails outright. See
+// login/page.tsx's identical fix.
 export default function NewInvoicePageWrapper() {
-  return <NewInvoicePage />;
+  return (
+    <Suspense fallback={null}>
+      <NewInvoicePage />
+    </Suspense>
+  );
 }
 
 function NewInvoicePage() {
@@ -85,6 +95,7 @@ function NewInvoicePage() {
   const searchParams = useSearchParams();
   const urlDraftId = searchParams.get('draftId');
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const { t } = useLanguage();
 
   const initialCustomerId = searchParams.get('customerId');
   const initialVehicleId = searchParams.get('vehicleId');
@@ -115,6 +126,11 @@ function NewInvoicePage() {
   // OrganizationBankAccount id.
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [bankAccountId, setBankAccountId] = useState<string>('');
+
+  // Employee (sales/cashier) picker. '' means unset — omitted from the
+  // payload, so the invoice carries no employee.
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<string>('');
 
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(urlDraftId);
   const skipAutosaveRef = useRef(false);
@@ -168,7 +184,7 @@ function NewInvoicePage() {
     formatRef.current = format;
     printDataRef.current = printData;
     servicesRef.current = services;
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -222,6 +238,15 @@ function NewInvoicePage() {
       );
     }
     loadBankAccounts();
+  }, []);
+
+  useEffect(() => {
+    async function loadEmployees() {
+      const res = await apiFetch('/payroll/employees');
+      if (!res.ok) return;
+      setEmployees(await res.json());
+    }
+    loadEmployees();
   }, []);
 
   useEffect(() => {
@@ -314,6 +339,7 @@ function NewInvoicePage() {
     setResults([]);
     setCurrentDraftId(null);
     setBankAccountId('');
+    setEmployeeId('');
   }
 
   async function loadDraftById(id: string) {
@@ -334,6 +360,7 @@ function NewInvoicePage() {
     // (createDraft always resolves at create time) — so this is either a
     // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
     setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
+    setEmployeeId(draft.employeeId ?? '');
 
     const restoredCart: Record<string, CartLine> = {};
     for (const item of draft.items) {
@@ -347,6 +374,7 @@ function NewInvoicePage() {
           name: item.product?.name ?? '',
           sku: item.product?.sku ?? null,
           barcode: item.product?.barcode ?? null,
+          image: null,
           sellingPrice: Number(item.unitPrice),
           unit: item.product?.unit ?? null,
           stockByLocation: [],
@@ -427,13 +455,13 @@ function NewInvoicePage() {
     if (locationFilter) {
       target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
+        setError(t('sales.invoicesNew.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
         return;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" has no stock at any location.`);
+        setError(t('sales.invoicesNew.noStockAnywhere', { name: product.name }));
         return;
       }
     }
@@ -472,8 +500,15 @@ function NewInvoicePage() {
         const { [key]: _removed, ...rest } = prev;
         return rest;
       }
+      // FIX — CartPanel's "+" stepper is only disabled past available
+      // stock when posModeEnabled is false (`disabled={!posModeEnabled &&
+      // line.quantity >= available}`), implying POS mode should allow
+      // overselling — but this unconditional ceiling meant the button
+      // looked enabled and silently did nothing once past stock. The
+      // very first addToCart() still respects real stock (above); this
+      // bypass only applies to the stepper once a line already exists.
       const available = stockAtLineLocation(line);
-      if (nextQty > available) return prev;
+      if (!posModeEnabled && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
     });
   }
@@ -512,13 +547,17 @@ function NewInvoicePage() {
     });
   }
 
+  // FIX — PERCENTAGE was unclamped above 100, letting a mistyped
+  // discount (e.g. 500) drive netAmount negative and submit a negative
+  // line/document total with no client-side rejection.
   function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
       if (discountType === null) return { ...prev, [key]: { ...line, discountType: null, discountValue: null } };
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (line.discountValue ?? 0);
+      const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+      const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (line.discountValue ?? 0);
       return { ...prev, [key]: { ...line, discountType, discountValue: nextValue } };
     });
   }
@@ -529,7 +568,8 @@ function NewInvoicePage() {
         if (s.key !== key) return s;
         if (discountType === null) return { ...s, discountType: null, discountValue: null };
         const parsed = Number(rawValue);
-        const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (s.discountValue ?? 0);
+        const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+        const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (s.discountValue ?? 0);
         return { ...s, discountType, discountValue: nextValue };
       }),
     );
@@ -623,10 +663,12 @@ function NewInvoicePage() {
     );
   }
 
+  // FIX — was d.toISOString().slice(0, 10), which converts to UTC first
+  // and rolls the date back one day in a timezone ahead of UTC.
   function pickReminderPreset(months: number) {
     const d = new Date();
     d.setMonth(d.getMonth() + months);
-    setReminderDueDate(d.toISOString().slice(0, 10));
+    setReminderDueDate(toCalendarDateString(d));
     setReminderSaved(false);
   }
 
@@ -769,6 +811,10 @@ function NewInvoicePage() {
     return { bankAccountId: bankAccountId === NO_BANK_ACCOUNT ? null : bankAccountId };
   }
 
+  function buildEmployeeField() {
+    return { employeeId: employeeId || null };
+  }
+
   function adoptDraftId(id: string) {
     loadedDraftIdRef.current = id;
     setCurrentDraftId(id);
@@ -790,6 +836,7 @@ function NewInvoicePage() {
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
             ...buildBankAccountField(),
+            ...buildEmployeeField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -805,6 +852,7 @@ function NewInvoicePage() {
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
             ...buildBankAccountField(),
+            ...buildEmployeeField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -841,7 +889,7 @@ function NewInvoicePage() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId]);
 
   useEffect(() => {
     return () => {
@@ -858,13 +906,13 @@ function NewInvoicePage() {
   async function handleCreateAndPrint() {
     if (cartLines.length === 0 && services.length === 0) return;
     if (customerNameRequired && !customer) {
-      setError('A customer is required for an A5 invoice.');
+      setError(t('sales.invoicesNew.customerRequiredError'));
       return;
     }
     const hasEmptyService =
       hasWorkshopRms && services.some((s) => !s.description.trim() || s.unitPrice === null);
     if (hasEmptyService) {
-      setError('Enter a description and price for every service (use 0 if free).');
+      setError(t('sales.invoicesNew.emptyServiceError'));
       return;
     }
 
@@ -883,13 +931,14 @@ function NewInvoicePage() {
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
             ...buildBankAccountField(),
+            ...buildEmployeeField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
           }),
         });
         if (!updateRes.ok) {
-          throw new Error(await extractErrorMessage(updateRes));
+          throw new Error(await extractErrorMessage(updateRes, t));
         }
       } else {
         const draftRes = await apiFetch('/invoices', {
@@ -901,6 +950,7 @@ function NewInvoicePage() {
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
             ...buildBankAccountField(),
+            ...buildEmployeeField(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -908,7 +958,7 @@ function NewInvoicePage() {
         });
 
         if (!draftRes.ok) {
-          throw new Error(await extractErrorMessage(draftRes));
+          throw new Error(await extractErrorMessage(draftRes, t));
         }
         const draft = await draftRes.json();
         invoiceId = draft.id;
@@ -917,7 +967,7 @@ function NewInvoicePage() {
 
       const printRes = await apiFetch(`/invoices/${invoiceId}/print`, { method: 'POST' });
       if (!printRes.ok) {
-        throw new Error(await extractErrorMessage(printRes));
+        throw new Error(await extractErrorMessage(printRes, t));
       }
       const issued = await printRes.json();
 
@@ -946,6 +996,9 @@ function NewInvoicePage() {
         vehicleModel: issued.vehicleModel ?? null,
         vehicleVin: issued.vehicleVin ?? null,
         vehicleOdometer: issued.vehicleOdometer ?? null,
+
+        employeeId: issued.employeeId ?? null,
+        employeeName: issued.employeeName ?? null,
 
         items: issued.items.map((item: any) => ({
           id: item.id,
@@ -987,7 +1040,7 @@ function NewInvoicePage() {
       } as InvoiceView);
     } catch (e: any) {
       console.error(e);
-      setError(e.message || 'Could not create invoice');
+      setError(e.message || t('sales.invoicesNew.couldNotCreateInvoice'));
     } finally {
       setPrinting(false);
     }
@@ -1011,6 +1064,7 @@ function NewInvoicePage() {
       setOdometer('');
       setServices([]);
       setBankAccountId('');
+      setEmployeeId('');
       setReminderOpen(false);
       setReminderNote('');
       setReminderDueDate('');
@@ -1045,14 +1099,6 @@ function NewInvoicePage() {
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/invoices')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -1060,9 +1106,9 @@ function NewInvoicePage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  New Invoice
+                  {t('sales.invoicesNew.title')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Search items, create and print an invoice</p>
+                <p className="text-xs text-gray-500 truncate">{t('sales.invoicesNew.subtitle')}</p>
               </div>
             </div>
 
@@ -1071,7 +1117,7 @@ function NewInvoicePage() {
                 onClick={() => router.push('/sales/invoices')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
-                History
+                {t('sales.invoicesNew.history')}
               </button>
 
               <div className="flex items-center bg-blue-600/5 border border-blue-500/15 rounded-lg p-1 text-sm font-medium overflow-x-auto">
@@ -1103,7 +1149,7 @@ function NewInvoicePage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4">
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-4">
             <div>
-              <p className="font-semibold">Invoice {printData.invoiceNumber} printed</p>
+              <p className="font-semibold">{t('sales.invoicesNew.invoicePrintedTitle', { number: printData.invoiceNumber ?? '' })}</p>
               <p className="text-sm">
                 {formatIDR(printData.total)} · {printData.locationName}
               </p>
@@ -1115,7 +1161,7 @@ function NewInvoicePage() {
                 className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2 rounded-md font-semibold text-sm w-full sm:w-auto"
               >
                 <PackageCheck size={16} strokeWidth={2} />
-                Go to Fulfillment
+                {t('sales.invoicesNew.goToFulfillment')}
               </button>
             )}
           </div>
@@ -1209,6 +1255,9 @@ function NewInvoicePage() {
             bankAccountId={bankAccountId}
             onChangeBankAccountId={setBankAccountId}
             noBankAccountValue={NO_BANK_ACCOUNT}
+            employees={employees}
+            employeeId={employeeId}
+            onChangeEmployeeId={setEmployeeId}
           />
         </div>
       </div>
@@ -1220,9 +1269,9 @@ function NewInvoicePage() {
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />
-            {totalLineCount} item{totalLineCount === 1 ? '' : 's'}
+            {totalLineCount} {t(totalLineCount === 1 ? 'sales.invoicesNew.itemCountOne' : 'sales.invoicesNew.itemCountOther')}
           </span>
-          <span className="text-sm font-bold">{formatIDR(total)} · Review</span>
+          <span className="text-sm font-bold">{formatIDR(total)} · {t('sales.invoicesNew.reviewCta')}</span>
         </button>
       )}
 

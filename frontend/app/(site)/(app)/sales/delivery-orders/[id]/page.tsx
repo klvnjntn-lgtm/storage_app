@@ -4,11 +4,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, Truck, Ban, Printer, Download, PackageCheck, FileText } from 'lucide-react';
+import { Truck, Ban, Printer, Download, PackageCheck, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/template/DeliveryOrderA4Template';
-import { toDeliveryOrderView, type DeliveryOrderView } from '@/lib/delivery-orders-mapper';
+import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/templates/DeliveryOrderA4Template';
+import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -27,6 +28,7 @@ function statusStyle(status: string) {
 
 export default function DeliveryOrderDetailPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -54,10 +56,13 @@ export default function DeliveryOrderDetailPage() {
       ]);
       if (!detailRes.ok) {
         const body = await detailRes.json().catch(() => null);
-        setError(body?.message ?? `Request failed (${detailRes.status})`);
+        setError(body?.message ?? t('sales.deliveryOrderDetail.requestFailed', { status: detailRes.status }));
         return;
       }
-      const detail: DeliveryOrderDetail = await detailRes.json();
+      // FIX — was a bare type-assertion-via-annotation on the raw fetch
+      // response. mapDeliveryOrderToDetail was defined for exactly this
+      // and had zero callers anywhere.
+      const detail: DeliveryOrderDetail = mapDeliveryOrderToDetail(await detailRes.json());
       setOrder(detail);
       setDeliveredBy(detail.deliveredBy ?? '');
       setReceivedBy(detail.receivedBy ?? '');
@@ -69,7 +74,7 @@ export default function DeliveryOrderDetailPage() {
         setPreviewError(true);
       }
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrderDetail.couldNotReachServer'));
     } finally {
       setLoading(false);
     }
@@ -90,12 +95,12 @@ export default function DeliveryOrderDetailPage() {
       });
       const resBody = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(resBody?.message ?? `Request failed (${res.status})`);
+        setError(resBody?.message ?? t('sales.deliveryOrderDetail.requestFailed', { status: res.status }));
         return;
       }
       return resBody;
     } catch {
-      setError('Could not reach the server.');
+      setError(t('sales.deliveryOrderDetail.couldNotReachServer'));
     } finally {
       setActionLoading(null);
     }
@@ -106,7 +111,7 @@ export default function DeliveryOrderDetailPage() {
   }
 
   async function handleCancel() {
-    if (!confirm('Cancel this delivery order? This cannot be undone.')) return;
+    if (!confirm(t('sales.deliveryOrderDetail.confirmCancel'))) return;
     if (await runAction('cancel', `/delivery-orders/${id}/cancel`)) load();
   }
 
@@ -140,7 +145,7 @@ export default function DeliveryOrderDetailPage() {
     setError(null);
     try {
       const res = await apiFetch(`/delivery-orders/${order.id}/pdf`);
-      if (!res.ok) throw new Error(`Failed to generate PDF (${res.status})`);
+      if (!res.ok) throw new Error(t('sales.deliveryOrderDetail.failedGeneratePdf', { status: res.status }));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -149,7 +154,7 @@ export default function DeliveryOrderDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e.message || 'Could not generate PDF.');
+      setError(e.message || t('sales.deliveryOrderDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }
@@ -158,7 +163,7 @@ export default function DeliveryOrderDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </main>
     );
   }
@@ -192,24 +197,16 @@ export default function DeliveryOrderDetailPage() {
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/delivery-orders')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to delivery orders
-          </button>
-
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>{order.doNumber ?? order.id}</h1>
                 <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(order.status)}`}>
-                  {order.status}
+                  {t(`sales.deliveryOrderDetail.badge.${order.status}`)}
                 </span>
               </div>
               <p className="text-xs text-gray-500">
-                {order.customerName ?? 'No customer'} · {order.location?.name ?? '—'}
+                {order.customerName ?? t('sales.deliveryOrderDetail.noCustomer')} · {order.location?.name ?? '—'}
                 {order.salesOrder?.orderNumber && (
                   <>
                     {' '}
@@ -225,7 +222,7 @@ export default function DeliveryOrderDetailPage() {
                 {order.invoice?.invoiceNumber && (
                   <>
                     {' '}
-                    · Invoice{' '}
+                    · {t('sales.deliveryOrderDetail.invoiceLabel')}{' '}
                     <button
                       className="underline font-medium"
                       onClick={() => router.push(`/sales/invoices/${order.invoiceId}`)}
@@ -246,7 +243,7 @@ export default function DeliveryOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Truck size={14} strokeWidth={2} />
-                    Mark Shipped
+                    {t('sales.deliveryOrderDetail.markShipped')}
                   </button>
                   <button
                     disabled={actionLoading === 'cancel'}
@@ -254,7 +251,7 @@ export default function DeliveryOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50"
                   >
                     <Ban size={14} strokeWidth={2} />
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </>
               )}
@@ -266,7 +263,7 @@ export default function DeliveryOrderDetailPage() {
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                 >
                   <FileText size={14} strokeWidth={2} />
-                  Convert to Invoice
+                  {t('sales.deliveryOrderDetail.convertToInvoice')}
                 </button>
               )}
 
@@ -278,14 +275,14 @@ export default function DeliveryOrderDetailPage() {
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
-                    {pdfGenerating ? 'Generating...' : 'Download PDF'}
+                    {pdfGenerating ? t('sales.deliveryOrderDetail.generating') : t('sales.deliveryOrderDetail.downloadPdf')}
                   </button>
                   <button
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
-                    Print
+                    {t('common.print')}
                   </button>
                 </>
               )}
@@ -301,7 +298,7 @@ export default function DeliveryOrderDetailPage() {
 
         {order.invoice && (
           <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3">
-            <p className="font-semibold text-purple-900 mb-1">Converted from invoice</p>
+            <p className="font-semibold text-purple-900 mb-1">{t('sales.deliveryOrderDetail.convertedFromInvoice')}</p>
             <p>{order.invoice.invoiceNumber}</p>
           </div>
         )}
@@ -310,19 +307,19 @@ export default function DeliveryOrderDetailPage() {
           <div className="border-2 border-gray-300 rounded-md p-3 space-y-2">
             <div className="flex items-center gap-1.5 font-semibold text-sm">
               <PackageCheck size={15} strokeWidth={2} />
-              Record proof of delivery
+              {t('sales.deliveryOrderDetail.recordProof')}
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
               <input
                 value={deliveredBy}
                 onChange={(e) => setDeliveredBy(e.target.value)}
-                placeholder="Delivered by"
+                placeholder={t('sales.deliveryOrderDetail.deliveredByPlaceholder')}
                 className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-blue-500"
               />
               <input
                 value={receivedBy}
                 onChange={(e) => setReceivedBy(e.target.value)}
-                placeholder="Received by"
+                placeholder={t('sales.deliveryOrderDetail.receivedByPlaceholder')}
                 className="text-sm px-2.5 py-2 rounded-md border-2 border-gray-300 focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -331,7 +328,7 @@ export default function DeliveryOrderDetailPage() {
               onClick={handleRecordProof}
               className="text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              Save signature
+              {t('sales.deliveryOrderDetail.saveSignature')}
             </button>
           </div>
         )}
@@ -353,7 +350,7 @@ export default function DeliveryOrderDetailPage() {
               className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] flex items-center justify-center text-sm text-gray-400"
               style={{ width: '210mm', height: '297mm' }}
             >
-              {previewError ? 'Could not load a print preview for this delivery order.' : 'Loading preview...'}
+              {previewError ? t('sales.deliveryOrderDetail.previewError') : t('sales.deliveryOrderDetail.loadingPreview')}
             </div>
           )}
         </div>

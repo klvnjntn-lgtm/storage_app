@@ -3,15 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  UploadCloud,
-  AlertCircle,
-  CheckCircle2,
-  PlugZap,
-  Database,
-} from 'lucide-react';
+import { UploadCloud, AlertCircle, CheckCircle2, PlugZap, Database } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -30,11 +24,11 @@ type Connection = {
 
 type StandardField = 'externalRef' | 'sku' | 'quantity' | 'customerName';
 
-const STANDARD_FIELDS: { key: StandardField; label: string; required: boolean }[] = [
-  { key: 'externalRef', label: 'Invoice / Order Number', required: true },
-  { key: 'sku', label: 'SKU', required: true },
-  { key: 'quantity', label: 'Quantity', required: true },
-  { key: 'customerName', label: 'Customer Name', required: false },
+const STANDARD_FIELD_KEYS: { key: StandardField; required: boolean }[] = [
+  { key: 'externalRef', required: true },
+  { key: 'sku', required: true },
+  { key: 'quantity', required: true },
+  { key: 'customerName', required: false },
 ];
 
 type CsvPreviewResponse = {
@@ -89,42 +83,37 @@ type GdbImportResult = {
 };
 
 // ─────────────────────────────────────────────────────────────
-// Raw upload/post helpers — bypass apiFetch's forced JSON
-// content-type since multipart uploads need the browser to set
-// its own boundary header.
+// Raw upload/post helpers.
+//
+// FIX — these used to hand-roll their own fetch() with a manually-read
+// localStorage token, bypassing apiFetch's 401 handling entirely (an
+// expired session mid-import surfaced as a generic error banner instead
+// of the app's normal clear-storage-and-redirect-to-login flow). The
+// original justification — "multipart uploads need the browser to set
+// its own boundary header, so we can't use apiFetch's forced JSON
+// Content-Type" — is stale: apiFetch already detects a FormData body
+// and skips setting Content-Type in that case, so it's safe to route
+// both of these through it like every other page does.
 // ─────────────────────────────────────────────────────────────
 
 async function uploadFile(path: string, file: File): Promise<Response> {
-  const token = localStorage.getItem('accessToken');
   const formData = new FormData();
   formData.append('file', file);
-
-  // Goes through Next's rewrite proxy (see next.config.ts), same as
-  // apiFetch — no need to hit the backend directly. Don't set
-  // Content-Type here: the browser needs to set its own multipart
-  // boundary, which it can only do if we let it set the header itself.
-  return fetch(`/api${path}`, {
-    method: 'POST',
-    headers: { Authorization: token ? `Bearer ${token}` : '' },
-    body: formData,
-  });
+  return apiFetch(path, { method: 'POST', body: formData });
 }
 async function postJson(path: string, body: unknown): Promise<Response> {
-  const token = localStorage.getItem('accessToken');
-
-  return fetch(`/api${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Bearer ${token}` : '',
-    },
-    body: JSON.stringify(body),
-  });
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export default function ImportOrdersPage() {
-  const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useLanguage();
+
+  const STANDARD_FIELDS: { key: StandardField; label: string; required: boolean }[] =
+    STANDARD_FIELD_KEYS.map((f) => ({
+      ...f,
+      label: t(`upload.uploadOrderPage.fields.${f.key}`),
+    }));
 
   const [mode, setMode] = useState<ImportMode>('csv');
 
@@ -202,6 +191,13 @@ export default function ImportOrdersPage() {
     setConfirmError('');
     setUploadError('');
     setMapping({ externalRef: '', sku: '', quantity: '', customerName: '' });
+    // FIX — was missing. Picking "Products + Customers + Invoices +
+    // Purchase Orders" for one .gdb file, then uploading a second file
+    // with no PO data, left that radio checked (though now disabled —
+    // see the `disabled={!gdbPreview.purchaseOrderCount}` below) since
+    // gdbTarget never reset between uploads, and handleGdbConfirm() had
+    // no guard preventing submission of that stale target.
+    setGdbTarget('products_only');
   }
 
   function handleModeChange(next: ImportMode) {
@@ -229,7 +225,7 @@ export default function ImportOrdersPage() {
       const data: CsvPreviewResponse = await res.json();
 
       if (!res.ok) {
-        setUploadError((data as any)?.message || 'Could not read that file');
+        setUploadError((data as any)?.message || t('upload.uploadOrderPage.couldNotReadFile'));
         return;
       }
 
@@ -257,7 +253,7 @@ export default function ImportOrdersPage() {
       setMapping(initialMapping);
     } catch (err) {
       console.error(err);
-      setUploadError('Could not reach the server — check the console for details.');
+      setUploadError(t('upload.uploadOrderPage.couldNotReachServer'));
     } finally {
       setUploading(false);
     }
@@ -291,7 +287,7 @@ export default function ImportOrdersPage() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setConfirmError(data?.message || `Import failed (status ${res.status})`);
+        setConfirmError(data?.message || t('upload.uploadOrderPage.importFailedWithStatus', { status: res.status }));
         return;
       }
 
@@ -301,7 +297,7 @@ export default function ImportOrdersPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error(err);
-      setConfirmError('Could not reach the server — check the console for details.');
+      setConfirmError(t('upload.uploadOrderPage.couldNotReachServer'));
     } finally {
       setConfirming(false);
     }
@@ -322,14 +318,14 @@ export default function ImportOrdersPage() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setUploadError(data?.message || 'Could not read that file');
+        setUploadError(data?.message || t('upload.uploadOrderPage.couldNotReadFile'));
         return;
       }
 
       setGdbPreview(data);
     } catch (err) {
       console.error(err);
-      setUploadError('Could not reach the server — check the console for details.');
+      setUploadError(t('upload.uploadOrderPage.couldNotReachServer'));
     } finally {
       setUploading(false);
     }
@@ -337,6 +333,14 @@ export default function ImportOrdersPage() {
 
   async function handleGdbConfirm() {
     if (!gdbPreview) return;
+
+    // FIX — defensive guard alongside the resetImportState() fix above:
+    // never submit a target this preview doesn't actually support, even
+    // if gdbTarget were somehow left stale.
+    if (gdbTarget === 'full_invoices_and_purchase_orders' && !gdbPreview.purchaseOrderCount) {
+      setConfirmError(t('upload.uploadOrderPage.noPoDataPickDifferent'));
+      return;
+    }
 
     setConfirming(true);
     setConfirmError('');
@@ -349,7 +353,7 @@ export default function ImportOrdersPage() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setConfirmError(data?.message || `Import failed (status ${res.status})`);
+        setConfirmError(data?.message || t('upload.uploadOrderPage.importFailedWithStatus', { status: res.status }));
         return;
       }
 
@@ -359,7 +363,7 @@ export default function ImportOrdersPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error(err);
-      setConfirmError('Could not reach the server — check the console for details.');
+      setConfirmError(t('upload.uploadOrderPage.couldNotReachServer'));
     } finally {
       setConfirming(false);
     }
@@ -378,23 +382,16 @@ export default function ImportOrdersPage() {
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/home')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 active:bg-blue-50 rounded-md transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Scanner Hub
-          </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <PlugZap size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Order Import
+                {t('upload.uploadOrderPage.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Import invoices/orders from a CSV file or an Accurate Desktop .GDB database
+                {t('upload.uploadOrderPage.subtitle')}
               </p>
             </div>
           </div>
@@ -410,7 +407,7 @@ export default function ImportOrdersPage() {
               }`}
             >
               <UploadCloud size={16} strokeWidth={2} />
-              CSV file
+              {t('upload.uploadOrderPage.csvFileButton')}
             </button>
             <button
               onClick={() => handleModeChange('gdb')}
@@ -421,7 +418,7 @@ export default function ImportOrdersPage() {
               }`}
             >
               <Database size={16} strokeWidth={2} />
-              Accurate GDB
+              {t('upload.uploadOrderPage.accurateGdbButton')}
             </button>
           </div>
         </div>
@@ -435,8 +432,9 @@ export default function ImportOrdersPage() {
             <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
-                Import complete — {csvResult.created} order{csvResult.created === 1 ? '' : 's'} created,{' '}
-                {csvResult.skipped} skipped (already imported).
+                {csvResult.created === 1
+                  ? t('upload.uploadOrderPage.csv.importCompleteOne', { created: csvResult.created, skipped: csvResult.skipped })
+                  : t('upload.uploadOrderPage.csv.importCompleteMany', { created: csvResult.created, skipped: csvResult.skipped })}
               </span>
             </div>
 
@@ -444,7 +442,9 @@ export default function ImportOrdersPage() {
               <div className="border border-red-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {csvResult.errors.length} row{csvResult.errors.length === 1 ? '' : 's'} skipped
+                  {csvResult.errors.length === 1
+                    ? t('upload.uploadOrderPage.csv.rowsSkippedOne')
+                    : t('upload.uploadOrderPage.csv.rowsSkippedMany', { count: csvResult.errors.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200">
                   {csvResult.errors.map((e, i) => (
@@ -461,11 +461,11 @@ export default function ImportOrdersPage() {
           <>
             <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
               <label className="block text-xs font-semibold text-gray-600">
-                Connection — which system is this file from?
+                {t('upload.uploadOrderPage.csv.connectionLabel')}
               </label>
 
               {connectionsLoading ? (
-                <p className="text-sm text-gray-500">Loading connections...</p>
+                <p className="text-sm text-gray-500">{t('upload.uploadOrderPage.csv.loadingConnections')}</p>
               ) : (
                 <div className="flex flex-col sm:flex-row gap-3">
                   <select
@@ -478,7 +478,7 @@ export default function ImportOrdersPage() {
                     }}
                     className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm font-medium outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                   >
-                    {connections.length === 0 && <option value="">No connections yet</option>}
+                    {connections.length === 0 && <option value="">{t('upload.uploadOrderPage.csv.noConnectionsYet')}</option>}
                     {connections.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.provider}
@@ -492,7 +492,7 @@ export default function ImportOrdersPage() {
                 <input
                   value={newProviderName}
                   onChange={(e) => setNewProviderName(e.target.value)}
-                  placeholder="e.g. accurate_desktop_csv"
+                  placeholder={t('upload.uploadOrderPage.csv.newProviderPlaceholder')}
                   className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                 />
                 <button
@@ -500,19 +500,18 @@ export default function ImportOrdersPage() {
                   disabled={!newProviderName.trim() || creatingConnection}
                   className="px-4 py-2 border border-blue-500/20 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  {creatingConnection ? 'Adding...' : 'New connection'}
+                  {creatingConnection ? t('upload.uploadOrderPage.csv.addingConnection') : t('upload.uploadOrderPage.csv.newConnectionButton')}
                 </button>
               </div>
               <p className="text-xs text-gray-500">
-                Each connection remembers its own column mapping, so returning imports from the same
-                source won't need remapping.
+                {t('upload.uploadOrderPage.csv.connectionHint')}
               </p>
             </section>
 
             <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Invoice / order file
+                  {t('upload.uploadOrderPage.csv.invoiceOrderFileLabel')}
                 </label>
                 <input
                   ref={fileInputRef}
@@ -525,10 +524,10 @@ export default function ImportOrdersPage() {
               </div>
 
               {!connectionId && !connectionsLoading && (
-                <p className="text-xs text-gray-500">Select or create a connection above first.</p>
+                <p className="text-xs text-gray-500">{t('upload.uploadOrderPage.csv.selectConnectionFirst')}</p>
               )}
 
-              {uploading && <p className="text-sm text-gray-500">Reading file...</p>}
+              {uploading && <p className="text-sm text-gray-500">{t('upload.uploadOrderPage.csv.readingFile')}</p>}
 
               {uploadError && (
                 <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
@@ -542,11 +541,13 @@ export default function ImportOrdersPage() {
               <section className="space-y-4">
                 <div className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
                   <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                    Match columns
+                    {t('upload.uploadOrderPage.csv.matchColumnsHeading')}
                   </h2>
                   <p className="text-xs text-gray-500">
-                    {fileName} — {csvPreview.totalRows} row{csvPreview.totalRows === 1 ? '' : 's'} found.
-                    Match each field below to a column from your file.
+                    {csvPreview.totalRows === 1
+                      ? t('upload.uploadOrderPage.csv.rowsFoundOne', { fileName })
+                      : t('upload.uploadOrderPage.csv.rowsFoundMany', { fileName, count: csvPreview.totalRows })}{' '}
+                    {t('upload.uploadOrderPage.csv.matchFieldsHint')}
                   </p>
 
                   <div className="grid sm:grid-cols-2 gap-3 pt-2">
@@ -563,7 +564,7 @@ export default function ImportOrdersPage() {
                           }
                           className="w-full border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
                         >
-                          <option value="">— not mapped —</option>
+                          <option value="">{t('upload.uploadOrderPage.csv.notMapped')}</option>
                           {csvPreview.headers.map((h) => (
                             <option key={h} value={h}>{h}</option>
                           ))}
@@ -575,7 +576,7 @@ export default function ImportOrdersPage() {
                   {!mappingComplete && (
                     <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-3 text-sm">
                       <AlertCircle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
-                      Invoice/Order Number, SKU, and Quantity are required before importing.
+                      {t('upload.uploadOrderPage.csv.mappingIncompleteWarning')}
                     </div>
                   )}
                 </div>
@@ -584,10 +585,10 @@ export default function ImportOrdersPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-blue-50/60 border-b border-blue-500/15">
                       <tr>
-                        <th className="text-left px-3 py-2 font-semibold">Invoice #</th>
+                        <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadOrderPage.csv.invoiceNumberColumn')}</th>
                         <th className="text-left px-3 py-2 font-semibold">SKU</th>
-                        <th className="text-left px-3 py-2 font-semibold">Qty</th>
-                        <th className="text-left px-3 py-2 font-semibold">Customer</th>
+                        <th className="text-left px-3 py-2 font-semibold">{t('common.quantity')}</th>
+                        <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadOrderPage.csv.customerColumn')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -609,7 +610,7 @@ export default function ImportOrdersPage() {
                     </tbody>
                   </table>
                   <p className="text-xs text-gray-500 px-3 py-2 bg-blue-50/40 border-t border-blue-500/10">
-                    Showing first {csvPreview.preview.length} of {csvPreview.totalRows} rows
+                    {t('upload.uploadOrderPage.csv.showingFirstOfRows', { shown: csvPreview.preview.length, total: csvPreview.totalRows })}
                   </p>
                 </div>
 
@@ -627,7 +628,11 @@ export default function ImportOrdersPage() {
                     className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <UploadCloud size={18} strokeWidth={2} />
-                    {confirming ? 'Importing...' : `Import ${csvPreview.totalRows} Row${csvPreview.totalRows === 1 ? '' : 's'}`}
+                    {confirming
+                      ? t('upload.uploadPage.importing')
+                      : csvPreview.totalRows === 1
+                      ? t('upload.uploadPage.importButtonOne')
+                      : t('upload.uploadPage.importButtonMany', { count: csvPreview.totalRows })}
                   </button>
                 </div>
               </section>
@@ -641,12 +646,17 @@ export default function ImportOrdersPage() {
             <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
               <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
               <span>
-                Import complete — {gdbResult.items.created} product{gdbResult.items.created === 1 ? '' : 's'} created,{' '}
-                {gdbResult.items.updated} updated
+                {gdbResult.items.created === 1
+                  ? t('upload.uploadOrderPage.gdb.itemsSummaryOne', { created: gdbResult.items.created, updated: gdbResult.items.updated })
+                  : t('upload.uploadOrderPage.gdb.itemsSummaryMany', { created: gdbResult.items.created, updated: gdbResult.items.updated })}
                 {gdbResult.invoices &&
-                  `, ${gdbResult.invoices.created} invoice${gdbResult.invoices.created === 1 ? '' : 's'} created, ${gdbResult.invoices.skipped} skipped (already imported)`}
+                  (gdbResult.invoices.created === 1
+                    ? t('upload.uploadOrderPage.gdb.invoicesSummaryOne', { created: gdbResult.invoices.created, skipped: gdbResult.invoices.skipped })
+                    : t('upload.uploadOrderPage.gdb.invoicesSummaryMany', { created: gdbResult.invoices.created, skipped: gdbResult.invoices.skipped }))}
                 {gdbResult.purchaseOrders &&
-                  `, ${gdbResult.purchaseOrders.created} purchase order${gdbResult.purchaseOrders.created === 1 ? '' : 's'} created, ${gdbResult.purchaseOrders.updated} updated`}
+                  (gdbResult.purchaseOrders.created === 1
+                    ? t('upload.uploadOrderPage.gdb.purchaseOrdersSummaryOne', { created: gdbResult.purchaseOrders.created, updated: gdbResult.purchaseOrders.updated })
+                    : t('upload.uploadOrderPage.gdb.purchaseOrdersSummaryMany', { created: gdbResult.purchaseOrders.created, updated: gdbResult.purchaseOrders.updated }))}
                 .
               </span>
             </div>
@@ -655,7 +665,7 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.invoices.fractionalQuantityWarnings.length} quantity rounded — review
+                  {t('upload.uploadOrderPage.gdb.quantityRoundedWarning', { count: gdbResult.invoices.fractionalQuantityWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.invoices.fractionalQuantityWarnings.map((w, i) => (
@@ -669,7 +679,7 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.invoices.discountIgnoredWarnings.length} line discount(s) not applied — review
+                  {t('upload.uploadOrderPage.gdb.lineDiscountNotAppliedWarning', { count: gdbResult.invoices.discountIgnoredWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.invoices.discountIgnoredWarnings.map((w, i) => (
@@ -683,7 +693,9 @@ export default function ImportOrdersPage() {
               <div className="border border-red-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.invoices.errors.length} invoice{gdbResult.invoices.errors.length === 1 ? '' : 's'} failed
+                  {gdbResult.invoices.errors.length === 1
+                    ? t('upload.uploadOrderPage.gdb.invoicesFailedOne')
+                    : t('upload.uploadOrderPage.gdb.invoicesFailedMany', { count: gdbResult.invoices.errors.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200">
                   {gdbResult.invoices.errors.map((e, i) => (
@@ -698,7 +710,9 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.purchaseOrders.missingSupplierWarnings.length} PO{gdbResult.purchaseOrders.missingSupplierWarnings.length === 1 ? '' : 's'} with unmatched vendor — review
+                  {gdbResult.purchaseOrders.missingSupplierWarnings.length === 1
+                    ? t('upload.uploadOrderPage.gdb.unmatchedVendorOne')
+                    : t('upload.uploadOrderPage.gdb.unmatchedVendorMany', { count: gdbResult.purchaseOrders.missingSupplierWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.purchaseOrders.missingSupplierWarnings.map((w, i) => (
@@ -712,7 +726,9 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.purchaseOrders.duplicatePoNumberWarnings.length} duplicate PO number{gdbResult.purchaseOrders.duplicatePoNumberWarnings.length === 1 ? '' : 's'} — renumbered
+                  {gdbResult.purchaseOrders.duplicatePoNumberWarnings.length === 1
+                    ? t('upload.uploadOrderPage.gdb.duplicatePoNumberOne')
+                    : t('upload.uploadOrderPage.gdb.duplicatePoNumberMany', { count: gdbResult.purchaseOrders.duplicatePoNumberWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.purchaseOrders.duplicatePoNumberWarnings.map((w, i) => (
@@ -726,7 +742,9 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length} closed PO{gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length === 1 ? '' : 's'} with partial receiving — review
+                  {gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length === 1
+                    ? t('upload.uploadOrderPage.gdb.closedPartialReceivingOne')
+                    : t('upload.uploadOrderPage.gdb.closedPartialReceivingMany', { count: gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.purchaseOrders.closedButNotFullyReceivedWarnings.map((w, i) => (
@@ -740,7 +758,9 @@ export default function ImportOrdersPage() {
               <div className="border border-yellow-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.purchaseOrders.overReceivedWarnings.length} line{gdbResult.purchaseOrders.overReceivedWarnings.length === 1 ? '' : 's'} received more than ordered — review
+                  {gdbResult.purchaseOrders.overReceivedWarnings.length === 1
+                    ? t('upload.uploadOrderPage.gdb.overReceivedOne')
+                    : t('upload.uploadOrderPage.gdb.overReceivedMany', { count: gdbResult.purchaseOrders.overReceivedWarnings.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.purchaseOrders.overReceivedWarnings.map((w, i) => (
@@ -754,7 +774,9 @@ export default function ImportOrdersPage() {
               <div className="border border-red-200 rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
                   <AlertCircle size={14} strokeWidth={2} />
-                  {gdbResult.purchaseOrders.errors.length} purchase order{gdbResult.purchaseOrders.errors.length === 1 ? '' : 's'} failed
+                  {gdbResult.purchaseOrders.errors.length === 1
+                    ? t('upload.uploadOrderPage.gdb.purchaseOrdersFailedOne')
+                    : t('upload.uploadOrderPage.gdb.purchaseOrdersFailedMany', { count: gdbResult.purchaseOrders.errors.length })}
                 </div>
                 <ul className="text-sm divide-y divide-gray-200">
                   {gdbResult.purchaseOrders.errors.map((e, i) => (
@@ -771,7 +793,7 @@ export default function ImportOrdersPage() {
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">
-                Accurate .GDB file
+                {t('upload.uploadOrderPage.gdb.gdbFileLabel')}
               </label>
               <input
                 ref={fileInputRef}
@@ -783,7 +805,7 @@ export default function ImportOrdersPage() {
               />
             </div>
 
-            {uploading && <p className="text-sm text-gray-500">Reading database file…</p>}
+            {uploading && <p className="text-sm text-gray-500">{t('upload.uploadOrderPage.gdb.readingDatabaseFile')}</p>}
 
             {uploadError && (
               <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
@@ -797,17 +819,17 @@ export default function ImportOrdersPage() {
         {mode === 'gdb' && gdbPreview && (
           <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">
             <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-              Confirm import
+              {t('upload.uploadOrderPage.gdb.confirmImportHeading')}
             </h2>
             <p className="text-xs text-gray-500">
-              {fileName} — found <strong>{gdbPreview.itemCount}</strong> items,{' '}
-              <strong>{gdbPreview.customerCount}</strong> customers,{' '}
-              <strong>{gdbPreview.invoiceCount}</strong> invoices
+              {t('upload.uploadOrderPage.gdb.foundPrefix', { fileName })} <strong>{gdbPreview.itemCount}</strong> {t('upload.uploadOrderPage.gdb.itemsWord')},{' '}
+              <strong>{gdbPreview.customerCount}</strong> {t('upload.uploadOrderPage.gdb.customersWord')},{' '}
+              <strong>{gdbPreview.invoiceCount}</strong> {t('upload.uploadOrderPage.gdb.invoicesWord')}
               {gdbPreview.purchaseOrderCount != null && (
                 <>
-                  , and <strong>{gdbPreview.purchaseOrderCount}</strong> purchase orders
+                  , {t('upload.uploadOrderPage.gdb.andWord')} <strong>{gdbPreview.purchaseOrderCount}</strong> {t('upload.uploadOrderPage.gdb.purchaseOrdersWord')}
                   {gdbPreview.vendorCount != null && (
-                    <> from <strong>{gdbPreview.vendorCount}</strong> vendors</>
+                    <> {t('upload.uploadOrderPage.gdb.fromWord')} <strong>{gdbPreview.vendorCount}</strong> {t('upload.uploadOrderPage.gdb.vendorsWord')}</>
                   )}
                 </>
               )}
@@ -816,7 +838,7 @@ export default function ImportOrdersPage() {
 
             <fieldset className="space-y-2 pt-2 border-t border-blue-500/10">
               <legend className="text-xs font-semibold text-gray-600 mb-1">
-                What does this customer need?
+                {t('upload.uploadOrderPage.gdb.whatDoesCustomerNeed')}
               </legend>
 
               <label className="flex items-start gap-2 border border-blue-500/15 rounded-xl p-3 cursor-pointer has-[:checked]:border-blue-500/50 has-[:checked]:bg-blue-50/60 transition-colors">
@@ -827,9 +849,9 @@ export default function ImportOrdersPage() {
                   onChange={() => setGdbTarget('products_only')}
                 />
                 <span>
-                  <span className="block text-sm font-semibold">Products only</span>
+                  <span className="block text-sm font-semibold">{t('upload.uploadOrderPage.gdb.productsOnlyTitle')}</span>
                   <span className="block text-xs text-gray-500">
-                    Warehouse/fulfillment customers — imports items as products, nothing else.
+                    {t('upload.uploadOrderPage.gdb.productsOnlyDescription')}
                   </span>
                 </span>
               </label>
@@ -842,9 +864,9 @@ export default function ImportOrdersPage() {
                   onChange={() => setGdbTarget('full_invoices')}
                 />
                 <span>
-                  <span className="block text-sm font-semibold">Products + Customers + Invoices</span>
+                  <span className="block text-sm font-semibold">{t('upload.uploadOrderPage.gdb.fullInvoicesTitle')}</span>
                   <span className="block text-xs text-gray-500">
-                    Invoicing/POS customers — also imports historical invoices and customer records.
+                    {t('upload.uploadOrderPage.gdb.fullInvoicesDescription')}
                   </span>
                 </span>
               </label>
@@ -866,11 +888,11 @@ export default function ImportOrdersPage() {
                 />
                 <span>
                   <span className="block text-sm font-semibold">
-                    Products + Customers + Invoices + Purchase Orders
+                    {t('upload.uploadOrderPage.gdb.fullInvoicesPoTitle')}
                   </span>
                   <span className="block text-xs text-gray-500">
-                    Also imports vendors and historical purchase orders, including receiving history.
-                    {!gdbPreview.purchaseOrderCount && ' No purchase order data found in this file.'}
+                    {t('upload.uploadOrderPage.gdb.fullInvoicesPoDescription')}
+                    {!gdbPreview.purchaseOrderCount && ` ${t('upload.uploadOrderPage.gdb.noPoDataFound')}`}
                   </span>
                 </span>
               </label>
@@ -890,7 +912,7 @@ export default function ImportOrdersPage() {
                 className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <UploadCloud size={18} strokeWidth={2} />
-                {confirming ? 'Importing…' : 'Confirm import'}
+                {confirming ? t('upload.uploadOrderPage.gdb.importingEllipsis') : t('upload.uploadOrderPage.gdb.confirmImportButton')}
               </button>
             </div>
           </section>

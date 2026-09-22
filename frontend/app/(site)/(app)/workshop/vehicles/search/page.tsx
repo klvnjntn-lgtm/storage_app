@@ -1,26 +1,16 @@
 // app/(app)/vehicles/search/page.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import {
-  ArrowLeft,
-  Car,
-  Search,
-  Gauge,
-  ChevronRight,
-  ExternalLink,
-  Loader2,
-  AlertCircle,
-  RotateCcw,
-  Trash2,
-  CornerDownLeft,
-} from 'lucide-react';
+import { Car, Search, Gauge, ChevronRight, ExternalLink, Loader2, AlertCircle, RotateCcw, Trash2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { parseCalendarDate } from '@/lib/dates';
-import Pagination from '@/app/components/Pagination';
+import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -88,8 +78,8 @@ function isOverdue(h: HistoryItem): boolean {
   return due < today;
 }
 
-function itemLabel(item: HistoryItem['items'][number]): string {
-  const label = item.product?.name ?? item.description ?? 'Item';
+function itemLabel(item: HistoryItem['items'][number], t: (key: string) => string): string {
+  const label = item.product?.name ?? item.description ?? t('workshop.vehicleSearch.itemLabel');
   return item.quantity > 1 ? `${item.quantity}× ${label}` : label;
 }
 
@@ -101,11 +91,12 @@ function itemLabel(item: HistoryItem['items'][number]): string {
 function itemsToShow(
   items: HistoryItem['items'],
   itemQuery: string,
+  t: (key: string) => string,
 ): { lines: string[]; overflow: number } {
-  if (items.length === 0) return { lines: ['No items recorded'], overflow: 0 };
+  if (items.length === 0) return { lines: [t('workshop.vehicleSearch.noItemsRecorded')], overflow: 0 };
 
   const q = itemQuery.trim().toLowerCase();
-  const labels = items.map(itemLabel);
+  const labels = items.map((item) => itemLabel(item, t));
 
   const ordered = q
     ? [...labels].sort((a, b) => {
@@ -119,12 +110,26 @@ function itemsToShow(
   return { lines: ordered.slice(0, ITEMS_SUMMARY_MAX), overflow: ordered.length - ITEMS_SUMMARY_MAX };
 }
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright. See login/page.tsx.
 export default function VehicleLookupPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  return (
+    <Suspense fallback={null}>
+      <VehicleLookupPageInner />
+    </Suspense>
+  );
+}
 
-  // Search bar state
-  const [query, setQuery] = useState('');
+function VehicleLookupPageInner() {
+  const router = useRouter();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
+
+  // Search bar state — `query` and `selectedId` are seeded from the URL so
+  // pressing the browser's Back button from an invoice (opened out of the
+  // history list below) restores the same vehicle/page/item-search instead
+  // of landing back on a blank lookup.
+  const [query, setQuery] = useState<string>(() => getInitialParam('q', ''));
   const [results, setResults] = useState<SearchResult[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
@@ -132,15 +137,17 @@ export default function VehicleLookupPage() {
   const [notFound, setNotFound] = useState<string | null>(null);
 
   // Selected vehicle state
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => getInitialParam('vehicleId', '') || null);
   const [vehicle, setVehicle] = useState<VehicleSummary | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(false);
   const [vehicleError, setVehicleError] = useState<string | null>(null);
 
   // History state
   const [history, setHistory] = useState<HistoryPage | null>(null);
-  const [historyPage, setHistoryPage] = useState(1);
-  const [historyPageSize, setHistoryPageSize] = useState(HISTORY_LIMIT_DEFAULT);
+  const [historyPage, setHistoryPage] = useState(() => getInitialNumberParam('page', 1));
+  const [historyPageSize, setHistoryPageSize] = useState(() =>
+    getInitialNumberParam('pageSize', HISTORY_LIMIT_DEFAULT)
+  );
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Item-level search — separate from the vehicle-lookup `query` above.
@@ -148,14 +155,25 @@ export default function VehicleLookupPage() {
   // paginated server-side, unlike /vehicles/[id] which loads everything
   // at once), reordering matching items to the top of each card just
   // like /vehicles/[id]'s itemsToShow.
-  const [itemSearch, setItemSearch] = useState('');
+  const [itemSearch, setItemSearch] = useState<string>(() => getInitialParam('itemSearch', ''));
+
+  useSyncQueryParams({
+    q: query.trim(),
+    vehicleId: selectedId,
+    page: historyPage !== 1 ? historyPage : null,
+    pageSize: historyPageSize !== HISTORY_LIMIT_DEFAULT ? historyPageSize : null,
+    itemSearch: itemSearch || null,
+  });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set right before a *programmatic* setQuery (e.g. after picking a
   // vehicle) so the debounced search effect below doesn't treat it like
-  // user typing and pop the dropdown back open.
-  const skipNextSearchRef = useRef(false);
+  // user typing and pop the dropdown back open. Starts true when a vehicle
+  // was already restored from the URL, so the mount-time run of that same
+  // effect (query "changes" from undefined to its seeded value just like
+  // any other render) doesn't pop a redundant dropdown open underneath it.
+  const skipNextSearchRef = useRef(Boolean(selectedId));
 
   // ── Debounced typeahead search ──────────────────────────────────────
   useEffect(() => {
@@ -197,17 +215,45 @@ export default function VehicleLookupPage() {
     };
   }, [query]);
 
-  // ── Deep link from /workshop (?q=BP1234XX) ────────────────────────────
-  // Runs once on mount. Goes straight to the exact-match endpoint rather
-  // than setQuery()-then-waiting-for-the-debounce, so a link click lands
-  // directly on the vehicle instead of first flashing a dropdown. Uses the
-  // same multi-field search() as typing does (plate, model, VIN, customer
-  // name) — a single match goes straight through, several matches (e.g. a
-  // common customer name) fall back to showing the dropdown for disambiguation.
+  // ── Restore on mount ─────────────────────────────────────────────────
+  // Two cases, both runnable once at mount from state already seeded from
+  // the URL above:
+  //  1. `selectedId` is set — the browser's Back button brought us back
+  //     from an invoice opened out of the history list. Load that vehicle
+  //     and its history directly at the restored page, skipping the
+  //     plate/name search entirely (skipVehicleFetch is a no-op there).
+  //  2. Otherwise, `q` came from a deep link (e.g. /workshop's search
+  //     bar) — go straight to the exact-match endpoint rather than
+  //     setQuery()-then-waiting-for-the-debounce, so a link click lands
+  //     directly on the vehicle instead of first flashing a dropdown.
+  //     Uses the same multi-field search() as typing does (plate, model,
+  //     VIN, customer name) — a single match goes straight through,
+  //     several matches (e.g. a common customer name) fall back to
+  //     showing the dropdown for disambiguation.
   useEffect(() => {
-    const initialQ = searchParams.get('q');
+    if (selectedId) {
+      (async () => {
+        setVehicleLoading(true);
+        try {
+          const res = await apiFetch(`/vehicles/${selectedId}/summary`);
+          if (res.ok) {
+            setVehicle(await res.json());
+            await loadHistory(selectedId, historyPage, historyPageSize);
+          } else {
+            const body = await res.json().catch(() => null);
+            setVehicleError(body?.message ?? t('workshop.vehicleSearch.loadFailed', { status: res.status }));
+          }
+        } catch {
+          setVehicleError(t('workshop.vehicleSearch.serverError'));
+        } finally {
+          setVehicleLoading(false);
+        }
+      })();
+      return;
+    }
+
+    const initialQ = query.trim();
     if (!initialQ) return;
-    setQuery(initialQ);
 
     (async () => {
       setSearching(true);
@@ -226,7 +272,7 @@ export default function VehicleLookupPage() {
           }
         }
       } catch {
-        setVehicleError('Could not reach the server.');
+        setVehicleError(t('workshop.vehicleSearch.serverError'));
       } finally {
         setSearching(false);
       }
@@ -255,10 +301,10 @@ export default function VehicleLookupPage() {
         await loadHistory(id, 1, historyPageSize);
       } else {
         const body = await res.json().catch(() => null);
-        setVehicleError(body?.message ?? `Failed to load vehicle (${res.status})`);
+        setVehicleError(body?.message ?? t('workshop.vehicleSearch.loadFailed', { status: res.status }));
       }
     } catch {
-      setVehicleError('Could not reach the server.');
+      setVehicleError(t('workshop.vehicleSearch.serverError'));
     } finally {
       setVehicleLoading(false);
     }
@@ -323,7 +369,7 @@ export default function VehicleLookupPage() {
         }
       }
     } catch {
-      setVehicleError('Could not reach the server.');
+      setVehicleError(t('workshop.vehicleSearch.serverError'));
     } finally {
       setSearching(false);
     }
@@ -371,24 +417,16 @@ export default function VehicleLookupPage() {
           those pages instead of the old max-w-3xl. */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/workshop')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-3 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back to Workshop
-          </button>
-
           <div className="flex items-center gap-2.5 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Search size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                Vehicle History Lookup
+                {t('workshop.vehicleSearch.title')}
               </h1>
               <p className="text-xs text-gray-500 truncate">
-                Search by plate, model, VIN, or customer to jump straight to history
+                {t('workshop.vehicleSearch.subtitle')}
               </p>
             </div>
           </div>
@@ -406,7 +444,7 @@ export default function VehicleLookupPage() {
                 onKeyDown={handleKeyDown}
                 onFocus={() => results.length > 0 && setDropdownOpen(true)}
                 onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
-                placeholder="Enter plate, model, VIN, or customer name..."
+                placeholder={t('workshop.vehicleSearch.searchPlaceholder')}
                 autoFocus
                 className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
@@ -417,7 +455,7 @@ export default function VehicleLookupPage() {
                   onClick={confirmSelection}
                   className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
                 >
-                  Enter
+                  {t('workshop.vehicleSearch.enter')}
                   <CornerDownLeft size={11} strokeWidth={2} />
                 </button>
               )}
@@ -449,7 +487,7 @@ export default function VehicleLookupPage() {
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {notFound && !vehicleLoading && !vehicle && (
           <p className="text-sm text-gray-500 bg-white border-2 border-gray-200 rounded-md p-4 text-center">
-            No vehicle found for &quot;{notFound}&quot;
+            {t('workshop.vehicleSearch.notFound', { query: notFound })}
           </p>
         )}
 
@@ -457,7 +495,7 @@ export default function VehicleLookupPage() {
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{vehicleError}</p>
         )}
 
-        {vehicleLoading && <p className="text-sm text-gray-500">Loading vehicle...</p>}
+        {vehicleLoading && <p className="text-sm text-gray-500">{t('workshop.vehicleSearch.loadingVehicle')}</p>}
 
         {vehicle && (
           <>
@@ -472,30 +510,34 @@ export default function VehicleLookupPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => router.push(`/vehicles/${vehicle.id}`)}
+                  // FIX — was `/vehicles/${vehicle.id}`, a route that
+                  // doesn't exist. The real vehicle-detail route is
+                  // `/workshop/vehicles/[id]`, same as workshop/page.tsx
+                  // and reminders/page.tsx already use.
+                  onClick={() => router.push(`/workshop/vehicles/${vehicle.id}`)}
                   className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 hover:bg-blue-50 shrink-0 transition-colors"
                 >
                   <ExternalLink size={13} strokeWidth={2} />
-                  View Full Vehicle Profile
+                  {t('workshop.vehicleSearch.viewFullProfile')}
                 </button>
               </div>
 
               <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3 text-sm">
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">Customer</p>
+                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.customer')}</p>
                   <p className="font-semibold truncate">
                     {vehicle.customer.name}
                     {vehicle.customer.companyName ? ` · ${vehicle.customer.companyName}` : ''}
                   </p>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">VIN</p>
+                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.vin')}</p>
                   <p className="font-semibold truncate">{vehicle.vin ?? '—'}</p>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">Odometer</p>
+                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.odometer')}</p>
                   <p className="font-semibold truncate">
-                    {vehicle.odometer != null ? `${vehicle.odometer.toLocaleString('id-ID')} km` : '—'}
+                    {vehicle.odometer != null ? t('workshop.vehicleSearch.km', { value: vehicle.odometer.toLocaleString(dateLocale) }) : '—'}
                   </p>
                 </div>
               </div>
@@ -503,27 +545,27 @@ export default function VehicleLookupPage() {
 
             {/* History */}
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-gray-600">Service / Invoice History</h3>
+              <h3 className="text-sm font-semibold text-gray-600">{t('workshop.vehicleSearch.serviceHistory')}</h3>
               <div className="relative w-full sm:w-56">
                 <Search size={13} strokeWidth={2} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
-                  placeholder="Find a part/service on this page..."
+                  placeholder={t('workshop.vehicleSearch.findItemPlaceholder')}
                   className="w-full border-2 border-gray-300 rounded-md pl-8 pr-3 py-1.5 text-xs outline-none focus:border-blue-500"
                 />
               </div>
             </div>
 
-            {historyLoading && !history && <p className="text-sm text-gray-500">Loading history...</p>}
+            {historyLoading && !history && <p className="text-sm text-gray-500">{t('workshop.vehicleSearch.loadingHistory')}</p>}
 
             {history && history.items.length === 0 && (
-              <p className="text-sm text-gray-400">No service history yet for this vehicle.</p>
+              <p className="text-sm text-gray-400">{t('workshop.vehicleSearch.noHistory')}</p>
             )}
 
             <div className="flex flex-col gap-2">
               {history?.items.map((h) => {
-                const { lines, overflow } = itemsToShow(h.items, itemSearch);
+                const { lines, overflow } = itemsToShow(h.items, itemSearch, t);
                 const overdue = isOverdue(h);
                 return (
                   <div
@@ -538,17 +580,17 @@ export default function VehicleLookupPage() {
                     }`}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500">{displayDateFor(h).toLocaleDateString('id-ID')}</span>
-                      <span className="font-semibold">{h.invoiceNumber ?? 'Unissued draft'}</span>
+                      <span className="text-xs text-gray-500">{displayDateFor(h).toLocaleDateString(dateLocale)}</span>
+                      <span className="font-semibold">{h.invoiceNumber ?? t('workshop.vehicleSearch.unissuedDraft')}</span>
                       {h.status === 'VOID' && (
                         <span className="text-xs px-2 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300">
-                          VOID
+                          {t('workshop.vehicleSearch.void')}
                         </span>
                       )}
                       {overdue && (
                         <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-400">
                           <AlertCircle size={11} strokeWidth={2} />
-                          OVERDUE
+                          {t('workshop.vehicleSearch.overdue')}
                         </span>
                       )}
                     </div>
@@ -558,14 +600,14 @@ export default function VehicleLookupPage() {
                           {line}
                         </p>
                       ))}
-                      {overflow > 0 && <p className="text-xs text-gray-400">+{overflow} more</p>}
+                      {overflow > 0 && <p className="text-xs text-gray-400">{t('workshop.vehicleSearch.more', { count: overflow })}</p>}
                     </div>
                     <div className="flex items-center justify-between gap-2 pt-0.5">
                       <span className="flex items-center gap-1 text-xs text-gray-500">
                         {h.odometer != null && (
                           <>
                             <Gauge size={11} strokeWidth={2} />
-                            {h.odometer.toLocaleString('id-ID')} km
+                            {t('workshop.vehicleSearch.km', { value: h.odometer.toLocaleString(dateLocale) })}
                           </>
                         )}
                       </span>
@@ -580,19 +622,19 @@ export default function VehicleLookupPage() {
                               className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-blue-50 active:bg-blue-100"
                             >
                               <RotateCcw size={13} strokeWidth={2} />
-                              Resume
+                              {t('workshop.vehicleSearch.resume')}
                             </button>
                             <button
                               onClick={() => discardDraft(h.id)}
                               className="flex items-center gap-1 text-xs px-2.5 py-2 rounded-md border border-gray-300 hover:bg-red-50 active:bg-red-100 hover:border-red-300 text-red-600"
                             >
                               <Trash2 size={13} strokeWidth={2} />
-                              Discard
+                              {t('workshop.vehicleSearch.discard')}
                             </button>
                           </div>
                         ) : (
                           <span className="flex items-center gap-0.5 text-xs text-gray-400">
-                            View
+                            {t('workshop.vehicleSearch.view')}
                             <ChevronRight size={13} strokeWidth={2} />
                           </span>
                         )}
@@ -623,7 +665,7 @@ export default function VehicleLookupPage() {
         {!vehicle && !vehicleLoading && !notFound && (
           <div className="flex flex-col items-center justify-center text-center py-16 text-gray-400">
             <Search size={32} strokeWidth={1.5} className="mb-3" />
-            <p className="text-sm">Start typing a plate number above to see its history.</p>
+            <p className="text-sm">{t('workshop.vehicleSearch.startTyping')}</p>
           </div>
         )}
       </div>

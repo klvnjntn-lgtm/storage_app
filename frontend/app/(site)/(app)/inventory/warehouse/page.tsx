@@ -8,15 +8,11 @@ import {
   ArrowLeftRight,
   PackageCheck,
   Undo2,
-  LogOut,
-  X,
-  User,
-  ShieldCheck,
-  ShieldAlert,
   Boxes,
   PlugZap,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 type Mode = 'RECEIVE' | 'RETURNS' | 'MOVE' | 'FULFILLMENT';
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -26,13 +22,6 @@ type SearchResult = {
   stocks: any[];
   locations: any[];
   events: any[];
-};
-
-type LicenseStatus = {
-  valid: boolean;
-  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'UNKNOWN';
-  expiresAt: string | null;
-  message?: string;
 };
 
 const statusStyle = (status: string) => {
@@ -52,15 +41,13 @@ const statusStyle = (status: string) => {
 
 export default function Warehouse() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [sessions, setSessions] = useState<any[]>([]);
   const [query, setQuery] = useState('');
   const [data, setData] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [profile, setProfile] = useState<any>(null);
-  const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>('PICK_PACK_SHIP');
   const [pendingOrderCount, setPendingOrderCount] = useState<number | null>(null);
-  const [showProfile, setShowProfile] = useState(false);
 
   const MODES: {
     mode: Mode;
@@ -71,61 +58,36 @@ export default function Warehouse() {
   }[] = [
     {
       mode: 'RECEIVE',
-      label: 'RECEIVE',
-      subtitle: 'Incoming stock',
+      label: t('inventory.warehousePage.modeReceiveLabel'),
+      subtitle: t('inventory.warehousePage.modeReceiveSubtitle'),
       icon: Inbox,
       gradient: 'bg-gradient-to-br from-emerald-500 to-emerald-700',
     },
     {
       mode: 'RETURNS',
-      label: 'RETURNS',
-      subtitle: 'Customer returns',
+      label: t('inventory.warehousePage.modeReturnsLabel'),
+      subtitle: t('inventory.warehousePage.modeReturnsSubtitle'),
       icon: Undo2,
       gradient: 'bg-gradient-to-br from-amber-500 to-orange-600',
     },
     {
       mode: 'MOVE',
-      label: 'MOVE',
-      subtitle: 'Pick → Move, relocate stock between locations',
+      label: t('inventory.warehousePage.modeMoveLabel'),
+      subtitle: t('inventory.warehousePage.modeMoveSubtitle'),
       icon: ArrowLeftRight,
       gradient: 'bg-gradient-to-br from-blue-500 to-indigo-700',
     },
     {
       mode: 'FULFILLMENT',
-      label: 'FULFILL ORDER',
+      label: t('inventory.warehousePage.modeFulfillLabel'),
       subtitle:
         fulfillmentMode === 'PICK_SHIP'
-          ? 'Pick → Ship, one session'
-          : 'Pick → Pack → Ship, one session',
+          ? t('inventory.warehousePage.modeFulfillSubtitlePickShip')
+          : t('inventory.warehousePage.modeFulfillSubtitlePickPackShip'),
       icon: PackageCheck,
       gradient: 'bg-gradient-to-br from-violet-500 to-purple-700',
     },
   ];
-
-  useEffect(() => {
-    async function loadProfile() {
-      try {
-        const res = await apiFetch('/auth/me');
-        if (!res.ok) return;
-        setProfile(await res.json());
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    loadProfile();
-  }, []);
-
-  useEffect(() => {
-    async function loadLicense() {
-      try {
-        const res = await apiFetch('/license/status');
-        setLicense(await res.json());
-      } catch (err) {
-        console.error('License status fetch failed:', err);
-      }
-    }
-    loadLicense();
-  }, []);
 
   useEffect(() => {
     async function loadOrgSettings() {
@@ -162,6 +124,15 @@ export default function Warehouse() {
       body: JSON.stringify({ type: mode }),
     });
     const session = await res.json();
+    // FIX — was navigating unconditionally, with no res.ok check. A
+    // rejected session-creation request (validation error, bad org
+    // state, etc.) silently sent the user to
+    // /inventory/sessions/undefined with zero error feedback — this is
+    // the primary "start a session" action on this page.
+    if (!res.ok) {
+      alert(session?.message || t('inventory.warehousePage.startSessionFailed', { status: res.status }));
+      return;
+    }
     router.push(`/inventory/sessions/${session.id}`);
   };
 
@@ -202,7 +173,7 @@ export default function Warehouse() {
         backgroundSize: '24px 24px',
       }}
     >
-      {/* TOP BAR — logo + account only, no nav links */}
+      {/* TOP BAR — logo only; account/logout lives in AppShell's nav */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -210,88 +181,12 @@ export default function Warehouse() {
               <Boxes size={18} strokeWidth={2} className="text-white" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-bold tracking-tight leading-none truncate">Warehouse OS</h1>
-              <p className="text-xs text-gray-500 mt-0.5 truncate">Scanner Hub</p>
+              <h1 className="text-base sm:text-lg font-bold tracking-tight leading-none truncate">{t('appShell.brand')}</h1>
+              <p className="text-xs text-gray-500 mt-0.5 truncate">{t('inventory.warehousePage.scannerHub')}</p>
             </div>
           </div>
-
-          <button
-            onClick={() => setShowProfile(true)}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-blue-500/20 hover:bg-blue-50 hover:border-blue-500/35 font-medium transition-colors shrink-0"
-          >
-            <User size={16} strokeWidth={2} className="text-blue-700" />
-            <span className="hidden xs:inline">Account</span>
-          </button>
         </div>
       </div>
-
-      {/* Account Modal — w-full + max-w + horizontal margin instead of a
-          bare fixed width, so it can't overflow the viewport on the
-          narrowest phones (down to ~320px wide). */}
-      {showProfile && profile && (
-        <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl border border-gray-100 p-6 w-full max-w-[300px] shadow-xl">
-            <div className="flex items-center justify-between mb-5">
-              <span className="text-[15px] font-medium">Account</span>
-              <button
-                onClick={() => setShowProfile(false)}
-                className="text-gray-400 hover:text-blue-700 transition-colors"
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-sm font-medium text-white shrink-0 shadow-sm">
-                {profile.email.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{profile.email}</p>
-                <p className="text-xs text-gray-500 truncate">{profile.role} · {profile.organization.name}</p>
-              </div>
-            </div>
-
-            {license && (
-              <div
-                className={`flex items-center gap-2 rounded-md border px-3 py-2 mb-5 text-xs font-medium ${
-                  license.valid
-                    ? 'bg-green-50 border-green-200 text-green-700'
-                    : 'bg-red-50 border-red-200 text-red-700'
-                }`}
-              >
-                {license.valid ? <ShieldCheck size={15} strokeWidth={2} className="shrink-0" /> : <ShieldAlert size={15} strokeWidth={2} className="shrink-0" />}
-                <span>{license.valid ? 'License active' : license.message || 'License invalid or expired'}</span>
-              </div>
-            )}
-
-            <div className="border-t border-gray-100 pt-4 space-y-2.5 mb-5">
-              {[
-                { label: 'Email', value: profile.email },
-                { label: 'Role', value: profile.role },
-                { label: 'Organization', value: profile.organization.name },
-                ...(license ? [{ label: 'License', value: license.status }] : []),
-              ].map(({ label, value }) => (
-                <div key={label} className="flex justify-between items-center gap-2">
-                  <span className="text-[13px] text-gray-400 shrink-0">{label}</span>
-                  <span className="text-[13px] text-gray-700 truncate text-right">{value}</span>
-                </div>
-              ))}
-            </div>
-
-            <button
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-red-200 bg-red-50 text-red-600 text-[13px] font-medium hover:bg-red-100 transition-colors"
-              onClick={() => {
-                localStorage.removeItem('accessToken');
-                window.location.href = '/login';
-              }}
-            >
-              <LogOut size={14} />
-              Log out
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* CENTERED CONTENT */}
       <div className="max-w-5xl mx-auto w-full px-4 sm:px-5 flex flex-col items-center text-center">
@@ -302,20 +197,20 @@ export default function Warehouse() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search SKU, product, rack, brand..."
+              placeholder={t('inventory.warehousePage.searchPlaceholder')}
               className="flex-1 min-w-0 text-base outline-none placeholder:text-gray-400 bg-transparent text-left"
             />
           </div>
 
           {query && (
             <div className="mt-2 bg-white border border-blue-500/20 rounded-md overflow-hidden shadow-md text-left">
-              {loading && <div className="p-3 text-sm text-gray-500">Searching...</div>}
+              {loading && <div className="p-3 text-sm text-gray-500">{t('inventory.warehousePage.searching')}</div>}
 
               {!loading && data && (
                 <div className="max-h-72 overflow-auto text-sm">
                   {data.products?.length > 0 && (
                     <div className="p-2">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">Products</p>
+                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsProducts')}</p>
                       {data.products.map((p: any) => (
                         <div
                           key={p.id}
@@ -331,7 +226,7 @@ export default function Warehouse() {
 
                   {data.stocks?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">Stock</p>
+                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsStock')}</p>
                       {data.stocks.map((s: any) => (
                         <div
                           key={s.id}
@@ -347,7 +242,7 @@ export default function Warehouse() {
 
                   {data.locations?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">Locations</p>
+                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsLocations')}</p>
                       {data.locations.map((l: any) => (
                         <div
                           key={l.id}
@@ -362,7 +257,7 @@ export default function Warehouse() {
 
                   {data.events?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">Events</p>
+                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsEvents')}</p>
                       {data.events.map((e: any) => (
                         <div
                           key={e.id}
@@ -372,7 +267,7 @@ export default function Warehouse() {
                           }
                         >
                           {e.type} • {e.product?.name}
-                          {!e.sessionId && <span className="text-gray-400"> (bulk import)</span>}
+                          {!e.sessionId && <span className="text-gray-400"> {t('inventory.warehousePage.bulkImport')}</span>}
                         </div>
                       ))}
                     </div>
@@ -383,7 +278,7 @@ export default function Warehouse() {
                     (data.stocks?.length ?? 0) === 0 &&
                     (data.locations?.length ?? 0) === 0 &&
                     (data.events?.length ?? 0) === 0 && (
-                      <div className="p-3 text-sm text-gray-500">No results found</div>
+                      <div className="p-3 text-sm text-gray-500">{t('common.noResults')}</div>
                   )}
                 </div>
               )}
@@ -406,12 +301,12 @@ export default function Warehouse() {
                 </span>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-violet-900">
-                    {pendingOrderCount} uploaded order{pendingOrderCount === 1 ? '' : 's'} waiting to be fulfilled
+                    {t('inventory.warehousePage.pendingOrders', { count: pendingOrderCount })}
                   </p>
-                  <p className="text-xs text-violet-600">From Accurate / CSV import</p>
+                  <p className="text-xs text-violet-600">{t('inventory.warehousePage.pendingOrdersSource')}</p>
                 </div>
               </div>
-              <span className="text-xs text-violet-700 font-semibold shrink-0">View →</span>
+              <span className="text-xs text-violet-700 font-semibold shrink-0">{t('inventory.warehousePage.view')}</span>
             </div>
           </div>
         )}
@@ -419,12 +314,12 @@ export default function Warehouse() {
         {/* RECENT SESSIONS */}
         <div className="pt-6 w-full">
           <div className="flex justify-between items-center mb-2">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Sessions</h2>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('inventory.warehousePage.recentSessions')}</h2>
             <button
               onClick={() => router.push('/inventory/sessions')}
               className="text-xs text-gray-500 hover:text-blue-700 font-semibold transition-colors"
             >
-              View All →
+              {t('inventory.warehousePage.viewAll')}
             </button>
           </div>
 
@@ -448,14 +343,14 @@ export default function Warehouse() {
               </div>
             ))}
 
-            {sessions.length === 0 && <p className="text-sm text-gray-400">No recent sessions</p>}
+            {sessions.length === 0 && <p className="text-sm text-gray-400">{t('inventory.warehousePage.noRecentSessions')}</p>}
           </div>
         </div>
 
         {/* MAIN ACTIONS */}
         <div className="pt-7 pb-10 w-full">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 text-left">
-            Start a Session
+            {t('inventory.warehousePage.startSession')}
           </h2>
 
           <div className="grid grid-cols-2 gap-3">
@@ -488,7 +383,7 @@ export default function Warehouse() {
 
       {/* FOOTER */}
       <div className="px-4 sm:px-6 py-4 text-center text-xs text-gray-500 border-t border-blue-500/15">
-        Tap a mode → scan items instantly
+        {t('inventory.warehousePage.footerHint')}
       </div>
     </main>
   );

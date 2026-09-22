@@ -345,13 +345,7 @@ export class PurchaseOrderService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const year = new Date().getFullYear();
-        // TODO: still counts by createdAt, same known gap noted previously —
-        // unrelated to this change, left as-is.
-        const count = await tx.purchaseOrder.count({
-          where: { organizationId, poNumber: { not: null }, createdAt: { gte: new Date(`${year}-01-01`) } },
-        });
-        const poNumber = await this.numbering.next({ prefix: 'PO', count, year });
+        const poNumber = await this.numbering.nextSequential(tx, organizationId, 'PURCHASE_ORDER', 'PO');
         const updated = await tx.purchaseOrder.update({
           where: { id: po.id },
           data: { status: PurchaseOrderStatus.SENT, poNumber },
@@ -554,7 +548,11 @@ export class PurchaseOrderService {
         id: item.id,
         productName: item.product?.name ?? 'Legacy custom item',
         sku: item.product?.sku ?? null,
-        quantity: item.quantity,
+        // FIX — was raw `item.quantity`, a Prisma Decimal(12,2) that
+        // serializes as a STRING over JSON despite PurchaseOrderPrintView
+        // claiming `number`, unlike every other field here which is
+        // already wrapped in Number(...).
+        quantity: Number(item.quantity),
         unitCost: Number(item.unitCost),
         lineTotal: Number(item.lineTotal),
       })),

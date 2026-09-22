@@ -83,6 +83,11 @@ export class DeliveryOrderService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Lock the order row so a concurrent SalesOrderService.cancel()
+      // (which takes the same lock) can't cancel this order out from
+      // under a delivery that's about to be created against it.
+      await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${dto.salesOrderId} FOR UPDATE`;
+
       const salesOrder = await tx.salesOrder.findFirst({
         where: { id: dto.salesOrderId, organizationId },
         include: { items: true, customer: true },
@@ -102,6 +107,9 @@ export class DeliveryOrderService {
         const soItem = itemsById.get(line.salesOrderItemId);
         if (!soItem) throw new BadRequestException(`Sales order item ${line.salesOrderItemId} not found on this order`);
         if (line.quantity <= 0) throw new BadRequestException('Delivery quantity must be positive');
+        // Fast pre-check only — this read isn't locked and can be stale
+        // under concurrent deliveries against the same line. The
+        // authoritative check is the atomic claim below.
         const remaining = Number(soItem.quantity) - Number(soItem.deliveredQuantity);
         if (line.quantity > remaining) {
           throw new BadRequestException(`Cannot deliver ${line.quantity} — only ${remaining} remaining on this line`);
@@ -116,11 +124,7 @@ export class DeliveryOrderService {
         : [];
       const productNameById = new Map(products.map((p) => [p.id, p.name]));
 
-      const year = new Date().getFullYear();
-      const count = await tx.deliveryOrder.count({
-        where: { organizationId, doNumber: { not: null }, createdAt: { gte: new Date(`${year}-01-01`) } },
-      });
-      const doNumber = await this.numbering.next({ prefix: 'DO', count, year });
+      const doNumber = await this.numbering.nextSequential(tx, organizationId, 'DELIVERY_ORDER', 'DO');
 
       const deliveryOrder = await tx.deliveryOrder.create({
         data: {
@@ -159,10 +163,23 @@ export class DeliveryOrderService {
       });
 
       for (const line of dto.items) {
-        await tx.salesOrderItem.update({
-          where: { id: line.salesOrderItemId },
+        const soItem = itemsById.get(line.salesOrderItemId)!;
+        // Atomic claim: only succeeds if deliveredQuantity + line.quantity
+        // wouldn't exceed the ordered quantity, checked and applied in one
+        // statement so two concurrent create() calls against the same
+        // line can't both pass the (unlocked) pre-check above.
+        const claim = await tx.salesOrderItem.updateMany({
+          where: {
+            id: line.salesOrderItemId,
+            deliveredQuantity: { lte: Number(soItem.quantity) - line.quantity },
+          },
           data: { deliveredQuantity: { increment: line.quantity } },
         });
+        if (claim.count === 0) {
+          throw new BadRequestException(
+            `Cannot deliver ${line.quantity} on line ${line.salesOrderItemId} — remaining quantity changed concurrently, please retry`,
+          );
+        }
       }
 
       await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrder.id, tx);
@@ -314,6 +331,17 @@ export class DeliveryOrderService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Atomic status claim — same pattern as ship() — so two concurrent
+      // cancel() calls on the same delivery order can't both pass the
+      // (unlocked) status check above and both decrement quantities.
+      const claim = await tx.deliveryOrder.updateMany({
+        where: { id, organizationId, status: DeliveryOrderStatus.PACKED },
+        data: { status: DeliveryOrderStatus.CANCELLED },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('This delivery order is no longer packed — it may have already been shipped or cancelled');
+      }
+
       for (const item of deliveryOrder.items) {
         if (item.salesOrderItemId) {
           await tx.salesOrderItem.update({
@@ -327,7 +355,7 @@ export class DeliveryOrderService {
           });
         }
       }
-      const cancelled = await tx.deliveryOrder.update({ where: { id }, data: { status: DeliveryOrderStatus.CANCELLED } });
+      const cancelled = await tx.deliveryOrder.findUniqueOrThrow({ where: { id } });
       if (deliveryOrder.salesOrderId) {
         await this.salesOrderService.recomputeDeliveryStatus(organizationId, deliveryOrder.salesOrderId, tx);
       }
@@ -806,7 +834,7 @@ export class DeliveryOrderService {
           where: {
             id: invoice.id,
             organizationId,
-            fulfillmentPath: { in: [null, 'DELIVERY_ORDER'] },
+            OR: [{ fulfillmentPath: null }, { fulfillmentPath: 'DELIVERY_ORDER' }],
           },
           data: { fulfillmentPath: 'DELIVERY_ORDER' },
         });
@@ -819,11 +847,7 @@ export class DeliveryOrderService {
           );
         }
 
-        const year = new Date().getFullYear();
-        const count = await tx.deliveryOrder.count({
-          where: { organizationId, doNumber: { not: null }, createdAt: { gte: new Date(`${year}-01-01`) } },
-        });
-        const doNumber = await this.numbering.next({ prefix: 'DO', count, year });
+        const doNumber = await this.numbering.nextSequential(tx, organizationId, 'DELIVERY_ORDER', 'DO');
 
         const deliveryOrder = await tx.deliveryOrder.create({
           data: {

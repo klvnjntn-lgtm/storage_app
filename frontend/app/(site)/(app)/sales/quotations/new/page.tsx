@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { ArrowLeft, FileText, ShoppingCart } from 'lucide-react';
+import { FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
@@ -18,6 +18,7 @@ import {
   ServiceLine,
   TaxRate,
 } from '@/app/components/quotations/types';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -51,9 +52,20 @@ function hasSaveableContent(cart: Record<string, CartLine>, services: ServiceLin
   );
 }
 
+// FIX — useSearchParams() requires a Suspense boundary for static
+// prerendering, or `next build` fails outright. See login/page.tsx.
 export default function QuotationFormPage() {
+  return (
+    <Suspense fallback={null}>
+      <QuotationFormPageInner />
+    </Suspense>
+  );
+}
+
+function QuotationFormPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useLanguage();
   const urlDraftId = searchParams.get('draftId');
 
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -194,6 +206,7 @@ export default function QuotationFormPage() {
               name: item.product?.name ?? '',
               sku: item.product?.sku ?? null,
               barcode: item.product?.barcode ?? null,
+              image: null,
               sellingPrice: Number(item.unitPrice),
               unit: item.product?.unit ?? item.unit ?? null,
               stockByLocation: [],
@@ -230,7 +243,7 @@ export default function QuotationFormPage() {
       setServices(restoredServices);
       setCurrentDraftId(id);
     } else {
-      setError('Could not load this draft.');
+      setError(t('sales.quotationsNew.couldNotLoadDraft'));
     }
     setLoading(false);
   }
@@ -294,13 +307,18 @@ export default function QuotationFormPage() {
     if (locationFilter) {
       target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" isn't stocked at ${locationFilter.name}.`);
+        setError(
+          t('sales.quotationsNew.notStockedAtLocation', {
+            product: product.name,
+            location: locationFilter.name,
+          }),
+        );
         return;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
       if (!target || target.quantity <= 0) {
-        setError(`"${product.name}" has no stock at any location.`);
+        setError(t('sales.quotationsNew.noStockAnyLocation', { product: product.name }));
         return;
       }
     }
@@ -379,13 +397,17 @@ export default function QuotationFormPage() {
     });
   }
 
+  // FIX — PERCENTAGE was unclamped above 100, letting a mistyped
+  // discount (e.g. 500) drive netAmount negative and submit a negative
+  // line/document total with no client-side rejection.
   function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
       if (discountType === null) return { ...prev, [key]: { ...line, discountType: null, discountValue: null } };
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (line.discountValue ?? 0);
+      const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+      const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (line.discountValue ?? 0);
       return { ...prev, [key]: { ...line, discountType, discountValue: nextValue } };
     });
   }
@@ -396,7 +418,8 @@ export default function QuotationFormPage() {
         if (s.key !== key) return s;
         if (discountType === null) return { ...s, discountType: null, discountValue: null };
         const parsed = Number(rawValue);
-        const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : (s.discountValue ?? 0);
+        const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+        const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (s.discountValue ?? 0);
         return { ...s, discountType, discountValue: nextValue };
       }),
     );
@@ -655,12 +678,12 @@ export default function QuotationFormPage() {
     setError('');
     if (totalLineCount === 0) return;
     if (!customer) {
-      setError('Select a customer for this quotation.');
+      setError(t('sales.quotationsNew.selectCustomer'));
       return;
     }
     const hasEmptyService = services.some((s) => !s.description.trim() || s.unitPrice === null);
     if (hasEmptyService) {
-      setError('Enter a description and price for every service (use 0 if free).');
+      setError(t('sales.quotationsNew.serviceDescriptionPriceRequired'));
       return;
     }
 
@@ -681,13 +704,13 @@ export default function QuotationFormPage() {
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         savedRef.current = false;
-        setError(body?.message ?? `Request failed (${res.status})`);
+        setError(body?.message ?? t('sales.quotationsNew.requestFailed', { status: res.status }));
         return;
       }
       router.push(`/sales/quotations/${body.id}`);
     } catch {
       savedRef.current = false;
-      setError('Could not reach the server.');
+      setError(t('sales.quotationsNew.serverUnreachable'));
     } finally {
       setPrinting(false);
     }
@@ -703,7 +726,7 @@ export default function QuotationFormPage() {
           backgroundSize: '24px 24px',
         }}
       >
-        <p className="text-sm text-gray-500">Loading...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </main>
     );
   }
@@ -719,14 +742,6 @@ export default function QuotationFormPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <button
-            onClick={() => router.push('/sales/quotations')}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-700 mb-2 sm:mb-3 -ml-1 py-1 px-1 transition-colors"
-          >
-            <ArrowLeft size={16} strokeWidth={2} />
-            Back
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -734,9 +749,9 @@ export default function QuotationFormPage() {
               </span>
               <div className="min-w-0">
                 <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                  {currentDraftId ? 'Edit Quotation Draft' : 'New Quotation'}
+                  {currentDraftId ? t('sales.quotationsNew.editDraftTitle') : t('sales.quotationsNew.newTitle')}
                 </h1>
-                <p className="text-xs text-gray-500 truncate">Search items, build and save a quotation</p>
+                <p className="text-xs text-gray-500 truncate">{t('sales.quotationsNew.subtitle')}</p>
               </div>
             </div>
 
@@ -745,7 +760,7 @@ export default function QuotationFormPage() {
                 onClick={() => router.push('/sales/quotations')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
-                History
+                {t('sales.quotationsNew.history')}
               </button>
 
               <span className="text-sm px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-600/20 text-blue-700 font-medium">
@@ -822,9 +837,11 @@ export default function QuotationFormPage() {
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />
-            {totalLineCount} item{totalLineCount === 1 ? '' : 's'}
+            {totalLineCount} {t(totalLineCount === 1 ? 'sales.quotationsNew.item' : 'sales.quotationsNew.items')}
           </span>
-          <span className="text-sm font-bold">{formatIDR(total)} · Review</span>
+          <span className="text-sm font-bold">
+            {formatIDR(total)} · {t('sales.quotationsNew.review')}
+          </span>
         </button>
       )}
     </main>

@@ -2,6 +2,7 @@
 
 import { DiscountType } from '@/app/components/invoices/types';
 import { formatIDR } from '@/lib/format';
+import { useLanguage } from '@/app/context/LanguageContext';
 
 export function LineDiscountControl({
   discountType,
@@ -14,9 +15,10 @@ export function LineDiscountControl({
   discountAmount: number;
   onChange: (discountType: DiscountType | null, rawValue?: string) => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="flex items-center gap-1.5 pl-0.5 flex-wrap">
-      <span className="text-[11px] text-gray-400 shrink-0">Discount</span>
+      <span className="text-[11px] text-gray-400 shrink-0">{t('shared.lineDiscountControl.discount')}</span>
       <select
         value={discountType ?? ''}
         onChange={(e) => {
@@ -25,7 +27,7 @@ export function LineDiscountControl({
         }}
         className="text-[11px] border border-blue-500/20 rounded-md px-1 py-0.5 outline-none focus:border-blue-500/50"
       >
-        <option value="">None</option>
+        <option value="">{t('common.none')}</option>
         <option value="PERCENTAGE">%</option>
         <option value="FIXED">Rp</option>
       </select>
