@@ -58,7 +58,7 @@ export class SessionsService {
       where: { organizationId },
       orderBy: { sku: 'asc' },
       select: {
-        id: true, sku: true, name: true,
+        id: true, sku: true, name: true, image: true,
         sellingPrice: true, costPrice: true,
         stocks: { select: { quantity: true, location: { select: { name: true } } } },
       },
@@ -68,6 +68,7 @@ export class SessionsService {
       productId: product.id,
       sku: product.sku,
       name: product.name,
+      image: product.image,
       sellingPrice: product.sellingPrice != null ? Number(product.sellingPrice) : null,
       costPrice: canSeeCostPrice && product.costPrice != null ? Number(product.costPrice) : null,
       totalStock: product.stocks.reduce((sum, s) => sum + Number(s.quantity), 0),
