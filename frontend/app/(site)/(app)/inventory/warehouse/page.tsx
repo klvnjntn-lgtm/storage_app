@@ -156,9 +156,10 @@ export default function Warehouse() {
 
   useEffect(() => {
     const loadSessions = async () => {
-      const res = await apiFetch('/sessions');
-      const data = await res.json();
-      setSessions(data);
+      const res = await apiFetch('/sessions?pageSize=5');
+      if (!res.ok) return;
+      const body = await res.json();
+      setSessions(body.data ?? []);
     };
     loadSessions();
   }, []);
