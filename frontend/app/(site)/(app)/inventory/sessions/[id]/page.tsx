@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft,
+  ClipboardList,
   Calendar,
   Package,
   ListOrdered,
@@ -14,6 +14,7 @@ import {
   History,
   ArrowRightCircle,
   ArrowLeftCircle,
+  Receipt,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -47,6 +48,13 @@ type ReopenEvent = {
   user?: { id: string; email: string } | null;
 };
 
+type SessionInvoice = {
+  id: string;
+  invoiceNumber: string | null;
+  salesOrderId: string | null;
+  salesOrder: { id: string; orderNumber: string | null } | null;
+};
+
 type Session = {
   id: string;
   type: string;
@@ -58,19 +66,15 @@ type Session = {
   items: SessionItem[];
   notes: SessionNoteEntry[];
   reopenEvents: ReopenEvent[];
+  invoice: SessionInvoice | null;
 };
 
 const statusStyle = (status: string) => {
   switch (status?.toUpperCase()) {
     case 'OPEN':
-    case 'IN_PROGRESS':
       return 'bg-blue-100 text-blue-800 border-blue-300';
-    case 'COMPLETE':
     case 'COMPLETED':
-    case 'DONE':
       return 'bg-green-100 text-green-800 border-green-300';
-    case 'CANCELLED':
-      return 'bg-gray-100 text-gray-600 border-gray-300';
     default:
       return 'bg-gray-100 text-gray-600 border-gray-300';
   }
@@ -87,6 +91,10 @@ export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useLanguage();
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
+
+  const typeLabel = (type: string) => t(`inventory.sessionTypeLabels.${type}`) || type;
+  const statusLabel = (status: string) => t(`inventory.sessionStatusLabels.${status}`) || status;
+  const stageLabel = (stage: string) => t(`inventory.sessionStageLabels.${stage}`) || stage;
 
   const [session, setSession] = useState<Session | null>(null);
 
@@ -198,7 +206,7 @@ export default function SessionPage() {
   if (!session) {
     return (
       <main
-        className="min-h-screen text-black p-8"
+        className="min-h-screen text-black"
         style={{
           backgroundColor: '#f8fafc',
           backgroundImage:
@@ -206,7 +214,25 @@ export default function SessionPage() {
           backgroundSize: '24px 24px',
         }}
       >
-        {t('inventory.sessionDetail.loading')}
+        {/* Skeleton — mirrors the eventual header + summary-card layout so
+            the page doesn't jump/reflow once data arrives. */}
+        <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15">
+          <div className="max-w-5xl mx-auto flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-lg bg-gray-100 animate-pulse shrink-0" />
+            <div className="space-y-1.5">
+              <span className="block h-5 w-40 rounded bg-gray-100 animate-pulse" />
+              <span className="block h-3 w-24 rounded bg-gray-100 animate-pulse" />
+            </div>
+          </div>
+        </div>
+        <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
+          <div className="grid sm:grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="block h-16 rounded-xl bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+          <span className="block h-40 rounded-xl bg-gray-100 animate-pulse" />
+        </div>
       </main>
     );
   }
@@ -236,55 +262,100 @@ export default function SessionPage() {
         backgroundSize: '24px 24px',
       }}
     >
-
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-bold">{session.type}</h1>
-            {hasStages && session.stage && (
-              <span className="text-xs px-2 py-1 rounded-md border font-medium bg-purple-100 text-purple-800 border-purple-300">
-                {t('inventory.sessionDetail.stageLabel', { stage: session.stage })}
-              </span>
-            )}
-            <span className={`text-xs px-2 py-1 rounded-md border font-medium ${statusStyle(session.status)}`}>
-              {session.status}
+      {/* Header — icon badge + title/subtitle, matching /inventory/stock/[id]
+          and /inventory/sessions. */}
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
             </span>
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate">{typeLabel(session.type)}</h1>
+              <p className="text-xs text-gray-500 truncate">
+                {t('inventory.sessionDetail.sessionIdLabel', { id: session.id.slice(0, 8) })}
+              </p>
+            </div>
           </div>
 
-          {/* Stage progress — works for any staged session type */}
-          {hasStages && (
-            <div className="flex items-center gap-2 mt-4">
-              {stages.map((stage, i) => {
-                const reached = i <= stageIndex;
-                return (
-                  <div key={stage} className="flex items-center gap-2">
-                    <span
-                      className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${
-                        reached
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-gray-400 border-gray-300'
-                      }`}
-                    >
-                      {stage}
-                    </span>
-                    {i < stages.length - 1 && (
-                      <span className="text-gray-300">→</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {hasStages && session.stage && (
+              <span className="text-xs px-2.5 py-1.5 rounded-md border font-medium bg-purple-100 text-purple-800 border-purple-300">
+                {t('inventory.sessionDetail.stageLabel', { stage: stageLabel(session.stage) })}
+              </span>
+            )}
+            <span className={`text-xs px-2.5 py-1.5 rounded-md border font-medium ${statusStyle(session.status)}`}>
+              {statusLabel(session.status)}
+            </span>
+          </div>
         </div>
+
+        {/* Stage progress — works for any staged session type */}
+        {hasStages && (
+          <div className="max-w-5xl mx-auto flex items-center gap-2 mt-4">
+            {stages.map((stage, i) => {
+              const reached = i <= stageIndex;
+              return (
+                <div key={stage} className="flex items-center gap-2">
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${
+                      reached
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-400 border-gray-300'
+                    }`}
+                  >
+                    {stageLabel(stage)}
+                  </span>
+                  {i < stages.length - 1 && (
+                    <span className="text-gray-300">→</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Content */}
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+
+        {/* Source document — only present for a FULFILLMENT session created
+            from an invoice (requires INVOICE_POS to have an invoice at
+            all, plus WAREHOUSE_OPS to route it through a session instead
+            of direct issue). */}
+        {session.invoice && (
+          <div className="border border-purple-300/60 rounded-xl p-4 bg-purple-50/50 flex items-start gap-3">
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-purple-600/10 border border-purple-600/20 shrink-0">
+              <Receipt size={18} strokeWidth={2} className="text-purple-700" />
+            </span>
+            <div className="min-w-0">
+              <button
+                onClick={() => router.push(`/sales/invoices/${session.invoice!.id}`)}
+                className="font-semibold text-purple-900 hover:underline"
+              >
+                {t('inventory.sessionDetail.fulfillingInvoice', {
+                  number: session.invoice.invoiceNumber ?? session.invoice.id.slice(0, 8),
+                })}
+              </button>
+              {session.invoice.salesOrder && (
+                <p className="mt-0.5">
+                  <button
+                    onClick={() => router.push(`/sales/orders/${session.invoice!.salesOrder!.id}`)}
+                    className="text-sm text-purple-700/80 hover:underline"
+                  >
+                    {t('inventory.sessionDetail.fromSalesOrder', {
+                      number: session.invoice.salesOrder.orderNumber ?? session.invoice.salesOrder.id.slice(0, 8),
+                    })}
+                  </button>
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Summary */}
         <div className="grid sm:grid-cols-3 gap-3">
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
+          <div className="border border-blue-500/15 rounded-xl p-4 flex items-start gap-3 bg-white shadow-sm">
             <Calendar size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">{t('inventory.sessionDetail.created')}</p>
@@ -292,7 +363,7 @@ export default function SessionPage() {
             </div>
           </div>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
+          <div className="border border-blue-500/15 rounded-xl p-4 flex items-start gap-3 bg-white shadow-sm">
             <Package size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">{t('inventory.sessionDetail.products')}</p>
@@ -300,7 +371,7 @@ export default function SessionPage() {
             </div>
           </div>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 flex items-start gap-3 bg-white">
+          <div className="border border-blue-500/15 rounded-xl p-4 flex items-start gap-3 bg-white shadow-sm">
             <ListOrdered size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">{t('inventory.sessionDetail.totalQty')}</p>
@@ -314,21 +385,21 @@ export default function SessionPage() {
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => router.push(`/scan?sessionId=${session.id}`)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-semibold"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
             >
               <ScanLine size={18} strokeWidth={2} />
-              {hasStages ? t('inventory.sessionDetail.scanStage', { stage: session.stage ?? '' }) : t('inventory.sessionDetail.continueScanning')}
+              {hasStages ? t('inventory.sessionDetail.scanStage', { stage: stageLabel(session.stage ?? '') }) : t('inventory.sessionDetail.continueScanning')}
             </button>
 
             {hasStages && prevStage && (
               <button
                 onClick={regressStage}
                 disabled={regressing}
-                className="flex items-center gap-2 border-2 border-gray-300 hover:bg-blue-50 disabled:opacity-50 text-gray-700 px-4 py-2 rounded-md font-semibold transition-colors"
-                title={t('inventory.sessionDetail.goBackTo', { stage: prevStage })}
+                className="flex items-center gap-2 border border-gray-300 hover:bg-blue-50 disabled:opacity-50 text-gray-700 px-4 py-2 rounded-lg font-semibold transition-colors"
+                title={t('inventory.sessionDetail.goBackTo', { stage: stageLabel(prevStage) })}
               >
                 <ArrowLeftCircle size={18} strokeWidth={2} />
-                {regressing ? t('inventory.sessionDetail.goingBack') : t('inventory.sessionDetail.backTo', { stage: prevStage })}
+                {regressing ? t('inventory.sessionDetail.goingBack') : t('inventory.sessionDetail.backTo', { stage: stageLabel(prevStage) })}
               </button>
             )}
 
@@ -336,18 +407,18 @@ export default function SessionPage() {
               <button
                 onClick={advanceStage}
                 disabled={advancing}
-                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-md font-semibold"
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
               >
                 <ArrowRightCircle size={18} strokeWidth={2} />
-                {advancing ? t('inventory.sessionDetail.advancing') : t('inventory.sessionDetail.nextStage', { stage: nextStage })}
+                {advancing ? t('inventory.sessionDetail.advancing') : t('inventory.sessionDetail.nextStage', { stage: stageLabel(nextStage) })}
               </button>
             )}
 
             <button
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md font-semibold"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
               onClick={completeSession}
               disabled={!canComplete || completing}
-              title={!canComplete ? t('inventory.sessionDetail.reachStageBeforeCompleting', { stage: stages[stages.length - 1] }) : undefined}
+              title={!canComplete ? t('inventory.sessionDetail.reachStageBeforeCompleting', { stage: stageLabel(stages[stages.length - 1]) }) : undefined}
             >
               <CheckCircle2 size={18} strokeWidth={2} />
               {completing ? t('inventory.sessionDetail.completing') : t('inventory.sessionDetail.completeSession')}
@@ -360,13 +431,13 @@ export default function SessionPage() {
             {!reopenOpen ? (
               <button
                 onClick={() => setReopenOpen(true)}
-                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md font-semibold"
+                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 {t('inventory.sessionDetail.reopenSession')}
               </button>
             ) : (
-              <div className="border-2 border-orange-300 rounded-md p-4 space-y-3 bg-orange-50">
+              <div className="border border-orange-300 rounded-xl p-4 space-y-3 bg-orange-50">
                 <label className="text-sm font-semibold text-gray-700">
                   {t('inventory.sessionDetail.reopenPrompt')}
                 </label>
@@ -381,7 +452,7 @@ export default function SessionPage() {
                   <button
                     onClick={submitReopen}
                     disabled={!reopenReason.trim() || reopening}
-                    className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-semibold"
+                    className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
                   >
                     {reopening ? t('inventory.sessionDetail.reopening') : t('inventory.sessionDetail.confirmReopen')}
                   </button>
@@ -390,7 +461,7 @@ export default function SessionPage() {
                       setReopenOpen(false);
                       setReopenReason('');
                     }}
-                    className="border-2 border-gray-300 px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-50 transition-colors"
+                    className="border border-gray-300 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-50 transition-colors"
                   >
                     {t('common.cancel')}
                   </button>
@@ -407,7 +478,7 @@ export default function SessionPage() {
               <History size={16} strokeWidth={2} />
               {t('inventory.sessionDetail.reopenHistory')}
             </h2>
-            <div className="border-2 border-gray-300 rounded-md divide-y divide-gray-200 bg-white">
+            <div className="border border-blue-500/15 rounded-xl divide-y divide-gray-100 bg-white shadow-sm overflow-hidden">
               {session.reopenEvents.map((ev) => (
                 <div key={ev.id} className="p-3 text-sm flex items-start justify-between gap-4">
                   <p className="flex-1">{ev.reason}</p>
@@ -427,11 +498,11 @@ export default function SessionPage() {
             {t('inventory.sessionDetail.notes')}
           </h2>
 
-          <div className="border-2 border-gray-300 rounded-md p-4 space-y-4 bg-white">
+          <div className="border border-blue-500/15 rounded-xl p-4 space-y-4 bg-white shadow-sm">
             {(session.notes ?? []).length > 0 && (
               <div className="space-y-3">
                 {session.notes.map((n) => (
-                  <div key={n.id} className="border-b border-gray-200 pb-3 last:border-b-0 last:pb-0">
+                  <div key={n.id} className="border-b border-gray-100 pb-3 last:border-b-0 last:pb-0">
                     <p className="text-sm">{n.note}</p>
                     <p className="text-xs text-gray-500 mt-1">
                       {fmt(n.createdAt, dateLocale)}{n.user?.email ? ` · ${n.user.email}` : ''}
@@ -452,7 +523,7 @@ export default function SessionPage() {
             <button
               onClick={submitNote}
               disabled={!noteDraft.trim() || addingNote}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-semibold transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
             >
               {addingNote ? t('inventory.sessionDetail.adding') : t('inventory.sessionDetail.addNote')}
             </button>
@@ -463,9 +534,9 @@ export default function SessionPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">{t('inventory.sessionDetail.sessionItems')}</h2>
 
-          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
+          <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
             <table className="w-full text-sm">
-              <thead className="bg-blue-50/60 border-b-2 border-gray-300">
+              <thead className="bg-blue-50/60 border-b border-blue-500/15">
                 <tr>
                   <th className="p-3 text-left font-semibold">{t('inventory.sessionDetail.colProduct')}</th>
                   <th className="p-3 text-left font-semibold">{t('inventory.sessionDetail.colSku')}</th>
@@ -481,7 +552,7 @@ export default function SessionPage() {
                   return (
                     <tr
                       key={item.id}
-                      className={`border-t border-gray-300 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+                      className={`border-t border-gray-100 ${idx % 2 === 1 ? 'bg-gray-50/60' : 'bg-white'}`}
                     >
                       <td className="p-3 font-medium">{item.product.name}</td>
                       <td className="p-3 text-gray-500">{item.product.sku}</td>

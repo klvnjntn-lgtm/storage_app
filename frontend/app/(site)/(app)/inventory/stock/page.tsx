@@ -10,6 +10,8 @@ import SortableTh from '@/app/components/shared/SortableTh';
 import Pagination from '@/app/components/shared/Pagination';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import { toCalendarDateString } from '@/lib/dates';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -33,6 +35,18 @@ type ProductSummary = {
 
 type CurrentUser = {
   role: 'ADMIN' | 'USER';
+};
+
+type OversoldSale = {
+  id: number;
+  productId: string;
+  productName: string | null;
+  sku: string | null;
+  quantity: number;
+  createdAt: string;
+  userEmail: string | null;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
 };
 
 type Option = { id: string; name: string };
@@ -243,12 +257,33 @@ export default function StockPage() {
   const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+  // Oversold report, folded into this page as a filter rather than a
+  // separate subpage — negative stock is already computed client-side
+  // from totalStock, so no extra endpoint is needed for "products below
+  // zero stock". Sales that pushed stock negative are on the product's own
+  // Event History (Stock detail page), same as any other movement.
+  const [oversoldOnly, setOversoldOnly] = useState<boolean>(() => getInitialParam<'' | '1'>('oversold', '') === '1');
+  const [oversoldFrom, setOversoldFrom] = useState(() => toCalendarDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
+  const [oversoldTo, setOversoldTo] = useState(() => toCalendarDateString(new Date()));
+  const [oversoldSales, setOversoldSales] = useState<OversoldSale[] | null>(null);
+  const [oversoldSalesLoading, setOversoldSalesLoading] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    if (!oversoldOnly) return;
+    setOversoldSalesLoading(true);
+    apiFetch(`/stock/reports/oversold?from=${oversoldFrom}&to=${oversoldTo}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: OversoldSale[]) => setOversoldSales(data))
+      .catch(() => setOversoldSales([]))
+      .finally(() => setOversoldSalesLoading(false));
+  }, [oversoldOnly, oversoldFrom, oversoldTo]);
 
   useSyncQueryParams({
     search,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
+    oversold: oversoldOnly ? '1' : null,
   });
 
   const [categories, setCategories] = useState<Option[]>([]);
@@ -357,9 +392,10 @@ export default function StockPage() {
   // Filter by product name
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) => p.name.toLowerCase().includes(q));
-  }, [products, search]);
+    let result = q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
+    if (oversoldOnly) result = result.filter((p) => p.totalStock < 0);
+    return result;
+  }, [products, search, oversoldOnly]);
 
   // Column sorting — applied to the full filtered set, before pagination,
   // so sorting reorders across all pages rather than just the visible one.
@@ -386,7 +422,7 @@ export default function StockPage() {
       return;
     }
     setPage(1);
-  }, [search]);
+  }, [search, oversoldOnly]);
 
   const isFirstSortResetRef = useRef(true);
   useEffect(() => {
@@ -631,6 +667,21 @@ export default function StockPage() {
                 className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setOversoldOnly((v) => !v)}
+              aria-pressed={oversoldOnly}
+              title={t('inventory.stockPage.oversoldFilterTitle')}
+              className={`flex items-center gap-1.5 rounded-xl border px-3.5 py-3.5 text-sm font-semibold shadow-sm shrink-0 transition-colors ${
+                oversoldOnly
+                  ? 'bg-red-600 border-red-600 text-white'
+                  : 'bg-white border-blue-500/20 text-gray-600 hover:border-red-300 hover:text-red-700'
+              }`}
+            >
+              <AlertTriangle size={16} strokeWidth={2} />
+              {t('inventory.stockPage.oversoldFilterLabel')}
+            </button>
 
             {/* List/Grid toggle. Pure display preference — same data, same
                 filter/sort/pagination, just a different row renderer. */}
@@ -907,6 +958,55 @@ export default function StockPage() {
           </div>
         )}
 
+        {oversoldOnly && (
+          <div className="border-2 border-red-200 rounded-md overflow-hidden bg-white mb-4">
+            <div className="p-4 border-b-2 border-red-100 bg-red-50/50 flex flex-col sm:flex-row sm:items-end gap-3 justify-between">
+              <div>
+                <h2 className="font-bold text-sm text-red-800">{t('inventory.stockPage.oversoldSalesHeading')}</h2>
+                <p className="text-xs text-gray-600">{t('inventory.stockPage.oversoldSalesDescription')}</p>
+              </div>
+              <DateRangePicker
+                from={oversoldFrom}
+                to={oversoldTo}
+                onChange={(f, tt) => {
+                  setOversoldFrom(f ?? oversoldFrom);
+                  setOversoldTo(tt ?? oversoldTo);
+                }}
+              />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[560px]">
+                <thead className="bg-red-50/40 border-b border-red-100 text-left">
+                  <tr>
+                    <th className="px-4 py-2 font-semibold">{t('inventory.stockPage.colProduct')}</th>
+                    <th className="px-4 py-2 font-semibold">{t('inventory.stockPage.oversoldColQty')}</th>
+                    <th className="px-4 py-2 font-semibold">{t('inventory.stockPage.oversoldColInvoice')}</th>
+                    <th className="px-4 py-2 font-semibold">{t('inventory.stockPage.oversoldColUser')}</th>
+                    <th className="px-4 py-2 font-semibold">{t('inventory.stockPage.oversoldColDate')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {oversoldSalesLoading ? (
+                    <tr><td colSpan={5} className="px-4 py-4 text-center text-gray-500">{t('common.loading')}</td></tr>
+                  ) : !oversoldSales || oversoldSales.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-4 text-center text-gray-500">{t('inventory.stockPage.oversoldSalesEmpty')}</td></tr>
+                  ) : (
+                    oversoldSales.map((s) => (
+                      <tr key={s.id} className="border-b border-gray-100">
+                        <td className="px-4 py-2">{s.productName ?? s.sku ?? s.productId}</td>
+                        <td className="px-4 py-2 font-bold text-red-700">{s.quantity}</td>
+                        <td className="px-4 py-2">{s.invoiceNumber ?? '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{s.userEmail ?? '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{new Date(s.createdAt).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {viewMode === 'list' ? (
           <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
             <div
@@ -1000,7 +1100,11 @@ export default function StockPage() {
                           )}
                         </td>
                       )}
-                      <td className={`px-4 py-3 font-bold whitespace-nowrap ${cellHighlight('totalStock')}`}>
+                      <td
+                        className={`px-4 py-3 font-bold whitespace-nowrap ${cellHighlight('totalStock')} ${
+                          product.totalStock < 0 ? 'text-red-700' : ''
+                        }`}
+                      >
                         {product.totalStock}
                       </td>
                       {showLocations && (

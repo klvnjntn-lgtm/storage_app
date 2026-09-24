@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X, Upload, Search, ImageOff, Loader2 } from 'lucide-react';
+import { X, Upload, Camera, Search, ImageOff, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import Pagination from './Pagination';
@@ -33,6 +33,7 @@ const MIME_FILTERS: { value: string; label: string | null }[] = [
 export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
   const { t } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [totalItems, setTotalItems] = useState(0);
@@ -87,11 +88,7 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
 
   if (!open) return null;
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
+  async function uploadFile(file: File) {
     setError('');
 
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
@@ -118,6 +115,12 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
     } finally {
       setUploading(false);
     }
+  }
+
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) uploadFile(file);
   }
 
   return (
@@ -166,6 +169,24 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
 
           <button
             type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white text-blue-700 border-2 border-blue-600/30 rounded-md text-sm font-semibold hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+          >
+            <Camera size={15} strokeWidth={2.5} />
+            {t('shared.mediaLibrary.takePhoto')}
+          </button>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept={ACCEPTED_IMAGE_TYPES.join(',')}
+            capture="environment"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
@@ -181,7 +202,7 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
             ref={fileInputRef}
             type="file"
             accept={ACCEPTED_IMAGE_TYPES.join(',')}
-            onChange={handleUpload}
+            onChange={handleFileInputChange}
             className="hidden"
           />
         </div>

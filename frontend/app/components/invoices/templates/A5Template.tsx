@@ -68,7 +68,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
       {(hasCustomer || hasVehicle) && (
         <div className="mt-3 border-t border-gray-300 pt-2 flex gap-6">
           {hasCustomer && (
-            <div className="w-[100mm]">
+            <div className="w-[92mm]">
               <p className="text-[10px] uppercase tracking-wide text-black font-semibold">{t('sales.invoiceTemplate.billTo')}</p>
               {invoice.customerName && <p className="font-semibold text-black">{invoice.customerName}</p>}
               {invoice.customerPhone && <p className="text-black">{invoice.customerPhone}</p>}
@@ -80,7 +80,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           {/* Vehicle — WORKSHOP_RMS, only present when this invoice was
               attached to a vehicle. */}
           {hasVehicle && (
-            <div className="w-[80mm]">
+            <div className="w-[74mm]">
               <p className="text-[10px] uppercase tracking-wide text-black font-semibold">{t('sales.invoiceTemplate.vehicleLabel')}</p>
               <p className="font-semibold text-black">
                 {invoice.vehiclePlateNumber}

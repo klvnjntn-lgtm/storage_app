@@ -13,10 +13,18 @@ export function escapeHtml(s: string | null | undefined): string {
 // margin is baked into A4Template's own p-[15mm] instead — see
 // PAGE_CSS.A4 below and the screen-preview wrapper in [id]/page.tsx,
 // both of which key off this to avoid ever double-margining A4.
+// A5's margin is a couple mm more than the bare "fits exactly" 12mm.
+// The A5Template's content div spans 100% of the resulting content
+// width with no internal slack, so with 12mm here it landed flush
+// against the printable edge — fine for our own renderer, but zero
+// tolerance for a real printer/driver "fit A4 PDF to A5 paper" pass
+// rounding slightly differently on width vs height (A5 is exactly
+// half of A4, so those two fits are close but not identical), which
+// clipped a sliver off the right edge. The extra margin absorbs that.
 export const MARGIN_MM: Record<string, number> = {
   THERMAL_58: 3,
   RECEIPT: 4,
-  A5: 12,
+  A5: 14,
   A4: 0,
 };
 

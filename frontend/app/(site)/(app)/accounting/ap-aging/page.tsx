@@ -1,12 +1,14 @@
 // app/accounting/ap-aging/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
 import { ShoppingCart, Calendar, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
@@ -27,6 +29,7 @@ type APAgingReport = {
   asOf: string;
   dueDateCaveat: string;
   lines: APLine[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
   totals: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number; total: number };
   reconciliation: { apLedgerBalance: number; sumOfOutstandingPOs: number; matches: boolean };
 };
@@ -69,15 +72,24 @@ const BUCKET_BADGE: Record<APLine['bucket'], string> = {
 export default function APAgingPage() {
     const { t, language } = useLanguage();
     const [asOf, setAsOf] = useState(todayISO());
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
   const [report, setReport] = useState<APAgingReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useSyncQueryParams({
+    asOf,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
 
   async function loadReport() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`/accounting/reports/ap-aging?asOf=${asOf}`);
+      const params = new URLSearchParams({ asOf, page: String(page), pageSize: String(pageSize) });
+      const res = await apiFetch(`/accounting/reports/ap-aging?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('accounting.apAging.requestFailed', { status: res.status }));
@@ -93,15 +105,22 @@ export default function APAgingPage() {
     }
   }
 
+  // Merged into one effect (rather than a separate "reset page on asOf
+  // change" effect) — see ledger/page.tsx's identical fix for why two
+  // effects here means two requests per date change instead of one.
+  const filtersKey = asOf;
+  const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
+    if (prevFiltersKeyRef.current !== filtersKey) {
+      prevFiltersKeyRef.current = filtersKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
     loadReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asOf]);
-
-  const sortedLines = useMemo(
-    () => [...(report?.lines ?? [])].sort((a, b) => b.daysOverdue - a.daysOverdue),
-    [report],
-  );
+  }, [filtersKey, page, pageSize]);
 
   return (
     <main
@@ -177,28 +196,42 @@ export default function APAgingPage() {
               ))}
             </div>
 
-            {sortedLines.length === 0 ? (
+            {report.lines.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">{t('accounting.apAging.noOutstandingPOs')}</p>
             ) : (
-              <div className="flex flex-col gap-2">
-                {sortedLines.map((line) => (
-                  <div key={line.purchaseOrderId} className="border-2 border-gray-300 rounded-md bg-white p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold truncate">{line.poNumber ?? line.purchaseOrderId}</span>
-                        <span className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${BUCKET_BADGE[line.bucket]}`}>
-                          {line.bucket === 'current' ? t('accounting.arAging.bucketCurrent') : `${line.bucket}d`}
-                        </span>
+              <>
+                <div className="flex flex-col gap-2">
+                  {report.lines.map((line) => (
+                    <div key={line.purchaseOrderId} className="border-2 border-gray-300 rounded-md bg-white p-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold truncate">{line.poNumber ?? line.purchaseOrderId}</span>
+                          <span className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${BUCKET_BADGE[line.bucket]}`}>
+                            {line.bucket === 'current' ? t('accounting.arAging.bucketCurrent') : `${line.bucket}d`}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 truncate mt-0.5">
+                          {line.supplierName ?? t('accounting.apAging.noSupplierOnFile')}
+                          {line.dueDate && ` · ${t('accounting.expenses.dueOn', { date: new Date(line.dueDate).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }) })}`}
+                        </p>
                       </div>
-                      <p className="text-xs text-gray-500 truncate mt-0.5">
-                        {line.supplierName ?? t('accounting.apAging.noSupplierOnFile')}
-                        {line.dueDate && ` · ${t('accounting.expenses.dueOn', { date: new Date(line.dueDate).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }) })}`}
-                      </p>
+                      <span className="text-sm font-bold shrink-0">{formatIDR(line.outstanding)}</span>
                     </div>
-                    <span className="text-sm font-bold shrink-0">{formatIDR(line.outstanding)}</span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <Pagination
+                    page={report.pagination.page}
+                    pageSize={report.pagination.pageSize}
+                    totalItems={report.pagination.total}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              </>
             )}
           </>
         )}

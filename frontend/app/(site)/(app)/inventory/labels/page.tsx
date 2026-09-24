@@ -4,9 +4,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
 import Barcode from 'react-barcode';
-import { Tag, Printer, Minus, Plus, Search, X } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { Tag, Printer, Minus, Plus, Search, X, Barcode as BarcodeIcon, QrCode } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import PrintLabels from '@/app/components/shared/PrintLabels';
+import PrintLabels, { type LabelFormat } from '@/app/components/shared/PrintLabels';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -23,12 +24,14 @@ type Item = {
 const LabelCard = memo(function LabelCard({
   item,
   quantity,
+  format,
   onBump,
   onSetQty,
   onPrint,
 }: {
   item: Item;
   quantity: number;
+  format: LabelFormat;
   onBump: (sku: string, delta: number) => void;
   onSetQty: (sku: string, qty: number) => void;
   onPrint: (item: Item) => void;
@@ -40,7 +43,11 @@ const LabelCard = memo(function LabelCard({
         <p className="font-bold text-sm truncate w-full">{item.sku}</p>
         <p className="text-xs text-gray-600 mb-2 truncate w-full">{item.name}</p>
         <div className="flex justify-center overflow-hidden">
-          <Barcode value={item.sku} height={30} width={1.3} fontSize={10} margin={0} />
+          {format === 'qrcode' ? (
+            <QRCodeSVG value={item.sku} size={40} level="M" marginSize={0} />
+          ) : (
+            <Barcode value={item.sku} height={30} width={1.3} fontSize={10} margin={0} />
+          )}
         </div>
       </div>
 
@@ -95,6 +102,7 @@ export default function LabelsPage() {
   const [loading, setLoading] = useState(true);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [printTarget, setPrintTarget] = useState<Item[] | null>(null);
+  const [format, setFormat] = useState<LabelFormat>('barcode');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
@@ -208,14 +216,45 @@ export default function LabelsPage() {
               </div>
             </div>
 
-            <button
-              onClick={printAll}
-              disabled={filteredItems.length === 0}
-              className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-blue-700 active:bg-blue-800 w-full sm:w-auto disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
-            >
-              <Printer size={18} strokeWidth={2} />
-              {query ? t('inventory.labelsPage.printAllMatches') : t('inventory.labelsPage.printAll')}
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex items-center border border-gray-300 rounded-md overflow-hidden shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFormat('barcode')}
+                  aria-pressed={format === 'barcode'}
+                  className={`flex items-center gap-1.5 px-3 py-2.5 sm:py-2 text-xs font-semibold transition-colors ${
+                    format === 'barcode'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <BarcodeIcon size={14} strokeWidth={2} />
+                  {t('inventory.labelsPage.formatBarcode')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormat('qrcode')}
+                  aria-pressed={format === 'qrcode'}
+                  className={`flex items-center gap-1.5 px-3 py-2.5 sm:py-2 text-xs font-semibold border-l border-gray-300 transition-colors ${
+                    format === 'qrcode'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <QrCode size={14} strokeWidth={2} />
+                  {t('inventory.labelsPage.formatQrCode')}
+                </button>
+              </div>
+
+              <button
+                onClick={printAll}
+                disabled={filteredItems.length === 0}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
+              >
+                <Printer size={18} strokeWidth={2} />
+                {query ? t('inventory.labelsPage.printAllMatches') : t('inventory.labelsPage.printAll')}
+              </button>
+            </div>
           </div>
 
           {/* Search / filter — command-palette style matching
@@ -268,6 +307,7 @@ export default function LabelsPage() {
               key={item.sku}
               item={item}
               quantity={quantities[item.sku] ?? 1}
+              format={format}
               onBump={bumpQty}
               onSetQty={setQty}
               onPrint={printOne}
@@ -297,7 +337,7 @@ export default function LabelsPage() {
       )}
 
       {/* Print-only layout — only renders the current print target */}
-      <PrintLabels printTarget={printTarget} />
+      <PrintLabels printTarget={printTarget} format={format} />
     </main>
   );
 }

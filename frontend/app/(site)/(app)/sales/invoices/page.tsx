@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X } from 'lucide-react';
+import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
@@ -81,6 +81,120 @@ const STATUS_OPTIONS = ['ALL', 'DRAFT', 'ISSUED'] as const;
 
 const PAYMENT_OPTIONS = ['ALL', 'UNPAID', 'PARTIAL', 'PAID', 'OVERDUE'] as const;
 
+type CustomerFilterOption = { id: string; name: string; phone?: string | null };
+
+// Filter-bar customer picker — deliberately separate from
+// components/invoices/CustomerPicker, which is built for the
+// create-invoice flow (quick-add a new customer inline). A filter has no
+// use for creating customers, so this is a plain search-and-select.
+function CustomerFilterPicker({
+  customerId,
+  customerName,
+  onChange,
+  t,
+}: {
+  customerId: string | null;
+  customerName: string | null;
+  onChange: (id: string | null, name: string | null) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<CustomerFilterOption[]>([]);
+  const [searching, setSearching] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const timeout = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const q = query.trim();
+        const res = await apiFetch(q ? `/customers?q=${encodeURIComponent(q)}` : '/customers');
+        if (res.ok) setResults(await res.json());
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [query, open]);
+
+  if (customerId) {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-blue-500/20 bg-white font-semibold text-gray-700 whitespace-nowrap">
+        <User size={12} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+        <span className="truncate max-w-[10rem]">{customerName ?? customerId}</span>
+        <button
+          onClick={() => onChange(null, null)}
+          className="text-gray-400 hover:text-blue-700 shrink-0"
+          aria-label={t('sales.invoicesList.customerChangeFilter')}
+        >
+          <X size={12} strokeWidth={2.5} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35 font-semibold whitespace-nowrap transition-colors"
+      >
+        <User size={12} strokeWidth={2} />
+        {t('sales.invoicesList.customerFilterPlaceholder')}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 z-10 mt-1.5 w-56 bg-white border border-blue-500/20 rounded-xl shadow-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-2.5 py-2 border-b border-gray-100">
+            <Search size={13} strokeWidth={2} className="text-blue-600/60 shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('sales.invoicesList.customerSearchPlaceholder')}
+              className="w-full text-sm outline-none bg-transparent"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {searching && <p className="px-3 py-2 text-xs text-gray-400">{t('common.loading')}</p>}
+            {!searching && results.length === 0 && (
+              <p className="px-3 py-2 text-xs text-gray-400">{t('sales.invoicesList.customerNoMatches')}</p>
+            )}
+            {results.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => {
+                  onChange(c.id, c.name);
+                  setOpen(false);
+                  setQuery('');
+                }}
+                className="w-full flex flex-col items-start px-3 py-2 text-left hover:bg-blue-50/60 border-b border-gray-100 last:border-b-0"
+              >
+                <span className="text-sm font-medium">{c.name}</span>
+                {c.phone && <span className="text-xs text-gray-500">{c.phone}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InvoicesPage() {
   const router = useRouter();
   const { t } = useLanguage();
@@ -151,6 +265,12 @@ export default function InvoicesPage() {
     getInitialParam('payment', 'ALL')
   );
 
+  // Filter by a specific customer. `customerName` only exists to render
+  // the selected-customer chip without an extra fetch on page load — the
+  // actual filter sent to the server is customerId.
+  const [customerId, setCustomerId] = useState<string | null>(() => getInitialParam('customerId', '') || null);
+  const [customerName, setCustomerName] = useState<string | null>(() => getInitialParam('customerName', '') || null);
+
   // Search by invoice number or customer name. `search` is what the input
   // shows immediately; `debouncedSearch` is what actually drives the
   // fetch, updated 350ms after the person stops typing so each keystroke
@@ -189,6 +309,8 @@ export default function InvoicesPage() {
     search: debouncedSearch,
     status: statusFilter !== 'ALL' ? statusFilter : null,
     payment: paymentFilter !== 'ALL' ? paymentFilter : null,
+    customerId,
+    customerName: customerId ? customerName : null,
     from,
     to,
     dateField: from && to ? dateField : null,
@@ -201,6 +323,7 @@ export default function InvoicesPage() {
     (hasDateRange ? 1 : 0) +
     (statusFilter !== 'ALL' ? 1 : 0) +
     (paymentFilter !== 'ALL' ? 1 : 0) +
+    (customerId ? 1 : 0) +
     (debouncedSearch ? 1 : 0);
 
   function clearFilters() {
@@ -208,6 +331,8 @@ export default function InvoicesPage() {
     setTo(null);
     setStatusFilter('ALL');
     setPaymentFilter('ALL');
+    setCustomerId(null);
+    setCustomerName(null);
     setSearch('');
   }
 
@@ -224,6 +349,7 @@ export default function InvoicesPage() {
         params.set('dateField', dateField);
       }
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (customerId) params.set('customerId', customerId);
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (paymentFilter === 'OVERDUE') {
         params.set('overdue', 'true');
@@ -277,7 +403,7 @@ export default function InvoicesPage() {
   // URL (e.g. via the browser's Back button) back to 1 on mount: the ref
   // starts equal to the initial filtersKey, so the reset branch only ever
   // fires on an actual change, never on the first render.
-  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${debouncedSearch}`;
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${customerId}|${debouncedSearch}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -384,7 +510,7 @@ export default function InvoicesPage() {
 
           {/* Filter groups stack full-width on mobile (single column),
               then move into a 3-column row from sm up. */}
-          <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr] gap-x-6 gap-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-[auto_auto_1fr_1fr] gap-x-6 gap-y-3">
             {/* Date range */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
@@ -417,6 +543,22 @@ export default function InvoicesPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Customer */}
+            <div>
+              <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
+                {t('sales.invoicesList.customerLabel')}
+              </p>
+              <CustomerFilterPicker
+                customerId={customerId}
+                customerName={customerName}
+                onChange={(id, name) => {
+                  setCustomerId(id);
+                  setCustomerName(name);
+                }}
+                t={t}
+              />
             </div>
 
             {/* Status */}

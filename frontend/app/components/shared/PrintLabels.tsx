@@ -1,12 +1,16 @@
 import Barcode from 'react-barcode';
+import { QRCodeSVG } from 'qrcode.react';
 
 type Item = {
   sku: string;
   name: string;
 };
 
+export type LabelFormat = 'barcode' | 'qrcode';
+
 type PrintLabelsProps = {
   printTarget: Item[] | null;
+  format: LabelFormat;
 };
 
 /**
@@ -15,7 +19,7 @@ type PrintLabelsProps = {
  * Keep this as its own component so the print stylesheet and markup
  * stay isolated from the interactive page.
  */
-export default function PrintLabels({ printTarget }: PrintLabelsProps) {
+export default function PrintLabels({ printTarget, format }: PrintLabelsProps) {
   return (
     <>
       <div className="print-only label-grid">
@@ -23,7 +27,11 @@ export default function PrintLabels({ printTarget }: PrintLabelsProps) {
           <div key={`${item.sku}-${idx}`} className="label-card">
             <p className="font-bold text-sm truncate w-full">{item.sku}</p>
             <p className="text-xs text-gray-600 mb-2 truncate w-full">{item.name}</p>
-            <Barcode value={item.sku} height={30} width={1.3} fontSize={10} margin={0} />
+            {format === 'qrcode' ? (
+              <QRCodeSVG value={item.sku} size={40} level="M" marginSize={0} />
+            ) : (
+              <Barcode value={item.sku} height={30} width={1.3} fontSize={10} margin={0} />
+            )}
           </div>
         ))}
       </div>

@@ -7,6 +7,8 @@ import { Space_Grotesk } from 'next/font/google';
 import { Wallet, Calendar, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
@@ -35,6 +37,15 @@ type ARAgingReport = {
   totals: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number; total: number };
   reconciliation: { arLedgerBalance: number; sumOfOutstandingInvoices: number; matches: boolean };
 };
+
+// The backend's max page size for `lines` (see accounting.controller.ts's
+// "page, pageSize (max 200)" comment on GET reports/ar-aging). byCustomer
+// is always computed from every outstanding invoice regardless of paging,
+// so a customer whose invoices don't fit in this fetch would show a
+// nonzero total but an empty expanded list — fetching the max here
+// instead of the default (50) is what keeps that from happening for all
+// but the largest customers.
+const LINES_PAGE_SIZE = 200;
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
@@ -74,11 +85,23 @@ export default function ARAgingPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
 
+  // byCustomer isn't paginated server-side (it's always computed from
+  // every outstanding invoice), so this pages it client-side.
+  const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
+  const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
+
+  useSyncQueryParams({
+    asOf,
+    page: page !== 1 ? page : null,
+    pageSize: pageSize !== 20 ? pageSize : null,
+  });
+
   async function loadReport() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`/accounting/reports/ar-aging?asOf=${asOf}`);
+      const params = new URLSearchParams({ asOf, pageSize: String(LINES_PAGE_SIZE) });
+      const res = await apiFetch(`/accounting/reports/ar-aging?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('accounting.arAging.requestFailed', { status: res.status }));
@@ -96,8 +119,14 @@ export default function ARAgingPage() {
 
   useEffect(() => {
     loadReport();
+    setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asOf]);
+
+  const pagedCustomers = useMemo(
+    () => (report?.byCustomer ?? []).slice((page - 1) * pageSize, page * pageSize),
+    [report, page, pageSize],
+  );
 
   const linesByCustomer = useMemo(() => {
     const map = new Map<string, ARLine[]>();
@@ -192,8 +221,9 @@ export default function ARAgingPage() {
             {report.byCustomer.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">{t('accounting.arAging.noOutstandingInvoices')}</p>
             ) : (
+              <>
               <div className="flex flex-col gap-2">
-                {report.byCustomer.map((c) => {
+                {pagedCustomers.map((c) => {
                   const key = customerKey(c);
                   const isExpanded = expandedCustomer === key;
                   const invoices = linesByCustomer.get(key) ?? [];
@@ -228,6 +258,19 @@ export default function ARAgingPage() {
                   );
                 })}
               </div>
+              <div className="mt-4">
+                <Pagination
+                  page={page}
+                  pageSize={pageSize}
+                  totalItems={report.byCustomer.length}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => {
+                    setPageSize(size);
+                    setPage(1);
+                  }}
+                />
+              </div>
+              </>
             )}
           </>
         )}

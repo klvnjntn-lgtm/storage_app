@@ -45,10 +45,18 @@ function lineDiscountAmount(
   return 0;
 }
 
-function hasSaveableContent(cart: Record<string, CartLine>, services: ServiceLine[]): boolean {
+// Also true for a bare customer selection with an empty cart — exiting
+// the page (tab close, refresh, navigating away) should still leave a
+// draft behind so that pick isn't lost, not just once there's a line item.
+function hasSaveableContent(
+  cart: Record<string, CartLine>,
+  services: ServiceLine[],
+  customer: Customer | null,
+): boolean {
   return (
     Object.keys(cart).length > 0 ||
-    services.some((s) => s.description.trim() && s.unitPrice !== null)
+    services.some((s) => s.description.trim() && s.unitPrice !== null) ||
+    !!customer
   );
 }
 
@@ -301,7 +309,17 @@ function QuotationFormPageInner() {
     return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
   }
 
-  function addToCart(product: ProductSearchResult) {
+  function addToCart(
+    product: ProductSearchResult,
+    details: {
+      quantity: number;
+      unitPrice: number;
+      unit: string | null;
+      taxRateIds: string[];
+      discountType: DiscountType | null;
+      discountValue: number | null;
+    },
+  ): boolean {
     setError('');
     let target;
     if (locationFilter) {
@@ -313,39 +331,46 @@ function QuotationFormPageInner() {
             location: locationFilter.name,
           }),
         );
-        return;
+        return false;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
       if (!target || target.quantity <= 0) {
         setError(t('sales.quotationsNew.noStockAnyLocation', { product: product.name }));
-        return;
+        return false;
       }
     }
 
     const resolvedTarget = target;
     const key = cartKey(product.id, resolvedTarget.locationId);
+    const existing = cart[key];
+    const nextQty = (existing?.quantity ?? 0) + details.quantity;
+    if (nextQty > resolvedTarget.quantity) {
+      setError(
+        t('sales.quotationsNew.onlyAvailable', {
+          qty: resolvedTarget.quantity,
+          product: product.name,
+          location: resolvedTarget.locationName,
+        }),
+      );
+      return false;
+    }
 
-    setCart((prev) => {
-      const existing = prev[key];
-      const nextQty = (existing?.quantity ?? 0) + 1;
-      if (nextQty > resolvedTarget.quantity) return prev;
-      const defaultRate = taxRates.find((r) => r.isDefault);
-      return {
-        ...prev,
-        [key]: {
-          product,
-          quantity: nextQty,
-          unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
-          unit: existing?.unit ?? product.unit ?? null,
-          locationId: resolvedTarget.locationId,
-          locationName: resolvedTarget.locationName,
-          taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
-          discountType: existing?.discountType ?? null,
-          discountValue: existing?.discountValue ?? null,
-        },
-      };
-    });
+    setCart((prev) => ({
+      ...prev,
+      [key]: {
+        product,
+        quantity: nextQty,
+        unitPrice: details.unitPrice,
+        unit: details.unit,
+        locationId: resolvedTarget.locationId,
+        locationName: resolvedTarget.locationName,
+        taxRateIds: details.taxRateIds,
+        discountType: details.discountType,
+        discountValue: details.discountValue,
+      },
+    }));
+    return true;
   }
 
   function changeQty(key: string, delta: number) {
@@ -614,20 +639,25 @@ function QuotationFormPageInner() {
     window.history.replaceState(null, '', `/sales/quotations/new?draftId=${id}`);
   }
 
-  async function autosaveDraft() {
+  // useKeepalive is set from the pagehide handler below, so the request
+  // can outlive the page (tab close/refresh/navigating away) instead of
+  // being cancelled mid-flight like a normal fetch would be.
+  async function autosaveDraft(useKeepalive = false) {
     if (savedRef.current) return;
-    if (!hasSaveableContent(cartRef.current, servicesRef.current)) return;
+    if (!hasSaveableContent(cartRef.current, servicesRef.current, customerRef.current)) return;
 
     const payload = buildPayload();
     try {
       if (currentDraftId) {
         await apiFetch(`/sales-quotations/${currentDraftId}`, {
           method: 'PATCH',
+          keepalive: useKeepalive,
           body: JSON.stringify(payload),
         });
       } else {
         const res = await apiFetch('/sales-quotations', {
           method: 'POST',
+          keepalive: useKeepalive,
           body: JSON.stringify(payload),
         });
         if (res.ok) {
@@ -651,7 +681,7 @@ function QuotationFormPageInner() {
       return;
     }
     if (savedRef.current) return;
-    if (!hasSaveableContent(cart, services)) return;
+    if (!hasSaveableContent(cart, services, customer)) return;
 
     if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     autosaveTimeoutRef.current = setTimeout(() => {
@@ -667,10 +697,26 @@ function QuotationFormPageInner() {
   useEffect(() => {
     return () => {
       if (savedRef.current) return;
-      if (hasSaveableContent(cartRef.current, servicesRef.current)) {
+      if (hasSaveableContent(cartRef.current, servicesRef.current, customerRef.current)) {
         autosaveDraftRef.current();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Covers exits the unmount cleanup above can't see: closing the tab,
+  // refreshing, or navigating to a different site. pagehide (not
+  // beforeunload) is used so it doesn't block the back/forward cache; the
+  // fetch is fired with keepalive so it can complete after the page is gone.
+  useEffect(() => {
+    function handlePageHide() {
+      if (savedRef.current) return;
+      if (hasSaveableContent(cartRef.current, servicesRef.current, customerRef.current)) {
+        autosaveDraftRef.current(true);
+      }
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -782,6 +828,7 @@ function QuotationFormPageInner() {
           onSelectLocationFilter={selectLocationFilter}
           onAddToCart={addToCart}
           posModeEnabled={false}
+          taxRates={taxRates}
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
