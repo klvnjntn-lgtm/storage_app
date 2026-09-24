@@ -197,11 +197,10 @@ export class PurchaseOrderService {
   }
   async create(organizationId: string, userId: string, dto: CreatePurchaseOrderDto) {
     await this.tenantOwnership.validate(organizationId, { locationId: dto.locationId });
-    if (!dto.items?.length) throw new BadRequestException('Purchase order must have at least one item');
 
     return this.prisma.$transaction(async (tx) => {
       await this.validateSupplier(organizationId, dto.supplierId, tx);
-      const { lines: resolvedItems, createdProducts } = await this.resolvePoItems(organizationId, dto.items, tx);
+      const { lines: resolvedItems, createdProducts } = await this.resolvePoItems(organizationId, dto.items ?? [], tx);
       const { lines, subtotal } = this.priceLines(resolvedItems);
       const { discountAmount, taxRateId, taxAmount, total } = await this.computeTotals(
         organizationId, subtotal, dto.discountAmount, dto.taxRateId, tx,

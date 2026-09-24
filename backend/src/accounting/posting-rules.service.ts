@@ -190,6 +190,51 @@ export class PostingRulesService {
     );
   }
 
+  // Corrects a single already-posted COGS line by its cost delta — used
+  // when InvoiceService.recostInvoiceItem() replaces a provisional cost
+  // (booked while a line oversold, before the real purchase cost was
+  // known) with the real one. Posts only the difference, under its own
+  // sourceId, so the original postCogs() entry from issue() is never
+  // touched or duplicated. delta > 0 (cost went up): more COGS, same as
+  // postCogs. delta < 0: reverses the excess (Dr Inventory, Cr COGS).
+  async postCogsCorrection(
+    organizationId: string,
+    params: { sourceId: string; date: Date; memo: string; deltaAmount: number; locationId?: string | null },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const rounded = this.round2(params.deltaAmount);
+    if (rounded === 0) return null;
+
+    const db = this.db(tx);
+    const [cogs, inventory] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.COST_OF_GOODS_SOLD, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.INVENTORY, db),
+    ]);
+
+    const amount = Math.abs(rounded);
+    const lines = rounded > 0
+      ? [
+          { accountId: cogs, debit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined },
+          { accountId: inventory, credit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined },
+        ]
+      : [
+          { accountId: inventory, debit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined },
+          { accountId: cogs, credit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined },
+        ];
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: params.memo,
+        sourceType: JournalSourceType.INVOICE,
+        sourceId: params.sourceId,
+        lines,
+      },
+      tx,
+    );
+  }
+
   // Payment (against an invoice) → Cash/Bank (debit) + AR (credit)
   async postPayment(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
     const db = this.db(tx);

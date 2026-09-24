@@ -1472,7 +1472,14 @@ private async importStock(
 
     const existingInvoicesByNumber = new Map <
       string,
-      { id: string; vehicleId: string | null; odometer: number | null; nextServiceKm: number | null }
+      {
+        id: string;
+        vehicleId: string | null;
+        odometer: number | null;
+        nextServiceKm: number | null;
+        vehiclePlateNumber: string | null;
+        customerName: string | null;
+      }
     >();
     const INVOICE_LOOKUP_CHUNK_SIZE = 10_000;
 
@@ -1497,6 +1504,8 @@ private async importStock(
           vehicleId: true,
           odometer: true,
           nextServiceKm: true,
+          vehiclePlateNumber: true,
+          customerName: true,
         },
       });
 
@@ -1507,6 +1516,8 @@ private async importStock(
             vehicleId: invoice.vehicleId,
             odometer: invoice.odometer,
             nextServiceKm: invoice.nextServiceKm,
+            vehiclePlateNumber: invoice.vehiclePlateNumber,
+            customerName: invoice.customerName,
           });
         }
       }
@@ -1518,8 +1529,9 @@ private async importStock(
     const allSkus = [...new Set(lines.map((l) => l.SKU).filter(Boolean))];
     const products = await this.prisma.product.findMany({
       where: { organizationId, sku: { in: allSkus } },
-      select: { id: true, sku: true },
+      select: { id: true, sku: true, name: true },
     });
+    const productBySku = new Map(products.map((p) => [p.sku, p]));
     const productIdBySku = new Map(products.map((p) => [p.sku, p.id]));
 
     // Resolve vehicles before the concurrent create loop below.
@@ -1530,12 +1542,35 @@ private async importStock(
       organizationId,
     );
 
+    // FIX — snapshot vehicle/customer identity onto each imported invoice,
+    // same rationale as Invoice.odometer/Invoice.vehiclePlateNumber
+    // elsewhere: these invoices are created straight into ISSUED status
+    // (they never go through InvoiceService.issue(), which is where a
+    // normally-created invoice gets this snapshot), so without it they'd
+    // silently follow the live Vehicle/Customer record forever — e.g. a
+    // plate correction made today would rewrite every historical invoice
+    // for that car.
+    const vehicleIds = [...new Set([...vehicleIdByInvoiceId.values()].filter((v): v is string => !!v))];
+    const vehiclesById = new Map(
+      vehicleIds.length
+        ? (await this.prisma.vehicle.findMany({ where: { id: { in: vehicleIds } } })).map((v) => [v.id, v])
+        : [],
+    );
+    const customerIds = [...new Set([...customerIdMap.values()])];
+    const customersById = new Map(
+      customerIds.length
+        ? (await this.prisma.customer.findMany({ where: { id: { in: customerIds } } })).map((c) => [c.id, c])
+        : [],
+    );
+
     const buildInvoiceData = (header: (typeof headers)[number]) => {
       const invoiceNumber = header.EXTERNAL_INVOICE_NO;
       const itemLines = linesByInvoice.get(header.ARINVOICEID) ?? [];
       const customerId = header.CUSTOMERID != null ? customerIdMap.get(header.CUSTOMERID) ?? null : null;
       const vehicleId = vehicleIdByInvoiceId.get(header.ARINVOICEID) ?? null;
       const parsed = parsedByInvoiceId.get(header.ARINVOICEID) ?? null;
+      const vehicle = vehicleId ? vehiclesById.get(vehicleId) ?? null : null;
+      const customer = customerId ? customersById.get(customerId) ?? null : null;
 
       const itemsData = itemLines
         .filter((line) => line.SKU && line.QUANTITY != null)
@@ -1556,12 +1591,15 @@ private async importStock(
           }
 
           const productId = productIdBySku.get(line.SKU) ?? null;
+          const product = productBySku.get(line.SKU) ?? null;
           const unitPrice = num(line.UNITPRICE);
           const lineTotal = roundedQty * unitPrice;
 
           return {
             productId,
             description: productId ? null : `Unmapped Accurate SKU: ${line.SKU}`,
+            productName: product?.name ?? null,
+            sku: product?.sku ?? null,
             quantity: roundedQty,
             unitPrice: unitPrice.toString(),
             lineTotal: lineTotal.toString(),
@@ -1587,7 +1625,14 @@ private async importStock(
         status: InvoiceStatus.ISSUED,
         customerId,
         vehicleId,
-        customerName: header.CUSTOMER_NAME ?? null,
+        customerName: customer?.name ?? header.CUSTOMER_NAME ?? null,
+        customerAddress: customer?.address ?? null,
+        customerBillingAddress: customer?.billingAddress ?? customer?.address ?? null,
+        customerPhone: customer?.phone ?? null,
+        customerNpwp: customer?.npwp ?? null,
+        vehiclePlateNumber: vehicle?.plateNumber ?? null,
+        vehicleModel: vehicle?.vehicleModel ?? null,
+        vehicleVin: vehicle?.vin ?? null,
         issuedAt: header.INVOICEDATE ?? undefined,
         amountPaid: paidAmount,
         paymentStatus,
@@ -1618,16 +1663,45 @@ private async importStock(
             const existingInvoice = existingInvoicesByNumber.get(invoiceNumber);
             const vehicleId = vehicleIdByInvoiceId.get(header.ARINVOICEID) ?? null;
             const parsed = parsedByInvoiceId.get(header.ARINVOICEID) ?? null;
+            const customerId = header.CUSTOMERID != null ? customerIdMap.get(header.CUSTOMERID) ?? null : null;
+            const vehicle = vehicleId ? vehiclesById.get(vehicleId) ?? null : null;
+            const customer = customerId ? customersById.get(customerId) ?? null : null;
 
             // Existing invoice: backfill vehicleId/odometer/nextServiceKm
-            // if currently missing — covers re-imports of a GDB that now
-            // includes KM data an earlier import predates.
+            // and the vehicle/customer identity snapshot if currently
+            // missing — covers re-imports of a GDB that now includes data
+            // an earlier import predates, and invoices imported before
+            // the snapshot columns existed.
             if (existingInvoice) {
-              const patch: { vehicleId?: string; odometer?: number; nextServiceKm?: number } = {};
+              const patch: {
+                vehicleId?: string;
+                odometer?: number;
+                nextServiceKm?: number;
+                vehiclePlateNumber?: string;
+                vehicleModel?: string;
+                vehicleVin?: string | null;
+                customerName?: string;
+                customerAddress?: string | null;
+                customerBillingAddress?: string | null;
+                customerPhone?: string | null;
+                customerNpwp?: string | null;
+              } = {};
               if (!existingInvoice.vehicleId && vehicleId) patch.vehicleId = vehicleId;
               if (existingInvoice.odometer == null && parsed?.odometer != null) patch.odometer = parsed.odometer;
               if (existingInvoice.nextServiceKm == null && parsed?.nextServiceKm != null) {
                 patch.nextServiceKm = parsed.nextServiceKm;
+              }
+              if (!existingInvoice.vehiclePlateNumber && vehicle) {
+                patch.vehiclePlateNumber = vehicle.plateNumber;
+                patch.vehicleModel = vehicle.vehicleModel;
+                patch.vehicleVin = vehicle.vin;
+              }
+              if (!existingInvoice.customerName && customer) {
+                patch.customerName = customer.name;
+                patch.customerAddress = customer.address;
+                patch.customerBillingAddress = customer.billingAddress ?? customer.address;
+                patch.customerPhone = customer.phone;
+                patch.customerNpwp = customer.npwp;
               }
 
               if (Object.keys(patch).length > 0) {

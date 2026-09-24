@@ -1,5 +1,5 @@
 // src/sessions/sessions.controller.ts
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { SessionsService } from './sessions.service';
 import { SessionType, ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,8 +26,19 @@ export class SessionsController {
   // Read-only, ungated — same reasoning as ProductController: session
   // listing is core infrastructure visible regardless of module status.
   @Get()
-  findAll(@CurrentOrg() organizationId: string) {
-    return this.sessionsService.findAll(organizationId);
+  findAll(
+    @CurrentOrg() organizationId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.sessionsService.findAll(organizationId, {
+      from,
+      to,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
   }
 
 @Get('summary')

@@ -101,6 +101,16 @@ export class InvoiceLineInput {
   discountValue?: number;
 }
 
+export class IssueInvoiceDto {
+  // Set after the client has shown the "Only X in stock, sell Y anyway?"
+  // prompt (triggered by a 409 STOCK_CONFIRMATION_REQUIRED on the first,
+  // unconfirmed call) and the user confirmed. Only meaningful under
+  // StockPolicy.WARN — ignored under BLOCK/ALLOW.
+  @IsOptional()
+  @IsBoolean()
+  confirmOversell?: boolean;
+}
+
 export class CreateDraftInvoiceDto {
     @IsOptional()
   @IsString()
@@ -229,6 +239,23 @@ export class RevenueReportQueryDto {
   locationId?: string;
 }
 
+export class TopReportQueryDto {
+  @IsISO8601()
+  from: string; // ISO date — converted to Date in the controller before hitting the service
+
+  @IsISO8601()
+  to: string; // ISO date — converted to Date in the controller before hitting the service
+
+  // Rows per ranking (top customers / top products / top vehicles). Hub
+  // preview asks for a small number (e.g. 5); the full report page asks
+  // for more (e.g. 10-20).
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+}
+
 export class ListInvoicesQueryDto {
   @IsOptional()
   @IsEnum(InvoiceStatus)
@@ -257,6 +284,10 @@ export class ListInvoicesQueryDto {
   @IsOptional()
   @IsString()
   locationId?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
     @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -279,4 +310,12 @@ search?: string;
   @Type(() => Boolean)
   @IsBoolean()
   overdue?: boolean;
+}
+
+export class RecostInvoiceItemDto {
+  // Omit to recost using the product's current costPrice.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitCost?: number;
 }

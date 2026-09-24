@@ -6,22 +6,23 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 model OrganizationTaxRate {
-  id               String           @id @default(uuid())
-  organizationId   String
-  name             String
-  percentage       Decimal          @db.Decimal(5, 2)
-  createdAt        DateTime         @default(now())
-  archivedAt       DateTime?
-  isDefault        Boolean          @default(false)
-  invoiceItemTaxes InvoiceItemTax[]
-  invoiceTaxes     InvoiceTax[]
-  organization     Organization     @relation(fields: [organizationId], references: [id])
+  id                      String                  @id @default(uuid())
+  organizationId          String
+  name                    String
+  percentage              Decimal                 @db.Decimal(5, 2)
+  createdAt               DateTime                @default(now())
+  archivedAt              DateTime?
+  isDefault               Boolean                 @default(false)
+  invoiceItemTaxes        InvoiceItemTax[]
+  invoiceTaxes            InvoiceTax[]
+  organization            Organization            @relation(fields: [organizationId], references: [id])
   salesQuotationTaxes     SalesQuotationTax[]
   salesQuotationItemTaxes SalesQuotationItemTax[]
   salesOrderTaxes         SalesOrderTax[]
   salesOrderItemTaxes     SalesOrderItemTax[]
-purchaseOrders PurchaseOrder[]
+  purchaseOrders          PurchaseOrder[]
 
   @@index([organizationId])
 }
@@ -40,23 +41,23 @@ model InvoiceTax {
 }
 
 model Customer {
-  id             String       @id @default(cuid())
-  organizationId String
-  name           String
-  phone          String?
-  address        String?
+  id              String           @id @default(cuid())
+  organizationId  String
+  name            String
+  phone           String?
+  address         String?
   salesQuotations SalesQuotation[]
   salesOrders     SalesOrder[]
   deliveryOrders  DeliveryOrder[] // NEW — inverse of DeliveryOrder.customerId
-  billingAddress String?
+  billingAddress  String?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  npwp           String?
-  companyName    String?
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  invoices       Invoice[]
-  vehicles       Vehicle[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  npwp         String?
+  companyName  String?
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invoices     Invoice[]
+  vehicles     Vehicle[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
@@ -65,13 +66,13 @@ model Customer {
 }
 
 model Vehicle {
-  id             String            @id @default(cuid())
-  customerId     String
-  plateNumber    String
-  plateNormalized String           // FIX — uppercase, separator-stripped form of plateNumber (e.g. "BP1234XX"), computed at write time by normalizePlate(); used only for format-agnostic lookup matching, never displayed
-  vehicleModel   String
-  vin            String?
-  salesOrders SalesOrder[]
+  id              String       @id @default(cuid())
+  customerId      String
+  plateNumber     String
+  plateNormalized String // FIX — uppercase, separator-stripped form of plateNumber (e.g. "BP1234XX"), computed at write time by normalizePlate(); used only for format-agnostic lookup matching, never displayed
+  vehicleModel    String
+  vin             String?
+  salesOrders     SalesOrder[]
 
   odometer       Int?
   createdAt      DateTime          @default(now())
@@ -91,105 +92,109 @@ model Vehicle {
 }
 
 model Organization {
-  id                     String                  @id @default(uuid())
-  name                   String
-  supplierPayments SupplierPayment[]
-  plan                   String                  @default("free")
-  seatLimit              Int                     @default(1)
-  createdAt              DateTime                @default(now())
-  fulfillmentMode        FulfillmentMode         @default(PICK_PACK_SHIP)
-  posPricingEnabled      Boolean                 @default(false)
-  documentSequences DocumentSequence[]
-  documentCounters DocumentCounter[]
-  employees            Employee[]
-  salaryComponentTypes SalaryComponentType[]
-  payrolls             Payroll[]
-  expenseCategories    ExpenseCategory[]
-  expenses             Expense[]
-  chartOfAccounts ChartOfAccount[]
-  fiscalPeriods   FiscalPeriod[]
-  journalEntries  JournalEntry[]
+  id                         String                @id @default(uuid())
+  name                       String
+  supplierPayments           SupplierPayment[]
+  plan                       String                @default("free")
+  seatLimit                  Int                   @default(1)
+  createdAt                  DateTime              @default(now())
+  fulfillmentMode            FulfillmentMode       @default(PICK_PACK_SHIP)
+  posPricingEnabled          Boolean               @default(false)
+  stockPolicy                StockPolicy           @default(BLOCK)
+  stockOverrideRequiresAdmin Boolean               @default(false)
+  settingsAuditLogs          SettingsAuditLog[]
+  documentSequences          DocumentSequence[]
+  documentCounters           DocumentCounter[]
+  employees                  Employee[]
+  salaryComponentTypes       SalaryComponentType[]
+  payrolls                   Payroll[]
+  expenseCategories          ExpenseCategory[]
+  expenses                   Expense[]
+  chartOfAccounts            ChartOfAccount[]
+  fiscalPeriods              FiscalPeriod[]
+  journalEntries             JournalEntry[]
 
-  legalName              String?
-  logoUrl                String?
-    purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
+  legalName                   String?
+  logoUrl                     String?
+  purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
-  npwp                   String?
-  taxEnabled              Boolean                 @default(false)
-  taxName                 String?
-  taxPercentage           Decimal?                @db.Decimal(5, 2)
-  address                String?
-  phone                  String?
+  npwp                         String?
+  taxEnabled                   Boolean                       @default(false)
+  taxName                      String?
+  taxPercentage                Decimal?                      @db.Decimal(5, 2)
+  address                      String?
+  phone                        String?
   // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
   // period a journal entry posts into (business-date.ts) — was a single
   // global ACCOUNTING_TIMEZONE env var before; now per-org.
-  timezone               String                  @default("Asia/Jakarta")
-  brands                 Brand[]
-  categories             Category[]
-  customers              Customer[]
-  events                 Event[]
-  externalOrders         ExternalOrder[]
-  integrationConnections IntegrationConnection[]
-  invoices               Invoice[]
-  locations              Location[]
-  modules                OrganizationModule[]
-  taxRates               OrganizationTaxRate[]
-  products               Product[]
-  sessions               Session[]
-  salesQuotations SalesQuotation[]
-  salesOrders     SalesOrder[]
-  deliveryOrders  DeliveryOrder[]
-  purchaseOrders  PurchaseOrder[]
+  timezone                     String                        @default("Asia/Jakarta")
+  brands                       Brand[]
+  categories                   Category[]
+  customers                    Customer[]
+  events                       Event[]
+  externalOrders               ExternalOrder[]
+  integrationConnections       IntegrationConnection[]
+  invoices                     Invoice[]
+  locations                    Location[]
+  modules                      OrganizationModule[]
+  taxRates                     OrganizationTaxRate[]
+  products                     Product[]
+  sessions                     Session[]
+  salesQuotations              SalesQuotation[]
+  salesOrders                  SalesOrder[]
+  deliveryOrders               DeliveryOrder[]
+  purchaseOrders               PurchaseOrder[]
   salesQuotationActivityEvents SalesQuotationActivityEvent[]
-  goodsReceipts GoodsReceipt[]
-suppliers Supplier[]
+  goodsReceipts                GoodsReceipt[]
+  suppliers                    Supplier[]
 
-  stocks                 Stock[]
-  users                  User[]
-  vehicles               Vehicle[]
-  vehicleReminders       VehicleReminder[]
-  bankAccounts           OrganizationBankAccount[]
-  fixedAssets            FixedAsset[]
-  mediaAssets            MediaAsset[]
+  stocks           Stock[]
+  users            User[]
+  vehicles         Vehicle[]
+  vehicleReminders VehicleReminder[]
+  bankAccounts     OrganizationBankAccount[]
+  fixedAssets      FixedAsset[]
+  mediaAssets      MediaAsset[]
 }
 
 model User {
-  id                String               @id @default(uuid())
-  email             String               @unique
+  id                String             @id @default(uuid())
+  email             String             @unique
   password          String
-  supplierPayments SupplierPayment[]
-    resetToken        String?   @unique
+  supplierPayments  SupplierPayment[]
+  settingsAuditLogs SettingsAuditLog[]
+  resetToken        String?            @unique
   resetTokenExpires DateTime?
 
-  role              Role                 @default(USER)
-  active            Boolean              @default(true)
-  organizationId    String
-  createdAt         DateTime             @default(now())
-  currentSessionId  String?
-  avatarUrl         String?
-  mediaAssets       MediaAsset[]
-  events            Event[]
-    payrolls Payroll[]
-  expenses Expense[]
-  journalEntries JournalEntry[]
+  role             Role           @default(USER)
+  active           Boolean        @default(true)
+  organizationId   String
+  createdAt        DateTime       @default(now())
+  currentSessionId String?
+  avatarUrl        String?
+  mediaAssets      MediaAsset[]
+  events           Event[]
+  payrolls         Payroll[]
+  expenses         Expense[]
+  journalEntries   JournalEntry[]
 
-  invoices          Invoice[]
-  activityEvents InvoiceActivityEvent[]
-    purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
+  invoices                    Invoice[]
+  activityEvents              InvoiceActivityEvent[]
+  purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
-  paymentsRecorded  Payment[]
-  expensePaymentsRecorded ExpensePayment[]
+  paymentsRecorded             Payment[]
+  expensePaymentsRecorded      ExpensePayment[]
   fixedAssets                  FixedAsset[]
   fixedAssetPaymentsRecorded   FixedAssetPayment[]
-  sessionNotes      SessionNote[]
-  reopenEvents      SessionReopenEvent[]
-  organization      Organization         @relation(fields: [organizationId], references: [id])
-  salesQuotations          SalesQuotation[]
-  salesOrders              SalesOrder[]
-  deliveryOrders           DeliveryOrder[]
-  salesOrderActivityEvents SalesOrderActivityEvent[]
+  sessionNotes                 SessionNote[]
+  reopenEvents                 SessionReopenEvent[]
+  organization                 Organization                  @relation(fields: [organizationId], references: [id])
+  salesQuotations              SalesQuotation[]
+  salesOrders                  SalesOrder[]
+  deliveryOrders               DeliveryOrder[]
+  salesOrderActivityEvents     SalesOrderActivityEvent[]
   salesQuotationActivityEvents SalesQuotationActivityEvent[]
-  goodsReceipts GoodsReceipt[]
+  goodsReceipts                GoodsReceipt[]
 
   @@index([organizationId])
 }
@@ -206,17 +211,17 @@ model MediaAsset {
   uploadedById   String?
   uploadedBy     User?        @relation(fields: [uploadedById], references: [id])
 
-  filename       String   // on-disk filename under uploads/media/
-  originalName   String?  // original upload filename — searched/displayed in the library UI
-  mimeType       String
-  sizeBytes      Int
-  width          Int?
-  height         Int?
-  url            String   // /uploads/media/<filename>
+  filename     String // on-disk filename under uploads/media/
+  originalName String? // original upload filename — searched/displayed in the library UI
+  mimeType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  url          String // /uploads/media/<filename>
 
-  compressedAt   DateTime? // set by the scheduled hard-recompression job; null = not yet run
+  compressedAt DateTime? // set by the scheduled hard-recompression job; null = not yet run
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([organizationId, createdAt])
   @@index([organizationId, originalName])
@@ -230,22 +235,22 @@ model Installation {
 }
 
 model Location {
-  id             String        @id @default(uuid())
-  name           String
-  createdAt      DateTime      @default(now())
-    expenses Expense[]
-   journalEntryLines JournalEntryLine[]
+  id                String             @id @default(uuid())
+  name              String
+  createdAt         DateTime           @default(now())
+  expenses          Expense[]
+  journalEntryLines JournalEntryLine[]
 
-  organizationId String
-  archivedAt     DateTime?
-  address        String?
-  phone          String?
-  fromEvents     Event[]       @relation("FromLocation")
-  toEvents       Event[]       @relation("ToLocation")
-  invoices       Invoice[]
-  invoiceItems   InvoiceItem[]
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  stocks         Stock[]
+  organizationId      String
+  archivedAt          DateTime?
+  address             String?
+  phone               String?
+  fromEvents          Event[]              @relation("FromLocation")
+  toEvents            Event[]              @relation("ToLocation")
+  invoices            Invoice[]
+  invoiceItems        InvoiceItem[]
+  organization        Organization         @relation(fields: [organizationId], references: [id])
+  stocks              Stock[]
   salesQuotations     SalesQuotation[]
   salesQuotationItems SalesQuotationItem[]
   salesOrders         SalesOrder[]
@@ -253,53 +258,56 @@ model Location {
   deliveryOrders      DeliveryOrder[]
   deliveryOrderItems  DeliveryOrderItem[]
   externalWarehouseId String? // Accurate ITEM.WAREHOUSEID, for stock-import mapping
-  goodsReceipts GoodsReceipt[]
-purchaseOrders PurchaseOrder[]
-  fixedAssets FixedAsset[]
+  goodsReceipts       GoodsReceipt[]
+  purchaseOrders      PurchaseOrder[]
+  fixedAssets         FixedAsset[]
+
   @@unique([id, organizationId])
   @@unique([organizationId, name, externalWarehouseId])
 }
+
 model Supplier {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
 
-  name           String
-  contactName    String?
-  phone          String?
-  email          String?
-  address        String?
-  npwp           String?
-  notes          String?
-  isActive       Boolean  @default(true)
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  npwp        String?
+  notes       String?
+  isActive    Boolean @default(true)
 
   purchaseOrders PurchaseOrder[]
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // NEW — Accurate GDB import support
-  externalId     String?  // Accurate PERSONDATA.ID (PO.VENDORID) — stable match key, avoids name-collision issues
+  externalId String? // Accurate PERSONDATA.ID (PO.VENDORID) — stable match key, avoids name-collision issues
 
-  @@index([organizationId, name])
   @@unique([organizationId, npwp])
   @@unique([organizationId, externalId]) // NEW
+  @@index([organizationId, name])
 }
+
 model SupplierPayment {
-  id              String   @id @default(uuid())
+  id              String                   @id @default(uuid())
   organizationId  String
   purchaseOrderId String
-  amount          Decimal  @db.Decimal(12, 2)
-  method          PaymentMethod @default(TRANSFER)
-  paidAt          DateTime @default(now())
+  amount          Decimal                  @db.Decimal(12, 2)
+  method          PaymentMethod            @default(TRANSFER)
+  paidAt          DateTime                 @default(now())
   note            String?
   recordedById    String?
-  createdAt       DateTime @default(now())
-  bankAccountId String?
-  bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
-  organization  Organization  @relation(fields: [organizationId], references: [id])
-  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  recordedBy    User?         @relation(fields: [recordedById], references: [id])
+  createdAt       DateTime                 @default(now())
+  bankAccountId   String?
+  bankAccount     OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  organization    Organization             @relation(fields: [organizationId], references: [id])
+  purchaseOrder   PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
+  recordedBy      User?                    @relation(fields: [recordedById], references: [id])
 
   @@index([purchaseOrderId])
 }
@@ -320,7 +328,7 @@ model DocumentSequence {
   lastNumber     Int
   updatedAt      DateTime     @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 
   @@unique([organizationId, documentType])
 }
@@ -333,14 +341,14 @@ model DocumentSequence {
 // "INVOICE", "GOODS_RECEIPT") rather than the DocumentType enum above, since
 // not every numbered document (GoodsReceipt) has an enum member there.
 model DocumentCounter {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   documentType   String
   year           Int
-  lastNumber     Int          @default(0)
-  updatedAt      DateTime     @updatedAt
+  lastNumber     Int      @default(0)
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 
   @@unique([organizationId, documentType, year])
 }
@@ -366,22 +374,22 @@ model Brand {
 }
 
 model Product {
-  id                 String                   @id @default(uuid())
-  name               String
-  createdAt          DateTime                 @default(now())
-  categoryId         String
-  active             Boolean                  @default(true)
-  brandId            String?
-  sku                String?
-  oem                String?
-  organizationId     String
-  unit               String?                  // NEW — default unit of measure (pcs, box, ltr, kg, etc.); line items may override via their own `unit`
-  image              String?                  // URL of a MediaAsset chosen via the media library; denormalized like Organization.logoUrl, not a FK
+  id                  String               @id @default(uuid())
+  name                String
+  createdAt           DateTime             @default(now())
+  categoryId          String
+  active              Boolean              @default(true)
+  brandId             String?
+  sku                 String?
+  oem                 String?
+  organizationId      String
+  unit                String? // NEW — default unit of measure (pcs, box, ltr, kg, etc.); line items may override via their own `unit`
+  image               String? // URL of a MediaAsset chosen via the media library; denormalized like Organization.logoUrl, not a FK
   salesQuotationItems SalesQuotationItem[]
   salesOrderItems     SalesOrderItem[]
   deliveryOrderItems  DeliveryOrderItem[]
   purchaseOrderItems  PurchaseOrderItem[]
-  goodsReceiptItems GoodsReceiptItem[]
+  goodsReceiptItems   GoodsReceiptItem[]
 
   barcode            String?
   costPrice          Decimal?                 @db.Decimal(12, 2)
@@ -424,10 +432,10 @@ model Session {
   events         Event[]
   externalOrder  ExternalOrder?
   invoiceId      String?              @unique // unchanged — still exactly one session per invoice
-  salesOrderId   String?              // NOT unique — an SO can have many sessions over time
+  salesOrderId   String? // NOT unique — an SO can have many sessions over time
   invoice        Invoice?             @relation(fields: [invoiceId], references: [id])
   salesOrder     SalesOrder?          @relation(fields: [salesOrderId], references: [id])
-  deliveryOrders DeliveryOrder[]      // reverse of DeliveryOrder.sessionId
+  deliveryOrders DeliveryOrder[] // reverse of DeliveryOrder.sessionId
   organization   Organization         @relation(fields: [organizationId], references: [id])
   items          SessionItem[]
   notes          SessionNote[]
@@ -458,9 +466,11 @@ model Event {
   organizationId String
   userId         String?
   invoiceId      String?
-  salesOrderId String? 
-                               // queried/joined the same way invoice-driven ones already are,
-                               // instead of being buried inside `metadata`.
+  salesOrderId   String?
+  // queried/joined the same way invoice-driven ones already are,
+  // instead of being buried inside `metadata`.
+  balanceAfter   Decimal?     @db.Decimal(12, 2) // resulting Stock.quantity after this movement; null on rows written before this field existed
+  oversold       Boolean      @default(false) // true when this movement (a SALE under WARN/ALLOW policy) pushed balanceAfter below zero
   fromLocation   Location?    @relation("FromLocation", fields: [fromLocationId], references: [id])
   invoice        Invoice?     @relation(fields: [invoiceId], references: [id])
   salesOrder     SalesOrder?  @relation(fields: [salesOrderId], references: [id])
@@ -473,6 +483,7 @@ model Event {
 
   @@index([invoiceId])
   @@index([salesOrderId])
+  @@index([organizationId, oversold])
 }
 
 model License {
@@ -576,6 +587,7 @@ enum InvoiceActivityEventType {
   PAYMENT_RECORDED
   MARKED_PAID
   VOIDED
+  COST_CORRECTED
 }
 
 enum SalesQuotationStatus {
@@ -597,13 +609,12 @@ enum SalesOrderStatus {
 }
 
 enum DeliveryOrderStatus {
-  PACKED              // created from a completed pack session, not yet shipped
+  PACKED // created from a completed pack session, not yet shipped
   SHIPPED
   CANCELLED
-  PARTIALLY_RETURNED  // some but not all shipped items have come back
-  RETURNED            // every shipped item has come back
+  PARTIALLY_RETURNED // some but not all shipped items have come back
+  RETURNED // every shipped item has come back
 }
-
 
 // ---- Sales Quotation ---------------------------------------------------
 // No stock or financial commitment. Pure priced-lines-with-an-expiry.
@@ -612,18 +623,18 @@ enum DeliveryOrderStatus {
 // re-sent/re-priced without ever becoming CONVERTED.
 
 model SalesQuotation {
-  id              String               @id @default(uuid())
-  quotationNumber String?
-  organizationId  String
-  locationId      String?
-  status          SalesQuotationStatus @default(DRAFT)
-  invoices Invoice[]
-  sentAt DateTime?
-  activityEvents SalesQuotationActivityEvent[]
-  format QuotationFormat @default(A4)
-  quotationDate DateTime? @db.Date
-  customerId   String?
-  customerName String?
+  id               String                        @id @default(uuid())
+  quotationNumber  String?
+  organizationId   String
+  locationId       String?
+  status           SalesQuotationStatus          @default(DRAFT)
+  invoices         Invoice[]
+  sentAt           DateTime?
+  activityEvents   SalesQuotationActivityEvent[]
+  format           QuotationFormat               @default(A4)
+  quotationDate    DateTime?                     @db.Date
+  customerId       String?
+  customerName     String?
   customerPoNumber String?
 
   subtotal  Decimal @default(0) @db.Decimal(12, 2)
@@ -634,7 +645,7 @@ model SalesQuotation {
   validUntil         DateTime? @db.Date
   createdAt          DateTime  @default(now())
   userId             String?
-termsAndConditions String?
+  termsAndConditions String?
   notes              String?
 
   // NEW — same bank-account snapshot as Invoice, above.
@@ -681,6 +692,7 @@ model SalesQuotationItem {
   location       Location?               @relation(fields: [locationId], references: [id])
   taxes          SalesQuotationItemTax[]
 }
+
 model SalesQuotationTax {
   id               String               @id @default(uuid())
   salesQuotationId String
@@ -721,22 +733,22 @@ model SalesOrder {
   confirmedAt    DateTime?
   format         SalesOrderFormat @default(A4)
 
-  quotationId  String? // nullable — SO can be created without a prior quotation
-  customerId   String?
-  customerName String?
+  quotationId      String? // nullable — SO can be created without a prior quotation
+  customerId       String?
+  customerName     String?
   customerPoNumber String? // NEW — customer's own reference/PO number
-  vehicleId    String?
+  vehicleId        String?
 
-  subtotal  Decimal   @default(0) @db.Decimal(12, 2)
-  discount  Decimal   @default(0) @db.Decimal(12, 2)
-  taxAmount Decimal   @default(0) @db.Decimal(12, 2)
-  total     Decimal   @default(0) @db.Decimal(12, 2)
-  orderDate DateTime? @db.Date
-  dueDate   DateTime?
-  createdAt DateTime  @default(now())
-  userId    String?
-  approvedBy String?  // NEW — name/role of internal approver (free text, not a User FK, since approval may be by someone outside the system)
-  notes      String?  // NEW
+  subtotal   Decimal   @default(0) @db.Decimal(12, 2)
+  discount   Decimal   @default(0) @db.Decimal(12, 2)
+  taxAmount  Decimal   @default(0) @db.Decimal(12, 2)
+  total      Decimal   @default(0) @db.Decimal(12, 2)
+  orderDate  DateTime? @db.Date
+  dueDate    DateTime?
+  createdAt  DateTime  @default(now())
+  userId     String?
+  approvedBy String? // NEW — name/role of internal approver (free text, not a User FK, since approval may be by someone outside the system)
+  notes      String? // NEW
 
   organization   Organization              @relation(fields: [organizationId], references: [id])
   quotation      SalesQuotation?           @relation(fields: [quotationId], references: [id])
@@ -750,7 +762,7 @@ model SalesOrder {
   deliveryOrders DeliveryOrder[] // header-level convenience FK, line linkage is the source of truth
   sessions       Session[] // an SO can have MULTIPLE sessions over its life — one per pack/ship batch
   activityEvents SalesOrderActivityEvent[]
-  events         Event[]                   // inverse of Event.salesOrderId, enables salesOrder.events
+  events         Event[] // inverse of Event.salesOrderId, enables salesOrder.events
 
   @@unique([organizationId, orderNumber])
 }
@@ -780,11 +792,11 @@ model SalesOrderItem {
   deliveredQuantity Decimal @default(0) @db.Decimal(12, 2)
 
   salesOrder         SalesOrder          @relation(fields: [salesOrderId], references: [id])
-  product             Product?             @relation(fields: [productId], references: [id])
-  location            Location?            @relation(fields: [locationId], references: [id])
-  taxes               SalesOrderItemTax[]
-  deliveryOrderItems  DeliveryOrderItem[]
-  invoiceItems        InvoiceItem[]
+  product            Product?            @relation(fields: [productId], references: [id])
+  location           Location?           @relation(fields: [locationId], references: [id])
+  taxes              SalesOrderItemTax[]
+  deliveryOrderItems DeliveryOrderItem[]
+  invoiceItems       InvoiceItem[]
 }
 
 model SalesOrderTax {
@@ -817,16 +829,16 @@ model SalesOrderItemTax {
 // If you'd rather have one polymorphic feed across all document types,
 // that's a bigger schema change than this rebuild needs right now.
 model SalesOrderActivityEvent {
-  id             String   @id @default(uuid())
+  id             String     @id @default(uuid())
   salesOrderId   String
   organizationId String
   userId         String
   eventType      String
   reason         String?
-  createdAt      DateTime @default(now())
-metadata       Json?    
-  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id])
-  user       User       @relation(fields: [userId], references: [id])
+  createdAt      DateTime   @default(now())
+  metadata       Json?
+  salesOrder     SalesOrder @relation(fields: [salesOrderId], references: [id])
+  user           User       @relation(fields: [userId], references: [id])
 }
 
 // ---- Delivery Order --------------------------------------------------
@@ -843,45 +855,46 @@ metadata       Json?
 // DeliveryOrder-creation time rather than joining through at print time.
 
 model DeliveryOrder {
-  id              String              @id @default(uuid())
-  doNumber        String?
-  organizationId  String
-  sessionId       String? // the pack session this was generated from
-  locationId      String?
-  status          DeliveryOrderStatus @default(PACKED)
-  createdAt       DateTime            @default(now())
-  userId          String?
-  shippedAt       DateTime?           // NEW — set when ship() transitions PACKED -> SHIPPED; this is the real "Delivery Date"
-  customerPhone    String?             // NEW — same snapshot rationale as customerAddress; captured at creation so a later edit to the customer record can't rewrite a signed DO
+  id             String              @id @default(uuid())
+  doNumber       String?
+  organizationId String
+  sessionId      String? // the pack session this was generated from
+  locationId     String?
+  status         DeliveryOrderStatus @default(PACKED)
+  createdAt      DateTime            @default(now())
+  userId         String?
+  shippedAt      DateTime? // NEW — set when ship() transitions PACKED -> SHIPPED; this is the real "Delivery Date"
+  customerPhone  String? // NEW — same snapshot rationale as customerAddress; captured at creation so a later edit to the customer record can't rewrite a signed DO
 
-  customerId       String?             // denormalized from SalesOrder.customerId at creation time
-  customerName     String?             // denormalized snapshot, same convention as Invoice.customerName
-  customerAddress  String?             // NEW — customer's address of record, snapshotted (distinct from deliveryAddress below)
-  customerPoNumber String?             // NEW — customer's own reference/PO number
-  deliveryAddress  String?             // where THIS shipment was actually sent — may differ from customerAddress (job site, branch, third party)
-  deliveredBy      String?             // name of the driver/staff who handed off the shipment (free text, not a User FK — may be a third-party courier)
-  receivedBy       String?             // name of the person who signed for/received the shipment at the customer's end
-  signedAt         DateTime?           // NEW — timestamp of receipt confirmation; pair with receivedBy as the minimal proof-of-delivery record
+  customerId       String? // denormalized from SalesOrder.customerId at creation time
+  customerName     String? // denormalized snapshot, same convention as Invoice.customerName
+  customerAddress  String? // NEW — customer's address of record, snapshotted (distinct from deliveryAddress below)
+  customerPoNumber String? // NEW — customer's own reference/PO number
+  deliveryAddress  String? // where THIS shipment was actually sent — may differ from customerAddress (job site, branch, third party)
+  deliveredBy      String? // name of the driver/staff who handed off the shipment (free text, not a User FK — may be a third-party courier)
+  receivedBy       String? // name of the person who signed for/received the shipment at the customer's end
+  signedAt         DateTime? // NEW — timestamp of receipt confirmation; pair with receivedBy as the minimal proof-of-delivery record
   notes            String?
 
   organization Organization        @relation(fields: [organizationId], references: [id])
-  salesOrderId String?       // CHANGED: was required — now optional
-  salesOrder   SalesOrder?   @relation(fields: [salesOrderId], references: [id])
+  salesOrderId String? // CHANGED: was required — now optional
+  salesOrder   SalesOrder?         @relation(fields: [salesOrderId], references: [id])
   session      Session?            @relation(fields: [sessionId], references: [id])
   location     Location?           @relation(fields: [locationId], references: [id])
   user         User?               @relation(fields: [userId], references: [id])
   customer     Customer?           @relation(fields: [customerId, organizationId], references: [id, organizationId])
   items        DeliveryOrderItem[]
-  invoiceId    String?          // NEW
-  invoice      Invoice?      @relation(fields: [invoiceId], references: [id])
-  @@index([invoiceId])
+  invoiceId    String? // NEW
+  invoice      Invoice?            @relation(fields: [invoiceId], references: [id])
 
   @@unique([organizationId, doNumber])
+  @@index([invoiceId])
 }
+
 model DeliveryOrderItem {
-  id               String  @id @default(uuid())
+  id               String   @id @default(uuid())
   deliveryOrderId  String
-  returnedQuantity Decimal @default(0)
+  returnedQuantity Decimal  @default(0)
   unitCost         Decimal? @db.Decimal(12, 2)
 
   // Denormalized snapshot for print stability (matches how InvoiceItem
@@ -893,14 +906,14 @@ model DeliveryOrderItem {
   unit        String? // NEW — pcs, box, ltr, etc.; falls back to Product.unit when null
   locationId  String?
 
-  deliveryOrder     DeliveryOrder   @relation(fields: [deliveryOrderId], references: [id])
-  salesOrderItemId  String?         // CHANGED: was required — now optional
-  salesOrderItem    SalesOrderItem? @relation(fields: [salesOrderItemId], references: [id])
-  product           Product?        @relation(fields: [productId], references: [id])
-  location          Location?       @relation(fields: [locationId], references: [id])
+  deliveryOrder    DeliveryOrder   @relation(fields: [deliveryOrderId], references: [id])
+  salesOrderItemId String? // CHANGED: was required — now optional
+  salesOrderItem   SalesOrderItem? @relation(fields: [salesOrderItemId], references: [id])
+  product          Product?        @relation(fields: [productId], references: [id])
+  location         Location?       @relation(fields: [locationId], references: [id])
 
-  invoiceItemId     Int?         @unique
-  invoiceItem       InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
+  invoiceItemId Int?         @unique
+  invoiceItem   InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
 }
 
 enum DiscountType {
@@ -909,29 +922,30 @@ enum DiscountType {
 }
 
 model OrganizationBankAccount {
-  id             String       @id @default(uuid())
-  organizationId String
-  bankName       String
-  accountNumber  String
-  accountName    String
-   chartAccount ChartOfAccount?   // inverse of the relation above
-   payments         Payment[]          // NEW
-   expenses         Expense[]          // NEW
-   expensePayments  ExpensePayment[]
-   supplierPayments SupplierPayment[]  // NEW (in addition to the relation already declared on SupplierPayment below)
-   fixedAssetPayments FixedAssetPayment[]
-   payrolls         Payroll[]          // NEW
+  id                 String              @id @default(uuid())
+  organizationId     String
+  bankName           String
+  accountNumber      String
+  accountName        String
+  chartAccount       ChartOfAccount? // inverse of the relation above
+  payments           Payment[] // NEW
+  expenses           Expense[] // NEW
+  expensePayments    ExpensePayment[]
+  supplierPayments   SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
+  fixedAssetPayments FixedAssetPayment[]
+  payrolls           Payroll[] // NEW
 
-  isDefault      Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  archivedAt     DateTime?
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  isDefault       Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  archivedAt      DateTime?
+  organization    Organization     @relation(fields: [organizationId], references: [id])
   invoices        Invoice[]
   salesQuotations SalesQuotation[]
 
-  @@index([organizationId])
   @@unique([organizationId, bankName, accountNumber])
+  @@index([organizationId])
 }
+
 enum FulfillmentStatus {
   UNFULFILLED
   PARTIALLY_FULFILLED
@@ -939,40 +953,40 @@ enum FulfillmentStatus {
 }
 
 model Invoice {
-  id             String                 @id @default(uuid())
-  invoiceNumber  String?
-  organizationId String
-    deliveryOrders DeliveryOrder[]
+  id                String            @id @default(uuid())
+  invoiceNumber     String?
+  organizationId    String
+  deliveryOrders    DeliveryOrder[]
   fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
-  replacesInvoiceId  String?  @unique
-  replaces           Invoice? @relation("InvoiceReplacement", fields: [replacesInvoiceId], references: [id])
-  replacedBy         Invoice? @relation("InvoiceReplacement")
-  employeeId     String?
-  employee       Employee?              @relation(fields: [employeeId], references: [id])
-  fulfillmentPath FulfillmentPath?
+  replacesInvoiceId String?           @unique
+  replaces          Invoice?          @relation("InvoiceReplacement", fields: [replacesInvoiceId], references: [id])
+  replacedBy        Invoice?          @relation("InvoiceReplacement")
+  employeeId        String?
+  employee          Employee?         @relation(fields: [employeeId], references: [id])
+  fulfillmentPath   FulfillmentPath?
 
-  locationId     String?
-  format         InvoiceFormat
-  status         InvoiceStatus          @default(DRAFT)
-  customerName   String?
+  locationId       String?
+  format           InvoiceFormat
+  status           InvoiceStatus @default(DRAFT)
+  customerName     String?
   customerPoNumber String?
-  subtotal       Decimal                @default(0) @db.Decimal(12, 2)
-  discount       Decimal                @default(0) @db.Decimal(12, 2)
-  total          Decimal                @default(0) @db.Decimal(12, 2)
-  userId         String?
-  createdAt      DateTime               @default(now())
-  invoiceDate    DateTime?              @db.Date
-  issuedAt       DateTime?
-  customerId     String?
-    amountPaid     Decimal                @default(0) @db.Decimal(12, 2)   // was Int
-    creditedAmount Decimal                @default(0) @db.Decimal(12, 2)   // FIX — sum of postSalesReturn's AR reversal; AR Aging subtracts this so a return doesn't leave the invoice looking overdue for units the customer no longer owes for
+  subtotal         Decimal       @default(0) @db.Decimal(12, 2)
+  discount         Decimal       @default(0) @db.Decimal(12, 2)
+  total            Decimal       @default(0) @db.Decimal(12, 2)
+  userId           String?
+  createdAt        DateTime      @default(now())
+  invoiceDate      DateTime?     @db.Date
+  issuedAt         DateTime?
+  customerId       String?
+  amountPaid       Decimal       @default(0) @db.Decimal(12, 2) // was Int
+  creditedAmount   Decimal       @default(0) @db.Decimal(12, 2) // FIX — sum of postSalesReturn's AR reversal; AR Aging subtracts this so a return doesn't leave the invoice looking overdue for units the customer no longer owes for
 
-  paymentStatus  PaymentStatus          @default(UNPAID)
-  paymentTerms   String?
-  dueDate        DateTime?
-  taxAmount      Decimal                @default(0) @db.Decimal(12, 2)
-  vehicleId      String?
-  salesOrderId   String?  
+  paymentStatus PaymentStatus @default(UNPAID)
+  paymentTerms  String?
+  dueDate       DateTime?
+  taxAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  vehicleId     String?
+  salesOrderId  String?
 
   // NEW — bank account snapshot, same rationale as customerName /
   // DeliveryOrderItem.productName: a printed document shouldn't
@@ -996,16 +1010,31 @@ model Invoice {
   taxes          InvoiceTax[]
   payments       Payment[]
   session        Session?
-  quotationId String?
-  quotation   SalesQuotation? @relation(fields: [quotationId], references: [id])
-  odometer      Int?
-  nextServiceKm Int?
+  quotationId    String?
+  quotation      SalesQuotation?        @relation(fields: [quotationId], references: [id])
+  odometer       Int?
+  nextServiceKm  Int?
+
+  // FIX — vehicle/customer identity snapshot, same rationale as
+  // bankAccountName above: a printed invoice shouldn't silently change
+  // its plate/VIN/customer details because the Vehicle/Customer record
+  // was edited or corrected later. Populated once, at issue() time, and
+  // preferred over the live vehicle/customer relation when present; a
+  // null here (drafts, and invoices issued before this column existed)
+  // still falls back to the live join.
+  vehiclePlateNumber     String?
+  vehicleModel           String?
+  vehicleVin             String?
+  customerAddress        String?
+  customerBillingAddress String?
+  customerPhone          String?
+  customerNpwp           String?
 
   discountType  DiscountType?
   discountValue Decimal?
-  @@index([organizationId, employeeId])   // NEW
 
   @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, employeeId]) // NEW
 }
 
 enum PurchaseOrderStatus {
@@ -1024,47 +1053,47 @@ enum PurchaseOrderActivityEventType {
 }
 
 model PurchaseOrder {
-  id              String              @id @default(uuid())
-  poNumber        String?
+  id               String                       @id @default(uuid())
+  poNumber         String?
   supplierPayments SupplierPayment[]
-  organizationId  String
-  locationId      String?
-  status          PurchaseOrderStatus @default(DRAFT)
-  supplierId      String?
-  subtotal        Decimal             @default(0) @db.Decimal(12, 2)
-  taxAmount       Decimal             @default(0) @db.Decimal(12, 2)
-  total           Decimal             @default(0) @db.Decimal(12, 2)
-  createdAt       DateTime            @default(now())
-  userId          String?
-  goodsReceipts   GoodsReceipt[]
-  organization    Organization        @relation(fields: [organizationId], references: [id])
-  items           PurchaseOrderItem[]
-  discountAmount  Decimal             @default(0) @db.Decimal(12, 2)
-  taxRateId       String?
-  notes           String?
-  expectedDate    DateTime?           @db.Date
-  supplier        Supplier?            @relation(fields: [supplierId], references: [id])
-  taxRate         OrganizationTaxRate? @relation(fields: [taxRateId], references: [id])
-  location        Location?            @relation(fields: [locationId], references: [id])
-  activityEvents  PurchaseOrderActivityEvent[]
-   dueDate      DateTime?
-   paymentTerms String?
+  organizationId   String
+  locationId       String?
+  status           PurchaseOrderStatus          @default(DRAFT)
+  supplierId       String?
+  subtotal         Decimal                      @default(0) @db.Decimal(12, 2)
+  taxAmount        Decimal                      @default(0) @db.Decimal(12, 2)
+  total            Decimal                      @default(0) @db.Decimal(12, 2)
+  createdAt        DateTime                     @default(now())
+  userId           String?
+  goodsReceipts    GoodsReceipt[]
+  organization     Organization                 @relation(fields: [organizationId], references: [id])
+  items            PurchaseOrderItem[]
+  discountAmount   Decimal                      @default(0) @db.Decimal(12, 2)
+  taxRateId        String?
+  notes            String?
+  expectedDate     DateTime?                    @db.Date
+  supplier         Supplier?                    @relation(fields: [supplierId], references: [id])
+  taxRate          OrganizationTaxRate?         @relation(fields: [taxRateId], references: [id])
+  location         Location?                    @relation(fields: [locationId], references: [id])
+  activityEvents   PurchaseOrderActivityEvent[]
+  dueDate          DateTime?
+  paymentTerms     String?
   // NEW — Accurate GDB import support
-  externalId      String?             // Accurate PO.POID — stable idempotency key, independent of poNumber
-  orderDate       DateTime?           @db.Date // Accurate PODATE
+  externalId       String? // Accurate PO.POID — stable idempotency key, independent of poNumber
+  orderDate        DateTime?                    @db.Date // Accurate PODATE
 
   @@unique([organizationId, poNumber])
   @@unique([organizationId, externalId]) // NEW
 }
 
 model PurchaseOrderItem {
-  id              String  @id @default(uuid())
-  purchaseOrderId String
-  productId       String?
-  quantity        Decimal @db.Decimal(12, 2)
-  unitCost        Decimal @db.Decimal(12, 2)
-  lineTotal       Decimal @db.Decimal(12, 2)
-  description     String?
+  id                String             @id @default(uuid())
+  purchaseOrderId   String
+  productId         String?
+  quantity          Decimal            @db.Decimal(12, 2)
+  unitCost          Decimal            @db.Decimal(12, 2)
+  lineTotal         Decimal            @db.Decimal(12, 2)
+  description       String?
   goodsReceiptItems GoodsReceiptItem[]
 
   // REMOVED — dead field, never read by GoodsReceiptService. Superseded by
@@ -1072,11 +1101,11 @@ model PurchaseOrderItem {
   // receivedQuantity Decimal @default(0) @db.Decimal(12, 2)
 
   // NEW — Accurate GDB import support
-  unit                      String?              // Accurate PODET.ITEMUNIT
-  unitRatio                 Decimal?  @db.Decimal(12, 4) // Accurate PODET.UNITRATIO
-  discountPercentage        Decimal?  @db.Decimal(5, 2)  // Accurate PODET.ITEMDISCPC (also applied into lineTotal at import time)
-  importedReceivedQuantity  Decimal   @default(0) @db.Decimal(12, 2) // Accurate PODET.QTYRECV — historical only, no real GoodsReceipt behind it; folded into GoodsReceiptService.receivedQuantitiesByPoItem
-  externalSeq               Int?      // Accurate PODET.SEQ — stable per-line key within one PO, for idempotent re-import
+  unit                     String? // Accurate PODET.ITEMUNIT
+  unitRatio                Decimal? @db.Decimal(12, 4) // Accurate PODET.UNITRATIO
+  discountPercentage       Decimal? @db.Decimal(5, 2) // Accurate PODET.ITEMDISCPC (also applied into lineTotal at import time)
+  importedReceivedQuantity Decimal  @default(0) @db.Decimal(12, 2) // Accurate PODET.QTYRECV — historical only, no real GoodsReceipt behind it; folded into GoodsReceiptService.receivedQuantitiesByPoItem
+  externalSeq              Int? // Accurate PODET.SEQ — stable per-line key within one PO, for idempotent re-import
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product       Product?      @relation(fields: [productId], references: [id])
@@ -1085,93 +1114,95 @@ model PurchaseOrderItem {
 }
 
 model PurchaseOrderActivityEvent {
-  id               String   @id @default(cuid())
-  purchaseOrderId  String?
-  poNumber         String?
-  organizationId   String
-  userId           String
-  eventType        PurchaseOrderActivityEventType
-  reason           String?
-  metadata         Json?
-  createdAt        DateTime @default(now())
+  id              String                         @id @default(cuid())
+  purchaseOrderId String?
+  poNumber        String?
+  organizationId  String
+  userId          String
+  eventType       PurchaseOrderActivityEventType
+  reason          String?
+  metadata        Json?
+  createdAt       DateTime                       @default(now())
 
-  purchaseOrder    PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
-  organization     Organization   @relation(fields: [organizationId], references: [id])
-  user             User           @relation(fields: [userId], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  user          User           @relation(fields: [userId], references: [id])
 
   @@index([organizationId, purchaseOrderId])
 }
 
 model GoodsReceipt {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization  @relation(fields: [organizationId], references: [id])
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
 
   purchaseOrderId String
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
 
-  locationId      String
-  location        Location @relation(fields: [locationId], references: [id])
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
 
-  userId          String
-  user            User     @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  receiptNumber   String?  // e.g. GR-000045, assigned via DocumentNumberingService
-  notes           String?
+  receiptNumber String? // e.g. GR-000045, assigned via DocumentNumberingService
+  notes         String?
 
-  items           GoodsReceiptItem[]
+  items GoodsReceiptItem[]
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  @@index([organizationId, purchaseOrderId])
   @@unique([organizationId, receiptNumber]) // FIX — matches the @@unique([organizationId, xNumber]) pattern every other document number follows; comment already claimed DocumentNumberingService assigns these, so they should never collide
+  @@index([organizationId, purchaseOrderId])
 }
 
 model GoodsReceiptItem {
-  id                  String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  goodsReceiptId      String
-  goodsReceipt        GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
 
   purchaseOrderItemId String
   purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
 
-  productId           String?
-  product             Product? @relation(fields: [productId], references: [id])
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
 
-  quantity            Int
+  quantity Int
 
   @@index([purchaseOrderItemId])
 }
+
 model InvoiceActivityEvent {
-  id             String                     @id @default(cuid())
+  id             String                   @id @default(cuid())
   invoiceId      String
   organizationId String
   userId         String?
-  eventType      InvoiceActivityEventType   @default(EDITED)  // default keeps every EXISTING row correctly classified as EDITED, since that's all this table ever recorded until now
-  reason         String?                    // was required — now optional since PAYMENT_RECORDED/MARKED_PAID/CREATED/ISSUED don't have a user-typed reason
+  eventType      InvoiceActivityEventType @default(EDITED) // default keeps every EXISTING row correctly classified as EDITED, since that's all this table ever recorded until now
+  reason         String? // was required — now optional since PAYMENT_RECORDED/MARKED_PAID/CREATED/ISSUED don't have a user-typed reason
   oldTotal       Decimal?
   newTotal       Decimal?
-  changes        Json?                      // was required — now optional; only EDITED populates this
-  createdAt      DateTime                   @default(now())
-  invoice        Invoice                    @relation(fields: [invoiceId], references: [id])
-  user           User?                      @relation(fields: [userId], references: [id])
+  changes        Json? // was required — now optional; only EDITED populates this
+  createdAt      DateTime                 @default(now())
+  invoice        Invoice                  @relation(fields: [invoiceId], references: [id])
+  user           User?                    @relation(fields: [userId], references: [id])
 
   @@index([invoiceId])
-  @@map("InvoiceEditEvent")  // keeps the physical table name — this is a rename+extend, not a new table, so existing history rows survive untouched
+  @@map("InvoiceEditEvent") // keeps the physical table name — this is a rename+extend, not a new table, so existing history rows survive untouched
 }
 
 model InvoiceItem {
-  id                  Int                @id @default(autoincrement())
-  invoiceId           String
-  productId           String?
-  quantity            Int
-  unit                String?
-  unitPrice           Decimal            @db.Decimal(12, 2)
-  unitCost            Decimal?           @db.Decimal(12, 2)
-  lineTotal           Decimal            @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
-  fulfilledQuantity Int @default(0)
-  reservedQuantity  Int @default(0)
+  id                Int      @id @default(autoincrement())
+  invoiceId         String
+  productId         String?
+  quantity          Int
+  unit              String?
+  unitPrice         Decimal  @db.Decimal(12, 2)
+  unitCost          Decimal? @db.Decimal(12, 2)
+  lineTotal         Decimal  @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
+  fulfilledQuantity Int      @default(0)
+  reservedQuantity  Int      @default(0)
+  costProvisional   Boolean  @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
 
   // NEW — per-item discount. Mirrors Invoice.discountType/discountValue
   // (now deprecated at the document level, see below) but scoped per line.
@@ -1184,18 +1215,26 @@ model InvoiceItem {
   // post-discount — tax stays document-level in the printed table).
   netAmount      Decimal       @default(0) @db.Decimal(12, 2)
 
-  taxAmount           Decimal            @default(0) @db.Decimal(12, 2) // now computed on netAmount, not lineTotal
-  total               Decimal            @default(0) @db.Decimal(12, 2) // netAmount + taxAmount — internal/back-compat field, not the printed "Total"
-  locationId          String?
-  description         String?
-  salesOrderItemId    String?
-  invoice             Invoice            @relation(fields: [invoiceId], references: [id])
-  location            Location?          @relation(fields: [locationId], references: [id])
-  product             Product?           @relation(fields: [productId], references: [id])
-  salesOrderItem      SalesOrderItem?    @relation(fields: [salesOrderItemId], references: [id])
-  deliveryOrderItem   DeliveryOrderItem? // back-relation only — FK lives on DeliveryOrderItem.invoiceItemId
-  taxes               InvoiceItemTax[]
+  taxAmount   Decimal @default(0) @db.Decimal(12, 2) // now computed on netAmount, not lineTotal
+  total       Decimal @default(0) @db.Decimal(12, 2) // netAmount + taxAmount — internal/back-compat field, not the printed "Total"
+  locationId  String?
+  description String?
+
+  // FIX — product identity snapshot, same rationale as
+  // Invoice.vehiclePlateNumber: a printed invoice line shouldn't change
+  // its product name/SKU because the product was renamed or deleted
+  // later. Populated once, at issue() time.
+  productName       String?
+  sku               String?
+  salesOrderItemId  String?
+  invoice           Invoice            @relation(fields: [invoiceId], references: [id])
+  location          Location?          @relation(fields: [locationId], references: [id])
+  product           Product?           @relation(fields: [productId], references: [id])
+  salesOrderItem    SalesOrderItem?    @relation(fields: [salesOrderItemId], references: [id])
+  deliveryOrderItem DeliveryOrderItem? // back-relation only — FK lives on DeliveryOrderItem.invoiceItemId
+  taxes             InvoiceItemTax[]
 }
+
 enum SalesQuotationActivityEventType {
   CREATED
   EDITED
@@ -1208,7 +1247,7 @@ enum SalesQuotationActivityEventType {
 }
 
 model SalesQuotationActivityEvent {
-  id              String                           @id @default(cuid())
+  id              String                          @id @default(cuid())
   quotationId     String?
   quotationNumber String?
   organizationId  String
@@ -1216,15 +1255,16 @@ model SalesQuotationActivityEvent {
   eventType       SalesQuotationActivityEventType
   reason          String?
   metadata        Json?
-  createdAt       DateTime                         @default(now())
+  createdAt       DateTime                        @default(now())
 
-  quotation       SalesQuotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  user            User            @relation(fields: [userId], references: [id])
-  organization    Organization    @relation(fields: [organizationId], references: [id])
+  quotation    SalesQuotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  user         User            @relation(fields: [userId], references: [id])
+  organization Organization    @relation(fields: [organizationId], references: [id])
 
   @@index([quotationId])
   @@index([organizationId, createdAt])
 }
+
 model VehicleReminder {
   id             String         @id @default(cuid())
   organizationId String
@@ -1256,18 +1296,18 @@ model InvoiceItemTax {
 }
 
 model Payment {
-  id           String        @id @default(cuid())
-  invoiceId    String
-    amount       Decimal       @db.Decimal(12, 2)   // was Int
+  id        String  @id @default(cuid())
+  invoiceId String
+  amount    Decimal @db.Decimal(12, 2) // was Int
 
-  method       PaymentMethod @default(CASH)
-  note         String?
-  recordedById String?
-  createdAt    DateTime      @default(now())
-  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
-  recordedBy   User?         @relation(fields: [recordedById], references: [id])
-   bankAccountId String?
-   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  method        PaymentMethod            @default(CASH)
+  note          String?
+  recordedById  String?
+  createdAt     DateTime                 @default(now())
+  invoice       Invoice                  @relation(fields: [invoiceId], references: [id])
+  recordedBy    User?                    @relation(fields: [recordedById], references: [id])
+  bankAccountId String?
+  bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
   @@index([invoiceId])
 }
@@ -1275,6 +1315,34 @@ model Payment {
 enum FulfillmentMode {
   PICK_PACK_SHIP
   PICK_SHIP
+}
+
+// Per-tenant POS stock enforcement. BLOCK caps a sale's fulfilled quantity at
+// what's available (today's behavior, unchanged). WARN also caps it unless
+// the client resubmits with confirmOversell, in which case it fulfills in
+// full and goes negative. ALLOW always fulfills in full and goes negative,
+// no confirmation needed.
+enum StockPolicy {
+  BLOCK
+  WARN
+  ALLOW
+}
+
+// Generic org-settings change log — reusable beyond stockPolicy. There was
+// no cross-entity audit table before this; per-document activity is tracked
+// on *ActivityEvent models instead, which don't fit a settings field change.
+model SettingsAuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  field          String
+  oldValue       String?
+  newValue       String?
+  userId         String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, field])
 }
 
 enum Role {
@@ -1309,6 +1377,7 @@ enum ExternalOrderStatus {
   FULFILLED
   CANCELLED
 }
+
 enum FulfillmentPath {
   DIRECT_ISSUE
   DELIVERY_ORDER
@@ -1360,27 +1429,28 @@ enum QuotationFormat {
 enum SalesOrderFormat {
   A4
 }
+
 // ---- Payroll -------------------------------------------------------------
 
 model Employee {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   organizationId    String
   name              String
   position          String?
-  nik               String?  // employee ID number
+  nik               String? // employee ID number
   bankName          String?
   bankAccountNumber String?
-  baseSalary        Decimal  @db.Decimal(12, 2)
-  isActive          Boolean  @default(true)
-  createdAt         DateTime @default(now())
+  baseSalary        Decimal   @db.Decimal(12, 2)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
   archivedAt        DateTime?
-  invoices          Invoice[]   // NEW — inverse relation
+  invoices          Invoice[] // NEW — inverse relation
 
-  organization      Organization               @relation(fields: [organizationId], references: [id])
-  salaryComponents  EmployeeSalaryComponent[]
-  payrollItems      PayrollItem[]
-  @@unique([id, organizationId])   // NEW
+  organization     Organization              @relation(fields: [organizationId], references: [id])
+  salaryComponents EmployeeSalaryComponent[]
+  payrollItems     PayrollItem[]
 
+  @@unique([id, organizationId]) // NEW
   @@index([organizationId])
 }
 
@@ -1390,18 +1460,18 @@ enum SalaryComponentKind {
 }
 
 model SalaryComponentType {
-  id                String   @id @default(uuid())
+  id                String              @id @default(uuid())
   organizationId    String
-  name              String   // "Meal Allowance", "BPJS Kesehatan", "PPh 21", etc.
+  name              String // "Meal Allowance", "BPJS Kesehatan", "PPh 21", etc.
   type              SalaryComponentKind
-  isTaxable         Boolean  @default(false)
-  isFixed           Boolean  @default(true)  // fixed amount vs percentage-based
-  defaultAmount     Decimal? @db.Decimal(12, 2)
-  defaultPercentage Decimal? @db.Decimal(5, 2)
-  accountId String?   // e.g. a specific BPJS Payable / PPh21 Payable account for this deduction
-  account   ChartOfAccount? @relation(fields: [accountId], references: [id])
+  isTaxable         Boolean             @default(false)
+  isFixed           Boolean             @default(true) // fixed amount vs percentage-based
+  defaultAmount     Decimal?            @db.Decimal(12, 2)
+  defaultPercentage Decimal?            @db.Decimal(5, 2)
+  accountId         String? // e.g. a specific BPJS Payable / PPh21 Payable account for this deduction
+  account           ChartOfAccount?     @relation(fields: [accountId], references: [id])
 
-  organization         Organization               @relation(fields: [organizationId], references: [id])
+  organization          Organization              @relation(fields: [organizationId], references: [id])
   employeeComponents    EmployeeSalaryComponent[]
   payrollItemComponents PayrollItemComponent[]
 
@@ -1415,8 +1485,8 @@ model EmployeeSalaryComponent {
   amount      Decimal? @db.Decimal(12, 2)
   percentage  Decimal? @db.Decimal(5, 2)
 
-  employee    Employee            @relation(fields: [employeeId], references: [id])
-  component   SalaryComponentType @relation(fields: [componentId], references: [id])
+  employee  Employee            @relation(fields: [employeeId], references: [id])
+  component SalaryComponentType @relation(fields: [componentId], references: [id])
 
   @@unique([employeeId, componentId])
 }
@@ -1434,25 +1504,25 @@ enum PayrollStatus {
 }
 
 model Payroll {
-  id             String         @id @default(uuid())
+  id             String                   @id @default(uuid())
   organizationId String
   periodMonth    Int
   periodYear     Int
-     paidAt        DateTime?
-   paymentMethod PaymentMethod?
-   bankAccountId String?               // NEW — which specific OrganizationBankAccount disbursement left from. Required when paymentMethod != CASH.
-   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  paidAt         DateTime?
+  paymentMethod  PaymentMethod?
+  bankAccountId  String? // NEW — which specific OrganizationBankAccount disbursement left from. Required when paymentMethod != CASH.
+  bankAccount    OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
-  payType        PayrollPayType @default(MONTHLY)
-  documentDate   DateTime       @db.Date
-  dueDate        DateTime?      @db.Date
-  status         PayrollStatus  @default(DRAFT)
-  createdAt      DateTime       @default(now())
-  userId         String?
+  payType      PayrollPayType @default(MONTHLY)
+  documentDate DateTime       @db.Date
+  dueDate      DateTime?      @db.Date
+  status       PayrollStatus  @default(DRAFT)
+  createdAt    DateTime       @default(now())
+  userId       String?
 
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  user           User?         @relation(fields: [userId], references: [id])
-  items          PayrollItem[]
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+  items        PayrollItem[]
 
   @@unique([organizationId, periodYear, periodMonth, payType])
 }
@@ -1466,9 +1536,9 @@ model PayrollItem {
   totalDeductions Decimal @default(0) @db.Decimal(12, 2)
   netPay          Decimal @default(0) @db.Decimal(12, 2)
 
-  payroll     Payroll                 @relation(fields: [payrollId], references: [id])
-  employee    Employee                @relation(fields: [employeeId], references: [id])
-  components  PayrollItemComponent[]
+  payroll    Payroll                @relation(fields: [payrollId], references: [id])
+  employee   Employee               @relation(fields: [employeeId], references: [id])
+  components PayrollItemComponent[]
 
   @@unique([payrollId, employeeId])
 }
@@ -1477,7 +1547,7 @@ model PayrollItemComponent {
   id            String              @id @default(uuid())
   payrollItemId String
   componentId   String
-  name          String              // snapshot at pay time, so renaming a component later doesn't rewrite history
+  name          String // snapshot at pay time, so renaming a component later doesn't rewrite history
   type          SalaryComponentKind
   amount        Decimal             @db.Decimal(12, 2)
 
@@ -1490,12 +1560,12 @@ model PayrollItemComponent {
 model ExpenseCategory {
   id             String @id @default(uuid())
   organizationId String
-  name           String  // "Electricity", "Rent", "Internet", "Insurance"...
+  name           String // "Electricity", "Rent", "Internet", "Insurance"...
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  expenses       Expense[]
-  accountId String?
-  account   ChartOfAccount? @relation(fields: [accountId], references: [id])
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  expenses     Expense[]
+  accountId    String?
+  account      ChartOfAccount? @relation(fields: [accountId], references: [id])
 
   @@unique([organizationId, name])
 }
@@ -1507,27 +1577,27 @@ enum ExpenseStatus {
 }
 
 model Expense {
-  id             String         @id @default(uuid())
+  id             String                   @id @default(uuid())
   organizationId String
   categoryId     String
   locationId     String?
   description    String?
-  amount         Decimal        @db.Decimal(12, 2)
-  amountPaid     Decimal        @default(0) @db.Decimal(12, 2) // FIX — tracks partial payments; see ExpensePayment
-  expenseDate    DateTime       @db.Date
+  amount         Decimal                  @db.Decimal(12, 2)
+  amountPaid     Decimal                  @default(0) @db.Decimal(12, 2) // FIX — tracks partial payments; see ExpensePayment
+  expenseDate    DateTime                 @db.Date
   dueDate        DateTime?
-  status         ExpenseStatus  @default(UNPAID)
+  status         ExpenseStatus            @default(UNPAID)
   paidAt         DateTime?
   paymentMethod  PaymentMethod?
-  createdAt      DateTime       @default(now())
+  createdAt      DateTime                 @default(now())
   userId         String?
-   bankAccountId String?
-   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  bankAccountId  String?
+  bankAccount    OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
-  organization Organization    @relation(fields: [organizationId], references: [id])
-  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
-  location     Location?       @relation(fields: [locationId], references: [id])
-  user         User?           @relation(fields: [userId], references: [id])
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  category     ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  location     Location?        @relation(fields: [locationId], references: [id])
+  user         User?            @relation(fields: [userId], references: [id])
   payments     ExpensePayment[]
 
   @@index([organizationId, expenseDate])
@@ -1548,9 +1618,9 @@ model ExpensePayment {
   createdAt     DateTime      @default(now())
   bankAccountId String?
 
-  expense       Expense                   @relation(fields: [expenseId], references: [id])
-  recordedBy    User?                     @relation(fields: [recordedById], references: [id])
-  bankAccount   OrganizationBankAccount?  @relation(fields: [bankAccountId], references: [id])
+  expense     Expense                  @relation(fields: [expenseId], references: [id])
+  recordedBy  User?                    @relation(fields: [recordedById], references: [id])
+  bankAccount OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
   @@index([expenseId])
 }
@@ -1576,25 +1646,25 @@ enum DepreciationMethod {
 // is what makes re-running that job for an already-caught-up asset a no-op
 // instead of double-posting.
 model FixedAsset {
-  id                      String              @id @default(uuid())
+  id                      String             @id @default(uuid())
   organizationId          String
   name                    String
   category                String?
   locationId              String?
-  acquisitionDate         DateTime            @db.Date
-  cost                    Decimal             @db.Decimal(14, 2)
-  salvageValue            Decimal             @default(0) @db.Decimal(14, 2)
+  acquisitionDate         DateTime           @db.Date
+  cost                    Decimal            @db.Decimal(14, 2)
+  salvageValue            Decimal            @default(0) @db.Decimal(14, 2)
   usefulLifeMonths        Int
-  depreciationMethod      DepreciationMethod  @default(STRAIGHT_LINE)
-  accumulatedDepreciation Decimal             @default(0) @db.Decimal(14, 2)
-  lastDepreciatedThrough  DateTime?           @db.Date
-  amountPaid              Decimal             @default(0) @db.Decimal(14, 2)
-  status                  FixedAssetStatus    @default(ACTIVE)
+  depreciationMethod      DepreciationMethod @default(STRAIGHT_LINE)
+  accumulatedDepreciation Decimal            @default(0) @db.Decimal(14, 2)
+  lastDepreciatedThrough  DateTime?          @db.Date
+  amountPaid              Decimal            @default(0) @db.Decimal(14, 2)
+  status                  FixedAssetStatus   @default(ACTIVE)
   disposedAt              DateTime?
-  disposalProceeds        Decimal?            @db.Decimal(14, 2)
+  disposalProceeds        Decimal?           @db.Decimal(14, 2)
   notes                   String?
   userId                  String?
-  createdAt               DateTime            @default(now())
+  createdAt               DateTime           @default(now())
 
   organization Organization        @relation(fields: [organizationId], references: [id])
   location     Location?           @relation(fields: [locationId], references: [id])
@@ -1648,45 +1718,45 @@ enum SystemAccountKey {
   ACCOUNTS_PAYABLE
   INVENTORY
   SALES_REVENUE
-  SALES_TAX_PAYABLE       // output VAT/PPN collected from customers
+  SALES_TAX_PAYABLE // output VAT/PPN collected from customers
   PURCHASE_TAX_RECEIVABLE // input VAT/PPN paid to suppliers, if taxEnabled
   COST_OF_GOODS_SOLD
   SALARY_EXPENSE
-  PAYROLL_PAYABLE          // net pay owed to employees, pre-disbursement
+  PAYROLL_PAYABLE // net pay owed to employees, pre-disbursement
   PAYROLL_DEDUCTIONS_PAYABLE // fallback for deductions with no specific account (BPJS/PPh21 etc.)
-  EXPENSE_PAYABLE           // generic AP for operating expenses (rent, electricity) before they're paid
-  UNCATEGORIZED_EXPENSE     // fallback when an ExpenseCategory has no accountId set
+  EXPENSE_PAYABLE // generic AP for operating expenses (rent, electricity) before they're paid
+  UNCATEGORIZED_EXPENSE // fallback when an ExpenseCategory has no accountId set
   RETAINED_EARNINGS
-    INVENTORY_ADJUSTMENT      // EXPENSE, debit-normal: shrinkage, count corrections
-  OPENING_BALANCE_EQUITY    // EQUITY, credit-normal: stock loaded via import
+  INVENTORY_ADJUSTMENT // EXPENSE, debit-normal: shrinkage, count corrections
+  OPENING_BALANCE_EQUITY // EQUITY, credit-normal: stock loaded via import
 
-  FIXED_ASSETS              // ASSET, debit-normal: cost basis of fixed assets on the books
-  ACCUMULATED_DEPRECIATION  // ASSET, credit-normal (contra-asset): depreciation taken to date
-  FIXED_ASSET_PAYABLE       // LIABILITY, credit-normal: unpaid acquisition cost, mirrors EXPENSE_PAYABLE
-  DEPRECIATION_EXPENSE      // EXPENSE, debit-normal
-  GAIN_ON_ASSET_DISPOSAL    // REVENUE, credit-normal: proceeds > net book value at disposal
-  LOSS_ON_ASSET_DISPOSAL    // EXPENSE, debit-normal: proceeds < net book value at disposal
+  FIXED_ASSETS // ASSET, debit-normal: cost basis of fixed assets on the books
+  ACCUMULATED_DEPRECIATION // ASSET, credit-normal (contra-asset): depreciation taken to date
+  FIXED_ASSET_PAYABLE // LIABILITY, credit-normal: unpaid acquisition cost, mirrors EXPENSE_PAYABLE
+  DEPRECIATION_EXPENSE // EXPENSE, debit-normal
+  GAIN_ON_ASSET_DISPOSAL // REVENUE, credit-normal: proceeds > net book value at disposal
+  LOSS_ON_ASSET_DISPOSAL // EXPENSE, debit-normal: proceeds < net book value at disposal
 }
 
 model ChartOfAccount {
-  id             String            @id @default(uuid())
+  id             String                   @id @default(uuid())
   organizationId String
-  code           String            // e.g. "1100", "4000" — displayed/sorted account code
+  code           String // e.g. "1100", "4000" — displayed/sorted account code
   name           String
-    bankAccountId String?              @unique
-  bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  bankAccountId  String?                  @unique
+  bankAccount    OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
-  type           AccountType
-  normalBalance  NormalBalance
-  systemKey      SystemAccountKey? // null for org-specific accounts (e.g. a custom expense account)
-  parentId       String?
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
+  type          AccountType
+  normalBalance NormalBalance
+  systemKey     SystemAccountKey? // null for org-specific accounts (e.g. a custom expense account)
+  parentId      String?
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
 
-  organization      Organization       @relation(fields: [organizationId], references: [id])
-  parent             ChartOfAccount?   @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children            ChartOfAccount[] @relation("AccountHierarchy")
-  journalLines        JournalEntryLine[]
+  organization         Organization          @relation(fields: [organizationId], references: [id])
+  parent               ChartOfAccount?       @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children             ChartOfAccount[]      @relation("AccountHierarchy")
+  journalLines         JournalEntryLine[]
   expenseCategories    ExpenseCategory[]
   salaryComponentTypes SalaryComponentType[]
 
@@ -1724,7 +1794,7 @@ enum JournalSourceType {
   EXPENSE
   PAYROLL
   MANUAL
-    STOCK_ADJUSTMENT
+  STOCK_ADJUSTMENT
 
   FIXED_ASSET_PURCHASE
   FIXED_ASSET_DEPRECIATION
@@ -1737,27 +1807,27 @@ enum JournalEntryStatus {
 }
 
 model JournalEntry {
-  id             String              @id @default(uuid())
+  id             String             @id @default(uuid())
   organizationId String
   entryNumber    String?
-  entryDate      DateTime            @db.Date
+  entryDate      DateTime           @db.Date
   memo           String?
   sourceType     JournalSourceType
-  sourceId       String?             // polymorphic — the Invoice/Payment/etc id. Not an FK: source lives in a different table per sourceType.
-  status         JournalEntryStatus  @default(POSTED)
+  sourceId       String? // polymorphic — the Invoice/Payment/etc id. Not an FK: source lives in a different table per sourceType.
+  status         JournalEntryStatus @default(POSTED)
   fiscalPeriodId String
-  createdAt      DateTime            @default(now())
+  createdAt      DateTime           @default(now())
   userId         String?
 
   // Reversal pairing: never edit or delete a posted entry. To undo one,
   // create a reversing entry (debits/credits swapped) linked back here.
-  reversalOfId   String?             @unique
-  reversalOf     JournalEntry?       @relation("Reversal", fields: [reversalOfId], references: [id])
-  reversedBy     JournalEntry?       @relation("Reversal")
+  reversalOfId String?       @unique
+  reversalOf   JournalEntry? @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry? @relation("Reversal")
 
-  organization Organization  @relation(fields: [organizationId], references: [id])
-  fiscalPeriod FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  fiscalPeriod FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
+  user         User?              @relation(fields: [userId], references: [id])
   lines        JournalEntryLine[]
 
   @@unique([organizationId, entryNumber])
@@ -1774,9 +1844,9 @@ model JournalEntryLine {
   description    String?
   locationId     String?
 
-  journalEntry JournalEntry    @relation(fields: [journalEntryId], references: [id])
-  account      ChartOfAccount  @relation(fields: [accountId], references: [id])
-  location     Location?       @relation(fields: [locationId], references: [id])
+  journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id])
+  account      ChartOfAccount @relation(fields: [accountId], references: [id])
+  location     Location?      @relation(fields: [locationId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
