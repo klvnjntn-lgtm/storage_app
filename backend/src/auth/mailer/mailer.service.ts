@@ -64,4 +64,26 @@ export class MailerService implements OnModuleInit {
 
     return info;
   }
+
+  async sendChangePasswordOtp(toEmail: string, code: string) {
+    const info = await this.transporter.sendMail({
+      from: this.fromAddress,
+      to: toEmail,
+      subject: 'Confirm your password change',
+      text: `Your password change confirmation code is: ${code}\n\nThis code expires in 10 minutes. If you didn't request this, you can safely ignore this email.`,
+      html: `
+        <p>We received a request to change your account password.</p>
+        <p>Your confirmation code is:</p>
+        <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+        <p>This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>
+      `,
+    });
+
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      this.logger.log(`Change-password OTP email preview: ${previewUrl}`);
+    }
+
+    return info;
+  }
 }

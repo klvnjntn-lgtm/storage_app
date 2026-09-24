@@ -166,6 +166,16 @@ model User {
   resetToken        String?            @unique
   resetTokenExpires DateTime?
 
+  // Change-password email OTP flow — see AuthService.requestPasswordChange/
+  // confirmPasswordChange. pendingPasswordHash holds the already-hashed new
+  // password chosen at request time so confirmPasswordChange only needs the
+  // OTP code, not the password again; otpAttempts caps brute-force guesses
+  // against the (short, numeric) code before it's invalidated.
+  changePasswordOtpHash     String?
+  changePasswordOtpExpires  DateTime?
+  changePasswordOtpAttempts Int       @default(0)
+  pendingPasswordHash       String?
+
   role             Role           @default(USER)
   active           Boolean        @default(true)
   organizationId   String

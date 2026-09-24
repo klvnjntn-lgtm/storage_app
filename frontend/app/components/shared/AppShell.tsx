@@ -97,6 +97,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changePasswordError, setChangePasswordError] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  // Step 2: the backend emails a one-time code instead of applying the
+  // password change immediately (see auth.controller.ts change-password /
+  // change-password/confirm). otpSent gates which step of the form shows.
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [confirmingOtp, setConfirmingOtp] = useState(false);
 
   function resetChangePasswordForm() {
     setShowChangePassword(false);
@@ -104,6 +110,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setNewPassword('');
     setConfirmPassword('');
     setChangePasswordError('');
+    setOtpSent(false);
+    setOtpCode('');
+  }
+
+  async function requestChangePasswordOtp() {
+    // Not apiFetch: a wrong current password legitimately returns 401
+    // from the backend, and apiFetch treats every 401 as "session
+    // expired" — it would wipe the token and bounce to /login before
+    // this form ever got to show the error.
+    const token = localStorage.getItem('accessToken');
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setChangePasswordError(
+        typeof data.message === 'string' ? data.message : t('appShell.changePasswordFailed'),
+      );
+      return false;
+    }
+    return true;
   }
 
   async function handleChangePassword(e: React.FormEvent) {
@@ -115,23 +147,47 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
     setChangingPassword(true);
     try {
-      // Not apiFetch: a wrong current password legitimately returns 401
-      // from the backend, and apiFetch treats every 401 as "session
-      // expired" — it would wipe the token and bounce to /login before
-      // this form ever got to show the error.
+      const sent = await requestChangePasswordOtp();
+      if (sent) {
+        setOtpSent(true);
+      }
+    } catch {
+      setChangePasswordError(t('appShell.changePasswordFailed'));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    setChangePasswordError('');
+    setChangingPassword(true);
+    try {
+      await requestChangePasswordOtp();
+    } catch {
+      setChangePasswordError(t('appShell.changePasswordFailed'));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function handleConfirmOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setChangePasswordError('');
+    setConfirmingOtp(true);
+    try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch('/api/auth/change-password', {
+      const res = await fetch('/api/auth/change-password/confirm', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ currentPassword, newPassword }),
+        body: JSON.stringify({ code: otpCode }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setChangePasswordError(
-          typeof data.message === 'string' ? data.message : t('appShell.changePasswordFailed'),
+          typeof data.message === 'string' ? data.message : t('appShell.changePasswordVerifyFailed'),
         );
         return;
       }
@@ -141,9 +197,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('user');
       window.location.href = '/login';
     } catch {
-      setChangePasswordError(t('appShell.changePasswordFailed'));
+      setChangePasswordError(t('appShell.changePasswordVerifyFailed'));
     } finally {
-      setChangingPassword(false);
+      setConfirmingOtp(false);
     }
   }
 
@@ -716,7 +772,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     <Lock size={14} />
                     {t('appShell.changePassword')}
                   </button>
-                ) : (
+                ) : !otpSent ? (
                   <form onSubmit={handleChangePassword} className="space-y-2.5">
                     <input
                       type="password"
@@ -766,6 +822,48 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         {changingPassword ? t('common.saving') : t('appShell.updatePassword')}
                       </button>
                     </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleConfirmOtp} className="space-y-2.5">
+                    <p className="text-xs text-gray-500">{t('appShell.changePasswordOtpSent')}</p>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      required
+                      maxLength={6}
+                      placeholder={t('appShell.changePasswordOtpCode')}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                      className="w-full text-[13px] px-3 py-2 rounded-md border border-blue-500/15 focus:outline-none focus:border-blue-500/40 tracking-widest"
+                    />
+                    {changePasswordError && (
+                      <p className="text-xs text-red-600">{changePasswordError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={resetChangePasswordForm}
+                        className="flex-1 py-2 rounded-md border border-blue-500/15 text-[13px] font-medium text-gray-600 hover:bg-blue-50 transition-colors"
+                      >
+                        {t('common.cancel')}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={confirmingOtp || otpCode.length !== 6}
+                        className="flex-1 py-2 rounded-md bg-blue-600 text-white text-[13px] font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {confirmingOtp ? t('common.saving') : t('appShell.changePasswordConfirm')}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={changingPassword}
+                      className="w-full text-[12px] text-blue-600 hover:text-blue-800 underline disabled:opacity-50"
+                    >
+                      {t('appShell.changePasswordResend')}
+                    </button>
                   </form>
                 )}
               </div>

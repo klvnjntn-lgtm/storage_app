@@ -132,13 +132,33 @@ logout(@CurrentUser() user: { sub: string }) {
   return this.authService.logout(user.sub);
 }
 
+// Step 1 of 2 — validates current/new password and emails a one-time
+// code rather than applying the change immediately. Throttled like the
+// other credential-adjacent endpoints (register/login/forgot-password),
+// since a wrong currentPassword guess is a password-verification oracle.
+@Throttle({ default: { limit: 5, ttl: 60000 } })
 @UseGuards(AuthGuard('jwt'))
 @Post('change-password')
-changePassword(
+requestPasswordChange(
   @CurrentUser() user: { sub: string },
   @Body('currentPassword') currentPassword: string,
   @Body('newPassword') newPassword: string,
 ) {
-  return this.authService.changePassword(user.sub, currentPassword, newPassword);
+  return this.authService.requestPasswordChange(user.sub, currentPassword, newPassword);
+}
+
+// Step 2 of 2 — confirms the emailed code and applies the password
+// already hashed & stashed by requestPasswordChange(). Throttled tighter
+// than the request step since a 6-digit code is brute-forceable; the
+// per-request attempt cap in AuthService is the primary defense, this is
+// a secondary limit on request rate itself.
+@Throttle({ default: { limit: 10, ttl: 60000 } })
+@UseGuards(AuthGuard('jwt'))
+@Post('change-password/confirm')
+confirmPasswordChange(
+  @CurrentUser() user: { sub: string },
+  @Body('code') code: string,
+) {
+  return this.authService.confirmPasswordChange(user.sub, code);
 }
 }

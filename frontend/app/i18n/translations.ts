@@ -161,6 +161,11 @@ const base = {
       updatePassword: 'Update password',
       passwordsDoNotMatch: 'New passwords do not match',
       changePasswordFailed: 'Failed to change password',
+      changePasswordOtpSent: 'Enter the code sent to your email',
+      changePasswordOtpCode: 'Confirmation code',
+      changePasswordConfirm: 'Confirm',
+      changePasswordResend: 'Resend code',
+      changePasswordVerifyFailed: 'Failed to confirm code',
     },
     home: {
       greetingMorning: 'Good morning',
@@ -392,6 +397,11 @@ const base = {
       updatePassword: 'Perbarui kata sandi',
       passwordsDoNotMatch: 'Kata sandi baru tidak cocok',
       changePasswordFailed: 'Gagal mengubah kata sandi',
+      changePasswordOtpSent: 'Masukkan kode yang dikirim ke email Anda',
+      changePasswordOtpCode: 'Kode konfirmasi',
+      changePasswordConfirm: 'Konfirmasi',
+      changePasswordResend: 'Kirim ulang kode',
+      changePasswordVerifyFailed: 'Gagal mengonfirmasi kode',
     },
     home: {
       greetingMorning: 'Selamat pagi',
