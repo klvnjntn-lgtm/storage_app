@@ -112,38 +112,124 @@ export class AuthService {
       select: { id: true, email: true, role: true },
     });
   }
-  async changePassword(userId: string, currentPassword: string, newPassword: string) {
-  const user = await this.prisma.user.findUnique({ where: { id: userId } });
-  if (!user || !user.active) {
-    throw new UnauthorizedException('User not found');
+  private static readonly CHANGE_PASSWORD_OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly CHANGE_PASSWORD_OTP_MAX_ATTEMPTS = 5;
+
+  // Step 1 of 2: validates the current/new password the same way the old
+  // single-step changePassword() used to, then emails a one-time code
+  // instead of applying the change immediately. The new password is
+  // already hashed and stashed on the user row (pendingPasswordHash) so
+  // confirmPasswordChange() only needs the code, not the password again —
+  // it never touches the plaintext password after this call returns.
+  async requestPasswordChange(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    if (!newPassword || newPassword.length < 8) {
+      throw new ForbiddenException('Password must be at least 8 characters');
+    }
+
+    const sameAsOld = await bcrypt.compare(newPassword, user.password);
+    if (sameAsOld) {
+      throw new ForbiddenException('New password must be different from current password');
+    }
+
+    const code = (Math.floor(Math.random() * 1_000_000)).toString().padStart(6, '0');
+    const [otpHash, pendingPasswordHash] = await Promise.all([
+      bcrypt.hash(code, 10),
+      bcrypt.hash(newPassword, 10),
+    ]);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        changePasswordOtpHash: otpHash,
+        changePasswordOtpExpires: new Date(Date.now() + AuthService.CHANGE_PASSWORD_OTP_TTL_MS),
+        changePasswordOtpAttempts: 0,
+        pendingPasswordHash,
+      },
+    });
+
+    // Unlike forgotPassword(), the caller here is already authenticated as
+    // this exact account, so there's no enumeration risk in surfacing a
+    // mailer failure — the user should know their code never arrived.
+    try {
+      await this.mailer.sendChangePasswordOtp(user.email, code);
+    } catch (err) {
+      this.logger.error(`Failed to send change-password OTP to ${user.email}`, err instanceof Error ? err.stack : err);
+      throw new ForbiddenException('Could not send confirmation email. Please try again.');
+    }
+
+    return { message: 'A confirmation code has been sent to your email.' };
   }
 
-  const valid = await bcrypt.compare(currentPassword, user.password);
-  if (!valid) {
-    throw new UnauthorizedException('Current password is incorrect');
+  // Step 2 of 2: confirms the code and applies the password already
+  // hashed & stashed by requestPasswordChange(). Attempts are capped
+  // (CHANGE_PASSWORD_OTP_MAX_ATTEMPTS) since a 6-digit code is brute-
+  // forceable given enough tries — exceeding the cap invalidates the
+  // pending request entirely, mirroring how an expired code is handled.
+  async confirmPasswordChange(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    if (
+      !user.changePasswordOtpHash ||
+      !user.changePasswordOtpExpires ||
+      !user.pendingPasswordHash ||
+      user.changePasswordOtpExpires < new Date()
+    ) {
+      throw new UnauthorizedException('Code is invalid or expired. Please request a new one.');
+    }
+
+    if (user.changePasswordOtpAttempts >= AuthService.CHANGE_PASSWORD_OTP_MAX_ATTEMPTS) {
+      await this.clearPendingPasswordChange(user.id);
+      throw new UnauthorizedException('Too many incorrect attempts. Please request a new code.');
+    }
+
+    const valid = await bcrypt.compare(code ?? '', user.changePasswordOtpHash);
+    if (!valid) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { changePasswordOtpAttempts: { increment: 1 } },
+      });
+      throw new UnauthorizedException('Incorrect code');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: user.pendingPasswordHash,
+        currentSessionId: null, // force re-login on all devices, same as resetPassword()
+        changePasswordOtpHash: null,
+        changePasswordOtpExpires: null,
+        changePasswordOtpAttempts: 0,
+        pendingPasswordHash: null,
+      },
+    });
+
+    return { message: 'Password changed. Please sign in again.' };
   }
 
-  if (!newPassword || newPassword.length < 8) {
-    throw new ForbiddenException('Password must be at least 8 characters');
+  private async clearPendingPasswordChange(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        changePasswordOtpHash: null,
+        changePasswordOtpExpires: null,
+        changePasswordOtpAttempts: 0,
+        pendingPasswordHash: null,
+      },
+    });
   }
-
-  const sameAsOld = await bcrypt.compare(newPassword, user.password);
-  if (sameAsOld) {
-    throw new ForbiddenException('New password must be different from current password');
-  }
-
-  const hashed = await bcrypt.hash(newPassword, 10);
-
-  await this.prisma.user.update({
-    where: { id: user.id },
-    data: {
-      password: hashed,
-      currentSessionId: null, // force re-login on all devices, same as resetPassword()
-    },
-  });
-
-  return { message: 'Password changed. Please sign in again.' };
-}
 
   // Always returns the same message whether or not the email is
   // registered — a differing response here would let this endpoint be
