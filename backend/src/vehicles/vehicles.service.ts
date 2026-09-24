@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
@@ -124,7 +124,18 @@ export class VehiclesService {
   }
 
   async update(organizationId: string, vehicleId: string, dto: UpdateVehicleDto) {
-    await this.getVehicleOrThrow(organizationId, vehicleId);
+    const vehicle = await this.getVehicleOrThrow(organizationId, vehicleId);
+    // FIX — a manual edit shouldn't be able to walk the odometer backward.
+    // Invoices no longer read this field live (each snapshots its own
+    // reading at issue time), so this only protects the vehicle's own
+    // "current reading" cache from bad data entry — same floor
+    // InvoiceService.applyOdometerReading() already enforces when the
+    // reading comes from a sale.
+    if (dto.odometer != null && vehicle.odometer != null && dto.odometer < vehicle.odometer) {
+      throw new BadRequestException(
+        `Odometer (${dto.odometer} km) cannot be lower than the vehicle's current reading (${vehicle.odometer} km)`,
+      );
+    }
     try {
       return await this.prisma.vehicle.update({
         where: { id: vehicleId },

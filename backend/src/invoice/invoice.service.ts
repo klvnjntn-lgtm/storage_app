@@ -20,6 +20,7 @@ import {
   ModuleKey,
   Prisma,
   SessionType,
+  StockPolicy,
 } from '@prisma/client';
 import { PaymentStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -405,19 +406,62 @@ constructor(
     }
   }
 
+  // ---- POS stock policy (read-only, non-admin-safe) ------------------
+  async getPosStockConfig(organizationId: string) {
+    const [org, enabledModules] = await Promise.all([
+      this.prisma.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { stockPolicy: true, stockOverrideRequiresAdmin: true },
+      }),
+      this.orgModulesService.getEnabledModules(organizationId),
+    ]);
+    // Warehouse-ops orgs never touch this policy at all (see issue()) —
+    // pick/pack/ship is always strict, so report that reality here too.
+    if (enabledModules.includes(ModuleKey.WAREHOUSE_OPS)) {
+      return { requiresConfirmation: false, allowNegative: false, overrideRequiresAdmin: false };
+    }
+    return {
+      requiresConfirmation: org.stockPolicy === 'WARN',
+      allowNegative: org.stockPolicy !== 'BLOCK',
+      overrideRequiresAdmin: org.stockOverrideRequiresAdmin,
+    };
+  }
+
   // ---- print / issue ------------------------------------------------
 async issue(
   organizationId: string,
   invoiceId: string,
   issuedByUserId: string,
+  issuedByUserRole?: string,
+  confirmOversell = false,
 ): Promise<InvoicePrintView & { sessionId: string | null }> {
   const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
   if (invoice.items.length === 0) {
     throw new BadRequestException('Cannot print an empty invoice');
   }
 
-  const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
+  const [org, enabledModules] = await Promise.all([
+    this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { stockPolicy: true, stockOverrideRequiresAdmin: true },
+    }),
+    this.orgModulesService.getEnabledModules(organizationId),
+  ]);
   const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
+
+  if (confirmOversell && org.stockOverrideRequiresAdmin && issuedByUserRole !== 'ADMIN') {
+    throw new ForbiddenException('Only an admin can confirm selling below available stock');
+  }
+  // Warehouse-ops orgs never reach fulfill() below at all (decreasesStockHere
+  // is always false for them — stock leaves at pick, not at issue), so this
+  // never actually gets read for them. Forced explicitly anyway rather than
+  // relying on that being true forever: org.stockPolicy is also rejected
+  // from ever being set to non-BLOCK for a WAREHOUSE_OPS org (see
+  // OrganizationService.updateSettings), so this should always already be
+  // BLOCK here — this is belt-and-suspenders, not the primary guard.
+  const stockPolicy = hasWarehouseOps
+    ? { mode: StockPolicy.BLOCK, confirmOversell: false }
+    : { mode: org.stockPolicy, confirmOversell };
 
   // A sales-order-sourced invoice whose goods already move through delivery
   // orders must not ALSO decrement stock / post COGS at issue time.
@@ -471,7 +515,7 @@ async issue(
 
         for (const item of invoice.items) {
           if (!item.productId) continue;
-          const { fulfilledQuantity } = await this.stockService.fulfill(
+          const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
             organizationId,
             item.productId,
             item.locationId as string,
@@ -479,11 +523,15 @@ async issue(
             issuedByUserId,
             { type: EventType.SALE, invoiceId: invoice.id },
             tx,
+            stockPolicy,
           );
           if (fulfilledQuantity > 0) {
             await tx.invoiceItem.update({
               where: { id: item.id },
-              data: { fulfilledQuantity: { increment: fulfilledQuantity } },
+              data: {
+                fulfilledQuantity: { increment: fulfilledQuantity },
+                ...(oversold ? { costProvisional: true } : {}),
+              },
             });
             // Actual fulfilled qty, not ordered: oversold units haven't shipped.
             costedLines.push({
@@ -500,9 +548,45 @@ async issue(
       const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
       const invoiceDate = invoice.invoiceDate ?? new Date();
 
+      // FIX — snapshot vehicle/customer/product identity onto the invoice
+      // now, at the moment it becomes a permanent printed document. Later
+      // edits to the Vehicle/Customer record, or to a product's
+      // name/sku, must not change what an already-issued invoice shows.
+      const [vehicle, customer, products] = await Promise.all([
+        invoice.vehicleId ? tx.vehicle.findUnique({ where: { id: invoice.vehicleId } }) : null,
+        invoice.customerId ? tx.customer.findUnique({ where: { id: invoice.customerId } }) : null,
+        tx.product.findMany({
+          where: { id: { in: invoice.items.filter((i) => i.productId).map((i) => i.productId!) } },
+        }),
+      ]);
+      const productById = new Map(products.map((p) => [p.id, p]));
+
+      await Promise.all(
+        invoice.items
+          .filter((i) => i.productId)
+          .map((i) => {
+            const product = productById.get(i.productId!);
+            return tx.invoiceItem.update({
+              where: { id: i.id },
+              data: { productName: product?.name ?? null, sku: product?.sku ?? null },
+            });
+          }),
+      );
+
       const updated = await tx.invoice.update({
         where: { id: invoice.id },
-        data: { invoiceDate, invoiceNumber },
+        data: {
+          invoiceDate,
+          invoiceNumber,
+          vehiclePlateNumber: vehicle?.plateNumber ?? null,
+          vehicleModel: vehicle?.vehicleModel ?? null,
+          vehicleVin: vehicle?.vin ?? null,
+          customerName: customer?.name ?? invoice.customerName ?? null,
+          customerAddress: customer?.address ?? null,
+          customerBillingAddress: customer?.billingAddress ?? customer?.address ?? null,
+          customerPhone: customer?.phone ?? null,
+          customerNpwp: customer?.npwp ?? null,
+        },
         include: invoiceDetailInclude,
       });
 
@@ -659,6 +743,127 @@ async issue(
     };
   }
 
+  // Top customers / top products / top vehicles for a date range, all
+  // ranked by revenue. vehicleIds, when given, scopes the customer and
+  // product rankings down to invoices for those cars only — the vehicle
+  // ranking itself always stays unscoped, since selecting one car would
+  // otherwise collapse it to a single row.
+  async getTopReport(
+    organizationId: string,
+    from: Date,
+    to: Date,
+    vehicleIds?: string[],
+    limit = 10,
+  ) {
+    const baseInvoiceWhere = {
+      organizationId,
+      status: InvoiceStatus.ISSUED,
+      issuedAt: { gte: from, lte: to },
+    };
+    const scopedInvoiceWhere = vehicleIds?.length
+      ? { ...baseInvoiceWhere, vehicleId: { in: vehicleIds } }
+      : baseInvoiceWhere;
+
+    const [customerGroups, productGroups, vehicleGroups] = await Promise.all([
+      this.prisma.invoice.groupBy({
+        by: ['customerId'],
+        where: { ...scopedInvoiceWhere, customerId: { not: null } },
+        _sum: { total: true },
+        _count: { id: true },
+        orderBy: { _sum: { total: 'desc' } },
+        take: limit,
+      }),
+      // lineTotal (gross: quantity × unitPrice), not netAmount — netAmount
+      // is a newer post-discount field that's unpopulated on almost every
+      // historical row (verified: ~99.999% zero in the dev DB), so
+      // ordering by it would rank products by an essentially arbitrary
+      // tie-break instead of actual revenue.
+      this.prisma.invoiceItem.groupBy({
+        by: ['productId'],
+        where: { productId: { not: null }, invoice: scopedInvoiceWhere },
+        _sum: { quantity: true, lineTotal: true },
+        orderBy: { _sum: { lineTotal: 'desc' } },
+        take: limit,
+      }),
+      this.prisma.invoice.groupBy({
+        by: ['vehicleId'],
+        where: { ...baseInvoiceWhere, vehicleId: { not: null } },
+        _sum: { total: true },
+        _count: { id: true },
+        orderBy: { _sum: { total: 'desc' } },
+        take: limit,
+      }),
+    ]);
+
+    const customerIds = customerGroups.map((g) => g.customerId).filter((id): id is string => !!id);
+    const productIds = productGroups.map((g) => g.productId).filter((id): id is string => !!id);
+    const rankedVehicleIds = vehicleGroups.map((g) => g.vehicleId).filter((id): id is string => !!id);
+
+    // `id: { in: [] }` correctly resolves to an empty result, so these run
+    // unconditionally rather than branching on `*Ids.length` — that branch
+    // would otherwise mix a Prisma query with a bare `[]` literal in the
+    // same Promise.all slot, which defeats TS's inference of the result's
+    // element type.
+    const [customers, products, vehicles] = await Promise.all([
+      this.prisma.customer.findMany({
+        where: { id: { in: customerIds } },
+        select: { id: true, name: true, companyName: true },
+      }),
+      this.prisma.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, name: true, sku: true },
+      }),
+      this.prisma.vehicle.findMany({
+        where: { id: { in: rankedVehicleIds } },
+        select: {
+          id: true,
+          plateNumber: true,
+          vehicleModel: true,
+          customerId: true,
+          customer: { select: { name: true } },
+        },
+      }),
+    ]);
+
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+    const productMap = new Map(products.map((p) => [p.id, p]));
+    const vehicleMap = new Map(vehicles.map((v) => [v.id, v]));
+
+    return {
+      topCustomers: customerGroups.map((g) => {
+        const c = customerMap.get(g.customerId as string);
+        return {
+          customerId: g.customerId as string,
+          name: c?.companyName || c?.name || 'Unknown',
+          revenue: Number(g._sum.total ?? 0),
+          invoiceCount: g._count.id,
+        };
+      }),
+      topProducts: productGroups.map((g) => {
+        const p = productMap.get(g.productId as string);
+        return {
+          productId: g.productId as string,
+          name: p?.name ?? 'Unknown',
+          sku: p?.sku ?? null,
+          unitsSold: g._sum.quantity ?? 0,
+          revenue: Number(g._sum.lineTotal ?? 0),
+        };
+      }),
+      topVehicles: vehicleGroups.map((g) => {
+        const v = vehicleMap.get(g.vehicleId as string);
+        return {
+          vehicleId: g.vehicleId as string,
+          plateNumber: v?.plateNumber ?? 'Unknown',
+          vehicleModel: v?.vehicleModel ?? '',
+          customerId: v?.customerId ?? null,
+          customerName: v?.customer?.name ?? null,
+          revenue: Number(g._sum.total ?? 0),
+          visitCount: g._count.id,
+        };
+      }),
+    };
+  }
+
   async list(
     organizationId: string,
     filters: {
@@ -666,6 +871,7 @@ async issue(
       from?: Date;
       to?: Date;
       locationId?: string;
+      customerId?: string;
       dateField?: 'issued' | 'invoice';
       page?: number;
       pageSize?: number;
@@ -714,6 +920,7 @@ async issue(
       organizationId,
       status: filters.status,
       locationId: filters.locationId,
+      customerId: filters.customerId,
       ...(!filters.overdue && filters.paymentStatus ? { paymentStatus: filters.paymentStatus } : {}),
       ...overdueFilter,
       AND: [dateCondition, searchCondition].filter(
@@ -820,10 +1027,16 @@ async issue(
       notes: invoice.notes,
       customerPoNumber: invoice.customerPoNumber,
       paymentStatus: invoice.paymentStatus,
-      vehiclePlateNumber: invoice.vehicle?.plateNumber ?? null,
-      vehicleModel: invoice.vehicle?.vehicleModel ?? null,
-      vehicleVin: invoice.vehicle?.vin ?? null,
-      vehicleOdometer: invoice.odometer ?? invoice.vehicle?.odometer ?? null,
+      // FIX — prefer the snapshot taken at issue() time; only a draft, or
+      // an invoice issued before these columns existed, falls back to the
+      // live vehicle record. Odometer has no live fallback at all: unlike
+      // plate/model/VIN there's no "current" odometer that's still true
+      // of the invoice once time has passed, so a blank snapshot means
+      // it just wasn't recorded, not "use whatever it reads today."
+      vehiclePlateNumber: invoice.vehiclePlateNumber ?? invoice.vehicle?.plateNumber ?? null,
+      vehicleModel: invoice.vehicleModel ?? invoice.vehicle?.vehicleModel ?? null,
+      vehicleVin: invoice.vehicleVin ?? invoice.vehicle?.vin ?? null,
+      vehicleOdometer: invoice.odometer ?? null,
 
       employeeId: invoice.employeeId ?? null,             // NEW
       employeeName: invoice.employee?.name ?? null,        // NEW
@@ -842,11 +1055,12 @@ async issue(
       discountType: invoice.discountType,
       discountValue: invoice.discountValue != null ? toNumber(invoice.discountValue) : null,
 
-      customerName: invoice.customer?.name ?? invoice.customerName,
-      customerAddress: invoice.customer?.address ?? null,
-      billingAddress: invoice.customer?.billingAddress ?? invoice.customer?.address ?? null,
-      customerPhone: invoice.customer?.phone ?? null,
-      customerNpwp: invoice.customer?.npwp ?? null,
+      customerName: invoice.customerName ?? invoice.customer?.name ?? null,
+      customerAddress: invoice.customerAddress ?? invoice.customer?.address ?? null,
+      billingAddress:
+        invoice.customerBillingAddress ?? invoice.customer?.billingAddress ?? invoice.customer?.address ?? null,
+      customerPhone: invoice.customerPhone ?? invoice.customer?.phone ?? null,
+      customerNpwp: invoice.customerNpwp ?? invoice.customer?.npwp ?? null,
 
       subtotal: toNumber(invoice.subtotal),
       discount: toNumber(invoice.discount),
@@ -867,8 +1081,8 @@ async issue(
 
       items: invoice.items.map((item) => ({
         id: String(item.id),
-        productName: item.product?.name ?? item.description ?? '',
-        sku: item.product?.sku ?? null,
+        productName: item.productName ?? item.product?.name ?? item.description ?? '',
+        sku: item.sku ?? item.product?.sku ?? null,
         quantity: item.quantity,
         unit: item.unit,
 
@@ -1127,7 +1341,7 @@ async editIssuedInvoice(
   const invoice = await this.prisma.invoice.findFirst({
     where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
     include: {
-      items: { include: { product: { select: { name: true } } } },
+      items: { include: { product: { select: { name: true, sku: true } } } },
     },
   });
   if (!invoice) throw new NotFoundException('Issued invoice not found');
@@ -1141,15 +1355,42 @@ async editIssuedInvoice(
   const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
   const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
+  const org = await this.prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { stockPolicy: true },
+  });
+  // See issue() — same belt-and-suspenders: the fulfill() call below only
+  // runs when !hasWarehouseOps anyway, so this never actually matters for
+  // a warehouse-ops org, but force BLOCK explicitly rather than rely on that.
+  const stockPolicy = hasWarehouseOps
+    ? { mode: StockPolicy.BLOCK, confirmOversell: false }
+    : { mode: org.stockPolicy, confirmOversell: !!dto.confirmOversell };
+
   const keyOf = (i: { productId: string | null; description: string | null }) =>
     i.productId ? `p:${i.productId}` : `s:${i.description}`;
 
   const oldItemByKey = new Map(invoice.items.map((i) => [keyOf(i), i]));
 
+  // FIX — force existing lines to keep the price they were issued at.
+  // Without this, priceLines() re-derives unitPrice from the live
+  // product (unless posPricingEnabled is on and dto sent one), so
+  // editing any line on an issued invoice — even just a quantity change
+  // — silently re-priced every product line to today's selling price,
+  // computed off dto.items directly so it's ready before priceLines runs.
+  const forcedUnitPriceByIndex = new Map<number, number>();
+  dto.items.forEach((item, idx) => {
+    if (!item.productId) return;
+    const oldItem = oldItemByKey.get(`p:${item.productId}`);
+    if (oldItem?.unitPrice != null) {
+      forcedUnitPriceByIndex.set(idx, Number(oldItem.unitPrice));
+    }
+  });
+
   const updated = await this.prisma.$transaction(async (tx) => {
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items, tx, {
         requireLocationForProducts: !hasWarehouseOps,
+        forcedUnitPriceByIndex,
       });
     const newTotal = this.round2(subtotal - discountAmount + taxAmount);
 
@@ -1168,6 +1409,21 @@ async editIssuedInvoice(
     const demandChanges: { label: string; before: number; after: number }[] = [];
     const carriedFulfilledByLineIndex = new Map<number, number>();
     const unitCostByLineIndex = new Map<number, number | null>();
+    // FIX — same idea for product identity: preserve the name/sku that
+    // was on the invoice when it was issued, don't re-pull today's
+    // product.name/sku for a line that already existed. A line being
+    // added for the first time during this edit has no history to
+    // preserve, so it takes today's product identity — same as a brand
+    // new invoice line would.
+    const productNameByLineIndex = new Map<number, string | null>();
+    const skuByLineIndex = new Map<number, string | null>();
+    const costProvisionalByLineIndex = new Map<number, boolean>();
+
+    const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
+    const products = productIds.length
+      ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId } })
+      : [];
+    const productInfoById = new Map(products.map((p) => [p.id, p]));
 
     for (let idx = 0; idx < lines.length; idx++) {
       const l = lines[idx];
@@ -1175,11 +1431,15 @@ async editIssuedInvoice(
 
       const key = keyOf(l);
       const oldItem = oldItemByKey.get(key);
+      const currentProduct = productInfoById.get(l.productId);
       // Preserve the cost basis already locked in when this line's units
       // were fulfilled — re-pricing to today's product.costPrice would
       // silently rewrite historical COGS for units that already shipped.
       const oldUnitCost = oldItem?.unitCost != null ? Number(oldItem.unitCost) : null;
       unitCostByLineIndex.set(idx, oldUnitCost ?? l.unitCost);
+      productNameByLineIndex.set(idx, oldItem?.productName ?? oldItem?.product?.name ?? currentProduct?.name ?? null);
+      skuByLineIndex.set(idx, oldItem?.sku ?? oldItem?.product?.sku ?? currentProduct?.sku ?? null);
+      if (oldItem?.costProvisional) costProvisionalByLineIndex.set(idx, true);
       const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
       const oldQty = oldItem ? Number(oldItem.quantity) : 0;
 
@@ -1198,11 +1458,12 @@ async editIssuedInvoice(
       if (!hasWarehouseOps) {
         const addedDemand = l.quantity - oldQty;
         if (addedDemand > 0) {
-          const { fulfilledQuantity } = await this.stockService.fulfill(
+          const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
             organizationId, l.productId, l.locationId!, addedDemand, userId,
-            { type: EventType.SALE, invoiceId: invoice.id }, tx,
+            { type: EventType.SALE, invoiceId: invoice.id }, tx, stockPolicy,
           );
           fulfilledForThisLine += fulfilledQuantity;
+          if (oversold) costProvisionalByLineIndex.set(idx, true);
         }
       }
 
@@ -1281,6 +1542,9 @@ async editIssuedInvoice(
             quantity: l.quantity,
             unitPrice: l.unitPrice,
             unitCost: unitCostByLineIndex.get(idx) ?? l.unitCost,
+            productName: productNameByLineIndex.get(idx) ?? null,
+            sku: skuByLineIndex.get(idx) ?? null,
+            costProvisional: costProvisionalByLineIndex.get(idx) ?? false,
             unit: l.unit,
             lineTotal: l.lineTotal,
             discountType: l.discountType,
@@ -1345,10 +1609,6 @@ async editIssuedInvoice(
       }
     }
 
-    const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
-    const products = productIds.length
-      ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId }, select: { id: true, name: true } })
-      : [];
     const productNames = new Map(products.map((p) => [p.id, p.name]));
     const changes = this.buildEditDiff(invoice.items, lines, productNames);
 
@@ -1461,6 +1721,77 @@ async editIssuedInvoice(
       },
     });
   }
+
+// Corrects a line's provisional cost (booked at Product.costPrice while it
+// oversold) once the real cost is known, and books the delta so profit
+// reports stay accurate. See PostingRulesService.postCogsCorrection.
+async recostInvoiceItem(
+  organizationId: string,
+  invoiceId: string,
+  itemId: number,
+  newUnitCost: number | undefined,
+  userId: string,
+) {
+  return this.prisma.$transaction(async (tx) => {
+    const item = await tx.invoiceItem.findFirst({
+      where: { id: itemId, invoiceId, invoice: { organizationId } },
+    });
+    if (!item) throw new NotFoundException('Invoice item not found');
+    if (!item.costProvisional) {
+      throw new BadRequestException('This line is not marked as having a provisional cost');
+    }
+    if (!item.productId) {
+      throw new BadRequestException('Line has no product to recost against');
+    }
+
+    let resolvedUnitCost = newUnitCost;
+    if (resolvedUnitCost == null) {
+      const product = await tx.product.findFirst({
+        where: { id: item.productId, organizationId },
+        select: { costPrice: true },
+      });
+      resolvedUnitCost = product?.costPrice != null ? Number(product.costPrice) : undefined;
+    }
+    if (resolvedUnitCost == null) {
+      throw new BadRequestException('No cost available to recost with — pass unitCost explicitly or set the product\'s costPrice first');
+    }
+
+    const oldUnitCost = item.unitCost != null ? Number(item.unitCost) : 0;
+    const fulfilledQuantity = Number(item.fulfilledQuantity);
+    const deltaAmount = (resolvedUnitCost - oldUnitCost) * fulfilledQuantity;
+
+    if (deltaAmount !== 0) {
+      await this.postingRules.postCogsCorrection(
+        organizationId,
+        {
+          sourceId: `${invoiceId}:cogs:recost:${itemId}:${Date.now()}`,
+          date: new Date(),
+          memo: `Cost correction for invoice item ${itemId}`,
+          deltaAmount,
+          locationId: item.locationId,
+        },
+        tx,
+      );
+    }
+
+    const updated = await tx.invoiceItem.update({
+      where: { id: itemId },
+      data: { unitCost: resolvedUnitCost, costProvisional: false },
+    });
+
+    await tx.invoiceActivityEvent.create({
+      data: {
+        invoiceId,
+        organizationId,
+        userId,
+        eventType: InvoiceActivityEventType.COST_CORRECTED,
+        changes: { itemId, oldUnitCost, newUnitCost: resolvedUnitCost, deltaAmount, fulfilledQuantity },
+      },
+    });
+
+    return updated;
+  });
+}
 
 async voidInvoice(
   organizationId: string,

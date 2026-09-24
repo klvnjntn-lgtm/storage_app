@@ -95,6 +95,13 @@ export class LineItemPricingService {
       // hasWarehouseOps carve-out for the identical rule), not fixed on
       // the invoice line itself.
       requireLocationForProducts?: boolean;
+      // NEW — index (into `items`) -> unit price that must be used
+      // as-is, bypassing both posPricingEnabled and product.sellingPrice.
+      // InvoiceService.editIssuedInvoice() uses this to keep an
+      // already-issued line's price exactly what it was at issue time;
+      // without it, editing any line silently re-priced every product
+      // line on the invoice to today's selling price.
+      forcedUnitPriceByIndex?: Map<number, number>;
     } = {},
   ): Promise<{
     items: PricedLine[];
@@ -167,7 +174,7 @@ export class LineItemPricingService {
       { taxRateId: string; name: string; percentage: number; amount: number }
     >();
 
-    const lines: PricedLine[] = items.map((item) => {
+    const lines: PricedLine[] = items.map((item, index) => {
       const itemTaxRateIds = Array.from(new Set(item.taxRateIds ?? []));
 
       let unitPrice: number;
@@ -189,7 +196,10 @@ export class LineItemPricingService {
         if (!unit) {
           unit = product.unit ?? null;
         }
-        if (org.posPricingEnabled && item.unitPrice != null) {
+        const forcedUnitPrice = options.forcedUnitPriceByIndex?.get(index);
+        if (forcedUnitPrice != null) {
+          unitPrice = forcedUnitPrice;
+        } else if (org.posPricingEnabled && item.unitPrice != null) {
           unitPrice = item.unitPrice;
         } else {
           if (product.sellingPrice == null) {

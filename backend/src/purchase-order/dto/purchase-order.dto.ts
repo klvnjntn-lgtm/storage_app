@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray, IsDateString, IsNumber, IsOptional, IsPositive, IsString,
-  IsUUID, MaxLength, Min, ValidateNested, IsNotEmpty, ArrayMinSize,
+  IsUUID, MaxLength, Min, ValidateNested, IsNotEmpty,
 } from 'class-validator';
 
 export class NewProductDto {
@@ -80,7 +80,10 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @IsString() @MaxLength(200)
   paymentTerms?: string;
 
-  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)
+  // No @ArrayMinSize — empty on create is how a supplier-only/no-items
+  // draft gets persisted (autosave, exit-save). send() rejects an empty
+  // PO at the real transition point instead.
+  @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];
 }
 

@@ -10,6 +10,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Inject,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -31,6 +32,8 @@ const INVOICE_POS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = [
   'npwp',
   'logoUrl',
   'taxEnabled',
+  'stockPolicy',
+  'stockOverrideRequiresAdmin',
 ];
 
 const WAREHOUSE_OPS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = ['fulfillmentMode'];
@@ -67,11 +70,12 @@ export class OrganizationController {
   async updateSettings(
     @CurrentOrg() orgId: string,
     @Body() body: UpdateOrganizationSettingsInput,
+    @Req() req,
   ) {
     await this.assertFieldsAllowed(orgId, body, INVOICE_POS_FIELDS, ModuleKey.INVOICE_POS);
     await this.assertFieldsAllowed(orgId, body, WAREHOUSE_OPS_FIELDS, ModuleKey.WAREHOUSE_OPS);
 
-    return this.organizationService.updateSettings(orgId, body);
+    return this.organizationService.updateSettings(orgId, body, req.user.sub);
   }
 
   @UseGuards(RolesGuard)

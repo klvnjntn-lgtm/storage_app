@@ -3,6 +3,7 @@ import { DiscountType } from '@prisma/client';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -92,4 +93,11 @@ export class EditIssuedInvoiceDto {
   @IsString()
   @IsNotEmpty()
   reason: string;
+
+  // Same confirm-then-resubmit flow as IssueInvoiceDto.confirmOversell.
+  // No admin-role check needed here — this endpoint is already
+  // @Roles('ADMIN')-only.
+  @IsOptional()
+  @IsBoolean()
+  confirmOversell?: boolean;
 }

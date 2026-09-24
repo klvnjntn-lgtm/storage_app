@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import { StockService, ImportMode } from './stock.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -11,6 +11,20 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @Controller('stock')
 export class StockController {
   constructor(private readonly stockService: StockService) {}
+
+  // Must come before @Get(':productId') below, same routing trap as every
+  // other single-segment-before-:id route in this codebase — otherwise
+  // Nest matches "reports" as the :productId param.
+  @Get('reports/oversold')
+  getOversoldSales(
+    @CurrentOrg() orgId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
+    return this.stockService.getOversoldSales(orgId, fromDate, toDate);
+  }
 
   @Get(':productId')
   getStock(

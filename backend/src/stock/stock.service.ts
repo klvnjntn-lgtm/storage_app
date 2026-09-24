@@ -1,9 +1,10 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { Prisma, EventType } from '@prisma/client';
+import { Prisma, EventType, StockPolicy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductService } from '../product/product.service'; // adjust path if different
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
 
 function slugify(value: string): string {
   return value
@@ -227,9 +228,21 @@ export class StockService {
   // -----------------------------
   // Unlike decrease() — strict, throws on insufficient stock — fulfill()
   // takes as much as is physically available and reports back exactly what
-  // happened. Stock.quantity can never go below zero as a result. Used by
-  // InvoiceService.issue()/editIssuedInvoice() for non-warehouse orgs,
-  // where a sale can still succeed even when it oversells.
+  // happened, UNLESS the org's stockPolicy says otherwise. Used by
+  // InvoiceService.issue()/editIssuedInvoice() for non-warehouse orgs.
+  //
+  //   BLOCK (default): unchanged — cap at available, never go negative.
+  //   WARN: same cap UNLESS policy.confirmOversell is set, in which case
+  //     it fulfills in full and goes negative; without it, throws
+  //     StockConfirmationRequiredException instead of silently capping, so
+  //     the caller gets a chance to ask the user first. The whole
+  //     transaction rolls back when that happens — nothing partially
+  //     commits.
+  //   ALLOW: always fulfills in full, goes negative freely, no
+  //     confirmation needed.
+  //
+  // balanceAfter/oversold are stamped on the Event row so the oversold
+  // report can query it directly without recomputing running balances.
   async fulfill(
     orgId: string,
     productId: string,
@@ -238,16 +251,39 @@ export class StockService {
     userId: string,
     context: StockMovementContext,
     tx?: Prisma.TransactionClient,
-  ): Promise<{ fulfilledQuantity: number; shortfall: number }> {
-    if (requestedQty <= 0) return { fulfilledQuantity: 0, shortfall: 0 };
+    policy: { mode: StockPolicy; confirmOversell?: boolean } = { mode: StockPolicy.BLOCK },
+  ): Promise<{ fulfilledQuantity: number; shortfall: number; oversold: boolean }> {
+    if (requestedQty <= 0) return { fulfilledQuantity: 0, shortfall: 0, oversold: false };
 
     const run = async (client: Prisma.TransactionClient) => {
       await this.assertProductActive(orgId, productId, client);
       await this.assertLocationOwnership(orgId, locationId, client);
 
       const available = await this.lockStockRow(client, orgId, productId, locationId);
-      const fulfilledQuantity = Math.min(available, requestedQty);
-      const shortfall = requestedQty - fulfilledQuantity;
+      const shortfall = Math.max(0, requestedQty - available);
+
+      let fulfilledQuantity: number;
+      if (shortfall === 0) {
+        fulfilledQuantity = requestedQty;
+      } else if (policy.mode === StockPolicy.ALLOW) {
+        fulfilledQuantity = requestedQty;
+      } else if (policy.mode === StockPolicy.WARN) {
+        if (!policy.confirmOversell) {
+          throw new StockConfirmationRequiredException({
+            productId,
+            locationId,
+            available,
+            requested: requestedQty,
+          });
+        }
+        fulfilledQuantity = requestedQty;
+      } else {
+        // BLOCK — today's behavior, cap at available.
+        fulfilledQuantity = available;
+      }
+
+      const balanceAfter = available - fulfilledQuantity;
+      const oversold = balanceAfter < 0;
 
       if (fulfilledQuantity > 0) {
         await client.stock.update({
@@ -261,11 +297,18 @@ export class StockService {
             productId,
             fromLocationId: locationId,
             quantity: -fulfilledQuantity,
+            balanceAfter,
+            oversold,
             userId,
             organizationId: orgId,                          // 🔒
             invoiceId: context.invoiceId,
             salesOrderId: context.salesOrderId,
-            metadata: context.metadata ?? {},
+            metadata: {
+              ...(context.metadata ?? {}),
+              ...(oversold && policy.mode === StockPolicy.WARN
+                ? { confirmedOverrideByUserId: userId }
+                : {}),
+            },
           },
         });
       }
@@ -273,7 +316,7 @@ export class StockService {
       // The shortfall is read straight off InvoiceItem.quantity -
       // fulfilledQuantity by whoever needs it.
 
-      return { fulfilledQuantity, shortfall };
+      return { fulfilledQuantity, shortfall: requestedQty - fulfilledQuantity, oversold };
     };
 
     return tx ? run(tx) : this.prisma.$transaction(run);
@@ -526,6 +569,41 @@ export class StockService {
   // -----------------------------
   // GET
   // -----------------------------
+  // Oversold report: SALE events that pushed a product's stock below zero,
+  // in a date range — who, when, quantity. The "products currently below
+  // zero" half of the report is served client-side off the Stock list
+  // (totalStock < 0), no query needed for that part.
+  async getOversoldSales(orgId: string, from: Date, to: Date) {
+    const events = await this.prisma.event.findMany({
+      where: {
+        organizationId: orgId,
+        type: EventType.SALE,
+        oversold: true,
+        createdAt: { gte: from, lte: to },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        product: { select: { id: true, name: true, sku: true } },
+        user: { select: { id: true, email: true } },
+        invoice: { select: { id: true, invoiceNumber: true } },
+      },
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      productId: e.productId,
+      productName: e.product?.name ?? null,
+      sku: e.product?.sku ?? null,
+      quantity: Math.abs(Number(e.quantity)),
+      balanceAfter: e.balanceAfter != null ? Number(e.balanceAfter) : null,
+      createdAt: e.createdAt,
+      userId: e.userId,
+      userEmail: e.user?.email ?? null,
+      invoiceId: e.invoiceId,
+      invoiceNumber: e.invoice?.invoiceNumber ?? null,
+    }));
+  }
+
   async get(orgId: string, productId: string) {
     await this.assertProductOwnership(orgId, productId);
     const rows = await this.prisma.stock.findMany({

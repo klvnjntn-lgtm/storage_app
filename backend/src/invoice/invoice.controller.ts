@@ -11,8 +11,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { InvoiceService } from './invoice.service';
 import {
   CreateDraftInvoiceDto,
+  IssueInvoiceDto,
   ListInvoicesQueryDto,
+  RecostInvoiceItemDto,
   RevenueReportQueryDto,
+  TopReportQueryDto,
   UpdateDraftInvoiceDto,
 } from './dto/invoice.dto';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -39,6 +42,7 @@ export class InvoiceController {
       from: query.from ? new Date(query.from) : undefined,
       to: query.to ? this.endOfDay(query.to) : undefined,
       locationId: query.locationId,
+      customerId: query.customerId,
       dateField: query.dateField,
       page: query.page,
       pageSize: query.pageSize,
@@ -62,6 +66,38 @@ export class InvoiceController {
       this.endOfDay(query.to),
       query.locationId,
     );
+  }
+
+  // Top customers / top products / top vehicles, for the Sales Insights
+  // charts. Two segments ("reports/top"), so this never collides with the
+  // single-segment @Get(':id') below regardless of declaration order.
+  @Get('reports/top')
+  getTopReport(
+    @CurrentOrg() organizationId: string,
+    @Query() query: TopReportQueryDto,
+    @Query('vehicleId') vehicleId?: string | string[],
+  ) {
+    const vehicleIds = vehicleId ? (Array.isArray(vehicleId) ? vehicleId : [vehicleId]) : undefined;
+    return this.invoiceService.getTopReport(
+      organizationId,
+      new Date(query.from),
+      this.endOfDay(query.to),
+      vehicleIds,
+      query.limit,
+    );
+  }
+
+  // Non-admin-safe: only the derived, POS-relevant behaviour (never the
+  // raw org settings, which stay behind GET /organization/settings and
+  // its RolesGuard). This is what the POS UI polls before/while building
+  // a sale to decide whether to show a stock warning at all — the actual
+  // enforcement still happens inside issue()'s transaction regardless of
+  // what the client saw here.
+  // Must come before @Get(':id') — same routing trap as overdue-count/
+  // statement/:id/draft below.
+  @Get('stock-policy')
+  async getPosStockConfig(@CurrentOrg() organizationId: string) {
+    return this.invoiceService.getPosStockConfig(organizationId);
   }
 
   // Must come before @Get(':id') — otherwise Nest matches "overdue-count"
@@ -116,6 +152,23 @@ export class InvoiceController {
   ) {
     const { sub: userId } = req.user;
     return this.invoiceService.editIssuedInvoice(orgId, id, dto, userId);
+  }
+
+  // Corrects a line's provisional cost (booked while it oversold) once the
+  // real cost is known — e.g. after a goods receipt updates Product.costPrice.
+  // Posts a correcting COGS/Inventory journal entry for the delta rather than
+  // reposting the whole line, so this never double-counts.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/items/:itemId/recost')
+  recostInvoiceItem(
+    @Req() req,
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: RecostInvoiceItemDto,
+  ) {
+    return this.invoiceService.recostInvoiceItem(organizationId, id, Number(itemId), dto.unitCost, req.user.sub);
   }
 
   @Get(':id/edit-history')
@@ -186,8 +239,13 @@ export class InvoiceController {
   }
 
 @Post(':id/print')
-print(@CurrentOrg() organizationId: string, @Req() req, @Param('id') id: string) {
-  return this.invoiceService.issue(organizationId, id, req.user.sub);
+print(
+  @CurrentOrg() organizationId: string,
+  @Req() req,
+  @Param('id') id: string,
+  @Body() dto: IssueInvoiceDto,
+) {
+  return this.invoiceService.issue(organizationId, id, req.user.sub, req.user.role, !!dto?.confirmOversell);
 }
 
   @UseGuards(RolesGuard)

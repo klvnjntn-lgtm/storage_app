@@ -158,24 +158,49 @@ async create(
     : doCreate(client as Prisma.TransactionClient);
 }
 
-async findAll(organizationId: string) {
-    const sessions = await this.prisma.session.findMany({
-      where: { organizationId },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        type: true,
-        stage: true,
-        status: true,
-        createdAt: true,
-        _count: { select: { items: true } },
-      },
-    });
+async findAll(
+    organizationId: string,
+    filters: { from?: string; to?: string; page?: number; pageSize?: number } = {},
+  ) {
+    const page = filters.page && filters.page > 0 ? filters.page : 1;
+    const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
 
-    return sessions.map(({ _count, ...rest }) => ({
-      ...rest,
-      totalItems: _count.items,
-    }));
+    const where: Prisma.SessionWhereInput = { organizationId };
+    if (filters.from && filters.to) {
+      const gte = new Date(filters.from);
+      const lte = new Date(filters.to);
+      lte.setHours(23, 59, 59, 999);
+      where.createdAt = { gte, lte };
+    }
+
+    const [sessions, total] = await this.prisma.$transaction([
+      this.prisma.session.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          type: true,
+          stage: true,
+          status: true,
+          createdAt: true,
+          _count: { select: { items: true } },
+          invoice: { select: { id: true, invoiceNumber: true } },
+        },
+      }),
+      this.prisma.session.count({ where }),
+    ]);
+
+    return {
+      data: sessions.map(({ _count, ...rest }) => ({
+        ...rest,
+        totalItems: _count.items,
+      })),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async findOne(organizationId: string, id: string) {
@@ -192,6 +217,8 @@ async findAll(organizationId: string) {
           select: {
             id: true,
             invoiceNumber: true,
+            salesOrderId: true,
+            salesOrder: { select: { id: true, orderNumber: true } },
             items: {
               select: {
                 productId: true,
@@ -421,6 +448,30 @@ async findAll(organizationId: string) {
     // updateMany, so this closes the business-rule race, not a stock one.
     try {
       return await this.prisma.$transaction(async (tx) => {
+      // The status/stage read above happened outside this transaction, so
+      // a concurrent complete()/advanceStage()/regressStage() call (none of
+      // which run at Serializable isolation) could have changed either
+      // since then. Re-check the fresh values before mutating anything —
+      // effectiveType/isStaged/stages were derived from the stale read, so
+      // if either moved, bail out and let the caller retry against current
+      // state rather than silently applying a scan to the wrong stage or a
+      // now-completed session.
+      const freshSession = await tx.session.findFirst({
+        where: { id: sessionId, organizationId },
+        select: { status: true, stage: true },
+      });
+      if (!freshSession) throw new BadRequestException('Session not found');
+      if (freshSession.status === 'COMPLETED') {
+        throw new BadRequestException(
+          'Session is completed — reopen it before adding items',
+        );
+      }
+      if (freshSession.stage !== session.stage) {
+        throw new ConflictException(
+          'Session stage changed since this scan started, please retry',
+        );
+      }
+
       const locationIds = [fromLocationId, toLocationId].filter(
         Boolean,
       ) as string[];
@@ -448,8 +499,13 @@ async findAll(organizationId: string) {
             }),
           ]);
 
-          const priorTotal = Number(priorAgg._sum.quantity ?? 0);
-          const currentTotal = Number(currentAgg._sum.quantity ?? 0);
+          // PICK events are stored with a negative quantity (see the
+          // Event.create below), so a prior/current stage of PICK would
+          // otherwise sum to a negative total here — abs() normalizes
+          // both sides regardless of which stage the sign convention
+          // applies to, matching the invoice over-pick check below.
+          const priorTotal = Math.abs(Number(priorAgg._sum.quantity ?? 0));
+          const currentTotal = Math.abs(Number(currentAgg._sum.quantity ?? 0));
           const remaining = priorTotal - currentTotal;
 
           if (qty > remaining) {

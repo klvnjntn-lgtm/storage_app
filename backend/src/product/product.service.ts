@@ -67,6 +67,13 @@ export class ProductService {
       sessionType: e.session?.type ?? null,
       sessionStatus: e.session?.status ?? null,
       user: e.user ?? null,
+      balanceAfter: e.balanceAfter != null ? Number(e.balanceAfter) : null,
+      oversold: e.oversold,
+      invoiceId: e.invoiceId ?? null,
+      // The user who typed "sell anyway?" on a WARN override — set by
+      // StockService.fulfill() on the same Event row, may differ from
+      // who issued the invoice on an edit made by someone else.
+      confirmedOverrideByUserId: (e.metadata as any)?.confirmedOverrideByUserId ?? null,
     }));
   }
 
