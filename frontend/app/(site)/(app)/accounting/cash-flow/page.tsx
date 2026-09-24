@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { Banknote, Calendar, ArrowDownToLine, ArrowUpFromLine, Info, AlertTriangle } from 'lucide-react';
+import { Banknote, ArrowDownToLine, ArrowUpFromLine, Info, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -59,24 +60,11 @@ function defaultTo() {
   return toCalendarDateString(new Date());
 }
 
-const RANGE_PRESETS = [
-  { labelKey: 'accounting.profitLoss.thisMonth', fn: () => {
-    const d = new Date();
-    return { from: new Date(d.getFullYear(), d.getMonth(), 1), to: d };
-  }},
-  { labelKey: 'accounting.profitLoss.lastMonth', fn: () => {
-    const d = new Date();
-    return { from: new Date(d.getFullYear(), d.getMonth() - 1, 1), to: new Date(d.getFullYear(), d.getMonth(), 0) };
-  }},
-  { labelKey: 'accounting.profitLoss.thisYear', fn: () => {
-    const d = new Date();
-    return { from: new Date(d.getFullYear(), 0, 1), to: d };
-  }},
-] as const;
-
-function toISODate(d: Date) {
-  return toCalendarDateString(d);
-}
+// What DateRangePicker's "All time" preset resolves to for this report —
+// its from/to are required by the backend (RevenueReportQueryDto-style
+// DTOs aren't optional here), so a null/null onChange gets translated to
+// a fixed wide range rather than sent through as-is.
+const ALL_TIME_FROM = '2000-01-01';
 
 export default function CashFlowPage() {
   const { t } = useLanguage();
@@ -115,12 +103,6 @@ export default function CashFlowPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  function applyPreset(fn: () => { from: Date; to: Date }) {
-    const { from: f, to: t } = fn();
-    setFrom(toISODate(f));
-    setTo(toISODate(t));
-  }
-
   return (
     <main
       className="min-h-screen text-black"
@@ -149,43 +131,15 @@ export default function CashFlowPage() {
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-5 sm:mb-6">
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
-            <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
-              <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                <Calendar size={12} strokeWidth={2} />
-                {t('accounting.journal.from')}
-              </label>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
-              <label className="text-xs font-semibold text-gray-600">{t('accounting.journal.to')}</label>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 sm:flex gap-1.5">
-            {RANGE_PRESETS.map((p) => (
-              <button
-                key={p.labelKey}
-                onClick={() => applyPreset(p.fn)}
-                className="text-xs px-3 py-2.5 sm:py-2 rounded-md border-2 border-gray-300 text-gray-600 font-semibold hover:bg-blue-50 hover:border-blue-500/40 hover:text-blue-700 active:bg-blue-100 transition-colors"
-              >
-                {t(p.labelKey)}
-              </button>
-            ))}
-          </div>
+        <div className="mb-5 sm:mb-6">
+          <DateRangePicker
+            from={from}
+            to={to}
+            onChange={(f, t) => {
+              setFrom(f ?? ALL_TIME_FROM);
+              setTo(t ?? toCalendarDateString(new Date()));
+            }}
+          />
         </div>
 
         {error && (

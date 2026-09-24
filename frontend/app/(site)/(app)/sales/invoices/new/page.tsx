@@ -59,14 +59,21 @@ function lineDiscountAmount(
   return 0;
 }
 
+// Also true for a bare customer selection with an empty cart — exiting
+// the page (tab close, refresh, navigating away) should still leave a
+// draft behind so that pick isn't lost, not just once there's a line item.
 function hasSaveableContent(
   cart: Record<string, CartLine>,
   services: ServiceLine[],
   hasWorkshopRms: boolean,
+  customer: Customer | null,
+  customerName: string,
 ): boolean {
   return (
     Object.keys(cart).length > 0 ||
-    (hasWorkshopRms && services.some((s) => s.description.trim() && s.unitPrice !== null))
+    (hasWorkshopRms && services.some((s) => s.description.trim() && s.unitPrice !== null)) ||
+    !!customer ||
+    !!customerName.trim()
   );
 }
 
@@ -76,6 +83,21 @@ async function extractErrorMessage(res: Response, t: (key: string, vars?: Record
     return data?.message || JSON.stringify(data);
   } catch {
     return res.statusText || t('sales.invoicesNew.requestFailed', { status: res.status });
+  }
+}
+
+// A 409 from POST /invoices/:id/print under StockPolicy.WARN — the backend
+// refused to oversell without confirmation. Ask, then the caller resubmits
+// with confirmOversell: true. Not a generic error: this is the one 409 the
+// print endpoint uses for this specific reason (see
+// StockConfirmationRequiredException on the backend).
+async function confirmStockOversell(res: Response): Promise<boolean> {
+  try {
+    const data = await res.json();
+    if (data?.error !== 'STOCK_CONFIRMATION_REQUIRED') return false;
+    return window.confirm(data.message as string);
+  } catch {
+    return false;
   }
 }
 
@@ -449,46 +471,63 @@ function NewInvoicePage() {
     return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
   }
 
-  function addToCart(product: ProductSearchResult) {
+  function addToCart(
+    product: ProductSearchResult,
+    details: {
+      quantity: number;
+      unitPrice: number;
+      unit: string | null;
+      taxRateIds: string[];
+      discountType: DiscountType | null;
+      discountValue: number | null;
+    },
+  ): boolean {
     setError('');
     let target;
     if (locationFilter) {
       target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
       if (!target || target.quantity <= 0) {
         setError(t('sales.invoicesNew.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
-        return;
+        return false;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
       if (!target || target.quantity <= 0) {
         setError(t('sales.invoicesNew.noStockAnywhere', { name: product.name }));
-        return;
+        return false;
       }
     }
 
     const resolvedTarget = target;
     const key = cartKey(product.id, resolvedTarget.locationId);
+    const existing = cart[key];
+    const nextQty = (existing?.quantity ?? 0) + details.quantity;
+    if (!posModeEnabled && nextQty > resolvedTarget.quantity) {
+      setError(
+        t('sales.invoicesNew.onlyAvailable', {
+          qty: resolvedTarget.quantity,
+          name: product.name,
+          location: resolvedTarget.locationName,
+        }),
+      );
+      return false;
+    }
 
-    setCart((prev) => {
-      const existing = prev[key];
-      const nextQty = (existing?.quantity ?? 0) + 1;
-      if (nextQty > resolvedTarget.quantity) return prev;
-      const defaultRate = taxRates.find((r) => r.isDefault);
-      return {
-        ...prev,
-        [key]: {
-          product,
-          quantity: nextQty,
-          unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
-          unit: existing?.unit ?? product.unit ?? null,
-          locationId: resolvedTarget.locationId,
-          locationName: resolvedTarget.locationName,
-          taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
-          discountType: existing?.discountType ?? null,
-          discountValue: existing?.discountValue ?? null,
-        },
-      };
-    });
+    setCart((prev) => ({
+      ...prev,
+      [key]: {
+        product,
+        quantity: nextQty,
+        unitPrice: details.unitPrice,
+        unit: details.unit,
+        locationId: resolvedTarget.locationId,
+        locationName: resolvedTarget.locationName,
+        taxRateIds: details.taxRateIds,
+        discountType: details.discountType,
+        discountValue: details.discountValue,
+      },
+    }));
+    return true;
   }
 
   function changeQty(key: string, delta: number) {
@@ -821,8 +860,14 @@ function NewInvoicePage() {
     window.history.replaceState(null, '', `/sales/invoices/new?draftId=${id}`);
   }
 
-  async function autosaveDraft() {
-    if (printData || !hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms)) return;
+  // useKeepalive is set from the pagehide handler below, so the request
+  // can outlive the page (tab close/refresh/navigating away) instead of
+  // being cancelled mid-flight like a normal fetch would be.
+  async function autosaveDraft(useKeepalive = false) {
+    if (
+      printData ||
+      !hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms, customerRef.current, customerNameRef.current)
+    ) return;
 
     const itemsPayload = buildItemsPayload();
 
@@ -830,6 +875,7 @@ function NewInvoicePage() {
       if (currentDraftId) {
         await apiFetch(`/invoices/${currentDraftId}`, {
           method: 'PATCH',
+          keepalive: useKeepalive,
           body: JSON.stringify({
             format,
             ...buildCustomerFields(),
@@ -845,6 +891,7 @@ function NewInvoicePage() {
       } else {
         const res = await apiFetch('/invoices', {
           method: 'POST',
+          keepalive: useKeepalive,
           body: JSON.stringify({
             locationId: cartLines[0]?.locationId,
             format,
@@ -878,7 +925,7 @@ function NewInvoicePage() {
       skipAutosaveRef.current = false;
       return;
     }
-    if (printData || !hasSaveableContent(cart, services, hasWorkshopRms)) return;
+    if (printData || !hasSaveableContent(cart, services, hasWorkshopRms, customer, customerName)) return;
 
     if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     autosaveTimeoutRef.current = setTimeout(() => {
@@ -895,11 +942,29 @@ function NewInvoicePage() {
     return () => {
       if (
         !printDataRef.current &&
-        hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms)
+        hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms, customerRef.current, customerNameRef.current)
       ) {
         autosaveDraftRef.current();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Covers exits the unmount cleanup above can't see: closing the tab,
+  // refreshing, or navigating to a different site. pagehide (not
+  // beforeunload) is used so it doesn't block the back/forward cache; the
+  // fetch is fired with keepalive so it can complete after the page is gone.
+  useEffect(() => {
+    function handlePageHide() {
+      if (
+        !printDataRef.current &&
+        hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms, customerRef.current, customerNameRef.current)
+      ) {
+        autosaveDraftRef.current(true);
+      }
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -965,7 +1030,18 @@ function NewInvoicePage() {
         adoptDraftId(draft.id);
       }
 
-      const printRes = await apiFetch(`/invoices/${invoiceId}/print`, { method: 'POST' });
+      let printRes = await apiFetch(`/invoices/${invoiceId}/print`, { method: 'POST' });
+      if (printRes.status === 409) {
+        const confirmed = await confirmStockOversell(printRes);
+        if (!confirmed) {
+          setPrinting(false);
+          return;
+        }
+        printRes = await apiFetch(`/invoices/${invoiceId}/print`, {
+          method: 'POST',
+          body: JSON.stringify({ confirmOversell: true }),
+        });
+      }
       if (!printRes.ok) {
         throw new Error(await extractErrorMessage(printRes, t));
       }
@@ -1179,6 +1255,7 @@ function NewInvoicePage() {
           onSelectLocationFilter={selectLocationFilter}
           onAddToCart={addToCart}
           posModeEnabled={posModeEnabled}
+          taxRates={taxRates}
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">

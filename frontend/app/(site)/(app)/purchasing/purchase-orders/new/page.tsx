@@ -16,8 +16,26 @@ import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
+const AUTOSAVE_DEBOUNCE_MS = 1000;
+
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+// True once there's anything worth persisting as a draft — a cart line, a
+// started "new product" row, or just a chosen supplier with an empty cart.
+// The last case matters for exit-save: picking a supplier and closing the
+// tab should still leave a draft behind, not just once there's a line item.
+function hasSaveableContent(
+  cart: Record<string, POCartLine>,
+  newProductLines: PONewProductLine[],
+  supplier: Supplier | null,
+): boolean {
+  return (
+    Object.keys(cart).length > 0 ||
+    newProductLines.some((l) => l.name.trim() || l.sku.trim() || l.category.trim()) ||
+    !!supplier
+  );
 }
 
 // FIX — useSearchParams() requires a Suspense boundary for static
@@ -53,6 +71,23 @@ function PurchaseOrderFormPageInner() {
   const [notEditable, setNotEditable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Draft id this "new" page has adopted — starts as whatever ?id= was in
+  // the URL, but autosave can also mint a fresh one client-side (see
+  // adoptId below), same as the sales-side new pages.
+  const [currentId, setCurrentId] = useState<string | null>(editId);
+  const skipAutosaveRef = useRef(false);
+  const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedRef = useRef(false);
+
+  const cartRef = useRef(cart);
+  const newProductLinesRef = useRef(newProductLines);
+  const supplierRef = useRef(supplier);
+  useEffect(() => {
+    cartRef.current = cart;
+    newProductLinesRef.current = newProductLines;
+    supplierRef.current = supplier;
+  }, [cart, newProductLines, supplier, locationId, taxRateId, discountAmount]);
 
   useEffect(() => {
     (async () => {
@@ -114,6 +149,7 @@ function PurchaseOrderFormPageInner() {
           // reconstruct), so it's silently excluded from the editable
           // cart. Surface via a read-only banner elsewhere if needed.
         }
+        skipAutosaveRef.current = true;
         setCart(restoredCart);
         // Draft POs never contain unsaved "new product" rows — those
         // only exist client-side until save, at which point they become
@@ -127,15 +163,15 @@ function PurchaseOrderFormPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  function addProduct(product: POProduct) {
+  function addProduct(product: POProduct, details: { quantity: number; unitCost: number }) {
     setCart((prev) => {
       const existing = prev[product.id];
       return {
         ...prev,
         [product.id]: {
           product,
-          quantity: (existing?.quantity ?? 0) + 1,
-          unitCost: existing?.unitCost ?? 0,
+          quantity: (existing?.quantity ?? 0) + details.quantity,
+          unitCost: details.unitCost,
         },
       };
     });
@@ -224,6 +260,125 @@ function PurchaseOrderFormPageInner() {
     };
   }
 
+  // Autosave-only payload: unlike buildPayload() (used for the explicit
+  // Save button) this never throws on a half-filled "new product" row —
+  // it just leaves that row out of the draft until it's complete, the
+  // same way the sales-side pages silently drop half-filled service lines.
+  function buildAutosavePayload() {
+    const validNewProductLines = newProductLines.filter(
+      (l) => l.name.trim() && l.sku.trim() && l.category.trim(),
+    );
+    return {
+      locationId: locationId || undefined,
+      supplierId: supplier?.id,
+      discountAmount: clampedDiscount,
+      taxRateId: taxRateId || undefined,
+      items: [
+        ...cartLines.map((l) => ({ productId: l.product.id, quantity: l.quantity, unitCost: l.unitCost })),
+        ...validNewProductLines.map((l) => ({
+          newProduct: {
+            name: l.name.trim(),
+            sku: l.sku.trim(),
+            category: l.category.trim(),
+            brand: l.brand?.trim() || undefined,
+            oem: l.oem?.trim() || undefined,
+            barcode: l.barcode?.trim() || undefined,
+          },
+          quantity: l.quantity,
+          unitCost: l.unitCost,
+        })),
+      ],
+    };
+  }
+
+  function adoptId(id: string) {
+    setCurrentId(id);
+    window.history.replaceState(null, '', `/purchasing/purchase-orders/new?id=${id}`);
+  }
+
+  // useKeepalive is set from the pagehide handler below, so the request
+  // can outlive the page (tab close/refresh/navigating away) instead of
+  // being cancelled mid-flight like a normal fetch would be.
+  async function autosaveDraft(useKeepalive = false) {
+    if (savedRef.current) return;
+    if (!hasSaveableContent(cartRef.current, newProductLinesRef.current, supplierRef.current)) return;
+
+    const payload = buildAutosavePayload();
+    try {
+      if (currentId) {
+        await apiFetch(`/purchase-orders/${currentId}`, {
+          method: 'PATCH',
+          keepalive: useKeepalive,
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const res = await apiFetch('/purchase-orders', {
+          method: 'POST',
+          keepalive: useKeepalive,
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const draft = await res.json();
+          adoptId(draft.id);
+        }
+      }
+    } catch (e) {
+      console.error('Draft autosave failed', e);
+    }
+  }
+
+  const autosaveDraftRef = useRef(autosaveDraft);
+  useEffect(() => {
+    autosaveDraftRef.current = autosaveDraft;
+  });
+
+  useEffect(() => {
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false;
+      return;
+    }
+    if (savedRef.current) return;
+    if (!hasSaveableContent(cart, newProductLines, supplier)) return;
+
+    if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+    autosaveTimeoutRef.current = setTimeout(() => {
+      autosaveDraft();
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, newProductLines, supplier, locationId, taxRateId, discountAmount]);
+
+  // Safety net for leaving via client-side navigation (component unmount) —
+  // the debounce above may not have fired yet.
+  useEffect(() => {
+    return () => {
+      if (savedRef.current) return;
+      if (hasSaveableContent(cartRef.current, newProductLinesRef.current, supplierRef.current)) {
+        autosaveDraftRef.current();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Covers exits the unmount cleanup above can't see: closing the tab,
+  // refreshing, or navigating to a different site. pagehide (not
+  // beforeunload) is used so it doesn't block the back/forward cache; the
+  // fetch is fired with keepalive so it can complete after the page is gone.
+  useEffect(() => {
+    function handlePageHide() {
+      if (savedRef.current) return;
+      if (hasSaveableContent(cartRef.current, newProductLinesRef.current, supplierRef.current)) {
+        autosaveDraftRef.current(true);
+      }
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleSave() {
     setError('');
     if (itemCount === 0) {
@@ -238,17 +393,20 @@ function PurchaseOrderFormPageInner() {
       return;
     }
     setSaving(true);
+    savedRef.current = true;
     try {
-      const res = editId
-        ? await apiFetch(`/purchase-orders/${editId}`, { method: 'PATCH', body: JSON.stringify(payload) })
+      const res = currentId
+        ? await apiFetch(`/purchase-orders/${currentId}`, { method: 'PATCH', body: JSON.stringify(payload) })
         : await apiFetch('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
+        savedRef.current = false;
         setError(body?.message ?? t('purchasing.purchaseOrderNew.requestFailed', { status: res.status }));
         return;
       }
       router.push(`/purchasing/purchase-orders/${body.id}`);
     } catch {
+      savedRef.current = false;
       setError(t('purchasing.purchaseOrderNew.serverError'));
     } finally {
       setSaving(false);
@@ -296,7 +454,7 @@ function PurchaseOrderFormPageInner() {
               <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
             </span>
             <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
-              {editId ? t('purchasing.purchaseOrderNew.titleEdit') : t('purchasing.purchaseOrderNew.titleNew')}
+              {currentId ? t('purchasing.purchaseOrderNew.titleEdit') : t('purchasing.purchaseOrderNew.titleNew')}
             </h1>
           </div>
         </div>
@@ -518,7 +676,7 @@ function PurchaseOrderFormPageInner() {
             disabled={saving || itemCount === 0}
             className="w-full bg-blue-600 text-white font-semibold px-4 py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {saving ? t('purchasing.purchaseOrderNew.saving') : editId ? t('purchasing.purchaseOrderNew.saveChanges') : t('purchasing.purchaseOrderNew.saveDraft')}
+            {saving ? t('purchasing.purchaseOrderNew.saving') : currentId ? t('purchasing.purchaseOrderNew.saveChanges') : t('purchasing.purchaseOrderNew.saveDraft')}
           </button>
         </div>
       </div>

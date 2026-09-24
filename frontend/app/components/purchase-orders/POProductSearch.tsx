@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Search, Plus, List, LayoutGrid, ImageOff } from 'lucide-react';
+import { Search, Plus, Minus, X, List, LayoutGrid, ImageOff, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { POProduct } from './types';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -10,7 +10,17 @@ import { useLanguage } from '@/app/context/LanguageContext';
 const SEARCH_DEBOUNCE_MS = 300;
 
 type Props = {
-  onAddProduct: (product: POProduct) => void;
+  onAddProduct: (product: POProduct, details: { quantity: number; unitCost: number }) => void;
+};
+
+// A product just clicked in the results, held here — not yet in the
+// cart — so its quantity/unit cost can be set before it joins the real
+// cart. Mirrors the sales-side ProductSearch staging card, minus
+// tax/discount, which purchase-order lines don't have.
+type StagedLine = {
+  product: POProduct;
+  quantity: number;
+  unitCost: number;
 };
 
 export function POProductSearch({ onAddProduct }: Props) {
@@ -20,6 +30,17 @@ export function POProductSearch({ onAddProduct }: Props) {
   const [searching, setSearching] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
+  const [staged, setStaged] = useState<StagedLine | null>(null);
+
+  function selectProduct(product: POProduct) {
+    setStaged({ product, quantity: 1, unitCost: 0 });
+  }
+
+  function confirmStaged() {
+    if (!staged) return;
+    onAddProduct(staged.product, { quantity: staged.quantity, unitCost: staged.unitCost });
+    setStaged(null);
+  }
 
   useEffect(() => {
     if (!query.trim()) {
@@ -88,6 +109,73 @@ export function POProductSearch({ onAddProduct }: Props) {
         </div>
       </div>
 
+      {staged && (
+        <div className="mb-3 border-2 border-black rounded-md p-3">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <ShoppingCart size={13} strokeWidth={2} className="text-gray-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
+                  {t('purchasing.productSearch.adjustBeforeAdding')}
+                </p>
+                <p className="text-sm font-medium break-words leading-snug">{staged.product.name}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setStaged(null)}
+              className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-black hover:bg-gray-100 shrink-0"
+              aria-label={t('purchasing.productSearch.cancelSelection')}
+            >
+              <X size={14} strokeWidth={2} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap mb-3">
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.colQty')}</label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, prev.quantity - 1) } : prev))}
+                  disabled={staged.quantity <= 1}
+                  className="w-7 h-7 flex items-center justify-center border-2 border-gray-200 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Minus size={14} strokeWidth={2} />
+                </button>
+                <span className="w-6 text-center text-sm">{staged.quantity}</span>
+                <button
+                  onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: prev.quantity + 1 } : prev))}
+                  className="w-7 h-7 flex items-center justify-center border-2 border-gray-200 rounded hover:bg-gray-100"
+                >
+                  <Plus size={14} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.colUnitCost')}</label>
+              <input
+                type="number"
+                min={0}
+                value={staged.unitCost}
+                onChange={(e) => {
+                  const parsed = Number(e.target.value);
+                  setStaged((prev) => (prev ? { ...prev, unitCost: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0 } : prev));
+                }}
+                className="w-28 border-2 border-gray-300 focus:border-black rounded-md px-2 py-1.5 text-sm outline-none"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={confirmStaged}
+            className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-black hover:bg-gray-800 text-white font-semibold transition-colors"
+          >
+            <ShoppingCart size={14} strokeWidth={2} />
+            {t('purchasing.productSearch.addToCart')}
+          </button>
+        </div>
+      )}
+
       {searching && <p className="text-sm text-gray-400">{t('purchasing.productSearch.searching')}</p>}
 
       {!searching && results.length > 0 && viewMode === 'list' && (
@@ -95,7 +183,7 @@ export function POProductSearch({ onAddProduct }: Props) {
           {results.map((p) => (
             <button
               key={p.id}
-              onClick={() => onAddProduct(p)}
+              onClick={() => selectProduct(p)}
               className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-md hover:bg-gray-100 text-sm"
             >
               <span className="min-w-0">
@@ -115,7 +203,7 @@ export function POProductSearch({ onAddProduct }: Props) {
             return (
               <button
                 key={p.id}
-                onClick={() => onAddProduct(p)}
+                onClick={() => selectProduct(p)}
                 className="text-left border-2 border-gray-200 rounded-md overflow-hidden hover:border-black transition-colors"
               >
                 <div className="aspect-square bg-gray-50 flex items-center justify-center">

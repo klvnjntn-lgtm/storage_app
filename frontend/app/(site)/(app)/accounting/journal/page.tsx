@@ -4,9 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from 'next/font/google';
-import { BookText, Calendar, ChevronDown, ChevronUp, Plus, X, Loader2, Ban, Trash2 } from 'lucide-react';
+import { BookText, ChevronDown, ChevronUp, Plus, X, Loader2, Ban, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import { toCalendarDateString } from '@/lib/dates';
 import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -84,8 +85,8 @@ export default function JournalPage() {
   // reversal that briefly leaves this page) restores the same filters
   // instead of resetting to the default 30-day range.
   const [sourceType, setSourceType] = useState<string>(() => getInitialParam('sourceType', ''));
-  const [from, setFrom] = useState(() => getInitialParam('from', defaultFrom()));
-  const [to, setTo] = useState(() => getInitialParam('to', defaultTo()));
+  const [from, setFrom] = useState<string | null>(() => getInitialParam('from', defaultFrom()));
+  const [to, setTo] = useState<string | null>(() => getInitialParam('to', defaultTo()));
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
 
@@ -116,7 +117,9 @@ export default function JournalPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
       if (sourceType) params.set('sourceType', sourceType);
       const res = await apiFetch(`/accounting/journal?${params}`);
       if (!res.ok) {
@@ -287,18 +290,7 @@ export default function JournalPage() {
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {/* Filters */}
         <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-4">
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                <Calendar size={12} strokeWidth={2} /> {t('accounting.journal.from')}
-              </label>
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">{t('accounting.journal.to')}</label>
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500" />
-            </div>
-          </div>
+          <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
           <select
             value={sourceType}
             onChange={(e) => setSourceType(e.target.value)}

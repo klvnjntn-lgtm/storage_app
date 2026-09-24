@@ -44,6 +44,8 @@ import {
   Camera,
   Lock,
   Images,
+  BarChart3,
+  Home,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import NotificationDrawer from '@/app/components/shared/NotificationDrawer';
@@ -245,6 +247,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   const salesChildren: NavItem[] = [
+    { href: '/sales', label: t('nav.items.salesHome'), icon: Home },
     { href: '/sales/orders', label: t('nav.items.salesOrder'), icon: ClipboardList },
     { href: '/sales/invoices', label: t('nav.items.invoice'), icon: Receipt },
     { href: '/sales/delivery-orders', label: t('nav.items.deliveryOrder'), icon: Truck },
@@ -262,6 +265,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Sales (hasInvoicePos) since SupplierController and
   // PurchaseOrderController are both @RequireModule(INVOICE_POS).
   const purchasingChildren: NavItem[] = [
+    { href: '/purchasing', label: t('nav.items.purchasingHome'), icon: Home },
     { href: '/purchasing/purchase-orders', label: t('nav.items.purchaseOrders'), icon: ClipboardList },
     { href: '/purchasing/suppliers', label: t('nav.items.suppliers'), icon: Building2 },
   ];
@@ -274,6 +278,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const accountingChildren: NavItem[] = [
+    { href: '/accounting', label: t('nav.items.accountingHome'), icon: Home },
     { href: '/accounting/journal', label: t('nav.items.journal'), icon: BookText },
     { href: '/accounting/expenses', label: t('nav.items.expenses'), icon: Receipt },
     { href: '/accounting/payroll', label: t('nav.items.payroll'), icon: Users },
@@ -287,6 +292,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/ar-aging', label: t('nav.items.arAging'), icon: Wallet },
     { href: '/accounting/ap-aging', label: t('nav.items.apAging'), icon: ShoppingCart },
     { href: '/accounting/ledger', label: t('nav.items.accountLedger'), icon: BookOpen },
+    { href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 },
   ];
 
   const accountingItem: NavItem = {
@@ -300,6 +306,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     {
       label: t('nav.groups.overview'),
       items: [
+        { href: '/home', label: t('nav.items.home'), icon: Home },
+        { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
         { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
       ],
     },
@@ -339,6 +347,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       label: t('nav.groups.workshop'),
       items: hasWorkshopRms
         ? [
+            { href: '/workshop', label: t('nav.items.workshopHome'), icon: Home },
             { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
             { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
             { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },

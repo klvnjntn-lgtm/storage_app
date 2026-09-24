@@ -23,8 +23,50 @@ function srgbColorMix() {
 }
 srgbColorMix.postcss = true;
 
+// Belt-and-suspenders for the same class of device as above: this one
+// doesn't choke on oklab specifically, it doesn't understand the
+// color-mix() *function* at all (color-mix() only shipped in
+// Chrome 111 / Firefox 113 / Safari 16.2, so a genuinely old browser on
+// an old PC predates it outright). Tailwind's own `/NN` opacity output is
+// entirely color-mix()-based — base tier and the srgb-rewritten
+// @supports tier alike — so on such a browser BOTH declarations are
+// invalid and the property is left unset, i.e. no color, not even the
+// oklch hex fallback's color. A plain rgba() declaration understands no
+// such function and is universally supported, so it's inserted *before*
+// Tailwind's color-mix() declaration: browsers that can't parse
+// color-mix() silently keep this rgba() value (an unparseable
+// declaration never overrides the prior valid one), while every other
+// browser overwrites it with the color-mix() line right after, same as
+// today.
+function colorMixRgbaFallback() {
+  const COLOR_MIX_RE =
+    /^color-mix\(in srgb, (#[0-9a-fA-F]{3,8}) (\d+(?:\.\d+)?)%, transparent\)$/;
+
+  function hexToRgb(hex) {
+    let h = hex.slice(1);
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    if (h.length !== 6) return null;
+    const num = parseInt(h, 16);
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+  }
+
+  return {
+    postcssPlugin: "color-mix-rgba-fallback",
+    Declaration(decl) {
+      const match = decl.value.match(COLOR_MIX_RE);
+      if (!match) return;
+      const [, hex, pct] = match;
+      const rgb = hexToRgb(hex);
+      if (!rgb) return;
+      const alpha = Number(pct) / 100;
+      decl.cloneBefore({ value: `rgba(${rgb.join(", ")}, ${alpha})` });
+    },
+  };
+}
+colorMixRgbaFallback.postcss = true;
+
 const config = {
-  plugins: ["@tailwindcss/postcss", srgbColorMix()],
+  plugins: ["@tailwindcss/postcss", srgbColorMix(), colorMixRgbaFallback()],
 };
 
 export default config;

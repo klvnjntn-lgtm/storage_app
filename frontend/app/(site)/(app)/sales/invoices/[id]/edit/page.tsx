@@ -257,55 +257,59 @@ if (item.productId) {
     return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
   }
 
-function addToCart(product: ProductSearchResult) {
+function addToCart(
+  product: ProductSearchResult,
+  details: {
+    quantity: number;
+    unitPrice: number;
+    unit: string | null;
+    taxRateIds: string[];
+    discountType: DiscountType | null;
+    discountValue: number | null;
+  },
+): boolean {
   setError('');
   let target;
   if (locationFilter) {
     target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
     if (!target || target.quantity <= 0) {
       setError(t('sales.invoiceEdit.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
-      return;
+      return false;
     }
   } else {
     target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
     if (!target || target.quantity <= 0) {
       setError(t('sales.invoiceEdit.noStockAnywhere', { name: product.name }));
-      return;
+      return false;
     }
   }
   const resolvedTarget = target;
   const key = cartKey(product.id, resolvedTarget.locationId);
 
-  // FIX — was missing entirely, unlike invoices/new/orders/new/
-  // quotations/new, which all cap at resolvedTarget.quantity. Without
-  // this, repeatedly clicking "Add to cart" oversubscribed stock with no
-  // warning. POS mode intentionally allows overselling past this point
-  // via the stepper (see changeQty below), but the very first add should
-  // still respect real stock, same as every sibling page.
-  const nextQty = (cart[key]?.quantity ?? 0) + 1;
+  // Still respects real stock on this first add, same as every sibling
+  // page — POS mode's overselling allowance only kicks in later, on the
+  // stepper for a line already in the cart (see changeQty below).
+  const existing = cart[key];
+  const nextQty = (existing?.quantity ?? 0) + details.quantity;
   if (!posPricingEnabled && nextQty > resolvedTarget.quantity) {
     setError(t('sales.invoiceEdit.onlyAvailable', { qty: resolvedTarget.quantity, name: product.name, location: resolvedTarget.locationName }));
-    return;
+    return false;
   }
 
   setCart((prev) => {
     const existing = prev[key];
-    const defaultRate = taxRates.find((r) => r.isDefault);
     return {
       ...prev,
       [key]: {
         product,
-        unit: existing?.unit ?? product.unit ?? null,
+        unit: details.unit,
         quantity: nextQty,
-        unitPrice: existing?.unitPrice ?? product.sellingPrice ?? 0,
+        unitPrice: details.unitPrice,
         locationId: resolvedTarget.locationId,
         locationName: resolvedTarget.locationName,
-        // FIX — was defaulting to 'PERCENTAGE'/0, fabricating a discount
-        // on every newly-added line. null means "no discount," matching
-        // invoices/new/page.tsx's addToCart.
-        discountType: existing?.discountType ?? null,
-        discountValue: existing?.discountValue ?? null,
-        taxRateIds: existing?.taxRateIds ?? (defaultRate ? [defaultRate.id] : []),
+        discountType: details.discountType,
+        discountValue: details.discountValue,
+        taxRateIds: details.taxRateIds,
         // A newly added line has nothing fulfilled yet, whether or not
         // one already existed with a floor from the restored invoice —
         // if `existing` came from the restored cart it already carries
@@ -315,6 +319,7 @@ function addToCart(product: ProductSearchResult) {
       },
     };
   });
+  return true;
 }
   function changeQty(key: string, delta: number) {
     setCart((prev) => {
@@ -558,15 +563,29 @@ function changeServiceUnit(key: string, value: string) {
             }))
         : [];
 
-      const res = await apiFetch(`/invoices/${params.id}/edit`, {
+      const payload = {
+        items: [...productItems, ...serviceItems],
+        dueDate: dueDate || undefined,
+        employeeId: employeeId || null,
+        reason: reason.trim(),
+      };
+      let res = await apiFetch(`/invoices/${params.id}/edit`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          items: [...productItems, ...serviceItems],
-          dueDate: dueDate || undefined,
-          employeeId: employeeId || null,
-          reason: reason.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        const confirmed =
+          body?.error === 'STOCK_CONFIRMATION_REQUIRED' && window.confirm(body.message as string);
+        if (!confirmed) {
+          setSaving(false);
+          return;
+        }
+        res = await apiFetch(`/invoices/${params.id}/edit`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ...payload, confirmOversell: true }),
+        });
+      }
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || t('sales.invoiceEdit.failedToSaveChanges', { status: res.status }));
@@ -612,6 +631,7 @@ function changeServiceUnit(key: string, value: string) {
             onSelectLocationFilter={selectLocationFilter}
             onAddToCart={addToCart}
             posModeEnabled={posPricingEnabled}
+            taxRates={taxRates}
           />
 
           <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 h-fit">

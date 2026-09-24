@@ -1,10 +1,33 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Search, MapPin, MapPinOff, ChevronDown, Check, List, LayoutGrid, ImageOff } from 'lucide-react';
-import { LocationOption, ProductSearchResult } from './types';
+import {
+  Search, MapPin, MapPinOff, ChevronDown, Check, List, LayoutGrid, ImageOff,
+  Minus, Plus, X, Percent, Pencil, ShoppingCart,
+} from 'lucide-react';
+import { DiscountType, LocationOption, ProductSearchResult, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// A product the user just clicked in the results, held here — not yet in
+// the cart — so its quantity/price/tax/discount can be set before it
+// joins the real cart (and shows up in CartPanel). Mirrors CartLine's
+// editable fields, minus the location bookkeeping the parent resolves at
+// confirm time.
+type StagedLine = {
+  product: ProductSearchResult;
+  quantity: number;
+  unitPrice: number;
+  unit: string | null;
+  taxRateIds: string[];
+  discountType: DiscountType | null;
+  discountValue: number | null;
+};
 
 export function ProductSearch({
   query,
@@ -16,6 +39,7 @@ export function ProductSearch({
   onSelectLocationFilter,
   onAddToCart,
   posModeEnabled,
+  taxRates,
 }: {
   query: string;
   setQuery: (q: string) => void;
@@ -24,8 +48,22 @@ export function ProductSearch({
   locations: LocationOption[];
   locationFilter: LocationOption | null;
   onSelectLocationFilter: (loc: LocationOption | null) => void;
-  onAddToCart: (product: ProductSearchResult) => void;
+  // Returns false when the parent rejected the add (e.g. not enough
+  // stock) — the staging card then stays open with its inputs intact
+  // instead of clearing, so the person can adjust quantity and retry.
+  onAddToCart: (
+    product: ProductSearchResult,
+    details: {
+      quantity: number;
+      unitPrice: number;
+      unit: string | null;
+      taxRateIds: string[];
+      discountType: DiscountType | null;
+      discountValue: number | null;
+    },
+  ) => boolean;
   posModeEnabled: boolean;
+  taxRates: TaxRate[];
 }) {
   const { t } = useLanguage();
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
@@ -36,6 +74,9 @@ export function ProductSearch({
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
 
+  const [staged, setStaged] = useState<StagedLine | null>(null);
+  const [editingStagedPrice, setEditingStagedPrice] = useState(false);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (locationDropdownRef.current && !locationDropdownRef.current.contains(e.target as Node)) {
@@ -45,6 +86,66 @@ export function ProductSearch({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Same target-resolution rule every page's addToCart uses: the filtered
+  // location's stock if one's picked, otherwise whichever location has the
+  // most on hand. Used here only to cap the staged quantity stepper —
+  // the parent re-derives and re-validates this independently on confirm.
+  function resolveTarget(product: ProductSearchResult) {
+    if (locationFilter) {
+      return product.stockByLocation.find((s) => s.locationId === locationFilter.id);
+    }
+    return [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
+  }
+
+  function selectProduct(product: ProductSearchResult) {
+    const defaultRate = taxRates.find((r) => r.isDefault);
+    setStaged({
+      product,
+      quantity: 1,
+      unitPrice: product.sellingPrice ?? 0,
+      unit: product.unit ?? null,
+      taxRateIds: defaultRate ? [defaultRate.id] : [],
+      discountType: null,
+      discountValue: null,
+    });
+    setEditingStagedPrice(false);
+  }
+
+  function confirmStaged() {
+    if (!staged) return;
+    const added = onAddToCart(staged.product, {
+      quantity: staged.quantity,
+      unitPrice: staged.unitPrice,
+      unit: staged.unit,
+      taxRateIds: staged.taxRateIds,
+      discountType: staged.discountType,
+      discountValue: staged.discountValue,
+    });
+    if (added) {
+      setStaged(null);
+      setEditingStagedPrice(false);
+    }
+  }
+
+  const stagedAvailable = staged ? resolveTarget(staged.product)?.quantity ?? 0 : 0;
+  const stagedSubtotal = staged ? round2(staged.unitPrice * staged.quantity) : 0;
+  const stagedDiscountAmount = staged
+    ? staged.discountType === 'PERCENTAGE'
+      ? round2(stagedSubtotal * ((staged.discountValue ?? 0) / 100))
+      : staged.discountType === 'FIXED'
+      ? round2(Math.min(staged.discountValue ?? 0, stagedSubtotal))
+      : 0
+    : 0;
+  const stagedNet = round2(stagedSubtotal - stagedDiscountAmount);
+  const stagedTaxAmount = staged
+    ? round2(
+        taxRates
+          .filter((r) => staged.taxRateIds.includes(r.id))
+          .reduce((sum, r) => sum + stagedNet * (r.percentage / 100), 0),
+      )
+    : 0;
+  const stagedTotal = round2(stagedNet + stagedTaxAmount);
 
   return (
     <div>
@@ -149,6 +250,152 @@ export function ProductSearch({
         />
       </div>
 
+      {staged && (
+        <div className="mt-3 border-2 border-blue-500/40 bg-blue-50/30 rounded-xl p-3">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <ShoppingCart size={13} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-blue-900/60 uppercase tracking-wide">
+                  {t('sales.productSearch.adjustBeforeAdding')}
+                </p>
+                <p className="text-sm font-medium break-words leading-snug">{staged.product.name}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setStaged(null);
+                setEditingStagedPrice(false);
+              }}
+              className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-blue-700 hover:bg-white shrink-0"
+              aria-label={t('sales.productSearch.cancelSelection')}
+            >
+              <X size={14} strokeWidth={2} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            {posModeEnabled ? (
+              editingStagedPrice ? (
+                <div className="flex items-center gap-1 bg-white border-2 border-blue-600 rounded-md pl-2 pr-1 py-1">
+                  <span className="text-xs text-gray-400">Rp</span>
+                  <input
+                    type="number"
+                    min={0}
+                    autoFocus
+                    value={staged.unitPrice}
+                    onChange={(e) => {
+                      const parsed = Number(e.target.value);
+                      setStaged((prev) => (prev ? { ...prev, unitPrice: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0 } : prev));
+                    }}
+                    onBlur={() => setEditingStagedPrice(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') setEditingStagedPrice(false);
+                    }}
+                    className="w-20 text-xs outline-none"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => setEditingStagedPrice(true)}
+                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-blue-500/20 bg-white text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50 transition-colors"
+                >
+                  <Pencil size={10} strokeWidth={2} className="text-gray-400" />
+                  {formatIDR(staged.unitPrice)}
+                </button>
+              )
+            ) : (
+              <span className="text-xs text-gray-500">{formatIDR(staged.unitPrice)}</span>
+            )}
+
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() =>
+                  setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, prev.quantity - 1) } : prev))
+                }
+                disabled={staged.quantity <= 1}
+                className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Minus size={14} strokeWidth={2} />
+              </button>
+              <span className="w-5 text-center text-sm">{staged.quantity}</span>
+              <button
+                onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: prev.quantity + 1 } : prev))}
+                disabled={!posModeEnabled && staged.quantity >= stagedAvailable}
+                className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus size={14} strokeWidth={2} />
+              </button>
+            </div>
+
+            <span className="text-xs text-gray-400">
+              = <span className="font-medium text-gray-700">{formatIDR(stagedSubtotal)}</span>
+            </span>
+          </div>
+
+          <LineDiscountControl
+            discountType={staged.discountType}
+            discountValue={staged.discountValue}
+            discountAmount={stagedDiscountAmount}
+            onChange={(discountType, rawValue) =>
+              setStaged((prev) => {
+                if (!prev) return prev;
+                if (discountType === null) return { ...prev, discountType: null, discountValue: null };
+                const parsed = Number(rawValue);
+                const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
+                const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (prev.discountValue ?? 0);
+                return { ...prev, discountType, discountValue: nextValue };
+              })
+            }
+          />
+
+          {taxRates.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5 mt-1.5">
+              <span className="flex items-center gap-1 text-[11px] text-gray-400">
+                <Percent size={10} strokeWidth={2} />
+                {t('sales.invoiceCart.taxLabel')}
+              </span>
+              {taxRates.map((rate) => {
+                const checked = staged.taxRateIds.includes(rate.id);
+                return (
+                  <label key={rate.id} className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setStaged((prev) => {
+                          if (!prev) return prev;
+                          const has = prev.taxRateIds.includes(rate.id);
+                          return {
+                            ...prev,
+                            taxRateIds: has
+                              ? prev.taxRateIds.filter((id) => id !== rate.id)
+                              : [...prev.taxRateIds, rate.id],
+                          };
+                        })
+                      }
+                      className="w-3.5 h-3.5 accent-blue-600"
+                    />
+                    {rate.name} ({rate.percentage}%)
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-3 pt-2 border-t border-blue-500/15">
+            <span className="text-sm font-semibold">{formatIDR(stagedTotal)}</span>
+            <button
+              onClick={confirmStaged}
+              className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold transition-colors"
+            >
+              <ShoppingCart size={14} strokeWidth={2} />
+              {t('sales.productSearch.addToCart')}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className={viewMode === 'grid' ? 'mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2' : 'mt-3 flex flex-col gap-2'}>
         {searching && <p className="text-sm text-gray-500">{t('sales.productSearch.searching')}</p>}
         {!searching && query && results.length === 0 && <p className="text-sm text-gray-500">{t('sales.productSearch.noMatchingItems')}</p>}
@@ -173,7 +420,7 @@ export function ProductSearch({
                 key={product.id}
                 onClick={() => {
                   if (outOfStock) return;
-                  onAddToCart(product);
+                  selectProduct(product);
                 }}
                 className={`border rounded-xl overflow-hidden transition-colors ${
                   outOfStock
@@ -212,7 +459,7 @@ export function ProductSearch({
               key={product.id}
               onClick={() => {
                 if (outOfStock) return;
-                onAddToCart(product);
+                selectProduct(product);
               }}
               className={`border rounded-xl p-3 transition-colors ${
                 outOfStock

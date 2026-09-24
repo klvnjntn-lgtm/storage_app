@@ -7,6 +7,7 @@ import { Space_Grotesk } from 'next/font/google';
 import { Users, Plus, X, Loader2, ChevronDown, ChevronUp, Wallet, Trash2, Send, SlidersHorizontal, Undo2, Printer } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
@@ -142,6 +143,12 @@ function RunsTab() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // /payroll/runs has no server-side pagination, so this pages the
+  // already-fetched list client-side.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const pagedRuns = useMemo(() => (runs ?? []).slice((page - 1) * pageSize, page * pageSize), [runs, page, pageSize]);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PayrollRun | null>(null);
@@ -500,7 +507,7 @@ function RunsTab() {
       )}
 
       <div className="flex flex-col gap-2">
-        {(runs ?? []).map((run) => {
+        {pagedRuns.map((run) => {
           const isExpanded = expandedId === run.id;
           const isPaying = payingId === run.id;
           const isVoiding = voidingId === run.id;
@@ -703,6 +710,20 @@ function RunsTab() {
           );
         })}
       </div>
+      {(runs?.length ?? 0) > 0 && (
+        <div className="mt-4">
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={runs?.length ?? 0}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
     </>
   );
 }
@@ -715,6 +736,15 @@ function EmployeesTab() {
   const [components, setComponents] = useState<SalaryComponent[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // /payroll/employees has no server-side pagination, so this pages the
+  // already-fetched list client-side.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const pagedEmployees = useMemo(
+    () => (employees ?? []).slice((page - 1) * pageSize, page * pageSize),
+    [employees, page, pageSize],
+  );
 
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -989,7 +1019,7 @@ function EmployeesTab() {
       )}
 
       <div className="flex flex-col gap-2">
-        {(employees ?? []).map((emp) => (
+        {pagedEmployees.map((emp) => (
           <div key={emp.id} className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
             <div className="p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1130,6 +1160,20 @@ function EmployeesTab() {
           </div>
         ))}
       </div>
+      {(employees?.length ?? 0) > 0 && (
+        <div className="mt-4">
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={employees?.length ?? 0}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
     </>
   );
 }

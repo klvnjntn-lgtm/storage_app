@@ -170,6 +170,9 @@ export const purchasingWorkshop = {
         skuLabel: 'SKU: {sku}',
         listView: 'List',
         gridView: 'Grid',
+        adjustBeforeAdding: 'Adjust before adding',
+        addToCart: 'Add to order',
+        cancelSelection: 'Cancel',
       },
       purchaseOrderTemplate: {
         purchaseOrder: 'Purchase Order',
@@ -472,6 +475,9 @@ export const purchasingWorkshop = {
         skuLabel: 'SKU: {sku}',
         listView: 'Daftar',
         gridView: 'Grid',
+        adjustBeforeAdding: 'Sesuaikan sebelum menambahkan',
+        addToCart: 'Tambah ke pesanan',
+        cancelSelection: 'Batal',
       },
       purchaseOrderTemplate: {
         purchaseOrder: 'Pesanan Pembelian',

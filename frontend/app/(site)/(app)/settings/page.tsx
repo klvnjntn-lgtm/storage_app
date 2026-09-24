@@ -12,6 +12,7 @@ import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibr
 const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
+type StockPolicy = 'BLOCK' | 'WARN' | 'ALLOW';
 
 type ModuleStatus = {
   module: string;
@@ -57,6 +58,8 @@ export default function SettingsPage() {
 
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode | null>(null);
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean | null>(null);
+  const [stockPolicy, setStockPolicy] = useState<StockPolicy | null>(null);
+  const [stockOverrideRequiresAdmin, setStockOverrideRequiresAdmin] = useState<boolean | null>(null);
   const [modules, setModules] = useState<ModuleStatus[] | null>(null);
 
   const [business, setBusiness] = useState<BusinessDetails | null>(null);
@@ -135,6 +138,8 @@ export default function SettingsPage() {
       .then((data) => {
         setFulfillmentMode(data.fulfillmentMode);
         setPosPricingEnabled(data.posPricingEnabled);
+        setStockPolicy(data.stockPolicy ?? 'BLOCK');
+        setStockOverrideRequiresAdmin(!!data.stockOverrideRequiresAdmin);
         const details: BusinessDetails = {
           legalName: data.legalName ?? null,
           npwp: data.npwp ?? null,
@@ -210,6 +215,56 @@ export default function SettingsPage() {
         return;
       }
       setPosPricingEnabled(data.posPricingEnabled);
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveStockPolicy(next: StockPolicy) {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    const prev = stockPolicy;
+    setStockPolicy(next); // optimistic
+    try {
+      const res = await apiFetch('/organization/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockPolicy: next }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setStockPolicy(prev); // roll back
+        setError(data?.message || t('settings.stockPolicy.updateFailed'));
+        return;
+      }
+      setStockPolicy(data.stockPolicy);
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveStockOverrideRequiresAdmin(next: boolean) {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    const prev = stockOverrideRequiresAdmin;
+    setStockOverrideRequiresAdmin(next); // optimistic
+    try {
+      const res = await apiFetch('/organization/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockOverrideRequiresAdmin: next }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setStockOverrideRequiresAdmin(prev); // roll back
+        setError(data?.message || t('settings.stockPolicy.updateFailed'));
+        return;
+      }
+      setStockOverrideRequiresAdmin(data.stockOverrideRequiresAdmin);
       setSaved(true);
     } finally {
       setSaving(false);
@@ -462,7 +517,7 @@ export default function SettingsPage() {
   const hasWarehouseOps = modules?.find((m) => m.module === 'WAREHOUSE_OPS')?.purchased ?? false;
   const hasInvoicePos = modules?.find((m) => m.module === 'INVOICE_POS')?.purchased ?? false;
 
-  const loaded = fulfillmentMode !== null && posPricingEnabled !== null && modules !== null;
+  const loaded = fulfillmentMode !== null && posPricingEnabled !== null && stockPolicy !== null && modules !== null;
 
   return (
     <main
@@ -860,6 +915,65 @@ export default function SettingsPage() {
                 </p>
               </button>
             </div>
+          </section>
+        )}
+
+        {/* Stock Policy — hidden entirely for warehouse-ops orgs: pick/pack/ship
+            always deducts stock strictly there (see StockService/DeliveryOrder),
+            this setting has no effect on that path, and the backend rejects
+            changing it while WAREHOUSE_OPS is active. */}
+        {hasInvoicePos && !hasWarehouseOps && (
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
+            <div>
+              <h2 className="font-bold">{t('settings.stockPolicy.heading')}</h2>
+              <p className="text-sm text-gray-600 mt-1">{t('settings.stockPolicy.description')}</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              {([
+                ['BLOCK', 'blockTitle', 'blockDescription'],
+                ['WARN', 'warnTitle', 'warnDescription'],
+                ['ALLOW', 'allowTitle', 'allowDescription'],
+              ] as const).map(([value, titleKey, descKey]) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={saving || !loaded}
+                  onClick={() => saveStockPolicy(value)}
+                  className={`flex-1 text-left border rounded-xl p-3 transition-colors disabled:opacity-50 ${
+                    stockPolicy === value
+                      ? 'border-blue-500/50 bg-blue-50/60'
+                      : 'border-blue-500/15 hover:border-blue-500/35 hover:bg-blue-50/30'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
+                        stockPolicy === value ? 'border-blue-600 bg-blue-600' : 'border-gray-400'
+                      }`}
+                    />
+                    <span className="font-semibold text-sm">{t(`settings.stockPolicy.${titleKey}`)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 ml-5">{t(`settings.stockPolicy.${descKey}`)}</p>
+                </button>
+              ))}
+            </div>
+
+            {stockPolicy === 'WARN' && (
+              <label className="flex items-start gap-2 pt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={stockOverrideRequiresAdmin ?? false}
+                  disabled={saving || !loaded}
+                  onChange={(e) => saveStockOverrideRequiresAdmin(e.target.checked)}
+                />
+                <span>
+                  <span className="text-sm font-medium block">{t('settings.stockPolicy.overrideRequiresAdminLabel')}</span>
+                  <span className="text-xs text-gray-500">{t('settings.stockPolicy.overrideRequiresAdminDescription')}</span>
+                </span>
+              </label>
+            )}
           </section>
         )}
 
