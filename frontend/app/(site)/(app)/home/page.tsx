@@ -83,9 +83,8 @@ export default function Home() {
         const res = await apiFetch('/sessions');
         if (!res.ok) return;
         const json = await res.json();
-        const open = Array.isArray(json)
-          ? json.filter((s: any) => s.status === 'OPEN' || s.status === 'IN_PROGRESS').length
-          : 0;
+        const list = Array.isArray(json) ? json : (json.data ?? []);
+        const open = list.filter((s: any) => s.status === 'OPEN' || s.status === 'IN_PROGRESS').length;
         setOpenSessions(open);
       } catch (err) {
         console.error('Sessions fetch failed:', err);
