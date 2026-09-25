@@ -2,12 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { LayoutDashboard, Tag, ClipboardList, Warehouse, Package, ArrowUpRight, Inbox, Lock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // Brighter, more saturated stops (400 -> 600) than the old 500 -> 700 —
 // same hues, punchier and less muddy against the white cards.

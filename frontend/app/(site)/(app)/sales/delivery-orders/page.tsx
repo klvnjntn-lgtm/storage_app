@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Truck, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -13,7 +13,6 @@ import type { DeliveryOrderListItem, DeliveryOrderStatus } from '@/app/component
 import { mapDeliveryOrderToListItem } from '@/lib/mappers/delivery-orders-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type DateField = 'shipped' | 'created';
 

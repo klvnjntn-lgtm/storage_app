@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { FileSpreadsheet, Plus, RotateCcw, Trash2, Search, X, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
@@ -11,7 +11,6 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'CONVERTED';
 type DateField = 'sent' | 'created';

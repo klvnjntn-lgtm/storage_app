@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Car, Search, Gauge, ChevronRight, ExternalLink, Loader2, AlertCircle, RotateCcw, Trash2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -12,7 +12,6 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type SearchResult = {
   id: string;

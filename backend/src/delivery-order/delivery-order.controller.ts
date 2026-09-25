@@ -7,6 +7,9 @@ import { DeliveryOrderService } from './delivery-order.service';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { RecordDeliveryOrderReturnDto } from './dto/delivery-order-return.dto';
 import { RecordDeliveryOrderProofDto } from './dto/delivery-order-proof.dto'; // adjust path/name to your actual DTO
+import { RecordDeliveryOrderFailureDto } from './dto/delivery-order-failure.dto';
+import { SetDeliveryOrderDestinationDto } from './dto/delivery-order-destination.dto';
+import { UpdateDeliveryOrderDetailsDto } from './dto/delivery-order-details.dto';
 import type { Response } from 'express';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
@@ -73,13 +76,72 @@ export class DeliveryOrderController {
   recordProofOfDelivery(
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
+    @Req() req,
     @Body() dto: RecordDeliveryOrderProofDto,
   ) {
-    return this.deliveryOrderService.recordProofOfDelivery(organizationId, id, {
-      deliveredBy: dto.deliveredBy,
-      receivedBy: dto.receivedBy,
-      signedAt: dto.signedAt ? new Date(dto.signedAt) : undefined,
+    return this.deliveryOrderService.recordProofOfDelivery(
+      organizationId,
+      id,
+      {
+        deliveredBy: dto.deliveredBy,
+        receivedBy: dto.receivedBy,
+        signedAt: dto.signedAt ? new Date(dto.signedAt) : undefined,
+        completedLatitude: dto.completedLatitude,
+        completedLongitude: dto.completedLongitude,
+        proofPhotoUrl: dto.proofPhotoUrl,
+      },
+      req.user,
+    );
+  }
+
+  @Post(':id/failure')
+  recordFailedDelivery(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: RecordDeliveryOrderFailureDto,
+  ) {
+    return this.deliveryOrderService.recordFailedDelivery(
+      organizationId,
+      id,
+      {
+        reason: dto.reason,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        failedAt: dto.failedAt ? new Date(dto.failedAt) : undefined,
+      },
+      req.user,
+    );
+  }
+
+  @Patch(':id/destination')
+  setDestination(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Body() dto: SetDeliveryOrderDestinationDto,
+  ) {
+    return this.deliveryOrderService.setDestination(organizationId, id, {
+      latitude: dto.latitude,
+      longitude: dto.longitude,
     });
+  }
+
+  @Patch(':id/details')
+  updateDetails(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateDeliveryOrderDetailsDto,
+  ) {
+    return this.deliveryOrderService.updateDetails(organizationId, id, {
+      priority: dto.priority,
+      deliveryWindowStart: dto.deliveryWindowStart ? new Date(dto.deliveryWindowStart) : undefined,
+      deliveryWindowEnd: dto.deliveryWindowEnd ? new Date(dto.deliveryWindowEnd) : undefined,
+    });
+  }
+
+  @Post(':id/reschedule')
+  reschedule(@CurrentOrg() organizationId: string, @Param('id') id: string) {
+    return this.deliveryOrderService.rescheduleDelivery(organizationId, id);
   }
 
   @Post(':id/return')

@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import Barcode from 'react-barcode';
 import { QRCodeSVG } from 'qrcode.react';
 import { Tag, Printer, Minus, Plus, Search, X, Barcode as BarcodeIcon, QrCode } from 'lucide-react';
@@ -11,7 +11,6 @@ import PrintLabels, { type LabelFormat } from '@/app/components/shared/PrintLabe
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Item = {
   sku: string;
@@ -319,7 +318,7 @@ export default function LabelsPage() {
       {/* Sticky footer bar keeps pagination reachable and visible instead of
           trailing off at the bottom of a long/short grid */}
       {!loading && filteredItems.length > 0 && (
-        <div className="no-print sticky bottom-0 z-10 bg-white/80 backdrop-blur-md border-t border-blue-500/15 px-4 sm:px-6 py-3">
+        <div className="no-print sticky bottom-[var(--app-bottom-nav-h,0px)] z-10 bg-white/80 backdrop-blur-md border-t border-blue-500/15 px-4 sm:px-6 py-3">
           <div className="max-w-5xl mx-auto">
             <Pagination
               page={page}

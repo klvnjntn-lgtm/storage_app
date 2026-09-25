@@ -51,6 +51,14 @@ model Customer {
   deliveryOrders  DeliveryOrder[] // NEW — inverse of DeliveryOrder.customerId
   billingAddress  String?
 
+  // NEW — default location for new deliveries to this customer. Set once
+  // via a click-to-pin map (no geocoding service exists — same convention
+  // as DeliveryOrder.destinationLatitude), copied onto a new DeliveryOrder
+  // at creation time; that individual shipment's own pin can still
+  // override it (job site, branch, third party — see that field's comment).
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   npwp         String?
@@ -143,6 +151,8 @@ model Organization {
   salesQuotations              SalesQuotation[]
   salesOrders                  SalesOrder[]
   deliveryOrders               DeliveryOrder[]
+  routes                       Route[]
+  teams                        Team[]
   purchaseOrders               PurchaseOrder[]
   salesQuotationActivityEvents SalesQuotationActivityEvent[]
   goodsReceipts                GoodsReceipt[]
@@ -155,6 +165,7 @@ model Organization {
   bankAccounts     OrganizationBankAccount[]
   fixedAssets      FixedAsset[]
   mediaAssets      MediaAsset[]
+  notifications    Notification[]
 }
 
 model User {
@@ -182,6 +193,8 @@ model User {
   createdAt        DateTime       @default(now())
   currentSessionId String?
   avatarUrl        String?
+  teamId           String? // NEW — only meaningful for role=DRIVER; groups drivers for organization/reporting
+  team             Team?          @relation(fields: [teamId], references: [id])
   mediaAssets      MediaAsset[]
   events           Event[]
   payrolls         Payroll[]
@@ -202,9 +215,18 @@ model User {
   salesQuotations              SalesQuotation[]
   salesOrders                  SalesOrder[]
   deliveryOrders               DeliveryOrder[]
+  routesAsDriver               Route[]                       @relation("DriverRoutes")
+  routesCreated                Route[]                       @relation("RouteCreatedBy")
+  routeHistoryEvents           RouteHistoryEvent[]
   salesOrderActivityEvents     SalesOrderActivityEvent[]
   salesQuotationActivityEvents SalesQuotationActivityEvent[]
   goodsReceipts                GoodsReceipt[]
+
+  notifications     Notification[]
+  devices           Device[]               @relation("UserDevices")
+  devicesApproved   Device[]               @relation("DeviceApprovedBy")
+  accessSchedules   DriverAccessSchedule[]
+  pushSubscriptions PushSubscription[]
 
   @@index([organizationId])
 }
@@ -621,6 +643,7 @@ enum SalesOrderStatus {
 enum DeliveryOrderStatus {
   PACKED // created from a completed pack session, not yet shipped
   SHIPPED
+  FAILED // NEW — delivery attempted but did not reach the customer; terminal like CANCELLED, set from SHIPPED via recordFailedDelivery()
   CANCELLED
   PARTIALLY_RETURNED // some but not all shipped items have come back
   RETURNED // every shipped item has come back
@@ -886,6 +909,49 @@ model DeliveryOrder {
   signedAt         DateTime? // NEW — timestamp of receipt confirmation; pair with receivedBy as the minimal proof-of-delivery record
   notes            String?
 
+  // NEW — single-shot GPS capture, not continuous tracking. Set once by
+  // recordProofOfDelivery()/recordFailedDelivery() from navigator.geolocation
+  // at the moment the driver taps the button; never updated afterward and
+  // never polled. Decimal(9,6) gives ~11cm precision, standard for lat/lng.
+  completedLatitude  Decimal?  @db.Decimal(9, 6)
+  completedLongitude Decimal?  @db.Decimal(9, 6)
+  failedAt           DateTime?
+  failureReason      String?
+  failureLatitude    Decimal?  @db.Decimal(9, 6)
+  failureLongitude   Decimal?  @db.Decimal(9, 6)
+
+  // NEW — the delivery destination pin, set by clicking a point on a map
+  // (no geocoding service exists). Planning data, correctable any time —
+  // unlike completed/failureLatitude above, this isn't a one-shot event
+  // capture. Per-DeliveryOrder rather than per-Customer because
+  // deliveryAddress (above) can already differ from the customer's own
+  // address (job site, branch, third party); a per-shipment pin follows
+  // that same reasoning.
+  destinationLatitude  Decimal? @db.Decimal(9, 6)
+  destinationLongitude Decimal? @db.Decimal(9, 6)
+
+  // NEW — priority-weighted routing input (DeliveryRoutesService.optimize()
+  // visits HIGH stops first, as their own optimized sub-sequence).
+  priority DeliveryPriority @default(NORMAL)
+
+  // NEW — this specific shipment's requested window, a concrete datetime
+  // (not a recurring daily "HH:mm") since a DeliveryOrder is one shipment
+  // on one day, not a recurring booking. Feeds into RouteStop's derived
+  // atRisk alongside plannedEta.
+  deliveryWindowStart DateTime?
+  deliveryWindowEnd   DateTime?
+
+  // NEW — set by DeliveryOrderService.recordProofOfDelivery() alongside
+  // completedLatitude/Longitude; uploaded via the existing media module
+  // (POST /media) first, then referenced here as a plain URL — same
+  // denormalized-URL convention as Organization.logoUrl/User.avatarUrl.
+  proofPhotoUrl String?
+
+  // NEW — set by rescheduleDelivery() when a FAILED delivery is put back
+  // into SHIPPED status for re-attempt. failedAt/failureReason are kept
+  // as history rather than cleared.
+  rescheduledAt DateTime?
+
   organization Organization        @relation(fields: [organizationId], references: [id])
   salesOrderId String? // CHANGED: was required — now optional
   salesOrder   SalesOrder?         @relation(fields: [salesOrderId], references: [id])
@@ -896,6 +962,7 @@ model DeliveryOrder {
   items        DeliveryOrderItem[]
   invoiceId    String? // NEW
   invoice      Invoice?            @relation(fields: [invoiceId], references: [id])
+  routeStop    RouteStop? // NEW — inverse; most DOs aren't on a route
 
   @@unique([organizationId, doNumber])
   @@index([invoiceId])
@@ -924,6 +991,105 @@ model DeliveryOrderItem {
 
   invoiceItemId Int?         @unique
   invoiceItem   InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
+}
+
+// A driver's planned multi-stop delivery run for one day. Belongs to the
+// DELIVERY_DMS module — separate from DeliveryOrder (a single-shipment
+// document, ungated) which Route wraps via RouteStop.
+model Route {
+  id              String      @id @default(cuid())
+  organizationId  String
+  driverId        String // User.id, role must be DRIVER — enforced in DeliveryRoutesService, not the DB
+  routeDate       DateTime
+  name            String?
+  status          RouteStatus @default(PLANNED)
+  createdByUserId String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // NEW — depot/starting point pin, same click-to-pin UX as
+  // DeliveryOrder.destinationLatitude. Required before optimize() can run.
+  startLatitude      Decimal?  @db.Decimal(9, 6)
+  startLongitude     Decimal?  @db.Decimal(9, 6)
+  plannedDepartureAt DateTime?
+
+  organization  Organization        @relation(fields: [organizationId], references: [id])
+  driver        User                @relation("DriverRoutes", fields: [driverId], references: [id])
+  createdBy     User?               @relation("RouteCreatedBy", fields: [createdByUserId], references: [id])
+  stops         RouteStop[]
+  historyEvents RouteHistoryEvent[]
+
+  @@index([organizationId])
+  @@index([organizationId, driverId, routeDate])
+}
+
+// One stop per DeliveryOrder, in sequence. Deliberately has no status of
+// its own — a stop's state (pending/delivered/failed) is always derived
+// from its DeliveryOrder at read time, per the spec's "delivery status is
+// the source of truth, not a parallel tracking state" rule.
+model RouteStop {
+  id              String    @id @default(cuid())
+  routeId         String
+  deliveryOrderId String    @unique // a DO belongs to at most one route
+  sequence        Int // 1-based order within the route
+  plannedEta      DateTime? // computed by DeliveryRoutesService.optimize()/recalculateEtasAfterResolution()
+  createdAt       DateTime  @default(now())
+
+  // NEW — cached leg data from the last optimize() call, from this stop's
+  // previous stop (or the route's start point for the first pending stop).
+  // Lets ETA recalculation after a delivery resolves be pure arithmetic —
+  // no repeat OSRM calls at delivery-time.
+  travelMetersFromPrevious  Decimal? @db.Decimal(10, 2)
+  travelSecondsFromPrevious Int?
+
+  route         Route         @relation(fields: [routeId], references: [id])
+  deliveryOrder DeliveryOrder @relation(fields: [deliveryOrderId], references: [id])
+
+  @@unique([routeId, sequence])
+  @@index([routeId])
+}
+
+// Groups driver accounts for organization/reporting purposes — no
+// scheduling or routing behavior hangs off this, it's purely a label.
+model Team {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  members      User[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+enum RouteHistoryEventType {
+  CREATED
+  DRIVER_CHANGED
+  START_SET
+  STOP_ADDED
+  STOP_REMOVED
+  STOPS_REORDERED
+  OPTIMIZED
+}
+
+// Append-only audit trail of route changes — spec's "route version, time
+// changed, who changed it, stop sequence" requirement. Written best-effort
+// by DeliveryRoutesService alongside each mutation; never blocks the
+// mutation itself if a write here fails (same pattern as ETA recalc).
+model RouteHistoryEvent {
+  id              String                @id @default(cuid())
+  routeId         String
+  type            RouteHistoryEventType
+  createdAt       DateTime              @default(now())
+  createdByUserId String?
+  metadata        Json?
+
+  route     Route @relation(fields: [routeId], references: [id])
+  createdBy User? @relation(fields: [createdByUserId], references: [id])
+
+  @@index([routeId, createdAt])
 }
 
 enum DiscountType {
@@ -1355,9 +1521,120 @@ model SettingsAuditLog {
   @@index([organizationId, field])
 }
 
+// Generic recipient-scoped notification, in-app + (optionally) push. Kept
+// deliberately generic (typed `payload`/`link` rather than per-feature
+// columns) so callers across modules — delivery, device approval, account
+// lock/unlock — can all write into the same feed instead of each growing
+// their own ad-hoc alert table.
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  type           NotificationType
+  title          String
+  body           String?
+  payload        Json?
+  link           String?
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@index([organizationId, createdAt])
+}
+
+enum NotificationType {
+  DELIVERY_ASSIGNED
+  ROUTE_REASSIGNED
+  ROUTE_REOPTIMIZED
+  DELIVERY_FAILED
+  DELIVERY_AT_RISK
+  ROUTE_STOPS_CHANGED
+  DEVICE_PENDING_APPROVAL
+  DEVICE_APPROVED
+  DEVICE_REJECTED
+  DEVICE_REVOKED
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+}
+
+// A browser/device a DRIVER has logged in from. `deviceId` is a
+// client-generated UUID persisted in localStorage (see frontend apifetch),
+// not this row's own id — it's how the same physical device is recognized
+// across logins. First device for a driver auto-approves so onboarding
+// isn't blocked; any later device starts PENDING and blocks login until an
+// admin approves it (see AuthService.login).
+model Device {
+  id               String       @id @default(cuid())
+  userId           String
+  user             User         @relation("UserDevices", fields: [userId], references: [id])
+  deviceId         String
+  label            String?
+  userAgent        String?
+  status           DeviceStatus @default(PENDING)
+  firstSeenAt      DateTime     @default(now())
+  lastSeenAt       DateTime     @default(now())
+  approvedAt       DateTime?
+  approvedByUserId String?
+  approvedBy       User?        @relation("DeviceApprovedBy", fields: [approvedByUserId], references: [id])
+
+  @@unique([userId, deviceId])
+  @@index([userId, status])
+}
+
+enum DeviceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+// Admin-configured windows a DRIVER is allowed to be logged in. Absence of
+// any row for a user means unrestricted (every existing driver today) —
+// there's no separate "restriction enabled" flag, so there's no state where
+// the two can drift out of sync. See access-schedule.util.ts for the
+// same-day-only (no overnight wrap) window check this drives.
+model DriverAccessSchedule {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  dayOfWeek DayOfWeek
+  startTime String // "HH:mm", 24h, interpreted in the org's timezone
+  endTime   String // "HH:mm"; must be > startTime — no overnight windows in v1
+  createdAt DateTime  @default(now())
+
+  @@index([userId, dayOfWeek])
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+// A driver's subscribed browser push endpoint (Web Push / VAPID). One row
+// per browser subscription; a driver logged in on two devices gets two rows.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
 enum Role {
   ADMIN
   USER
+  DRIVER
 }
 
 enum EventType {
@@ -1398,6 +1675,19 @@ enum ModuleKey {
   INVOICE_POS
   WAREHOUSE_OPS
   WORKSHOP_RMS
+  DELIVERY_DMS
+}
+
+enum RouteStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryPriority {
+  NORMAL
+  HIGH
 }
 
 enum InvoiceFormat {

@@ -33,6 +33,8 @@ import { GdbImportModule } from './gdb-import/gdb-import.module';
 import { SalesQuotationModule } from './sales-quotation/sales-quotation.module';
 import { SalesOrderModule } from './sales-order/sales-order.module';
 import { DeliveryOrderModule } from './delivery-order/delivery-order.module';
+import { DeliveryRoutesModule } from './delivery-routes/delivery-routes.module';
+import { TeamsModule } from './teams/teams.module';
 import { PurchaseOrderModule } from './purchase-order/purchase-order.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { BankAccountModule } from './bank-accounts/bank-account.module';
@@ -42,6 +44,10 @@ import { SupplierPaymentsModule } from './accounting/supplier-payments.module';
 import { ExpensesModule } from './accounting/expenses.module';
 import { PayrollModule } from './accounting/payroll.module';
 import { FixedAssetsModule } from './accounting/fixed-assets.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { UsersModule } from './users/users.module';
+import { DevicesModule } from './devices/devices.module';
+import { AccessControlModule } from './access-control/access-control.module';
 @Module({
   imports: [
     // FIX — @nestjs/throttler was a listed dependency and @Throttle()
@@ -67,6 +73,8 @@ import { FixedAssetsModule } from './accounting/fixed-assets.module';
     SalesQuotationModule,
     SalesOrderModule,
     DeliveryOrderModule,
+    DeliveryRoutesModule,
+    TeamsModule,
     PurchaseOrderModule,
     GdbImportModule,
     AccountingModule,
@@ -86,6 +94,10 @@ import { FixedAssetsModule } from './accounting/fixed-assets.module';
     OrganizationModulesModule,
     IntegrationModule,
     MediaModule,
+    NotificationsModule,
+    UsersModule,
+    DevicesModule,
+    AccessControlModule,
   ],
   controllers: [AppController],
   providers: [

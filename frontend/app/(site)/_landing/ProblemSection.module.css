@@ -1,0 +1,351 @@
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+  padding: 40px 0 124px;
+}
+
+@media (min-width: 640px) {
+  .stage {
+    padding-bottom: 92px;
+  }
+}
+
+/* ─── spreadsheet ─────────────────────────────────────────────────── */
+
+.sheet {
+  position: relative;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #0d1424, #0a0f1c);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 40px 80px -30px rgba(0, 0, 0, 0.9);
+  transform: rotate(-1.2deg);
+}
+
+.sheetBar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px 14px 0 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dots {
+  display: flex;
+  gap: 5px;
+  margin-right: 4px;
+}
+
+.dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  color: #34d399;
+  opacity: 0.75;
+}
+
+.fileName {
+  min-width: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.formula {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.cellRef {
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.fx {
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.grid {
+  font-size: 11.5px;
+  border-radius: 0 0 14px 14px;
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 30px 1.1fr 1.5fr 0.9fr 0.7fr;
+  height: 32px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.row > span:first-child {
+  justify-content: center;
+  padding: 0;
+  border-left: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.letters {
+  height: 24px;
+}
+
+.letters > span {
+  justify-content: center;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.headRow > span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.n {
+  justify-content: flex-end;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.bad > span {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.09);
+}
+
+.bad > span:first-child {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.selected {
+  position: relative;
+  overflow: visible !important;
+  box-shadow: inset 0 0 0 2px #3b82f6;
+}
+
+.selected::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 6px;
+  height: 6px;
+  background: #3b82f6;
+  box-shadow: 0 0 0 1.5px #0a0f1c;
+}
+
+.err {
+  font-weight: 600;
+  color: #f87171 !important;
+}
+
+.dim {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.guess {
+  color: #fbbf24 !important;
+}
+
+.struck > span:not(:first-child) {
+  color: rgba(255, 255, 255, 0.35);
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 113, 113, 0.75);
+}
+
+/* hand-drawn circle around row 3, columns C–D */
+.scribble {
+  position: absolute;
+  left: calc(30px + (100% - 30px) * 0.56);
+  right: -12px;
+  top: 150px;
+  height: 44px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.scribble path {
+  fill: none;
+  stroke: #f87171;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 6px rgba(248, 113, 113, 0.55));
+}
+
+.mismatch {
+  position: absolute;
+  right: 6px;
+  bottom: -15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fecaca;
+  background: rgba(69, 10, 10, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.45), 0 10px 24px -8px rgba(0, 0, 0, 0.8);
+}
+
+.mismatch svg {
+  color: #f87171;
+}
+
+@media (min-width: 640px) {
+  .mismatch {
+    right: -10px;
+  }
+}
+
+/* ─── sticky note ─────────────────────────────────────────────────── */
+
+.note {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  top: 0;
+  width: 128px;
+  padding: 16px 13px 14px;
+  border-radius: 3px;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #422006;
+  background: linear-gradient(165deg, #fde68a, #fbbf24);
+  box-shadow: 0 18px 30px -12px rgba(0, 0, 0, 0.7), inset 0 -10px 20px -12px rgba(146, 64, 14, 0.35);
+}
+
+.tape {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 54px;
+  height: 17px;
+  margin-left: -27px;
+  background: rgba(255, 255, 255, 0.32);
+  transform: rotate(-5deg);
+}
+
+@media (min-width: 640px) {
+  .note {
+    right: -14px;
+    width: 150px;
+    font-size: 15px;
+  }
+}
+
+/* ─── chat ────────────────────────────────────────────────────────── */
+
+.chat {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  bottom: 0;
+  width: 232px;
+  padding: 10px 12px 7px;
+  border-radius: 14px 14px 14px 4px;
+  background: #1b2433;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 26px 44px -16px rgba(0, 0, 0, 0.85);
+}
+
+@media (min-width: 640px) {
+  .chat {
+    left: -22px;
+    width: 256px;
+  }
+}
+
+.chatHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chatAvatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #d97706;
+}
+
+.chatName {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.chatMsg {
+  margin-top: 5px;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.chatMeta {
+  margin-top: 3px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+}

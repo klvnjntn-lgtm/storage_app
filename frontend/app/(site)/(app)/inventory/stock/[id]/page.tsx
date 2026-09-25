@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Package, ImageOff, Upload, Trash2, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -11,7 +11,6 @@ import Pagination from '@/app/components/shared/Pagination';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type StockRow = {
   location: {

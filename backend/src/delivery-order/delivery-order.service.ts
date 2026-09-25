@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
@@ -7,8 +12,16 @@ import { SalesOrderService } from '../sales-order/sales-order.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
-import { DeliveryOrderStatus, SalesOrderStatus, EventType, Prisma } from '@prisma/client';
+import {
+  DeliveryOrderStatus,
+  SalesOrderStatus,
+  EventType,
+  Prisma,
+  DeliveryPriority,
+} from '@prisma/client';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
+import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 import puppeteer from 'puppeteer';
 
@@ -62,6 +75,8 @@ export class DeliveryOrderService {
     private stockService: StockService,
     private printTokenService: PrintTokenService,
     private postingRules: PostingRulesService,
+    private deliveryRoutesService: DeliveryRoutesService,
+    private notifications: NotificationsService,
   ) {}
 
   // Creating a delivery order is a planned/prepared delivery — a
@@ -75,11 +90,19 @@ export class DeliveryOrderService {
   // without a join back to the sales order — the cost basis travels with
   // the delivery order the way productName already does, and doesn't
   // drift if the product's costPrice changes between order and shipment.
-  async create(organizationId: string, userId: string, dto: CreateDeliveryOrderDto) {
-    await this.tenantOwnership.validate(organizationId, { locationId: dto.locationId });
+  async create(
+    organizationId: string,
+    userId: string,
+    dto: CreateDeliveryOrderDto,
+  ) {
+    await this.tenantOwnership.validate(organizationId, {
+      locationId: dto.locationId,
+    });
 
     if (!dto.items?.length) {
-      throw new BadRequestException('Delivery order must have at least one item');
+      throw new BadRequestException(
+        'Delivery order must have at least one item',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -99,20 +122,29 @@ export class DeliveryOrderService {
         SalesOrderStatus.PARTIALLY_DELIVERED,
       ];
       if (!allowedStatuses.includes(salesOrder.status)) {
-        throw new BadRequestException(`Cannot deliver against a sales order in ${salesOrder.status} status`);
+        throw new BadRequestException(
+          `Cannot deliver against a sales order in ${salesOrder.status} status`,
+        );
       }
 
       const itemsById = new Map(salesOrder.items.map((i) => [i.id, i]));
       for (const line of dto.items) {
         const soItem = itemsById.get(line.salesOrderItemId);
-        if (!soItem) throw new BadRequestException(`Sales order item ${line.salesOrderItemId} not found on this order`);
-        if (line.quantity <= 0) throw new BadRequestException('Delivery quantity must be positive');
+        if (!soItem)
+          throw new BadRequestException(
+            `Sales order item ${line.salesOrderItemId} not found on this order`,
+          );
+        if (line.quantity <= 0)
+          throw new BadRequestException('Delivery quantity must be positive');
         // Fast pre-check only — this read isn't locked and can be stale
         // under concurrent deliveries against the same line. The
         // authoritative check is the atomic claim below.
-        const remaining = Number(soItem.quantity) - Number(soItem.deliveredQuantity);
+        const remaining =
+          Number(soItem.quantity) - Number(soItem.deliveredQuantity);
         if (line.quantity > remaining) {
-          throw new BadRequestException(`Cannot deliver ${line.quantity} — only ${remaining} remaining on this line`);
+          throw new BadRequestException(
+            `Cannot deliver ${line.quantity} — only ${remaining} remaining on this line`,
+          );
         }
       }
 
@@ -120,11 +152,19 @@ export class DeliveryOrderService {
         .map((l) => itemsById.get(l.salesOrderItemId)!.productId)
         .filter((id): id is string => !!id);
       const products = productIds.length
-        ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId }, select: { id: true, name: true } })
+        ? await tx.product.findMany({
+            where: { id: { in: productIds }, organizationId },
+            select: { id: true, name: true },
+          })
         : [];
       const productNameById = new Map(products.map((p) => [p.id, p.name]));
 
-      const doNumber = await this.numbering.nextSequential(tx, organizationId, 'DELIVERY_ORDER', 'DO');
+      const doNumber = await this.numbering.nextSequential(
+        tx,
+        organizationId,
+        'DELIVERY_ORDER',
+        'DO',
+      );
 
       const deliveryOrder = await tx.deliveryOrder.create({
         data: {
@@ -140,7 +180,13 @@ export class DeliveryOrderService {
           customerAddress: salesOrder.customer?.address ?? null,
           customerPhone: salesOrder.customer?.phone ?? null,
           customerPoNumber: salesOrder.customerPoNumber,
-          deliveryAddress: dto.deliveryAddress ?? salesOrder.customer?.address ?? null,
+          deliveryAddress:
+            dto.deliveryAddress ?? salesOrder.customer?.address ?? null,
+          // Inherit the customer's saved default location, if any — set
+          // once on the customer, reused on every new shipment; still
+          // correctable per-shipment via the existing destination picker.
+          destinationLatitude: salesOrder.customer?.latitude ?? null,
+          destinationLongitude: salesOrder.customer?.longitude ?? null,
           notes: dto.notes ?? null,
           items: {
             create: dto.items.map((line) => {
@@ -182,7 +228,11 @@ export class DeliveryOrderService {
         }
       }
 
-      await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrder.id, tx);
+      await this.salesOrderService.recomputeDeliveryStatus(
+        organizationId,
+        salesOrder.id,
+        tx,
+      );
 
       return deliveryOrder;
     });
@@ -217,7 +267,9 @@ export class DeliveryOrderService {
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
     if (deliveryOrder.status !== DeliveryOrderStatus.PACKED) {
-      throw new BadRequestException('Only a packed delivery order can be shipped');
+      throw new BadRequestException(
+        'Only a packed delivery order can be shipped',
+      );
     }
 
     const salesOrderId = deliveryOrder.salesOrderId;
@@ -225,7 +277,9 @@ export class DeliveryOrderService {
     const shouldDecreaseStock = !deliveryOrder.sessionId;
 
     if (shouldDecreaseStock) {
-      const missingLocation = deliveryOrder.items.find((item) => item.productId && !item.locationId);
+      const missingLocation = deliveryOrder.items.find(
+        (item) => item.productId && !item.locationId,
+      );
       if (missingLocation) {
         throw new BadRequestException(
           `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
@@ -239,19 +293,38 @@ export class DeliveryOrderService {
         data: { status: DeliveryOrderStatus.SHIPPED, shippedAt: new Date() },
       });
       if (claim.count === 0) {
-        throw new BadRequestException('This delivery order has already been shipped or is no longer packed');
+        throw new BadRequestException(
+          'This delivery order has already been shipped or is no longer packed',
+        );
       }
 
-      const costedLines: { productId: string; quantity: number; unitCost: number | null; locationId: string | null }[] = [];
+      const costedLines: {
+        productId: string;
+        quantity: number;
+        unitCost: number | null;
+        locationId: string | null;
+      }[] = [];
 
       if (shouldDecreaseStock) {
         for (const item of deliveryOrder.items) {
           if (!item.productId || !item.locationId) continue;
           await this.stockService.decrease(
-            organizationId, item.productId, item.locationId, Number(item.quantity), userId,
+            organizationId,
+            item.productId,
+            item.locationId,
+            Number(item.quantity),
+            userId,
             salesOrderId
-              ? { type: EventType.SALE, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id } }
-              : { type: EventType.SALE, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id } },
+              ? {
+                  type: EventType.SALE,
+                  salesOrderId,
+                  metadata: { deliveryOrderId: deliveryOrder.id },
+                }
+              : {
+                  type: EventType.SALE,
+                  invoiceId: invoiceId!,
+                  metadata: { deliveryOrderId: deliveryOrder.id },
+                },
             tx,
           );
           costedLines.push({
@@ -275,7 +348,11 @@ export class DeliveryOrderService {
             },
           });
         }
-        await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
+        await this.invoiceService.recomputeFulfillmentStatus(
+          organizationId,
+          invoiceId,
+          tx,
+        );
       }
 
       if (costedLines.length > 0) {
@@ -295,24 +372,220 @@ export class DeliveryOrderService {
     });
   }
 
+  // A DRIVER account may only act on a delivery order that's actually on
+  // one of their own routes (see backend/src/delivery-routes) — ADMIN/USER
+  // are unrestricted, same as every other delivery-order action, since
+  // staff have always been able to record proof directly without a route.
+  private async assertRequesterCanActOnDeliveryOrder(
+    deliveryOrderId: string,
+    requester?: { sub: string; role: string },
+  ) {
+    if (!requester || requester.role !== 'DRIVER') return;
+    const stop = await this.prisma.routeStop.findFirst({
+      where: { deliveryOrderId, route: { driverId: requester.sub } },
+      select: { id: true },
+    });
+    if (!stop) {
+      throw new ForbiddenException(
+        'This delivery order is not on one of your routes',
+      );
+    }
+  }
+
   async recordProofOfDelivery(
     organizationId: string,
     id: string,
-    params: { deliveredBy?: string; receivedBy?: string; signedAt?: Date },
+    params: {
+      deliveredBy?: string;
+      receivedBy?: string;
+      signedAt?: Date;
+      completedLatitude?: number;
+      completedLongitude?: number;
+      proofPhotoUrl?: string;
+    },
+    requester?: { sub: string; role: string },
   ) {
-    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({ where: { id, organizationId } });
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+    });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
     if (deliveryOrder.status !== DeliveryOrderStatus.SHIPPED) {
-      throw new BadRequestException('Proof of delivery can only be recorded once the delivery order has shipped');
+      throw new BadRequestException(
+        'Proof of delivery can only be recorded once the delivery order has shipped',
+      );
     }
+    await this.assertRequesterCanActOnDeliveryOrder(id, requester);
 
-    return this.prisma.deliveryOrder.update({
+    const signedAt = params.signedAt ?? deliveryOrder.signedAt ?? new Date();
+    const updated = await this.prisma.deliveryOrder.update({
       where: { id },
       data: {
         deliveredBy: params.deliveredBy ?? deliveryOrder.deliveredBy,
         receivedBy: params.receivedBy ?? deliveryOrder.receivedBy,
-        signedAt: params.signedAt ?? deliveryOrder.signedAt ?? new Date(),
+        signedAt,
+        completedLatitude:
+          params.completedLatitude ?? deliveryOrder.completedLatitude,
+        completedLongitude:
+          params.completedLongitude ?? deliveryOrder.completedLongitude,
+        proofPhotoUrl: params.proofPhotoUrl ?? deliveryOrder.proofPhotoUrl,
       },
+    });
+
+    // Best-effort — an ETA-recalc hiccup must never block the delivery
+    // action itself, which has already succeeded by this point.
+    try {
+      await this.deliveryRoutesService.recalculateEtasAfterResolution(
+        id,
+        signedAt,
+      );
+    } catch {
+      // ignore
+    }
+
+    return updated;
+  }
+
+  // Single-shot GPS capture at the moment of a failed delivery attempt —
+  // same "SHIPPED -> terminal status" shape as cancel()'s atomic claim,
+  // parallel to recordProofOfDelivery but ends in FAILED instead of
+  // leaving status at SHIPPED.
+  async recordFailedDelivery(
+    organizationId: string,
+    id: string,
+    params: {
+      reason?: string;
+      latitude?: number;
+      longitude?: number;
+      failedAt?: Date;
+    },
+    requester?: { sub: string; role: string },
+  ) {
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+    });
+    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+    if (deliveryOrder.status !== DeliveryOrderStatus.SHIPPED) {
+      throw new BadRequestException(
+        'A failed delivery can only be recorded once the delivery order has shipped',
+      );
+    }
+    await this.assertRequesterCanActOnDeliveryOrder(id, requester);
+
+    const failedAt = params.failedAt ?? new Date();
+    const claim = await this.prisma.deliveryOrder.updateMany({
+      where: { id, organizationId, status: DeliveryOrderStatus.SHIPPED },
+      data: {
+        status: DeliveryOrderStatus.FAILED,
+        failedAt,
+        failureReason: params.reason ?? null,
+        failureLatitude: params.latitude ?? null,
+        failureLongitude: params.longitude ?? null,
+      },
+    });
+    if (claim.count === 0) {
+      throw new BadRequestException(
+        'This delivery order is no longer in SHIPPED status',
+      );
+    }
+
+    try {
+      await this.deliveryRoutesService.recalculateEtasAfterResolution(
+        id,
+        failedAt,
+      );
+    } catch {
+      // ignore — best-effort, see recordProofOfDelivery's identical comment
+    }
+
+    await this.notifications.notifyOrgStaff(
+      organizationId,
+      'DELIVERY_FAILED',
+      `Delivery failed: ${deliveryOrder.customerName ?? deliveryOrder.doNumber ?? id}`,
+      { link: '/delivery/monitoring', payload: { deliveryOrderId: id } },
+    );
+
+    return this.prisma.deliveryOrder.findUniqueOrThrow({ where: { id } });
+  }
+
+  // Sets/corrects the destination pin used by the delivery map — planning
+  // data, not a one-shot event capture, so unlike proof/failure above it
+  // has no status gate and can be updated any time.
+  async setDestination(
+    organizationId: string,
+    id: string,
+    params: { latitude: number; longitude: number },
+  ) {
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+    });
+    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+
+    return this.prisma.deliveryOrder.update({
+      where: { id },
+      data: {
+        destinationLatitude: params.latitude,
+        destinationLongitude: params.longitude,
+      },
+    });
+  }
+
+  // Planning data (priority, requested delivery window) — like
+  // setDestination, correctable any time, no status gate.
+  async updateDetails(
+    organizationId: string,
+    id: string,
+    params: {
+      priority?: DeliveryPriority;
+      deliveryWindowStart?: Date;
+      deliveryWindowEnd?: Date;
+    },
+  ) {
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+    });
+    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+
+    return this.prisma.deliveryOrder.update({
+      where: { id },
+      data: {
+        priority: params.priority,
+        deliveryWindowStart: params.deliveryWindowStart,
+        deliveryWindowEnd: params.deliveryWindowEnd,
+      },
+    });
+  }
+
+  // Puts a FAILED delivery back into SHIPPED so it can be re-attempted —
+  // unlinks it from whatever route it was on (bypassing removeStop's
+  // "must be PENDING" guard, since this IS the recovery path for a
+  // resolved-but-failed stop) so it becomes addable to a new route via the
+  // ordinary addStop flow, on any date. failedAt/failureReason are kept as
+  // history, not cleared — rescheduledAt records that this happened.
+  async rescheduleDelivery(organizationId: string, id: string) {
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+      include: { routeStop: { select: { id: true } } },
+    });
+    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+    if (deliveryOrder.status !== DeliveryOrderStatus.FAILED) {
+      throw new BadRequestException(
+        'Only a failed delivery can be rescheduled',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (deliveryOrder.routeStop) {
+        await tx.routeStop.delete({
+          where: { id: deliveryOrder.routeStop.id },
+        });
+      }
+      return tx.deliveryOrder.update({
+        where: { id },
+        data: {
+          status: DeliveryOrderStatus.SHIPPED,
+          rescheduledAt: new Date(),
+        },
+      });
     });
   }
 
@@ -327,7 +600,9 @@ export class DeliveryOrderService {
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
     if (deliveryOrder.status !== DeliveryOrderStatus.PACKED) {
-      throw new BadRequestException('Only a packed (not yet shipped) delivery order can be cancelled');
+      throw new BadRequestException(
+        'Only a packed (not yet shipped) delivery order can be cancelled',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -339,7 +614,9 @@ export class DeliveryOrderService {
         data: { status: DeliveryOrderStatus.CANCELLED },
       });
       if (claim.count === 0) {
-        throw new BadRequestException('This delivery order is no longer packed — it may have already been shipped or cancelled');
+        throw new BadRequestException(
+          'This delivery order is no longer packed — it may have already been shipped or cancelled',
+        );
       }
 
       for (const item of deliveryOrder.items) {
@@ -355,9 +632,15 @@ export class DeliveryOrderService {
           });
         }
       }
-      const cancelled = await tx.deliveryOrder.findUniqueOrThrow({ where: { id } });
+      const cancelled = await tx.deliveryOrder.findUniqueOrThrow({
+        where: { id },
+      });
       if (deliveryOrder.salesOrderId) {
-        await this.salesOrderService.recomputeDeliveryStatus(organizationId, deliveryOrder.salesOrderId, tx);
+        await this.salesOrderService.recomputeDeliveryStatus(
+          organizationId,
+          deliveryOrder.salesOrderId,
+          tx,
+        );
       }
       return cancelled;
     });
@@ -424,7 +707,9 @@ export class DeliveryOrderService {
     reason?: string,
   ) {
     if (!items?.length) {
-      throw new BadRequestException('At least one item is required to record a return');
+      throw new BadRequestException(
+        'At least one item is required to record a return',
+      );
     }
 
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
@@ -436,17 +721,23 @@ export class DeliveryOrderService {
       deliveryOrder.status !== DeliveryOrderStatus.SHIPPED &&
       deliveryOrder.status !== DeliveryOrderStatus.PARTIALLY_RETURNED
     ) {
-      throw new BadRequestException('Only a shipped delivery order can have items returned');
+      throw new BadRequestException(
+        'Only a shipped delivery order can have items returned',
+      );
     }
 
     const itemsById = new Map(deliveryOrder.items.map((i) => [i.id, i]));
     for (const line of items) {
       const doItem = itemsById.get(line.deliveryOrderItemId);
       if (!doItem) {
-        throw new BadRequestException(`Delivery order item ${line.deliveryOrderItemId} not found on this delivery`);
+        throw new BadRequestException(
+          `Delivery order item ${line.deliveryOrderItemId} not found on this delivery`,
+        );
       }
-      if (line.quantity <= 0) throw new BadRequestException('Return quantity must be positive');
-      const outstanding = Number(doItem.quantity) - Number(doItem.returnedQuantity);
+      if (line.quantity <= 0)
+        throw new BadRequestException('Return quantity must be positive');
+      const outstanding =
+        Number(doItem.quantity) - Number(doItem.returnedQuantity);
       if (line.quantity > outstanding) {
         throw new BadRequestException(
           `Cannot return ${line.quantity} — only ${outstanding} of this line hasn't already been returned`,
@@ -457,12 +748,20 @@ export class DeliveryOrderService {
     const salesOrderId = deliveryOrder.salesOrderId;
     const invoiceId = deliveryOrder.invoiceId;
     if (!salesOrderId && !invoiceId) {
-      throw new BadRequestException('This delivery order has no originating sales order or invoice');
+      throw new BadRequestException(
+        'This delivery order has no originating sales order or invoice',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const costedReturnLines: { productId: string; quantity: number; unitCost: number | null; locationId: string | null }[] = [];
-      const revenueReturnLines: { invoiceItemId: number; quantity: number }[] = [];
+      const costedReturnLines: {
+        productId: string;
+        quantity: number;
+        unitCost: number | null;
+        locationId: string | null;
+      }[] = [];
+      const revenueReturnLines: { invoiceItemId: number; quantity: number }[] =
+        [];
       let resolvedInvoiceId: string | null = null;
 
       for (const line of items) {
@@ -475,7 +774,10 @@ export class DeliveryOrderService {
 
         if (doItem.salesOrderItemId) {
           const decremented = await tx.salesOrderItem.updateMany({
-            where: { id: doItem.salesOrderItemId, deliveredQuantity: { gte: line.quantity } },
+            where: {
+              id: doItem.salesOrderItemId,
+              deliveredQuantity: { gte: line.quantity },
+            },
             data: { deliveredQuantity: { decrement: line.quantity } },
           });
           if (decremented.count === 0) {
@@ -485,7 +787,10 @@ export class DeliveryOrderService {
           }
         } else if (doItem.invoiceItemId) {
           const decremented = await tx.invoiceItem.updateMany({
-            where: { id: doItem.invoiceItemId, fulfilledQuantity: { gte: line.quantity } },
+            where: {
+              id: doItem.invoiceItemId,
+              fulfilledQuantity: { gte: line.quantity },
+            },
             data: { fulfilledQuantity: { decrement: line.quantity } },
           });
           if (decremented.count === 0) {
@@ -497,13 +802,19 @@ export class DeliveryOrderService {
 
         const revenueItem = await this.resolveInvoiceItemForReturn(doItem, tx);
         if (revenueItem) {
-          if (resolvedInvoiceId && resolvedInvoiceId !== revenueItem.invoiceId) {
+          if (
+            resolvedInvoiceId &&
+            resolvedInvoiceId !== revenueItem.invoiceId
+          ) {
             throw new BadRequestException(
               'Return spans items from more than one invoice — this should not be possible',
             );
           }
           resolvedInvoiceId = revenueItem.invoiceId;
-          revenueReturnLines.push({ invoiceItemId: revenueItem.id, quantity: line.quantity });
+          revenueReturnLines.push({
+            invoiceItemId: revenueItem.id,
+            quantity: line.quantity,
+          });
         }
 
         if (doItem.productId && doItem.locationId) {
@@ -514,8 +825,22 @@ export class DeliveryOrderService {
             line.quantity,
             userId,
             salesOrderId
-              ? { type: EventType.RETURNS, salesOrderId, metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null } }
-              : { type: EventType.RETURNS, invoiceId: invoiceId!, metadata: { deliveryOrderId: deliveryOrder.id, reason: reason ?? null } },
+              ? {
+                  type: EventType.RETURNS,
+                  salesOrderId,
+                  metadata: {
+                    deliveryOrderId: deliveryOrder.id,
+                    reason: reason ?? null,
+                  },
+                }
+              : {
+                  type: EventType.RETURNS,
+                  invoiceId: invoiceId!,
+                  metadata: {
+                    deliveryOrderId: deliveryOrder.id,
+                    reason: reason ?? null,
+                  },
+                },
             tx,
           );
           // Only goods whose stock actually came back have a COGS
@@ -532,10 +857,18 @@ export class DeliveryOrderService {
 
       const updated = await this.recomputeReturnStatus(organizationId, id, tx);
       if (salesOrderId) {
-        await this.salesOrderService.recomputeDeliveryStatus(organizationId, salesOrderId, tx);
+        await this.salesOrderService.recomputeDeliveryStatus(
+          organizationId,
+          salesOrderId,
+          tx,
+        );
       }
       if (invoiceId) {
-        await this.invoiceService.recomputeFulfillmentStatus(organizationId, invoiceId, tx);
+        await this.invoiceService.recomputeFulfillmentStatus(
+          organizationId,
+          invoiceId,
+          tx,
+        );
       }
 
       // One reversal entry per recordReturn() call, keyed by a timestamp
@@ -602,20 +935,36 @@ export class DeliveryOrderService {
     const allReturned = deliveryOrder.items.every(
       (i) => Number(i.returnedQuantity) >= Number(i.quantity),
     );
-    const anyReturned = deliveryOrder.items.some((i) => Number(i.returnedQuantity) > 0);
+    const anyReturned = deliveryOrder.items.some(
+      (i) => Number(i.returnedQuantity) > 0,
+    );
     const newStatus = allReturned
       ? DeliveryOrderStatus.RETURNED
       : anyReturned
-      ? DeliveryOrderStatus.PARTIALLY_RETURNED
-      : DeliveryOrderStatus.SHIPPED;
+        ? DeliveryOrderStatus.PARTIALLY_RETURNED
+        : DeliveryOrderStatus.SHIPPED;
 
     if (newStatus === deliveryOrder.status) return deliveryOrder;
-    return tx.deliveryOrder.update({ where: { id: deliveryOrderId }, data: { status: newStatus } });
+    return tx.deliveryOrder.update({
+      where: { id: deliveryOrderId },
+      data: { status: newStatus },
+    });
   }
 
-  async list(organizationId: string, filters: { salesOrderId?: string; status?: DeliveryOrderStatus; page?: number; pageSize?: number }) {
+  async list(
+    organizationId: string,
+    filters: {
+      salesOrderId?: string;
+      status?: DeliveryOrderStatus;
+      page?: number;
+      pageSize?: number;
+    },
+  ) {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
-    const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
+    const pageSize =
+      filters.pageSize && filters.pageSize > 0
+        ? Math.min(filters.pageSize, 200)
+        : 20;
 
     const where: Prisma.DeliveryOrderWhereInput = {
       organizationId,
@@ -625,8 +974,14 @@ export class DeliveryOrderService {
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.deliveryOrder.findMany({
-        where, include: { items: true, salesOrder: { select: { orderNumber: true, customerName: true } } },
-        orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
+        where,
+        include: {
+          items: true,
+          salesOrder: { select: { orderNumber: true, customerName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
       this.prisma.deliveryOrder.count({ where }),
     ]);
@@ -650,7 +1005,10 @@ export class DeliveryOrderService {
 
   // ---- print / PDF ------------------------------------------------
 
-  async getPrintView(organizationId: string, id: string): Promise<DeliveryOrderPrintView> {
+  async getPrintView(
+    organizationId: string,
+    id: string,
+  ): Promise<DeliveryOrderPrintView> {
     const deliveryOrder = await this.getPrintViewOrThrow(organizationId, id);
     return this.mapForPrint(deliveryOrder);
   }
@@ -659,7 +1017,15 @@ export class DeliveryOrderService {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
       include: {
-        organization: { select: { name: true, legalName: true, address: true, phone: true, logoUrl: true } },
+        organization: {
+          select: {
+            name: true,
+            legalName: true,
+            address: true,
+            phone: true,
+            logoUrl: true,
+          },
+        },
         location: { select: { name: true, address: true } },
         salesOrder: { select: { orderNumber: true } },
         invoice: { select: { invoiceNumber: true } },
@@ -728,9 +1094,14 @@ export class DeliveryOrderService {
     try {
       const page = await browser.newPage();
       await page.emulateMediaType('print');
-      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+      await page.emulateMediaFeatures([
+        { name: 'prefers-color-scheme', value: 'light' },
+      ]);
       await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-      const pdfBuffer = await page.pdf({ printBackground: true, preferCSSPageSize: true });
+      const pdfBuffer = await page.pdf({
+        printBackground: true,
+        preferCSSPageSize: true,
+      });
       return Buffer.from(pdfBuffer);
     } finally {
       await browser.close();
@@ -738,7 +1109,11 @@ export class DeliveryOrderService {
   }
 
   verifyPrintToken(token: string, deliveryOrderId: string) {
-    return this.printTokenService.verifyDocumentToken(token, 'delivery-order', deliveryOrderId);
+    return this.printTokenService.verifyDocumentToken(
+      token,
+      'delivery-order',
+      deliveryOrderId,
+    );
   }
 
   // An invoice is fulfilled EITHER through a fulfillment session (pick-time
@@ -779,7 +1154,9 @@ export class DeliveryOrderService {
       );
     }
     if (invoice.status !== 'ISSUED') {
-      throw new BadRequestException('Only an issued invoice can be converted to a delivery order');
+      throw new BadRequestException(
+        'Only an issued invoice can be converted to a delivery order',
+      );
     }
 
     // Cheap early check using the invoice already fetched — no extra
@@ -798,13 +1175,17 @@ export class DeliveryOrderService {
       );
     }
 
-    const overrideByItemId = new Map((itemOverrides ?? []).map((o) => [o.invoiceItemId, o.quantity]));
+    const overrideByItemId = new Map(
+      (itemOverrides ?? []).map((o) => [o.invoiceItemId, o.quantity]),
+    );
 
     const candidateLines = invoice.items
       .filter((item) => item.productId)
       .map((item) => {
         const outstanding =
-          Number(item.quantity) - Number(item.fulfilledQuantity) - Number(item.reservedQuantity);
+          Number(item.quantity) -
+          Number(item.fulfilledQuantity) -
+          Number(item.reservedQuantity);
         const requested = overrideByItemId.has(String(item.id))
           ? overrideByItemId.get(String(item.id))!
           : outstanding;
@@ -821,7 +1202,9 @@ export class DeliveryOrderService {
     }
 
     if (candidateLines.length === 0) {
-      throw new BadRequestException('This invoice has nothing outstanding to deliver');
+      throw new BadRequestException(
+        'This invoice has nothing outstanding to deliver',
+      );
     }
 
     try {
@@ -834,12 +1217,17 @@ export class DeliveryOrderService {
           where: {
             id: invoice.id,
             organizationId,
-            OR: [{ fulfillmentPath: null }, { fulfillmentPath: 'DELIVERY_ORDER' }],
+            OR: [
+              { fulfillmentPath: null },
+              { fulfillmentPath: 'DELIVERY_ORDER' },
+            ],
           },
           data: { fulfillmentPath: 'DELIVERY_ORDER' },
         });
         if (claimed.count === 0) {
-          const current = await tx.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+          const current = await tx.invoice.findUniqueOrThrow({
+            where: { id: invoice.id },
+          });
           throw new BadRequestException(
             current.fulfillmentPath === 'SESSION'
               ? 'Cannot fulfill invoice directly. This invoice is already assigned to a warehouse fulfillment session.'
@@ -847,7 +1235,12 @@ export class DeliveryOrderService {
           );
         }
 
-        const doNumber = await this.numbering.nextSequential(tx, organizationId, 'DELIVERY_ORDER', 'DO');
+        const doNumber = await this.numbering.nextSequential(
+          tx,
+          organizationId,
+          'DELIVERY_ORDER',
+          'DO',
+        );
 
         const deliveryOrder = await tx.deliveryOrder.create({
           data: {
@@ -864,13 +1257,16 @@ export class DeliveryOrderService {
             customerPhone: invoice.customer?.phone ?? null,
             customerPoNumber: invoice.customerPoNumber,
             deliveryAddress: invoice.customer?.address ?? null,
+            destinationLatitude: invoice.customer?.latitude ?? null,
+            destinationLongitude: invoice.customer?.longitude ?? null,
             notes: null,
             items: {
               create: candidateLines.map(({ item, quantity }) => ({
                 salesOrderItemId: null,
                 invoiceItemId: item.id,
                 productId: item.productId,
-                productName: item.product?.name ?? item.description ?? 'Service',
+                productName:
+                  item.product?.name ?? item.description ?? 'Service',
                 quantity,
                 unit: item.unit,
                 locationId: item.locationId,
@@ -891,8 +1287,13 @@ export class DeliveryOrderService {
         return deliveryOrder;
       });
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new BadRequestException('A conflicting delivery order was created concurrently — please retry');
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new BadRequestException(
+          'A conflicting delivery order was created concurrently — please retry',
+        );
       }
       throw err;
     }

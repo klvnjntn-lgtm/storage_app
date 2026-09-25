@@ -3,15 +3,15 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
-import { User, Car, Plus, X, Check } from 'lucide-react';
+import { display } from '@/lib/fonts';
+import { User, Car, Plus, X, Check, MapPin } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type CustomerInvoice = {
   id: string;
@@ -31,6 +31,9 @@ type CustomerDetail = {
   phone: string | null;
   address: string | null;
   invoices: CustomerInvoice[];
+  // Prisma Decimal fields serialize as strings over JSON, not numbers.
+  latitude: string | null;
+  longitude: string | null;
 };
 
 type NewVehicleState = {
@@ -46,6 +49,7 @@ export default function CustomerDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const hasDelivery = useHasModule('DELIVERY_DMS');
   const { t, language } = useLanguage();
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
@@ -59,6 +63,11 @@ export default function CustomerDetailPage() {
   const [newVehicle, setNewVehicle] = useState<NewVehicleState>({ ...EMPTY_VEHICLE });
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [vehicleError, setVehicleError] = useState('');
+
+  const [pickingLocation, setPickingLocation] = useState(false);
+  const [pickedPosition, setPickedPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [locationError, setLocationError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +147,38 @@ export default function CustomerDetailPage() {
     }
   }
 
+  function openLocationPicker() {
+    setLocationError('');
+    setPickedPosition(
+      customer?.latitude && customer.longitude
+        ? { lat: Number(customer.latitude), lng: Number(customer.longitude) }
+        : null,
+    );
+    setPickingLocation(true);
+  }
+
+  async function saveLocation() {
+    if (!pickedPosition || !customer) return;
+    setSavingLocation(true);
+    setLocationError('');
+    try {
+      const res = await apiFetch(`/customers/${customer.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ latitude: pickedPosition.lat, longitude: pickedPosition.lng }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || `Failed to save (${res.status})`);
+      }
+      setCustomer({ ...customer, latitude: String(pickedPosition.lat), longitude: String(pickedPosition.lng) });
+      setPickingLocation(false);
+    } catch (e: any) {
+      setLocationError(e.message || t('customers.detailPage.saveLocationFailed'));
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   const totals = customer?.invoices.reduce(
     (acc, inv) => {
       if (inv.status === 'VOID') return acc;
@@ -188,6 +229,28 @@ export default function CustomerDetailPage() {
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
+        )}
+
+        {customer && hasDelivery && (
+          <div className="flex items-center justify-between border-2 border-gray-300 rounded-md p-3 mb-6 bg-white">
+            <div className="flex items-center gap-2 min-w-0">
+              <MapPin size={16} strokeWidth={2} className="text-gray-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{t('customers.detailPage.deliveryLocation')}</p>
+                <p className="text-xs text-gray-500 truncate">
+                  {customer.latitude && customer.longitude
+                    ? `${Number(customer.latitude).toFixed(5)}, ${Number(customer.longitude).toFixed(5)}`
+                    : t('customers.detailPage.noLocationSet')}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={openLocationPicker}
+              className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 font-semibold hover:border-blue-500/40 transition-colors shrink-0"
+            >
+              {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
+            </button>
+          </div>
         )}
 
         {customer && hasWorkshopRms && (
@@ -336,6 +399,42 @@ export default function CustomerDetailPage() {
           </>
         )}
       </div>
+
+      {pickingLocation && (
+        <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{t('customers.detailPage.pickLocationTitle')}</h3>
+              <button onClick={() => setPickingLocation(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <DeliveryMap
+              stops={[]}
+              height={280}
+              pickMode
+              pickedPosition={pickedPosition}
+              onPick={(lat, lng) => setPickedPosition({ lat, lng })}
+            />
+            {locationError && <p className="text-xs text-red-600">{locationError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPickingLocation(false)}
+                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-1.5"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                disabled={!pickedPosition || savingLocation}
+                onClick={saveLocation}
+                className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+              >
+                {savingLocation ? t('common.saving') : t('customers.detailPage.saveLocation')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

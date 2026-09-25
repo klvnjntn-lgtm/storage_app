@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
@@ -13,7 +13,6 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // Which date field the From/To range filters by. Only meaningful once a
 // range is actually set — see the toggle rendered next to the date picker.

@@ -3,12 +3,12 @@
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { LogIn, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import { getDeviceId } from '@/lib/apifetch';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // FIX — useSearchParams() (below, in LoginForm) requires a Suspense
 // boundary for static prerendering, or `next build` fails outright with
@@ -52,15 +52,22 @@ function LoginForm() {
     setLoading(true);
 
     try {
+      // X-Device-Id lets the backend recognize this browser across logins
+      // for DRIVER device-binding/approval — see apifetch.ts's getDeviceId.
+      // A non-DRIVER login carries the same header harmlessly; the backend
+      // only acts on it for role === 'DRIVER'.
       const loginRes = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
       const loginData = await loginRes.json();
 
       if (!loginRes.ok) {
+        // Device/access-hours rejections come back as specific, already
+        // human-readable messages (see AuthService.login) — surfaced as-is
+        // rather than folded into the generic "invalid credentials" copy.
         throw new Error(loginData?.message || t('auth.login.loginFailed'));
       }
 
@@ -81,7 +88,12 @@ function LoginForm() {
       // with no functional purpose. The meRes request itself stays: it
       // still validates the freshly-issued token actually works before
       // redirecting into the app.
-      router.replace('/home');
+      //
+      // A DRIVER account has no use for the admin AppShell — it lands on
+      // the dedicated /driver route instead (own minimal layout, no
+      // sidebar). Every other role keeps the existing /home redirect.
+      const meData = await meRes.json();
+      router.replace(meData?.role === 'DRIVER' ? '/driver' : '/home');
     } catch (err: any) {
       console.error(err);
       setError(err.message || t('auth.login.loginFailed'));

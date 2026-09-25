@@ -1,0 +1,15 @@
+{
+  "name": "WareSys",
+  "short_name": "WareSys",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/WARESYS.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

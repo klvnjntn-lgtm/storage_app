@@ -12,6 +12,25 @@
   --font-mono: var(--font-geist-mono);
 }
 
+@theme {
+  --animate-hero-in: hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes hero-in {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+  }
+
+  --animate-sheet-in: sheet-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes sheet-in {
+    from {
+      transform: translateY(100%);
+    }
+  }
+}
+
 /* Fallback: force hex colors instead of Tailwind's default oklch,
    which renders as white on some older monitors/GPUs */
 @theme {
@@ -168,5 +187,62 @@ body {
 @media print {
   @page {
     margin: 0;
+  }
+}
+
+/* ─── Landing page ───────────────────────────────────────────────────
+   Decorative CSS loops pause when their root (or the whole page) is
+   marked paused — offscreen sections and the hero's pause control. */
+[data-anim='paused'],
+[data-anim='paused'] * {
+  animation-play-state: paused !important;
+}
+
+/* Glass card spotlight: a soft glow and a lit border that follow the
+   cursor (position written to --mx/--my by SpotlightCard). The layers
+   only exist while hovered — an idle masked layer on every card costs
+   compositing and glitches some software renderers. */
+.spotlight-card::before,
+.spotlight-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  display: none;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.spotlight-card::before {
+  z-index: -1;
+  background: radial-gradient(
+    520px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(var(--glow, 96, 165, 250), 0.1),
+    transparent 45%
+  );
+}
+
+.spotlight-card::after {
+  padding: 1px;
+  background: radial-gradient(
+    280px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(var(--glow, 96, 165, 250), 0.55),
+    transparent 45%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@media (hover: hover) {
+  .spotlight-card:hover::before,
+  .spotlight-card:hover::after {
+    display: block;
+    animation: spotlight-in 0.35s ease both;
+  }
+}
+
+@keyframes spotlight-in {
+  from {
+    opacity: 0;
   }
 }

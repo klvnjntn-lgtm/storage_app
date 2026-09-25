@@ -5,8 +5,10 @@ import {
   Get,
   Patch,
   Param,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -39,7 +41,11 @@ export class AuthController {
   @SkipLicenseCheck()
   @Post('register')
   async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto.email, dto.password, dto.organizationName);
+    return this.authService.register(
+      dto.email,
+      dto.password,
+      dto.organizationName,
+    );
   }
 
   // FIX — classic brute-force/credential-stuffing target, previously
@@ -48,8 +54,20 @@ export class AuthController {
   @Public()
   @SkipLicenseCheck()
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto.email, dto.password);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    // Header takes precedence over the DTO field so every authenticated
+    // and unauthenticated call sends the device id the same way (see
+    // frontend/lib/apifetch.ts).
+    const headerDeviceId = req.headers['x-device-id'];
+    const deviceId =
+      (typeof headerDeviceId === 'string' ? headerDeviceId : undefined) ??
+      dto.deviceId;
+    return this.authService.login(
+      dto.email,
+      dto.password,
+      deviceId,
+      req.headers['user-agent'],
+    );
   }
 
   @Get('me')
@@ -106,59 +124,63 @@ export class AuthController {
   @Public()
   @SkipLicenseCheck()
   @Post('forgot-password')
-forgotPassword(@Body('email') email: string) {
-  return this.authService.forgotPassword(email);
-}
+  forgotPassword(@Body('email') email: string) {
+    return this.authService.forgotPassword(email);
+  }
 
-// FIX — same missing @Public()/@SkipLicenseCheck() issue as
-// forgot-password above; a locked-out user has no token to authenticate
-// with, so the global guards must let this route through unauthenticated.
-@Public()
-@SkipLicenseCheck()
-@Post('reset-password')
-resetPassword(
-  @Body('token') token: string,
-  @Body('newPassword') newPassword: string,
-) {
-  return this.authService.resetPassword(token, newPassword);
-}
+  // FIX — same missing @Public()/@SkipLicenseCheck() issue as
+  // forgot-password above; a locked-out user has no token to authenticate
+  // with, so the global guards must let this route through unauthenticated.
+  @Public()
+  @SkipLicenseCheck()
+  @Post('reset-password')
+  resetPassword(
+    @Body('token') token: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    return this.authService.resetPassword(token, newPassword);
+  }
 
-// FIX — no logout/session-revocation endpoint existed. See
-// AuthService.logout for how this invalidates the current token
-// immediately rather than waiting for its 7-day expiry.
-@UseGuards(AuthGuard('jwt'))
-@Post('logout')
-logout(@CurrentUser() user: { sub: string }) {
-  return this.authService.logout(user.sub);
-}
+  // FIX — no logout/session-revocation endpoint existed. See
+  // AuthService.logout for how this invalidates the current token
+  // immediately rather than waiting for its 7-day expiry.
+  @UseGuards(AuthGuard('jwt'))
+  @Post('logout')
+  logout(@CurrentUser() user: { sub: string }) {
+    return this.authService.logout(user.sub);
+  }
 
-// Step 1 of 2 — validates current/new password and emails a one-time
-// code rather than applying the change immediately. Throttled like the
-// other credential-adjacent endpoints (register/login/forgot-password),
-// since a wrong currentPassword guess is a password-verification oracle.
-@Throttle({ default: { limit: 5, ttl: 60000 } })
-@UseGuards(AuthGuard('jwt'))
-@Post('change-password')
-requestPasswordChange(
-  @CurrentUser() user: { sub: string },
-  @Body('currentPassword') currentPassword: string,
-  @Body('newPassword') newPassword: string,
-) {
-  return this.authService.requestPasswordChange(user.sub, currentPassword, newPassword);
-}
+  // Step 1 of 2 — validates current/new password and emails a one-time
+  // code rather than applying the change immediately. Throttled like the
+  // other credential-adjacent endpoints (register/login/forgot-password),
+  // since a wrong currentPassword guess is a password-verification oracle.
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(AuthGuard('jwt'))
+  @Post('change-password')
+  requestPasswordChange(
+    @CurrentUser() user: { sub: string },
+    @Body('currentPassword') currentPassword: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    return this.authService.requestPasswordChange(
+      user.sub,
+      currentPassword,
+      newPassword,
+    );
+  }
 
-// Step 2 of 2 — confirms the emailed code and applies the password
-// already hashed & stashed by requestPasswordChange(). Throttled tighter
-// than the request step since a 6-digit code is brute-forceable; the
-// per-request attempt cap in AuthService is the primary defense, this is
-// a secondary limit on request rate itself.
-@Throttle({ default: { limit: 10, ttl: 60000 } })
-@UseGuards(AuthGuard('jwt'))
-@Post('change-password/confirm')
-confirmPasswordChange(
-  @CurrentUser() user: { sub: string },
-  @Body('code') code: string,
-) {
-  return this.authService.confirmPasswordChange(user.sub, code);
-}
+  // Step 2 of 2 — confirms the emailed code and applies the password
+  // already hashed & stashed by requestPasswordChange(). Throttled tighter
+  // than the request step since a 6-digit code is brute-forceable; the
+  // per-request attempt cap in AuthService is the primary defense, this is
+  // a secondary limit on request rate itself.
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(AuthGuard('jwt'))
+  @Post('change-password/confirm')
+  confirmPasswordChange(
+    @CurrentUser() user: { sub: string },
+    @Body('code') code: string,
+  ) {
+    return this.authService.confirmPasswordChange(user.sub, code);
+  }
 }

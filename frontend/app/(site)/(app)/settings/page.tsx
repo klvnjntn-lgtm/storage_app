@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, Percent, Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
 type StockPolicy = 'BLOCK' | 'WARN' | 'ALLOW';

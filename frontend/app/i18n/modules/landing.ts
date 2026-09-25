@@ -21,6 +21,8 @@ export const landing = {
         sub2: 'Scan parts. Move stock. Know exactly what you have and where it is.',
         ctaDemo: 'Book a Demo',
         ctaHowItWorks: 'See How It Works ↓',
+        pauseAnimation: 'Pause animation',
+        playAnimation: 'Play animation',
       },
       scanFeed: {
         terminalLabel: 'warehouse@waresys — live feed',
@@ -31,6 +33,41 @@ export const landing = {
         line5: 'User jdelacruz logged transfer #4471',
         line6: 'Received 20x Oil Filter — Bay 1',
         line7: 'Audit log exported by admin',
+      },
+      scene: {
+        warehouse: 'Warehouse',
+        live: 'LIVE',
+        dashboard: 'Dashboard',
+        stock: 'Stock',
+        receiving: 'Receiving',
+        transfers: 'Transfers',
+        deliveries: 'Deliveries',
+        auditLog: 'Audit log',
+        today: 'Today',
+        lowStock: 'Low stock',
+        unitsInStock: 'Units in stock',
+        transfersToday: 'Transfers today',
+        sku: 'SKU',
+        item: 'Item',
+        location: 'Location',
+        qty: 'Qty',
+        receive: 'Receive',
+        move: 'Move',
+        track: 'Track',
+        liveActivity: 'Live activity',
+        left: '4 left',
+        badgeReceive: 'RECEIVE',
+        badgeMove: 'MOVE',
+        badgeAdjust: 'ADJUST',
+        badgeShip: 'SHIP',
+        items: {
+          brakePads: 'Brake pad set',
+          oilFilter: 'Oil filter',
+          timingBelt: 'Timing belt',
+          sparkPlug: 'Spark plug',
+          wheelBearing: 'Wheel bearing',
+          clutchKit: 'Clutch kit',
+        },
       },
       techMarquee: {
         tags: {
@@ -66,11 +103,15 @@ export const landing = {
         },
         mockLog: {
           fileLabel: 'manual-tracker.xlsx — unsaved',
-          line1: 'SKU-1042 · Bay 3 · qty 12',
-          line2: 'mismatch — last seen Bay 7, qty 4',
-          line3: '"did anyone move the brake pads??" — WhatsApp, 2 days ago',
-          line4: 'stock count.FINAL.v3.xlsx — never opened again',
         },
+        visual: {
+          mismatch: 'Mismatch — last seen Bay 7',
+          chatSender: 'Budi (Warehouse)',
+          chatMessage: 'Did anyone move the brake pads??',
+          chatTime: '2 days ago',
+          note: 'Recount on Friday?',
+        },
+        bridge: 'There’s a better way.',
       },
       features: {
         eyebrow: 'WareSys Warehouse',
@@ -101,6 +142,14 @@ export const landing = {
             sub: 'Import your existing stock and go',
           },
         },
+        visual: {
+          receivedToday: 'Received today',
+          scan: 'Scan',
+          imported: 'SKUs imported',
+          roleAdmin: 'Admin',
+          roleStaff: 'Staff',
+          roleDriver: 'Driver',
+        },
       },
       howItWorks: {
         eyebrow: 'How it works',
@@ -125,6 +174,7 @@ export const landing = {
         heading: 'One platform for your entire operation.',
         statusLive: 'Live',
         statusComingSoon: 'Coming soon',
+        hubCaption: 'One login. One source of truth.',
         products: {
           warehouse: {
             tag: 'Inventory & warehouse management',
@@ -184,6 +234,9 @@ export const landing = {
       faq: {
         eyebrow: 'Common questions',
         heading: 'What owners usually ask.',
+        stillQuestions: 'Still have questions?',
+        stillQuestionsBody: 'Talk to us directly — we reply the same day.',
+        contactCta: 'Contact us',
         items: {
           whatDoesItDo: {
             q: 'What does it actually do?',
@@ -216,6 +269,9 @@ export const landing = {
       },
       footer: {
         tagline: 'Built for spare parts businesses',
+        product: 'Product',
+        contact: 'Contact',
+        language: 'Language',
       },
     },
   },
@@ -236,6 +292,8 @@ export const landing = {
         sub2: 'Pindai suku cadang. Pindahkan stok. Ketahui persis apa yang Anda miliki dan di mana lokasinya.',
         ctaDemo: 'Jadwalkan Demo',
         ctaHowItWorks: 'Lihat Cara Kerjanya ↓',
+        pauseAnimation: 'Jeda animasi',
+        playAnimation: 'Putar animasi',
       },
       scanFeed: {
         terminalLabel: 'warehouse@waresys — feed langsung',
@@ -246,6 +304,41 @@ export const landing = {
         line5: 'Pengguna jdelacruz mencatat transfer #4471',
         line6: 'Menerima 20x Filter Oli — Bay 1',
         line7: 'Log audit diekspor oleh admin',
+      },
+      scene: {
+        warehouse: 'Gudang',
+        live: 'LIVE',
+        dashboard: 'Dasbor',
+        stock: 'Stok',
+        receiving: 'Penerimaan',
+        transfers: 'Transfer',
+        deliveries: 'Pengiriman',
+        auditLog: 'Log audit',
+        today: 'Hari ini',
+        lowStock: 'Stok menipis',
+        unitsInStock: 'Unit tersedia',
+        transfersToday: 'Transfer hari ini',
+        sku: 'SKU',
+        item: 'Barang',
+        location: 'Lokasi',
+        qty: 'Jml',
+        receive: 'Terima',
+        move: 'Pindah',
+        track: 'Lacak',
+        liveActivity: 'Aktivitas langsung',
+        left: 'sisa 4',
+        badgeReceive: 'TERIMA',
+        badgeMove: 'PINDAH',
+        badgeAdjust: 'KOREKSI',
+        badgeShip: 'KIRIM',
+        items: {
+          brakePads: 'Set kampas rem',
+          oilFilter: 'Filter oli',
+          timingBelt: 'Timing belt',
+          sparkPlug: 'Busi',
+          wheelBearing: 'Bearing roda',
+          clutchKit: 'Kit kopling',
+        },
       },
       techMarquee: {
         tags: {
@@ -281,11 +374,15 @@ export const landing = {
         },
         mockLog: {
           fileLabel: 'pelacak-manual.xlsx — belum disimpan',
-          line1: 'SKU-1042 · Bay 3 · qty 12',
-          line2: 'tidak cocok — terakhir terlihat Bay 7, qty 4',
-          line3: '"ada yang mindahin kampas rem??" — WhatsApp, 2 hari lalu',
-          line4: 'hitung stok.FINAL.v3.xlsx — tidak pernah dibuka lagi',
         },
+        visual: {
+          mismatch: 'Tidak cocok — terakhir di Bay 7',
+          chatSender: 'Budi (Gudang)',
+          chatMessage: 'Ada yang mindahin kampas rem??',
+          chatTime: '2 hari lalu',
+          note: 'Hitung ulang hari Jumat?',
+        },
+        bridge: 'Ada cara yang lebih baik.',
       },
       features: {
         eyebrow: 'WareSys Warehouse',
@@ -316,6 +413,14 @@ export const landing = {
             sub: 'Impor stok yang ada dan langsung jalan',
           },
         },
+        visual: {
+          receivedToday: 'Diterima hari ini',
+          scan: 'Pindai',
+          imported: 'SKU diimpor',
+          roleAdmin: 'Admin',
+          roleStaff: 'Staf',
+          roleDriver: 'Pengemudi',
+        },
       },
       howItWorks: {
         eyebrow: 'Cara Kerja',
@@ -340,6 +445,7 @@ export const landing = {
         heading: 'Satu platform untuk seluruh operasional Anda.',
         statusLive: 'Aktif',
         statusComingSoon: 'Segera hadir',
+        hubCaption: 'Satu login. Satu sumber data.',
         products: {
           warehouse: {
             tag: 'Manajemen inventaris & gudang',
@@ -399,6 +505,9 @@ export const landing = {
       faq: {
         eyebrow: 'Pertanyaan umum',
         heading: 'Yang biasa ditanyakan pemilik usaha.',
+        stillQuestions: 'Masih punya pertanyaan?',
+        stillQuestionsBody: 'Hubungi kami langsung — kami balas di hari yang sama.',
+        contactCta: 'Hubungi kami',
         items: {
           whatDoesItDo: {
             q: 'Sebenarnya ini untuk apa?',
@@ -431,6 +540,9 @@ export const landing = {
       },
       footer: {
         tagline: 'Dibuat untuk bisnis suku cadang',
+        product: 'Produk',
+        contact: 'Kontak',
+        language: 'Bahasa',
       },
     },
   },

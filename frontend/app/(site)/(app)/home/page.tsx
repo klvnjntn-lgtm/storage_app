@@ -2,12 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Space_Grotesk, JetBrains_Mono } from 'next/font/google';
-import { Receipt, ShoppingCart, ArrowUpRight, Lock, Inbox, Wrench, Calculator } from 'lucide-react';
+import { JetBrains_Mono } from 'next/font/google';
+import { display } from '@/lib/fonts';
+import { Receipt, ShoppingCart, ArrowUpRight, Lock, Inbox, Wrench, Calculator, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'] });
 
 type LicenseStatus = {
@@ -30,6 +30,125 @@ function getDateLine(language: string) {
     month: 'short',
     day: 'numeric',
   });
+}
+
+// Same "local component + data array" shape as accounting/page.tsx's
+// ReportCard/SecondaryCard — one card definition instead of six near-
+// identical inline JSX blocks (enabled gradient tile vs. disabled/locked
+// dashed tile).
+function ModuleCard({
+  title,
+  description,
+  href,
+  icon: Icon,
+  gradient,
+  enabled,
+  notEnabledLabel,
+  onNavigate,
+}: {
+  title: string;
+  description: string;
+  href: string;
+  icon: typeof Inbox;
+  gradient: string;
+  enabled: boolean;
+  notEnabledLabel: string;
+  onNavigate: (href: string) => void;
+}) {
+  if (!enabled) {
+    return (
+      <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
+        <div className="flex items-start justify-between">
+          <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
+            <Lock size={20} strokeWidth={2} className="text-blue-400" />
+          </span>
+        </div>
+        <div>
+          <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{title}</p>
+          <p className="text-sm text-gray-400 mt-0.5">{notEnabledLabel}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => onNavigate(href)}
+      className={`group relative text-left rounded-xl p-6 bg-gradient-to-br ${gradient} text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between`}
+    >
+      <div className="flex items-start justify-between">
+        <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
+          <Icon size={22} strokeWidth={2} />
+        </span>
+        <ArrowUpRight
+          size={18}
+          strokeWidth={2}
+          className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
+        />
+      </div>
+      <div>
+        <p className={`${display.className} text-xl font-bold leading-tight`}>{title}</p>
+        <p className="text-sm text-white/85 mt-0.5">{description}</p>
+      </div>
+    </button>
+  );
+}
+
+function useModuleItems(t: (key: string) => string, enabledModules: string[]) {
+  const has = (key: string) => enabledModules.includes(key);
+  return [
+    {
+      title: t('home.inventory'),
+      description: t('home.inventoryDesc'),
+      href: '/inventory',
+      icon: Inbox,
+      gradient: 'from-green-400 to-green-700',
+      enabled: has('WAREHOUSE_OPS'),
+    },
+    {
+      title: t('home.sales'),
+      description: t('home.salesDesc'),
+      href: '/sales',
+      icon: Receipt,
+      gradient: 'from-red-500 to-pink-600',
+      // NOTE: Sales, Purchasing, and Accounting all currently gate on
+      // INVOICE_POS. Split each into its own flag once the backend
+      // exposes separate ones.
+      enabled: has('INVOICE_POS'),
+    },
+    {
+      title: t('home.purchasing'),
+      description: t('home.purchasingDesc'),
+      href: '/purchasing',
+      icon: ShoppingCart,
+      gradient: 'from-amber-500 to-orange-700',
+      enabled: has('INVOICE_POS'),
+    },
+    {
+      title: t('home.accounting'),
+      description: t('home.accountingDesc'),
+      href: '/accounting',
+      icon: Calculator,
+      gradient: 'from-indigo-500 to-blue-800',
+      enabled: has('INVOICE_POS'),
+    },
+    {
+      title: t('home.workshop'),
+      description: t('home.workshopDesc'),
+      href: '/workshop',
+      icon: Wrench,
+      gradient: 'from-cyan-500 to-blue-700',
+      enabled: has('WORKSHOP_RMS'),
+    },
+    {
+      title: t('home.delivery'),
+      description: t('home.deliveryDesc'),
+      href: '/delivery',
+      icon: Truck,
+      gradient: 'from-violet-500 to-purple-800',
+      enabled: has('DELIVERY_DMS'),
+    },
+  ];
 }
 
 export default function Home() {
@@ -105,16 +224,8 @@ export default function Home() {
     })();
   }, []);
 
-  const warehouseEnabled = enabledModules.includes('WAREHOUSE_OPS');
-  // NOTE: Sales, Purchasing, and Accounting all currently gate on
-  // INVOICE_POS. Split each into its own flag once the backend exposes
-  // separate ones — Accounting in particular bundles Expenses/Payroll/
-  // reporting under the same module key as invoicing, which won't always
-  // be the right grouping.
-  const salesEnabled = enabledModules.includes('INVOICE_POS');
-  const purchasingEnabled = enabledModules.includes('INVOICE_POS');
-  const accountingEnabled = enabledModules.includes('INVOICE_POS');
-  const workshopEnabled = enabledModules.includes('WORKSHOP_RMS');
+  const MODULE_ITEMS = useModuleItems(t, enabledModules);
+  const notEnabledLabel = t('home.notEnabled');
 
   return (
     <main
@@ -175,203 +286,9 @@ export default function Home() {
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Inventory */}
-            {warehouseEnabled ? (
-              <button
-                onClick={() => router.push('/inventory')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-green-400 to-green-700 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                    <Inbox size={22} strokeWidth={2} />
-                  </span>
-                  <ArrowUpRight
-                    size={18}
-                    strokeWidth={2}
-                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                  />
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{t('home.inventory')}</p>
-                  <p className="text-sm text-white/85 mt-0.5">
-                    {t('home.inventoryDesc')}
-                  </p>
-                </div>
-              </button>
-            ) : (
-              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
-                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
-                  </span>
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{t('home.inventory')}</p>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {t('home.notEnabled')}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Sales */}
-            {salesEnabled ? (
-              <button
-                onClick={() => router.push('/sales')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-red-500 to-pink-600 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                    <Receipt size={22} strokeWidth={2} />
-                  </span>
-                  <ArrowUpRight
-                    size={18}
-                    strokeWidth={2}
-                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                  />
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{t('home.sales')}</p>
-                  <p className="text-sm text-white/85 mt-0.5">
-                    {t('home.salesDesc')}
-                  </p>
-                </div>
-              </button>
-            ) : (
-              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
-                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
-                  </span>
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{t('home.sales')}</p>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {t('home.notEnabled')}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Purchasing */}
-            {purchasingEnabled ? (
-              <button
-                onClick={() => router.push('/purchasing')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-amber-500 to-orange-700 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                    <ShoppingCart size={22} strokeWidth={2} />
-                  </span>
-                  <ArrowUpRight
-                    size={18}
-                    strokeWidth={2}
-                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                  />
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{t('home.purchasing')}</p>
-                  <p className="text-sm text-white/85 mt-0.5">
-                    {t('home.purchasingDesc')}
-                  </p>
-                </div>
-              </button>
-            ) : (
-              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
-                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
-                  </span>
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{t('home.purchasing')}</p>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {t('home.notEnabled')}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Accounting — NEW. Gradient distinct from all four siblings
-                (indigo/blue, vs. green/red-pink/amber-orange/cyan-blue) so
-                the grid stays scannable at a glance rather than any two
-                cards reading as "the same module" by color alone. */}
-            {accountingEnabled ? (
-              <button
-                onClick={() => router.push('/accounting')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-indigo-500 to-blue-800 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                    <Calculator size={22} strokeWidth={2} />
-                  </span>
-                  <ArrowUpRight
-                    size={18}
-                    strokeWidth={2}
-                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                  />
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{t('home.accounting')}</p>
-                  <p className="text-sm text-white/85 mt-0.5">
-                    {t('home.accountingDesc')}
-                  </p>
-                </div>
-              </button>
-            ) : (
-              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
-                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
-                  </span>
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{t('home.accounting')}</p>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {t('home.notEnabled')}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Workshop */}
-            {workshopEnabled ? (
-              <button
-                onClick={() => router.push('/workshop')}
-                className="group relative text-left rounded-xl p-6 bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[150px] flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                    <Wrench size={22} strokeWidth={2} />
-                  </span>
-                  <ArrowUpRight
-                    size={18}
-                    strokeWidth={2}
-                    className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                  />
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight`}>{t('home.workshop')}</p>
-                  <p className="text-sm text-white/85 mt-0.5">
-                    {t('home.workshopDesc')}
-                  </p>
-                </div>
-              </button>
-            ) : (
-              <div className="relative text-left rounded-xl p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 min-h-[150px] flex flex-col justify-between cursor-not-allowed">
-                <div className="flex items-start justify-between">
-                  <span className="shrink-0 rounded-lg bg-blue-100 p-2.5">
-                    <Lock size={20} strokeWidth={2} className="text-blue-400" />
-                  </span>
-                </div>
-                <div>
-                  <p className={`${display.className} text-xl font-bold leading-tight text-gray-500`}>{t('home.workshop')}</p>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {t('home.notEnabled')}
-                  </p>
-                </div>
-              </div>
-            )}
+            {MODULE_ITEMS.map((item) => (
+              <ModuleCard key={item.href} {...item} notEnabledLabel={notEnabledLabel} onNavigate={router.push} />
+            ))}
           </div>
         </div>
       </div>
