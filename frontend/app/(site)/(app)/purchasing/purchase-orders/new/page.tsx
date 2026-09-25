@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { ClipboardList, Trash2, Plus } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -14,7 +14,6 @@ import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 

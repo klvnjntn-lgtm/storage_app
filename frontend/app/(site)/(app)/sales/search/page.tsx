@@ -3,14 +3,13 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { FileText, ClipboardList, Receipt, Truck, Search, Loader2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
 

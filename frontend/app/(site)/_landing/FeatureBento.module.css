@@ -1,0 +1,962 @@
+/* NB: always name the keyframes inside an `animation` shorthand — the
+   CSS pipeline (Lightning CSS) collapses a nameless shorthand to
+   `animation: none`, silently dropping duration/timing. */
+
+.iconChip {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #93c5fd;
+  background: linear-gradient(160deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.04));
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 24px -6px rgba(59, 130, 246, 0.55);
+}
+
+.coreBadge {
+  flex-shrink: 0;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #93c5fd;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: #93c5fd;
+}
+
+/* ─── Scan: phone + receiving log ───────────────────────────────── */
+
+.scanStage {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+@media (min-width: 640px) {
+  .scanStage {
+    grid-template-columns: 172px minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .scanStage {
+    grid-template-columns: 216px minmax(0, 1fr);
+    gap: 32px;
+    align-items: center;
+  }
+}
+
+.phone {
+  position: relative;
+  aspect-ratio: 172 / 300;
+  padding: 6px;
+  border-radius: 30px;
+  background: linear-gradient(160deg, #222b3f, #0b1020);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 30px 60px -22px rgba(0, 0, 0, 0.85),
+    0 0 70px -22px rgba(59, 130, 246, 0.55);
+}
+
+.notch {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 50%;
+  width: 34%;
+  height: 12px;
+  border-radius: 999px;
+  background: #04060b;
+  transform: translateX(-50%);
+}
+
+.phoneScreen {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #070b15;
+}
+
+.cam {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 38px, rgba(148, 163, 184, 0.07) 38px 40px),
+    radial-gradient(circle at 50% 42%, #1c2745, #070b15 72%);
+}
+
+.box {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 74%;
+  aspect-ratio: 1.15;
+  border-radius: 6px;
+  background: linear-gradient(160deg, #6f5d48, #463a2c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 14px 24px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%) rotate(-3deg);
+}
+
+.box::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 16%;
+  background: rgba(0, 0, 0, 0.12);
+  transform: translateX(-50%);
+}
+
+.boxLabel {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 7px 4px;
+  border-radius: 3px;
+  background: #eef2f7;
+  transform: translate(-50%, -50%);
+}
+
+.boxLabel svg {
+  width: 70px;
+  height: auto;
+}
+
+.boxLabel span {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 6px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: #0f172a;
+}
+
+.reticle {
+  position: absolute;
+  inset: 24% 9%;
+  border-radius: 8px;
+  border: 1.5px solid #60a5fa;
+  clip-path: polygon(0 0, 20% 0, 20% 100%, 80% 100%, 80% 0, 100% 0, 100% 20%, 0 20%, 0 80%, 100% 80%, 100% 100%, 0 100%);
+  filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.8));
+}
+
+.laser {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 28%;
+  height: 1.5px;
+  background: #f87171;
+  box-shadow: 0 0 10px 2px rgba(248, 113, 113, 0.75);
+  animation: phoneLaser 1.5s ease-in-out infinite alternate;
+}
+
+.camFlash {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px #34d399, inset 0 0 44px rgba(52, 211, 153, 0.4);
+  opacity: 0;
+  animation: camFlash 6s ease-out infinite;
+}
+
+.toastOk {
+  position: absolute;
+  z-index: 2;
+  top: 34px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  color: #d1fae5;
+  background: rgba(6, 42, 32, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
+  transform: translateX(-50%);
+  animation: toastOk 6s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
+}
+
+.toastOk span {
+  font-weight: 700;
+  color: #34d399;
+}
+
+.toastOk svg {
+  color: #34d399;
+}
+
+.shutterRow {
+  flex-shrink: 0;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.shutter {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px #070b15, 0 0 0 4.5px rgba(255, 255, 255, 0.85);
+}
+
+.shutterLabel {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* receiving log */
+.log {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.logHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 10px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.logCount {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #6ee7b7;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.logViewport {
+  --row: 50px;
+  height: calc(var(--row) * 3);
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.logList {
+  animation: logList 6s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
+}
+
+.logRow {
+  height: var(--row);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 10px;
+}
+
+.logRow + .logRow {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.logFresh {
+  animation: logFresh 6s ease-out infinite both;
+}
+
+.logIcon {
+  display: none;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.logName {
+  display: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logRow .mono {
+  display: block;
+}
+
+.logQty {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: #34d399;
+  font-variant-numeric: tabular-nums;
+}
+
+.logLoc {
+  display: none;
+  min-width: 46px;
+  text-align: right;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+@media (min-width: 640px) {
+  .logIcon {
+    display: grid;
+  }
+
+  .logName,
+  .logLoc {
+    display: block;
+  }
+}
+
+/* ─── Transfer: rack → rack ──────────────────────────────────────── */
+
+.transfer {
+  position: relative;
+  width: 290px;
+  height: 156px;
+  margin: 0 auto;
+}
+
+.rack {
+  position: absolute;
+  left: 0;
+  top: 20px;
+  width: 84px;
+  height: 94px;
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+
+.rack b {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -22px;
+  text-align: center;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.rackTo {
+  left: auto;
+  right: 0;
+  background: rgba(59, 130, 246, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3), 0 0 30px -10px rgba(59, 130, 246, 0.7);
+  animation: rackArrive 4s ease-out infinite both;
+}
+
+.shelf {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 20px;
+  padding-bottom: 2px;
+  border-bottom: 2px solid rgba(148, 163, 184, 0.28);
+}
+
+.shelf i {
+  width: 14px;
+  height: 12px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.85), rgba(29, 78, 216, 0.85));
+}
+
+.shelf .shelfItemDim {
+  opacity: 0.3;
+}
+
+.shelfLanding i {
+  animation: landing 4s ease-out infinite both;
+}
+
+.transferPath {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 290px;
+  height: 156px;
+  overflow: visible;
+}
+
+.transferPath path {
+  fill: none;
+  stroke: rgba(96, 165, 250, 0.5);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+}
+
+.transferParcel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  offset-path: path('M 90 46 C 118 -4, 172 -4, 200 46');
+  offset-rotate: 0deg;
+  offset-distance: 100%;
+  animation: parcelRide 4s cubic-bezier(0.65, 0, 0.35, 1) infinite both;
+}
+
+.transferMeta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
+/* ─── Tracking: bars per location ───────────────────────────────── */
+
+.bars {
+  width: 100%;
+  display: grid;
+  gap: 13px;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 10px;
+}
+
+.barName {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
+.barTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  width: var(--pct);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1d4ed8, #60a5fa);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.55);
+  transform-origin: left center;
+}
+
+.barLow {
+  background: linear-gradient(90deg, #b45309, #fbbf24);
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+}
+
+.barValue {
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+/* ─── Roles ───────────────────────────────────────────────────────── */
+
+.people {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.person {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.personName {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.role {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+}
+
+.roleAdmin {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.roleStaff {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.roleDriver {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.17);
+}
+
+.perms {
+  display: flex;
+  gap: 3px;
+}
+
+.perm {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.permOn {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
+}
+
+/* ─── Audit timeline ─────────────────────────────────────────────── */
+
+.timeline {
+  position: relative;
+  width: 100%;
+  padding-left: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.6), rgba(96, 165, 250, 0.05));
+}
+
+.event {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 8px;
+}
+
+.dot {
+  position: absolute;
+  left: -20px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0a1122;
+  box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.55);
+}
+
+.dotLive {
+  background: #60a5fa;
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16), 0 0 12px #60a5fa;
+  animation: livePulse 2.4s ease-in-out infinite;
+}
+
+.eventBadge {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.tMove {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.tReceive {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.tAdjust {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.eventText {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eventMeta {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ─── Import ──────────────────────────────────────────────────────── */
+
+.import {
+  width: 100%;
+}
+
+.importFlow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.25);
+}
+
+.file .mono {
+  color: #d1fae5;
+}
+
+.flowArrow {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  color: rgba(255, 255, 255, 0.45);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.18) 50%, transparent 50%) center / 8px 1px repeat-x;
+}
+
+.flowArrow svg {
+  padding: 2px;
+  box-sizing: content-box;
+  background: #0b1222;
+}
+
+.importMark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+  box-shadow: 0 0 22px rgba(59, 130, 246, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.progress {
+  margin-top: 16px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.progressFill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #047857, #34d399);
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+  transform-origin: left center;
+}
+
+.importMeta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* hover: counts and import re-run, so the static tiles still respond */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :global(.spotlight-card):hover .barFill {
+    animation: regrow 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i) * 70ms);
+  }
+
+  :global(.spotlight-card):hover .progressFill {
+    animation: regrow 1.4s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+
+  :global(.spotlight-card):hover .perm {
+    transition: transform 0.25s ease;
+  }
+
+  :global(.spotlight-card):hover .permOn {
+    transform: translateY(-1px);
+  }
+}
+
+/* ─── Keyframes ───────────────────────────────────────────────────── */
+
+@keyframes phoneLaser {
+  from {
+    top: 28%;
+  }
+  to {
+    top: 70%;
+  }
+}
+
+@keyframes camFlash {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  43% {
+    opacity: 1;
+  }
+  58%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes toastOk {
+  0%,
+  41% {
+    opacity: 0;
+    transform: translate(-50%, -6px) scale(0.92);
+  }
+  45%,
+  84% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -4px) scale(0.96);
+  }
+}
+
+@keyframes logList {
+  0%,
+  43% {
+    transform: translateY(calc(var(--row) * -1));
+    opacity: 1;
+  }
+  49%,
+  90% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  94% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  95%,
+  97% {
+    transform: translateY(calc(var(--row) * -1));
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(calc(var(--row) * -1));
+    opacity: 1;
+  }
+}
+
+@keyframes logFresh {
+  0%,
+  44% {
+    opacity: 0;
+    background: rgba(52, 211, 153, 0);
+  }
+  49% {
+    opacity: 1;
+    background: rgba(52, 211, 153, 0.14);
+  }
+  75%,
+  100% {
+    opacity: 1;
+    background: rgba(52, 211, 153, 0);
+  }
+}
+
+@keyframes parcelRide {
+  0%,
+  8% {
+    offset-distance: 0%;
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  14% {
+    offset-distance: 0%;
+    opacity: 1;
+    transform: scale(1);
+  }
+  66% {
+    offset-distance: 100%;
+    opacity: 1;
+    transform: scale(1);
+  }
+  76%,
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes rackArrive {
+  0%,
+  64% {
+    box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3), 0 0 30px -10px rgba(59, 130, 246, 0.7);
+  }
+  72% {
+    box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.9), 0 0 44px -6px rgba(59, 130, 246, 1);
+  }
+  92%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3), 0 0 30px -10px rgba(59, 130, 246, 0.7);
+  }
+}
+
+@keyframes landing {
+  0%,
+  68% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  76%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes livePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16), 0 0 12px #60a5fa;
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(96, 165, 250, 0.06), 0 0 18px #60a5fa;
+  }
+}
+
+@keyframes regrow {
+  from {
+    transform: scaleX(0.15);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Reduced motion: static end states — scan logged, parcel delivered. */
+@media (prefers-reduced-motion: reduce) {
+  .laser,
+  .camFlash,
+  .toastOk,
+  .logList,
+  .logFresh,
+  .rackTo,
+  .shelfLanding i,
+  .transferParcel,
+  .dotLive {
+    animation: none !important;
+  }
+
+  .laser,
+  .transferParcel {
+    display: none;
+  }
+}

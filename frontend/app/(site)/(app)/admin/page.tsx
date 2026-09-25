@@ -1,12 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Settings, Database, Package, ChevronRight } from 'lucide-react';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 export default function AdminPage() {
   const router = useRouter();

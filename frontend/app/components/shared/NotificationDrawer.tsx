@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Car } from 'lucide-react';
+import { Bell, Car, Truck, ShieldAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useNotifications, type AppNotification } from '@/lib/hooks/useNotifications';
 
 const DUE_SOON_DAYS = 7;
 
@@ -14,15 +15,20 @@ function daysUntil(dueDate: string) {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
-export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
+// `enabled` gates whether the bell renders at all (hasWorkshopRms ||
+// hasDelivery, see AppShell.tsx); `remindersEnabled` additionally gates the
+// vehicle-reminders fetch specifically, since /reminders is module-gated to
+// WORKSHOP_RMS and a delivery-only org shouldn't call it.
+export default function NotificationDrawer({ enabled, remindersEnabled }: { enabled: boolean; remindersEnabled: boolean }) {
   const router = useRouter();
   const { t } = useLanguage();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { unreadCount, notifications, ensureListLoaded, markRead } = useNotifications(enabled);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!remindersEnabled) return;
     (async () => {
       try {
         const res = await apiFetch('/reminders');
@@ -33,7 +39,7 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
         console.error('Reminders fetch failed:', err);
       }
     })();
-  }, [enabled]);
+  }, [remindersEnabled]);
 
   if (!enabled) return null;
 
@@ -44,11 +50,12 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
     return d >= 0 && d <= DUE_SOON_DAYS;
   });
   const attention = [...overdue, ...dueSoon];
-  const count = attention.length;
+  const count = attention.length + unreadCount;
 
   function openPanel() {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     setOpen(true);
+    ensureListLoaded();
   }
   function scheduleClose() {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -67,6 +74,12 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
     return { text: t(key, { count: d }), cls: 'bg-amber-50 text-amber-700 border-amber-300' };
   }
 
+  function handleNotificationClick(n: AppNotification) {
+    setOpen(false);
+    if (!n.readAt) markRead(n.id);
+    if (n.link) router.push(n.link);
+  }
+
   return (
     <>
       {/* Desktop edge-hover trigger */}
@@ -82,9 +95,9 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
 
       {/* Floating bell — click/tap fallback for desktop + mobile + keyboard */}
       <button
-        onClick={() => (open ? setOpen(false) : setOpen(true))}
+        onClick={() => (open ? setOpen(false) : openPanel())}
         aria-label={t('shared.notificationDrawer.notifications')}
-        className="fixed bottom-5 right-5 z-40 w-11 h-11 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-all"
+        className="fixed bottom-[calc(var(--app-bottom-nav-h,0px)+1.25rem)] right-5 z-40 w-11 h-11 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-all"
       >
         <Bell size={18} strokeWidth={2} />
         {count > 0 && (
@@ -129,6 +142,26 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
           )}
 
           <div className="flex flex-col gap-2">
+            {notifications.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => handleNotificationClick(n)}
+                className={`text-left border rounded-xl p-2.5 shadow-sm hover:border-blue-500/40 hover:bg-blue-50/40 transition-colors ${
+                  n.readAt ? 'border-gray-200 bg-white/60' : 'border-blue-500/15 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                  {n.type.startsWith('DEVICE') || n.type.startsWith('ACCOUNT') ? (
+                    <ShieldAlert size={13} strokeWidth={2} className="text-blue-600/60 shrink-0" />
+                  ) : (
+                    <Truck size={13} strokeWidth={2} className="text-blue-600/60 shrink-0" />
+                  )}
+                  {!n.readAt && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />}
+                  <span className="text-xs font-semibold">{n.title}</span>
+                </div>
+                {n.body && <p className="text-xs text-gray-700">{n.body}</p>}
+              </button>
+            ))}
             {attention.map((r) => {
               const label = statusLabel(r);
               return (
@@ -153,15 +186,17 @@ export default function NotificationDrawer({ enabled }: { enabled: boolean }) {
             })}
           </div>
 
-          <button
-            onClick={() => {
-              setOpen(false);
-              router.push('/workshop/reminders');
-            }}
-            className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-blue-500/20 text-blue-700 font-semibold bg-white hover:bg-blue-50 transition-colors"
-          >
-            {t('shared.notificationDrawer.viewAllReminders')}
-          </button>
+          {remindersEnabled && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                router.push('/workshop/reminders');
+              }}
+              className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-blue-500/20 text-blue-700 font-semibold bg-white hover:bg-blue-50 transition-colors"
+            >
+              {t('shared.notificationDrawer.viewAllReminders')}
+            </button>
+          )}
         </div>
       </div>
     </>

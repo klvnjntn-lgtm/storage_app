@@ -32,6 +32,30 @@ services:
       - ./gdb-imports:/tmp/gdb-imports
 
 
+  osrm:
+    image: osrm/osrm-backend
+    container_name: waresys-osrm
+    restart: unless-stopped
+
+    volumes:
+      - ./osrm-data:/data
+
+    # MLD pipeline: osrm-extract/partition/customize run once, out of band
+    # (see osrm-data/ setup), producing sumatra-latest.osrm* — this
+    # service just serves the routing API from the prepared files.
+    #
+    # Sumatra, not all of Indonesia — osrm-extract for the full country
+    # needs ~16GB+ RAM (OOM-killed at 5.2GB on this 7.4GB sandbox before
+    # finishing); Sumatra (~283MB extract, includes Batam/Kepulauan Riau)
+    # fits comfortably. Swap this to indonesia-latest.osrm later on a
+    # machine with enough RAM to run the same 4-command pipeline —
+    # nothing else in the backend/frontend needs to change.
+    command: osrm-routed --algorithm MLD /data/sumatra-latest.osrm
+
+    ports:
+      - "5001:5000"
+
+
   backend:
     build:
       context: ./backend
@@ -45,11 +69,14 @@ services:
         condition: service_healthy
       firebird:
         condition: service_started
+      osrm:
+        condition: service_started
 
     environment:
       NODE_ENV: production
 
       DATABASE_URL: ${DATABASE_URL}
+      OSRM_URL: ${OSRM_URL}
 
       SUPERADMIN_SECRET: ${SUPERADMIN_SECRET}
       JWT_SECRET: ${JWT_SECRET}
@@ -86,6 +113,10 @@ services:
       MAIL_FROM: ${MAIL_FROM}
       APP_URL: ${APP_URL}
 
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
+
     volumes:
       - backend_data:/app/data
       - backend_uploads:/app/uploads
@@ -102,10 +133,12 @@ services:
       args:
         BACKEND_URL: http://backend:3000
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
 
     environment:
       INTERNAL_API_URL: ${INTERNAL_API_URL}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
 
     container_name: waresys-frontend
     restart: unless-stopped

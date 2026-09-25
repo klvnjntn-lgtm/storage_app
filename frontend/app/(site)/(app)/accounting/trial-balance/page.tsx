@@ -3,13 +3,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Rows3, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type TrialBalanceLine = { accountId: string; code: string; name: string; type: string; debit: number; credit: number };
 type TrialBalanceReport = {

@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { FileSpreadsheet, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type SalesOrderStatus = 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED';
 

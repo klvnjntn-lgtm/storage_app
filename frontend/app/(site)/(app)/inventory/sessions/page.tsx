@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { ClipboardList, Calendar, Package, Receipt, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -10,7 +10,6 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Session = {
   id: string;

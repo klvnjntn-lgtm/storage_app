@@ -1,0 +1,55 @@
+/* NB: always name the keyframes inside an `animation` shorthand (the
+   CSS pipeline collapses nameless shorthands to `animation: none`). */
+
+.marqueeMask {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+
+.marqueeTrack {
+  display: flex;
+  width: max-content;
+  animation: marquee 40s linear infinite;
+}
+
+.marqueeMask:hover .marqueeTrack {
+  animation-play-state: paused;
+}
+
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* closing CTA: the rim of a huge lit sphere rising from the bottom */
+.horizon {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: max(1400px, 160%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, calc(100% - 210px));
+  background: radial-gradient(closest-side, #050810 92%, transparent);
+  box-shadow:
+    0 -1px 0 0 rgba(147, 197, 253, 0.75),
+    0 -8px 40px 0 rgba(59, 130, 246, 0.45),
+    0 -60px 160px 10px rgba(37, 99, 235, 0.35),
+    inset 0 30px 80px -30px rgba(96, 165, 250, 0.35);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marqueeTrack {
+    animation: none;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: auto;
+  }
+
+  .marqueeTrack > [aria-hidden] {
+    display: none;
+  }
+}

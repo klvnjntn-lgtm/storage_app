@@ -6,6 +6,7 @@ import { purchasingWorkshop } from './modules/purchasing-workshop';
 import { accounting } from './modules/accounting';
 import { adminSettingsShared } from './modules/admin-settings-shared';
 import { landing } from './modules/landing';
+import { delivery } from './modules/delivery';
 
 export type Locale = 'en' | 'id';
 
@@ -91,6 +92,7 @@ const base = {
         purchasing: 'Purchasing',
         accounting: 'Accounting',
         workshop: 'Workshop',
+        delivery: 'Delivery',
         system: 'System',
       },
       items: {
@@ -134,13 +136,17 @@ const base = {
         vehicles: 'Vehicles',
         vehicleLookup: 'Vehicle Lookup',
         reminders: 'Reminders',
+        deliveryHome: 'Delivery Home',
+        deliveryRoutes: 'Routes',
+        deliveryMonitoring: 'Monitoring',
+        deliveryDrivers: 'Drivers',
         admin: 'Admin',
         settings: 'Settings',
         mediaLibrary: 'Media Library',
       },
     },
     appShell: {
-      brand: 'Warehouse OS',
+      brand: 'WareSys',
       tagline: 'Operations hub',
       account: 'Account',
       licenseActive: 'License active',
@@ -166,6 +172,20 @@ const base = {
       changePasswordConfirm: 'Confirm',
       changePasswordResend: 'Resend code',
       changePasswordVerifyFailed: 'Failed to confirm code',
+      mainNavigation: 'Main navigation',
+      more: 'More',
+      closeMenu: 'Close menu',
+      roles: {
+        ADMIN: 'Admin',
+        USER: 'User',
+        DRIVER: 'Driver',
+      },
+      licenseStatus: {
+        ACTIVE: 'Active',
+        EXPIRED: 'Expired',
+        REVOKED: 'Revoked',
+        UNKNOWN: 'Unknown',
+      },
     },
     home: {
       greetingMorning: 'Good morning',
@@ -187,6 +207,8 @@ const base = {
       accountingDesc: 'Chart of accounts, expenses, payroll, and reports',
       workshop: 'Workshop',
       workshopDesc: 'Vehicles, service jobs, and reminders',
+      delivery: 'Delivery',
+      deliveryDesc: 'Routes, drivers, and delivery monitoring',
     },
     auth: {
       login: {
@@ -327,6 +349,7 @@ const base = {
         purchasing: 'Pembelian',
         accounting: 'Akuntansi',
         workshop: 'Bengkel',
+        delivery: 'Pengiriman',
         system: 'Sistem',
       },
       items: {
@@ -370,13 +393,17 @@ const base = {
         vehicles: 'Kendaraan',
         vehicleLookup: 'Cari Kendaraan',
         reminders: 'Pengingat',
+        deliveryHome: 'Beranda Pengiriman',
+        deliveryRoutes: 'Rute',
+        deliveryMonitoring: 'Pemantauan',
+        deliveryDrivers: 'Driver',
         admin: 'Admin',
         settings: 'Pengaturan',
         mediaLibrary: 'Pustaka Media',
       },
     },
     appShell: {
-      brand: 'Warehouse OS',
+      brand: 'WareSys',
       tagline: 'Pusat operasional',
       account: 'Akun',
       licenseActive: 'Lisensi aktif',
@@ -402,6 +429,20 @@ const base = {
       changePasswordConfirm: 'Konfirmasi',
       changePasswordResend: 'Kirim ulang kode',
       changePasswordVerifyFailed: 'Gagal mengonfirmasi kode',
+      mainNavigation: 'Navigasi utama',
+      more: 'Lainnya',
+      closeMenu: 'Tutup menu',
+      roles: {
+        ADMIN: 'Admin',
+        USER: 'Pengguna',
+        DRIVER: 'Pengemudi',
+      },
+      licenseStatus: {
+        ACTIVE: 'Aktif',
+        EXPIRED: 'Kedaluwarsa',
+        REVOKED: 'Dicabut',
+        UNKNOWN: 'Tidak diketahui',
+      },
     },
     home: {
       greetingMorning: 'Selamat pagi',
@@ -423,6 +464,8 @@ const base = {
       accountingDesc: 'Bagan akun, beban, penggajian, dan laporan',
       workshop: 'Bengkel',
       workshopDesc: 'Kendaraan, pekerjaan servis, dan pengingat',
+      delivery: 'Pengiriman',
+      deliveryDesc: 'Rute, driver, dan pemantauan pengiriman',
     },
     auth: {
       login: {
@@ -505,6 +548,7 @@ export const translations = {
     ...accounting.en,
     ...adminSettingsShared.en,
     ...landing.en,
+    ...delivery.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -518,6 +562,7 @@ export const translations = {
     ...accounting.id,
     ...adminSettingsShared.id,
     ...landing.id,
+    ...delivery.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

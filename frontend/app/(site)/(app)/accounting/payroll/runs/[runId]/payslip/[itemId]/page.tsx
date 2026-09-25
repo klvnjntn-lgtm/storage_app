@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Printer, ArrowLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { PayslipA4Template } from '@/app/components/payroll/templates/PayslipA4Template';
 import { PayslipPrintView } from '@/app/components/payroll/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 export default function PayslipPrintPage() {
   const router = useRouter();

@@ -1,0 +1,236 @@
+.stage {
+  position: relative;
+  width: 900px;
+  height: 720px;
+  perspective: 2400px;
+  perspective-origin: 50% 40%;
+}
+
+.rig {
+  position: absolute;
+  left: 170px;
+  top: 390px;
+  width: 520px;
+  height: 340px;
+  transform-style: preserve-3d;
+  transform: rotateX(60deg) rotateZ(-22deg);
+  animation: sway 20s ease-in-out infinite;
+}
+
+.slab,
+.lid {
+  position: absolute;
+  transform-style: preserve-3d;
+}
+
+.slab {
+  inset: 0;
+  border-radius: 18px;
+}
+
+.floor {
+  position: absolute;
+  inset: -70px -90px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(37, 99, 235, 0.28), transparent);
+  transform: translateZ(-30px);
+}
+
+.floor::after {
+  content: '';
+  position: absolute;
+  inset: 50px 70px;
+  border-radius: 50%;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+}
+
+.shell {
+  background: linear-gradient(135deg, #1f2937, #0b1020);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.deck {
+  transform: translateZ(8px);
+  background: linear-gradient(150deg, #3a4457, #1c2331);
+  border: 1px solid rgba(203, 213, 225, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.keys {
+  position: absolute;
+  left: 40px;
+  right: 40px;
+  top: 34px;
+  height: 150px;
+  display: grid;
+  grid-template-columns: repeat(13, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 5px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.keys span {
+  border-radius: 4px;
+  background: #121823;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 0 6px rgba(59, 130, 246, 0.15);
+}
+
+.trackpad {
+  position: absolute;
+  left: 170px;
+  top: 206px;
+  width: 180px;
+  height: 108px;
+  border-radius: 10px;
+  background: linear-gradient(160deg, #2c3545, #222a38);
+  border: 1px solid rgba(203, 213, 225, 0.15);
+}
+
+.lid {
+  left: 0;
+  bottom: 100%;
+  width: 520px;
+  height: 330px;
+  transform-origin: 50% 100%;
+  transform: translateZ(14px) rotateX(-100deg);
+}
+
+.lidBack {
+  background: linear-gradient(160deg, #2a3344, #151b27);
+  border: 1px solid rgba(203, 213, 225, 0.2);
+}
+
+.panel {
+  transform: translateZ(4px);
+  padding: 10px;
+  background: #04060b;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 0 90px -10px rgba(59, 130, 246, 0.45);
+}
+
+.screen {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* ─── Modules pulled out of the screen ─────────────────────────── */
+
+.module {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 200px;
+  margin: -66px 0 0 -100px;
+  transform: translate3d(var(--bx), var(--by), var(--bz));
+  animation: fly 12s cubic-bezier(0.65, 0, 0.35, 1) infinite both;
+}
+
+.card {
+  padding: 8px 9px 9px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  box-shadow: 0 24px 48px -16px rgba(2, 6, 23, 0.75), 0 0 0 1px rgba(96, 165, 250, 0.2), 0 0 40px -8px rgba(59, 130, 246, 0.35);
+}
+
+.cardDark {
+  background: #0b1220;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.tether {
+  position: absolute;
+  height: 1.5px;
+  margin-top: -0.75px;
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.9), rgba(96, 165, 250, 0.25));
+  transform: rotateZ(var(--yaw)) rotateY(var(--pitch)) scaleX(1);
+  animation: reach 12s cubic-bezier(0.65, 0, 0.35, 1) infinite both;
+}
+
+.origin {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 9999px;
+  background: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2), 0 0 10px rgba(96, 165, 250, 0.9);
+  transform: translateZ(1px);
+  animation: glow 12s ease-in-out infinite both;
+}
+
+.viewfinder {
+  position: relative;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 50%, #1e293b, #020617);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.25);
+}
+
+.viewfinder::before {
+  content: '';
+  position: absolute;
+  inset: 8px 34px;
+  border: 1.5px solid #60a5fa;
+  border-radius: 4px;
+  clip-path: polygon(0 0, 22% 0, 22% 100%, 78% 100%, 78% 0, 100% 0, 100% 30%, 0 30%, 0 70%, 100% 70%, 100% 100%, 0 100%);
+  opacity: 0.8;
+}
+
+.scanLine {
+  position: absolute;
+  left: 30px;
+  right: 30px;
+  top: 10px;
+  height: 1.5px;
+  background: #f87171;
+  box-shadow: 0 0 8px 1px rgba(248, 113, 113, 0.8);
+  animation: sweep 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes sway {
+  0%, 100% { transform: rotateX(60deg) rotateZ(-28deg); }
+  50% { transform: rotateX(60deg) rotateZ(-16deg); }
+}
+
+@keyframes fly {
+  0%, 12% { transform: translate3d(var(--ax), var(--ay), 2px) scale(0.18); opacity: 0; }
+  16% { opacity: 1; }
+  40%, 80% { transform: translate3d(var(--bx), var(--by), var(--bz)) scale(1); }
+  92% { opacity: 1; }
+  97%, 100% { transform: translate3d(var(--ax), var(--ay), 2px) scale(0.18); opacity: 0; }
+}
+
+@keyframes reach {
+  0%, 12% { transform: rotateZ(var(--yaw)) rotateY(var(--pitch)) scaleX(0); }
+  40%, 80% { transform: rotateZ(var(--yaw)) rotateY(var(--pitch)) scaleX(1); }
+  97%, 100% { transform: rotateZ(var(--yaw)) rotateY(var(--pitch)) scaleX(0); }
+}
+
+@keyframes glow {
+  0%, 12% { opacity: 0; }
+  20%, 88% { opacity: 1; }
+  97%, 100% { opacity: 0; }
+}
+
+@keyframes sweep {
+  from { top: 10px; }
+  to { top: 46px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rig, .module, .tether, .origin, .scanLine {
+    animation: none;
+  }
+}

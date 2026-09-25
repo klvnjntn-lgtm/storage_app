@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { BookText, ChevronDown, ChevronUp, Plus, X, Loader2, Ban, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
@@ -13,7 +13,6 @@ import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Account = { id: string; code: string; name: string; type: string };
 

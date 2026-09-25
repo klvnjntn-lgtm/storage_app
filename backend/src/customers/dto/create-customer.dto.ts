@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsLatitude, IsLongitude, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -25,4 +25,14 @@ export class CreateCustomerDto {
   @IsString()
   @MaxLength(30)
   npwp?: string;
+
+  // Default location for new deliveries to this customer — see
+  // Customer.latitude's schema comment.
+  @IsOptional()
+  @IsLatitude()
+  latitude?: number;
+
+  @IsOptional()
+  @IsLongitude()
+  longitude?: number;
 }

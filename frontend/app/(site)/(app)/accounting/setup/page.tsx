@@ -3,13 +3,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Landmark, CheckCircle2, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Account = {
   id: string;

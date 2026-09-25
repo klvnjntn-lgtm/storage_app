@@ -1,12 +1,13 @@
 // src/auth/jwt.strategy.ts
 
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveTimezone } from '../accounting/business-date';
+import { isWithinAccessWindow } from './access-schedule.util';
+import { DevicesService } from './devices.service';
 
 interface JwtPayload {
   sub: string;
@@ -35,18 +36,28 @@ export function getJwtSecret(): string {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private devices: DevicesService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: getJwtSecret(),
+      passReqToCallback: true,
     });
   }
 
-  async validate(payload: JwtPayload) {
+  async validate(req: Request, payload: JwtPayload) {
     const user = await this.prisma.user.findUnique({
       where: {
         id: payload.sub,
+      },
+      include: {
+        accessSchedules: {
+          select: { dayOfWeek: true, startTime: true, endTime: true },
+        },
+        organization: { select: { timezone: true } },
       },
     });
 
@@ -59,9 +70,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     if (user.currentSessionId !== payload.sessionId) {
-      throw new UnauthorizedException(
-        'You have logged in on another device.',
-      );
+      throw new UnauthorizedException('You have logged in on another device.');
+    }
+
+    // Device/access-hours restrictions only apply to DRIVER accounts — see
+    // devices.service.ts and access-schedule.util.ts for the rationale
+    // (field driver phones, not office ADMIN/USER desktop logins).
+    if (user.role === 'DRIVER') {
+      if (user.accessSchedules.length > 0) {
+        const tz = resolveTimezone(user.organization);
+        if (!isWithinAccessWindow(user.accessSchedules, new Date(), tz)) {
+          throw new UnauthorizedException('Outside allowed access hours.');
+        }
+      }
+
+      // Best-effort freshness touch, not an enforcement point — device
+      // approval/revocation is enforced at login time and via revoke()
+      // (which nulls currentSessionId), not by re-checking the header here.
+      const deviceId = req.headers['x-device-id'];
+      if (typeof deviceId === 'string' && deviceId) {
+        void this.devices.touchLastSeen(user.id, deviceId);
+      }
     }
 
     return {

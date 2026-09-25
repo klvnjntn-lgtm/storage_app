@@ -11,6 +11,9 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer/mailer.service';
 import { randomUUID, randomBytes, createHash } from 'crypto';
+import { DevicesService } from './devices.service';
+import { resolveTimezone } from '../accounting/business-date';
+import { isWithinAccessWindow } from './access-schedule.util';
 
 @Injectable()
 export class AuthService {
@@ -20,11 +23,25 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private mailer: MailerService,
+    private devices: DevicesService,
   ) {}
 
-  async login(email: string, password: string) {
+  async login(
+    email: string,
+    password: string,
+    deviceId?: string,
+    userAgent?: string,
+  ) {
     const normalizedEmail = email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: {
+        accessSchedules: {
+          select: { dayOfWeek: true, startTime: true, endTime: true },
+        },
+        organization: { select: { timezone: true } },
+      },
+    });
     if (!user || !user.active) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -32,6 +49,35 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // DRIVER-only restrictions — see devices.service.ts / access-schedule.util.ts.
+    if (user.role === 'DRIVER') {
+      if (user.accessSchedules.length > 0) {
+        const tz = resolveTimezone(user.organization);
+        if (!isWithinAccessWindow(user.accessSchedules, new Date(), tz)) {
+          throw new UnauthorizedException('Outside allowed access hours.');
+        }
+      }
+
+      if (deviceId) {
+        const result = await this.devices.registerOrCheck(
+          user.organizationId,
+          user.id,
+          deviceId,
+          userAgent,
+        );
+        if (result === 'PENDING') {
+          throw new UnauthorizedException(
+            'This device is pending admin approval.',
+          );
+        }
+        if (result === 'REJECTED') {
+          throw new UnauthorizedException(
+            'This device has been denied access. Contact your administrator.',
+          );
+        }
+      }
     }
 
     return this.issueToken(user.id, user.email, user.role, user.organizationId);
@@ -48,7 +94,9 @@ export class AuthService {
   // it — see AuthController.invite.
   async register(email: string, password: string, organizationName: string) {
     const normalizedEmail = email.trim().toLowerCase();
-    const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const existing = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
     if (existing) {
       throw new ConflictException('Email already registered');
     }
@@ -82,15 +130,19 @@ export class AuthService {
     inviterOrgId: string,
     email: string,
     password: string,
-    role: 'ADMIN' | 'USER' = 'USER',
+    role: 'ADMIN' | 'USER' | 'DRIVER' = 'USER',
   ) {
     const normalizedEmail = email.trim().toLowerCase();
-    const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const existing = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
     if (existing) {
       throw new ConflictException('Email already registered');
     }
 
-    const org = await this.prisma.organization.findUnique({ where: { id: inviterOrgId } });
+    const org = await this.prisma.organization.findUnique({
+      where: { id: inviterOrgId },
+    });
     if (!org) {
       throw new ForbiddenException('Organization not found');
     }
@@ -108,7 +160,12 @@ export class AuthService {
     const hashed = await bcrypt.hash(password, 10);
 
     return this.prisma.user.create({
-      data: { email: normalizedEmail, password: hashed, role, organizationId: inviterOrgId },
+      data: {
+        email: normalizedEmail,
+        password: hashed,
+        role,
+        organizationId: inviterOrgId,
+      },
       select: { id: true, email: true, role: true },
     });
   }
@@ -121,7 +178,11 @@ export class AuthService {
   // already hashed and stashed on the user row (pendingPasswordHash) so
   // confirmPasswordChange() only needs the code, not the password again —
   // it never touches the plaintext password after this call returns.
-  async requestPasswordChange(userId: string, currentPassword: string, newPassword: string) {
+  async requestPasswordChange(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.active) {
       throw new UnauthorizedException('User not found');
@@ -138,10 +199,14 @@ export class AuthService {
 
     const sameAsOld = await bcrypt.compare(newPassword, user.password);
     if (sameAsOld) {
-      throw new ForbiddenException('New password must be different from current password');
+      throw new ForbiddenException(
+        'New password must be different from current password',
+      );
     }
 
-    const code = (Math.floor(Math.random() * 1_000_000)).toString().padStart(6, '0');
+    const code = Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0');
     const [otpHash, pendingPasswordHash] = await Promise.all([
       bcrypt.hash(code, 10),
       bcrypt.hash(newPassword, 10),
@@ -151,7 +216,9 @@ export class AuthService {
       where: { id: user.id },
       data: {
         changePasswordOtpHash: otpHash,
-        changePasswordOtpExpires: new Date(Date.now() + AuthService.CHANGE_PASSWORD_OTP_TTL_MS),
+        changePasswordOtpExpires: new Date(
+          Date.now() + AuthService.CHANGE_PASSWORD_OTP_TTL_MS,
+        ),
         changePasswordOtpAttempts: 0,
         pendingPasswordHash,
       },
@@ -163,8 +230,13 @@ export class AuthService {
     try {
       await this.mailer.sendChangePasswordOtp(user.email, code);
     } catch (err) {
-      this.logger.error(`Failed to send change-password OTP to ${user.email}`, err instanceof Error ? err.stack : err);
-      throw new ForbiddenException('Could not send confirmation email. Please try again.');
+      this.logger.error(
+        `Failed to send change-password OTP to ${user.email}`,
+        err instanceof Error ? err.stack : err,
+      );
+      throw new ForbiddenException(
+        'Could not send confirmation email. Please try again.',
+      );
     }
 
     return { message: 'A confirmation code has been sent to your email.' };
@@ -187,12 +259,19 @@ export class AuthService {
       !user.pendingPasswordHash ||
       user.changePasswordOtpExpires < new Date()
     ) {
-      throw new UnauthorizedException('Code is invalid or expired. Please request a new one.');
+      throw new UnauthorizedException(
+        'Code is invalid or expired. Please request a new one.',
+      );
     }
 
-    if (user.changePasswordOtpAttempts >= AuthService.CHANGE_PASSWORD_OTP_MAX_ATTEMPTS) {
+    if (
+      user.changePasswordOtpAttempts >=
+      AuthService.CHANGE_PASSWORD_OTP_MAX_ATTEMPTS
+    ) {
       await this.clearPendingPasswordChange(user.id);
-      throw new UnauthorizedException('Too many incorrect attempts. Please request a new code.');
+      throw new UnauthorizedException(
+        'Too many incorrect attempts. Please request a new code.',
+      );
     }
 
     const valid = await bcrypt.compare(code ?? '', user.changePasswordOtpHash);
@@ -236,10 +315,13 @@ export class AuthService {
   // used to enumerate every registered email address.
   async forgotPassword(email: string) {
     const normalizedEmail = email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
 
     const genericResponse = {
-      message: 'If an account exists for that email, a reset link is on its way.',
+      message:
+        'If an account exists for that email, a reset link is on its way.',
     };
 
     if (!user || !user.active) {
@@ -265,7 +347,10 @@ export class AuthService {
     try {
       await this.mailer.sendPasswordReset(user.email, rawToken);
     } catch (err) {
-      this.logger.error(`Failed to send password reset email to ${user.email}`, err instanceof Error ? err.stack : err);
+      this.logger.error(
+        `Failed to send password reset email to ${user.email}`,
+        err instanceof Error ? err.stack : err,
+      );
     }
 
     return genericResponse;
@@ -374,7 +459,9 @@ export class AuthService {
   // no @CurrentOrg()/JWT org involved, this is a superadmin-only,
   // cross-org operation by design.
   async setSeatLimit(orgId: string, seatLimit: number) {
-    const org = await this.prisma.organization.findUnique({ where: { id: orgId } });
+    const org = await this.prisma.organization.findUnique({
+      where: { id: orgId },
+    });
     if (!org) {
       throw new NotFoundException('Organization not found');
     }

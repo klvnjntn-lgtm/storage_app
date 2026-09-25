@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { BarChart3, Car, Search, X, Users, PackageSearch } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -15,7 +15,6 @@ import TopItemsPieChart from '@/app/components/reports/TopItemsPieChart';
 import TopVehiclesBarChart from '@/app/components/reports/TopVehiclesBarChart';
 import type { TopReport } from '@/app/components/reports/types';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const FULL_REPORT_LIMIT = 10;
 

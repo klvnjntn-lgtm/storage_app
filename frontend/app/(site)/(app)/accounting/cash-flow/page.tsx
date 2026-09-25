@@ -3,14 +3,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Banknote, ArrowDownToLine, ArrowUpFromLine, Info, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type CashFlowItem = { key: string; label: string; inflow: number; outflow: number; net: number };
 type CashFlowSectionTotals = { items: CashFlowItem[]; inflow: number; outflow: number; net: number };

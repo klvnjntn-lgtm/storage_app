@@ -3,7 +3,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Package, AlertTriangle, CheckCircle2, Archive, Pencil, Check, X, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
@@ -12,7 +12,6 @@ import { useSortableData } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type Product = {
   id: string;

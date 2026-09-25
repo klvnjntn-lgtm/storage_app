@@ -3,13 +3,12 @@
 import { useRef, useState, } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { UploadCloud, Download, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import React from 'react'
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // Shape of a row as it comes straight out of the sheet, before we coerce
 // qty/sellingPrice/costPrice into numbers. Cells can be strings, numbers,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate } from '@/lib/dates';
@@ -10,7 +10,6 @@ import { QuotationA4Template } from '@/app/components/quotations/templates/Quota
 import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type QuotationDetail = {
   id: string;

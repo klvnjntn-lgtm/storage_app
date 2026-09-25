@@ -16,10 +16,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Warehouse Inventory",
-    template: "%s · Warehouse Inventory",
+    default: "WareSys",
+    template: "%s · WareSys",
   },
   description: "Warehouse inventory management system",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({

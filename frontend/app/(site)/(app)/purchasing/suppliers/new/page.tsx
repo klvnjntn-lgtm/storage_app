@@ -3,14 +3,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Building2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { SupplierForm } from '@/app/components/suppliers/SupplierForm';
 import { emptySupplierFormValues, SupplierFormValues } from '@/app/components/suppliers/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 export default function NewSupplierPage() {
   const router = useRouter();

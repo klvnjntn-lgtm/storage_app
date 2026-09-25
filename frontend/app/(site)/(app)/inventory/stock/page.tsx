@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { LayoutDashboard, Search, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes, AlertTriangle, CheckCircle2, List, LayoutGrid, ImageOff, ArrowUpDown } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useSortableData } from '@/lib/hooks/useSortableData';
@@ -13,7 +13,6 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import { toCalendarDateString } from '@/lib/dates';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 type ProductSummary = {
   productId: string;

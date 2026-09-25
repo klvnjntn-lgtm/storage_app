@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -20,7 +20,6 @@ import {
 } from '@/app/components/quotations/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 const SEARCH_DEBOUNCE_MS = 300;
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -880,7 +879,7 @@ function QuotationFormPageInner() {
       {totalLineCount > 0 && (
         <button
           onClick={scrollToCart}
-          className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-blue-700 text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(37,99,235,0.25)]"
+          className="md:hidden fixed bottom-[var(--app-bottom-nav-h,0px)] inset-x-0 z-20 bg-blue-700 text-white px-4 py-3 flex items-center justify-between shadow-[0_-2px_10px_rgba(37,99,235,0.25)]"
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart size={16} strokeWidth={2} />

@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 export type CurrentUser = {
   id: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  role: 'ADMIN' | 'USER' | 'DRIVER';
 };
 
 export function useCurrentUser() {

@@ -10,6 +10,6 @@ export class InviteDto {
   password!: string;
 
   @IsOptional()
-  @IsIn(['ADMIN', 'USER'])
-  role?: 'ADMIN' | 'USER';
+  @IsIn(['ADMIN', 'USER', 'DRIVER'])
+  role?: 'ADMIN' | 'USER' | 'DRIVER';
 }

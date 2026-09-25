@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Landmark, TrendingUp, Receipt, Users, Rows3, Scale, Wallet, ShoppingCart, BookOpen, BookText, ArrowUpRight, Calculator, Banknote, CalendarClock, Building2, BarChart3, PackageSearch } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { apiFetch } from '@/lib/apifetch';
@@ -17,7 +17,6 @@ import type { TopReport } from '@/app/components/reports/types';
 
 const PREVIEW_LIMIT = 5;
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
 // Aging buckets are ordinal (current -> most overdue), not categorical
 // identities, so the first four steps are the dataviz skill's official

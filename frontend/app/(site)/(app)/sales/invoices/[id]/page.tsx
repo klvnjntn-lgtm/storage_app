@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Space_Grotesk } from 'next/font/google';
+import { display } from '@/lib/fonts';
 import { Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, AlertCircle, Ban, Lock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 
-const display = Space_Grotesk({ subsets: ['latin'], weight: ['500', '600', '700'] });
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
 import { VoidInvoiceDialog } from '@/app/components/invoices/VoidInvoiceDialog';
