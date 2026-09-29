@@ -264,21 +264,21 @@ export default function DeliveryRoutesPage() {
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>
         )}
 
-        <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm flex flex-wrap items-end gap-3">
-          <div>
+        <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-3">
+          <div className="col-span-2 sm:col-span-1">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.routes.dateLabel')}
             </label>
             <DatePicker value={date} onChange={setDate} />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.routes.driverFilterLabel')}
             </label>
             <select
               value={driverFilter}
               onChange={(e) => setDriverFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
             >
               <option value="">{t('delivery.routes.allDrivers')}</option>
               {groupDriversByTeam(drivers, t('delivery.routes.unassigned')).map((group) => (
@@ -292,14 +292,14 @@ export default function DeliveryRoutesPage() {
               ))}
             </select>
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.routes.statusFilterLabel')}
             </label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
             >
               <option value="">{t('delivery.routes.allStatuses')}</option>
               {statusOptions.map((s) => (
@@ -310,31 +310,31 @@ export default function DeliveryRoutesPage() {
             </select>
           </div>
 
-          <div className="ml-auto flex gap-2">
+          <div className="col-span-2 grid grid-cols-2 sm:flex sm:ml-auto gap-2">
             <button
               onClick={() => router.push('/delivery/drivers')}
-              className="flex items-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-1.5 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
             >
               <Users size={14} />
               {t('delivery.driversAdmin.title')}
             </button>
             <button
               onClick={() => setShowTeams((v) => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-1.5 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
             >
               <Users size={14} />
               {t('delivery.routes.teamsTitle')}
             </button>
             <button
               onClick={() => setShowInvite((v) => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-1.5 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
             >
               <UserPlus size={14} />
               {t('delivery.routes.inviteDriver')}
             </button>
             <button
               onClick={() => setShowNewRoute((v) => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-1.5 hover:bg-blue-700"
+              className="order-first sm:order-none flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700"
             >
               <Plus size={14} />
               {t('delivery.routes.newRoute')}
@@ -344,18 +344,18 @@ export default function DeliveryRoutesPage() {
 
         {showTeams && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm space-y-3">
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex items-end gap-2">
               <input
                 type="text"
                 placeholder={t('delivery.routes.teamNamePlaceholder')}
                 value={newTeamName}
                 onChange={(e) => setNewTeamName(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+                className="flex-1 sm:flex-none min-w-0 border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
               <button
                 disabled={creatingTeam || !newTeamName.trim()}
                 onClick={handleCreateTeam}
-                className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+                className="shrink-0 bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
               >
                 {creatingTeam ? t('delivery.routes.creatingTeam') : t('delivery.routes.createTeam')}
               </button>
@@ -369,21 +369,22 @@ export default function DeliveryRoutesPage() {
                   <button
                     onClick={() => handleDeleteTeam(team.id)}
                     aria-label={t('delivery.routes.deleteTeam')}
-                    className="p-1 rounded border border-red-200 text-red-600"
+                    className="p-2 sm:p-1 rounded border border-red-200 text-red-600"
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={14} />
                   </button>
                 </div>
                 <div className="mt-1.5 space-y-1">
                   {drivers
                     .filter((d) => d.team?.id === team.id)
                     .map((d) => (
-                      <div key={d.id} className="flex items-center justify-between text-xs text-gray-600">
-                        <span>{d.email}</span>
+                      <div key={d.id} className="flex items-center justify-between gap-2 text-xs text-gray-600">
+                        <span className="truncate">{d.email}</span>
                         <button
                           disabled={assigningDriverId === d.id}
                           onClick={() => handleAssignDriver(d.id, '')}
-                          className="text-red-600 disabled:opacity-50"
+                          aria-label={t('delivery.routeDetail.remove')}
+                          className="shrink-0 text-base leading-none px-2.5 py-1 sm:px-1 sm:py-0 text-red-600 disabled:opacity-50"
                         >
                           ×
                         </button>
@@ -393,7 +394,7 @@ export default function DeliveryRoutesPage() {
                 <select
                   value=""
                   onChange={(e) => e.target.value && handleAssignDriver(e.target.value, team.id)}
-                  className="mt-1.5 w-full border border-gray-300 rounded-md px-2 py-1 text-xs"
+                  className="mt-1.5 w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
                 >
                   <option value="">{t('delivery.routes.selectDriver')}</option>
                   {drivers
@@ -410,7 +411,7 @@ export default function DeliveryRoutesPage() {
         )}
 
         {showInvite && (
-          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm flex flex-wrap items-end gap-3">
+          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
                 {t('delivery.routes.inviteEmailLabel')}
@@ -419,7 +420,7 @@ export default function DeliveryRoutesPage() {
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
             </div>
             <div>
@@ -430,13 +431,13 @@ export default function DeliveryRoutesPage() {
                 type="text"
                 value={invitePassword}
                 onChange={(e) => setInvitePassword(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
             </div>
             <button
               disabled={inviting}
               onClick={handleInviteDriver}
-              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
               {inviting ? t('delivery.routes.inviting') : t('delivery.routes.inviteSubmit')}
             </button>
@@ -444,7 +445,7 @@ export default function DeliveryRoutesPage() {
         )}
 
         {showNewRoute && (
-          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm flex flex-wrap items-end gap-3">
+          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
                 {t('delivery.routes.driverLabel')}
@@ -452,7 +453,7 @@ export default function DeliveryRoutesPage() {
               <select
                 value={newRouteDriverId}
                 onChange={(e) => setNewRouteDriverId(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm min-w-[200px]"
+                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm sm:min-w-[200px]"
               >
                 <option value="">{t('delivery.routes.selectDriver')}</option>
                 {groupDriversByTeam(drivers, t('delivery.routes.unassigned')).map((group) => (
@@ -475,13 +476,13 @@ export default function DeliveryRoutesPage() {
                 type="text"
                 value={newRouteName}
                 onChange={(e) => setNewRouteName(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
             </div>
             <button
               disabled={creatingRoute || !newRouteDriverId}
               onClick={handleCreateRoute}
-              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
               {creatingRoute ? t('delivery.routes.creating') : t('delivery.routes.createRoute')}
             </button>
@@ -494,16 +495,16 @@ export default function DeliveryRoutesPage() {
             <button
               key={route.id}
               onClick={() => router.push(`/delivery/routes/${route.id}`)}
-              className="w-full text-left bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors flex items-center justify-between"
+              className="w-full text-left bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors flex items-center justify-between gap-3"
             >
-              <div>
-                <div className="text-sm font-semibold">{route.name ?? route.driver.email}</div>
-                <div className="text-xs text-gray-500">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{route.name ?? route.driver.email}</div>
+                <div className="text-xs text-gray-500 truncate">
                   {route.driver.email} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
                 </div>
               </div>
               <span
-                className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusStyle(route.status)}`}
+                className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusStyle(route.status)}`}
               >
                 {t(`delivery.routes.statusLabel.${route.status}`)}
               </span>

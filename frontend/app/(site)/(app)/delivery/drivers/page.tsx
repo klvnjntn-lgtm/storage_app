@@ -252,14 +252,14 @@ export default function DriversAdminPage() {
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => toggleExpanded(driver)}
-                  className="flex items-center gap-1 text-xs font-medium border border-blue-200 text-blue-700 rounded px-2 py-1"
+                  className="flex items-center gap-1 text-xs font-medium border border-blue-200 text-blue-700 rounded px-2.5 py-2 sm:px-2 sm:py-1"
                 >
                   {expandedId === driver.id ? t('delivery.driversAdmin.close') : t('delivery.driversAdmin.manage')}
                 </button>
                 <button
                   disabled={busyId === driver.id}
                   onClick={() => toggleActive(driver)}
-                  className={`flex items-center gap-1 text-xs font-medium rounded px-2 py-1 border disabled:opacity-50 ${
+                  className={`flex items-center gap-1 text-xs font-medium rounded px-2.5 py-2 sm:px-2 sm:py-1 border disabled:opacity-50 ${
                     driver.active ? 'border-red-200 text-red-700' : 'border-green-200 text-green-700'
                   }`}
                 >
@@ -298,18 +298,18 @@ export default function DriversAdminPage() {
                               <button
                                 disabled={deviceBusyId === d.id}
                                 onClick={() => handleDeviceAction(driver.id, d.id, 'approve')}
-                                className="p-1 rounded border border-green-200 text-green-700 disabled:opacity-40"
+                                className="p-2 sm:p-1 rounded border border-green-200 text-green-700 disabled:opacity-40"
                                 aria-label={t('delivery.driversAdmin.approve')}
                               >
-                                <Check size={12} />
+                                <Check size={14} />
                               </button>
                               <button
                                 disabled={deviceBusyId === d.id}
                                 onClick={() => handleDeviceAction(driver.id, d.id, 'reject')}
-                                className="p-1 rounded border border-red-200 text-red-700 disabled:opacity-40"
+                                className="p-2 sm:p-1 rounded border border-red-200 text-red-700 disabled:opacity-40"
                                 aria-label={t('delivery.driversAdmin.reject')}
                               >
-                                <X size={12} />
+                                <X size={14} />
                               </button>
                             </>
                           )}
@@ -317,10 +317,10 @@ export default function DriversAdminPage() {
                             <button
                               disabled={deviceBusyId === d.id}
                               onClick={() => handleDeviceAction(driver.id, d.id, 'revoke')}
-                              className="p-1 rounded border border-gray-300 text-gray-600 disabled:opacity-40"
+                              className="p-2 sm:p-1 rounded border border-gray-300 text-gray-600 disabled:opacity-40"
                               aria-label={t('delivery.driversAdmin.revoke')}
                             >
-                              <Ban size={12} />
+                              <Ban size={14} />
                             </button>
                           )}
                         </div>
@@ -338,11 +338,11 @@ export default function DriversAdminPage() {
                   {scheduleLoading && <p className="text-xs text-gray-400">{t('common.loading')}</p>}
                   <div className="space-y-1.5">
                     {windows.map((w, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-md p-1.5">
+                      <div key={idx} className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 bg-white border border-gray-200 rounded-md p-1.5">
                         <select
                           value={w.dayOfWeek}
                           onChange={(e) => updateWindow(idx, { dayOfWeek: e.target.value as DayOfWeek })}
-                          className="border border-gray-300 rounded px-1.5 py-1 text-xs"
+                          className="w-full sm:w-auto border border-gray-300 rounded px-1.5 py-2 sm:py-1 text-base sm:text-xs"
                         >
                           {DAYS.map((d) => (
                             <option key={d} value={d}>
@@ -354,21 +354,21 @@ export default function DriversAdminPage() {
                           type="time"
                           value={w.startTime}
                           onChange={(e) => updateWindow(idx, { startTime: e.target.value })}
-                          className="border border-gray-300 rounded px-1.5 py-1 text-xs"
+                          className="flex-1 sm:flex-none min-w-0 border border-gray-300 rounded px-1.5 py-2 sm:py-1 text-base sm:text-xs"
                         />
                         <span className="text-xs text-gray-400">–</span>
                         <input
                           type="time"
                           value={w.endTime}
                           onChange={(e) => updateWindow(idx, { endTime: e.target.value })}
-                          className="border border-gray-300 rounded px-1.5 py-1 text-xs"
+                          className="flex-1 sm:flex-none min-w-0 border border-gray-300 rounded px-1.5 py-2 sm:py-1 text-base sm:text-xs"
                         />
                         <button
                           onClick={() => removeWindow(idx)}
                           aria-label={t('delivery.driversAdmin.remove')}
-                          className="p-1 rounded border border-red-200 text-red-600 ml-auto"
+                          className="p-2 sm:p-1 rounded border border-red-200 text-red-600 sm:ml-auto"
                         >
-                          <Trash2 size={12} />
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     ))}
@@ -376,7 +376,7 @@ export default function DriversAdminPage() {
                   <div className="flex items-center gap-2 mt-2">
                     <button
                       onClick={addWindow}
-                      className="flex items-center gap-1 text-xs font-medium border border-gray-300 rounded px-2 py-1"
+                      className="flex items-center gap-1 text-xs font-medium border border-gray-300 rounded px-2.5 py-2 sm:px-2 sm:py-1"
                     >
                       <Plus size={12} />
                       {t('delivery.driversAdmin.addWindow')}
@@ -384,7 +384,7 @@ export default function DriversAdminPage() {
                     <button
                       disabled={savingSchedule}
                       onClick={() => saveSchedule(driver.id)}
-                      className="text-xs font-medium bg-blue-600 text-white rounded px-3 py-1 disabled:opacity-50"
+                      className="text-xs font-medium bg-blue-600 text-white rounded px-3 py-2 sm:py-1 disabled:opacity-50"
                     >
                       {savingSchedule ? t('delivery.driversAdmin.saving') : savedTick ? t('delivery.driversAdmin.saved') : t('delivery.driversAdmin.save')}
                     </button>

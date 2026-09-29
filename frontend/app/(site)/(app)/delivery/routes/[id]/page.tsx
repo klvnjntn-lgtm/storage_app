@@ -395,23 +395,23 @@ export default function DeliveryRouteDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-black">
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15">
-        <div className="max-w-5xl mx-auto">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15">
+        <div className="max-w-5xl mx-auto min-w-0">
           <button
             onClick={() => router.push('/delivery/routes')}
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-700 mb-1"
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-700 mb-1 py-1 -my-1"
           >
             <ArrowLeft size={12} />
             {t('delivery.routeDetail.backToRoutes')}
           </button>
-          <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
+          <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
             {route.name ?? new Date(route.routeDate).toLocaleDateString()}
           </h1>
-          <p className="text-xs text-gray-500">{route.driver.email}</p>
+          <p className="text-xs text-gray-500 truncate">{route.driver.email}</p>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>
         )}
@@ -431,10 +431,10 @@ export default function DeliveryRouteDetailPage() {
         )}
 
         {!isDriver && (
-          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm flex flex-wrap items-end gap-3">
+          <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <button
               onClick={openStartPicker}
-              className={`flex items-center gap-1.5 text-sm font-medium border rounded-md px-3 py-1.5 ${
+              className={`flex items-center justify-center gap-1.5 text-sm font-medium border rounded-md px-3 py-2.5 sm:py-1.5 ${
                 route.startLatitude ? 'border-blue-200 text-blue-700' : 'border-gray-300'
               }`}
             >
@@ -449,14 +449,14 @@ export default function DeliveryRouteDetailPage() {
                 type="datetime-local"
                 value={departureTime}
                 onChange={(e) => setDepartureTime(e.target.value)}
-                className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
+                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
             </div>
             <button
               disabled={optimizing || !route.startLatitude || route.stops.every((s) => s.status !== 'PENDING')}
               onClick={handleOptimize}
               title={!route.startLatitude ? t('delivery.routeDetail.setStart') : undefined}
-              className="flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-1.5 hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
             >
               <Navigation size={14} />
               {optimizing ? t('delivery.routeDetail.optimizing') : t('delivery.routeDetail.optimizeRoute')}
@@ -472,7 +472,7 @@ export default function DeliveryRouteDetailPage() {
                 setShowAddStop((v) => !v);
                 if (!showAddStop) await loadAvailableOrders();
               }}
-              className="flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-1.5 hover:bg-blue-700"
+              className="flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2 sm:py-1.5 hover:bg-blue-700"
             >
               <Plus size={14} />
               {t('delivery.routeDetail.addStop')}
@@ -481,11 +481,11 @@ export default function DeliveryRouteDetailPage() {
         </div>
 
         {!isDriver && showAddStop && (
-          <div className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm flex flex-wrap items-end gap-3">
+          <div className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <select
               value={selectedOrderId}
               onChange={(e) => setSelectedOrderId(e.target.value)}
-              className="border border-gray-300 rounded-md px-2.5 py-1.5 text-sm min-w-[220px]"
+              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm sm:min-w-[220px]"
             >
               <option value="">{t('delivery.routeDetail.selectDeliveryOrder')}</option>
               {availableOrders.map((o) => (
@@ -500,7 +500,7 @@ export default function DeliveryRouteDetailPage() {
             <button
               disabled={busy === 'add-stop' || !selectedOrderId}
               onClick={handleAddStop}
-              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
               {busy === 'add-stop' ? t('delivery.routeDetail.adding') : t('delivery.routeDetail.add')}
             </button>
@@ -515,16 +515,18 @@ export default function DeliveryRouteDetailPage() {
             return (
               <div
                 key={stop.id}
-                className={`bg-white rounded-lg border p-3 flex items-center justify-between gap-3 ${isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}`}
+                className={`bg-white rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 ${isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}`}
               >
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
                   <div className="text-xs text-gray-400 font-medium w-6 shrink-0">#{stop.sequence}</div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold truncate">
                       {stop.deliveryOrder.customerName ?? stop.deliveryOrder.doNumber ?? stop.deliveryOrder.id}
                     </div>
                     {stop.deliveryOrder.deliveryAddress && (
-                      <div className="text-xs text-gray-500 truncate">{stop.deliveryOrder.deliveryAddress}</div>
+                      // Wraps on phones where a truncated address is useless;
+                      // single-line on wider screens where the row has room.
+                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">{stop.deliveryOrder.deliveryAddress}</div>
                     )}
                     <div className="flex items-center gap-2 flex-wrap">
                       {isCurrent && (
@@ -556,21 +558,21 @@ export default function DeliveryRouteDetailPage() {
                     </div>
 
                     {editingStop?.id === stop.id && (
-                      <div className="mt-2 p-2 border border-gray-200 rounded-md bg-gray-50 flex flex-wrap items-end gap-2">
-                        <div>
+                      <div className="mt-2 p-2 border border-gray-200 rounded-md bg-gray-50 grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-2">
+                        <div className="col-span-2">
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.priorityLabel')}
                           </label>
                           <select
                             value={editPriority}
                             onChange={(e) => setEditPriority(e.target.value as 'NORMAL' | 'HIGH')}
-                            className="border border-gray-300 rounded-md px-2 py-1 text-xs"
+                            className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
                           >
                             <option value="NORMAL">{t('delivery.routeDetail.priorityNormal')}</option>
                             <option value="HIGH">{t('delivery.routeDetail.priorityHigh')}</option>
                           </select>
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.windowStartLabel')}
                           </label>
@@ -578,10 +580,10 @@ export default function DeliveryRouteDetailPage() {
                             type="datetime-local"
                             value={editWindowStart}
                             onChange={(e) => setEditWindowStart(e.target.value)}
-                            className="border border-gray-300 rounded-md px-2 py-1 text-xs"
+                            className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
                           />
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.windowEndLabel')}
                           </label>
@@ -589,19 +591,19 @@ export default function DeliveryRouteDetailPage() {
                             type="datetime-local"
                             value={editWindowEnd}
                             onChange={(e) => setEditWindowEnd(e.target.value)}
-                            className="border border-gray-300 rounded-md px-2 py-1 text-xs"
+                            className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
                           />
                         </div>
                         <button
                           onClick={() => setEditingStop(null)}
-                          className="text-xs font-medium border border-gray-300 rounded-md px-2 py-1"
+                          className="text-sm sm:text-xs font-medium border border-gray-300 rounded-md px-2 py-2 sm:py-1"
                         >
                           {t('common.cancel')}
                         </button>
                         <button
                           disabled={savingDetails}
                           onClick={handleSaveDetails}
-                          className="text-xs font-medium bg-blue-600 text-white rounded-md px-2 py-1 disabled:opacity-50"
+                          className="text-sm sm:text-xs font-medium bg-blue-600 text-white rounded-md px-2 py-2 sm:py-1 disabled:opacity-50"
                         >
                           {savingDetails ? t('common.saving') : t('delivery.routeDetail.saveDetails')}
                         </button>
@@ -610,11 +612,14 @@ export default function DeliveryRouteDetailPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                {/* On phones the actions drop to their own line (indented past
+                    the #sequence column) with larger tap targets, instead of
+                    squeezing the stop details down to nothing beside them. */}
+                <div className="flex items-center gap-2 flex-wrap pl-9 sm:pl-0 sm:flex-nowrap sm:shrink-0">
                   {statusBadge(stop.status, statusLabels[stop.status])}
                   <button
                     onClick={() => openEditDetails(stop)}
-                    className="text-[11px] font-medium text-blue-600 border border-blue-200 rounded px-1.5 py-0.5"
+                    className="text-xs sm:text-[11px] font-medium text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5"
                   >
                     {t('delivery.routeDetail.editDetails')}
                   </button>
@@ -622,7 +627,7 @@ export default function DeliveryRouteDetailPage() {
                     <button
                       disabled={reschedulingId === stop.id}
                       onClick={() => handleReschedule(stop)}
-                      className="text-[11px] font-medium text-amber-700 border border-amber-300 rounded px-1.5 py-0.5 disabled:opacity-50"
+                      className="text-xs sm:text-[11px] font-medium text-amber-700 border border-amber-300 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
                     >
                       {reschedulingId === stop.id
                         ? t('delivery.routeDetail.rescheduling')
@@ -632,13 +637,13 @@ export default function DeliveryRouteDetailPage() {
                   <button
                     onClick={() => openLocationPicker(stop)}
                     aria-label={t('delivery.routeDetail.setLocation')}
-                    className={`p-1 rounded border ${
+                    className={`p-2 sm:p-1 rounded border ${
                       stop.deliveryOrder.destinationLatitude
                         ? 'border-blue-200 text-blue-600'
                         : 'border-gray-200 text-gray-400'
                     }`}
                   >
-                    <MapPin size={12} />
+                    <MapPin size={14} />
                   </button>
                   {!isDriver && (
                     <>
@@ -646,25 +651,25 @@ export default function DeliveryRouteDetailPage() {
                         disabled={rowBusy || idx === 0}
                         onClick={() => handleMove(stop, -1)}
                         aria-label={t('delivery.routeDetail.moveUp')}
-                        className="p-1 rounded border border-gray-200 disabled:opacity-30"
+                        className="p-2 sm:p-1 rounded border border-gray-200 disabled:opacity-30"
                       >
-                        <ArrowUp size={12} />
+                        <ArrowUp size={14} />
                       </button>
                       <button
                         disabled={rowBusy || idx === route.stops.length - 1}
                         onClick={() => handleMove(stop, 1)}
                         aria-label={t('delivery.routeDetail.moveDown')}
-                        className="p-1 rounded border border-gray-200 disabled:opacity-30"
+                        className="p-2 sm:p-1 rounded border border-gray-200 disabled:opacity-30"
                       >
-                        <ArrowDown size={12} />
+                        <ArrowDown size={14} />
                       </button>
                       <button
                         disabled={rowBusy}
                         onClick={() => handleRemove(stop)}
                         aria-label={t('delivery.routeDetail.remove')}
-                        className="p-1 rounded border border-red-200 text-red-600 disabled:opacity-30"
+                        className="p-2 sm:p-1 rounded border border-red-200 text-red-600 disabled:opacity-30"
                       >
-                        <Trash2 size={12} />
+                        <Trash2 size={14} />
                       </button>
                     </>
                   )}
@@ -688,9 +693,9 @@ export default function DeliveryRouteDetailPage() {
             <div className="mt-2 space-y-1.5">
               {history.length === 0 && <p className="text-xs text-gray-500">{t('delivery.routeDetail.historyEmpty')}</p>}
               {history.map((h) => (
-                <div key={h.id} className="text-xs text-gray-600 flex items-center justify-between border-b border-gray-100 pb-1.5">
-                  <span>{t(`delivery.routeDetail.historyType.${h.type}`)}</span>
-                  <span className="text-gray-400">
+                <div key={h.id} className="text-xs text-gray-600 flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 border-b border-gray-100 pb-1.5">
+                  <span className="font-medium sm:font-normal">{t(`delivery.routeDetail.historyType.${h.type}`)}</span>
+                  <span className="text-gray-400 break-all sm:break-normal">
                     {h.createdBy?.email ?? '—'} · {new Date(h.createdAt).toLocaleString()}
                   </span>
                 </div>
@@ -701,8 +706,8 @@ export default function DeliveryRouteDetailPage() {
       </div>
 
       {(pickingStop || pickingStart) && (
-        <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-4 space-y-3">
+        <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">
                 {t(pickingStart ? 'delivery.routeDetail.pickStartTitle' : 'delivery.routeDetail.pickLocationTitle')}
@@ -712,9 +717,10 @@ export default function DeliveryRouteDetailPage() {
                   setPickingStop(null);
                   setPickingStart(false);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                aria-label={t('common.cancel')}
+                className="p-2 -m-2 text-gray-400 hover:text-gray-600"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
             <DeliveryMap
@@ -730,26 +736,26 @@ export default function DeliveryRouteDetailPage() {
                   longitude: Number(s.deliveryOrder.destinationLongitude),
                   label: s.deliveryOrder.customerName ?? s.deliveryOrder.doNumber ?? s.deliveryOrder.id,
                 }))}
-              height={280}
+              height={320}
               pickMode
               pickedPosition={pickedPosition}
               onPick={(lat, lng) => setPickedPosition({ lat, lng })}
             />
             {!pickedPosition && <p className="text-xs text-gray-500">{t('delivery.routeDetail.noLocationSet')}</p>}
-            <div className="flex justify-end gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button
                 onClick={() => {
                   setPickingStop(null);
                   setPickingStart(false);
                 }}
-                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-1.5"
+                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5"
               >
                 {t('common.cancel')}
               </button>
               <button
                 disabled={!pickedPosition || savingLocation}
                 onClick={pickingStart ? handleSaveStart : handleSaveLocation}
-                className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-1.5 disabled:opacity-50"
+                className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
               >
                 {savingLocation ? t('common.saving') : t('delivery.routeDetail.saveLocation')}
               </button>

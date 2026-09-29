@@ -20,9 +20,9 @@ function todayIso() {
 
 function StatCard({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 min-w-0">
       <div className={`text-2xl font-bold ${tone}`}>{value}</div>
-      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-xs text-gray-500 truncate">{label}</div>
     </div>
   );
 }
@@ -104,7 +104,7 @@ export default function DeliveryMonitoringPage() {
           <DatePicker value={date} onChange={setDate} />
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
           <StatCard label={t('delivery.monitoring.total')} value={summary.total} tone="text-gray-900" />
           <StatCard label={t('delivery.monitoring.delivered')} value={summary.delivered} tone="text-green-600" />
           <StatCard label={t('delivery.monitoring.pending')} value={summary.pending} tone="text-amber-600" />
@@ -127,10 +127,10 @@ export default function DeliveryMonitoringPage() {
           {byDriver.map((d) => (
             <div
               key={d.routeId}
-              className="bg-white rounded-lg border border-gray-200 p-3 flex items-center justify-between"
+              className="bg-white rounded-lg border border-gray-200 p-3 flex items-center justify-between gap-3"
             >
-              <span className="text-sm font-medium">{d.driver.email}</span>
-              <span className="text-xs text-gray-600">
+              <span className="text-sm font-medium truncate min-w-0">{d.driver.email}</span>
+              <span className="text-xs text-gray-600 shrink-0">
                 <span className="text-green-600 font-semibold">{d.delivered}</span>/{d.total}{' '}
                 {d.failed > 0 && (
                   <span className="text-red-600 font-semibold ml-1.5">
