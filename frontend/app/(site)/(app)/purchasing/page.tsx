@@ -24,7 +24,8 @@ export default function PurchasingHome() {
       description: t('purchasing.overview.suppliersCardDescription'),
       href: '/purchasing/suppliers',
       icon: Building2,
-      gradient: 'from-slate-400 to-gray-600',
+      // hex, not slate/gray-*: the grays invert in dark mode (theme.css)
+      gradient: 'from-[#94a3b8] to-[#4b5563]',
     },
   ];
 
@@ -32,9 +33,9 @@ export default function PurchasingHome() {
     <main
       className="min-h-screen text-black"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
-          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
         backgroundSize: '24px 24px',
       }}
     >

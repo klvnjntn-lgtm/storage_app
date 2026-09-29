@@ -35,7 +35,7 @@ export default function TopVehiclesBarChart({
           type="category"
           dataKey="label"
           width={compact ? 70 : 150}
-          tick={{ fontSize: compact ? 10 : 12, fill: '#52514e' }}
+          tick={{ fontSize: compact ? 10 : 12, fill: 'var(--chart-ink)' }}
           tickLine={false}
           axisLine={false}
         />
@@ -47,7 +47,7 @@ export default function TopVehiclesBarChart({
               const row = (payload as { payload?: (typeof data)[number] }[] | undefined)?.[0]?.payload;
               return row ? `${row.plateNumber} · ${row.vehicleModel}${row.customerName ? ` — ${row.customerName}` : ''}` : '';
             }}
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e1e0d9' }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--chart-grid)', background: 'var(--chart-surface)' }}
           />
         )}
         <Bar dataKey="revenue" radius={[0, 4, 4, 0]} isAnimationActive={false}>
@@ -59,7 +59,7 @@ export default function TopVehiclesBarChart({
               dataKey="revenue"
               position="right"
               formatter={(value: unknown) => formatIDRCompact(Number(value))}
-              style={{ fontSize: 11, fill: '#52514e' }}
+              style={{ fontSize: 11, fill: 'var(--chart-ink)' }}
             />
           )}
         </Bar>

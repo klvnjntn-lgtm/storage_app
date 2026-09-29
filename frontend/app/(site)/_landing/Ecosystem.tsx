@@ -1,17 +1,19 @@
 'use client';
 
 import { useRef } from 'react';
-import { Package, ReceiptText, Wrench, Warehouse, Check } from 'lucide-react';
+import { Package, ReceiptText, Wrench, Warehouse, Check, Truck, MapPin } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { ParallaxGlow, Reveal, SectionHeading, SpotlightCard, Stagger, StaggerItem, useAnimState } from './primitives';
 import styles from './Ecosystem.module.css';
 
-/* ─── 04 · Ecosystem. WareSys as the hub, the three products as live
+/* ─── 04 · Ecosystem. WareSys as the hub, the four products as live
    spokes. Data "flows" down the connectors (dash offset, desktop only,
    paused offscreen). Each card carries a one-line preview of what that
    product actually shows. ─────────────────────────────────────────── */
 
-function Preview({ kind }: { kind: 'warehouse' | 'invoice' | 'workshop' }) {
+type ProductKind = 'warehouse' | 'invoice' | 'workshop' | 'delivery';
+
+function Preview({ kind }: { kind: ProductKind }) {
   const { t } = useLanguage();
   if (kind === 'warehouse') {
     return (
@@ -30,6 +32,17 @@ function Preview({ kind }: { kind: 'warehouse' | 'invoice' | 'workshop' }) {
         <span className={styles.previewText}>Rp 2.450.000</span>
         <span className={styles.paid}>
           <Check size={11} strokeWidth={3} />
+        </span>
+      </div>
+    );
+  }
+  if (kind === 'delivery') {
+    return (
+      <div className={styles.preview} aria-hidden="true">
+        <span className={styles.mono}>DO-0418</span>
+        <span className={styles.previewText}>3 / 5 stops</span>
+        <span className={styles.previewMeta}>
+          <MapPin size={11} strokeWidth={2.2} />
         </span>
       </div>
     );
@@ -54,10 +67,11 @@ export default function Ecosystem() {
     { kind: 'warehouse' as const, icon: Package, name: 'WareSys Warehouse' },
     { kind: 'invoice' as const, icon: ReceiptText, name: 'Invoice POS' },
     { kind: 'workshop' as const, icon: Wrench, name: 'Workshop RMS' },
+    { kind: 'delivery' as const, icon: Truck, name: 'Delivery DMS' },
   ];
 
   return (
-    <section className="relative overflow-hidden">
+    <section id="products" className="relative overflow-hidden scroll-mt-16 md:scroll-mt-20">
       <ParallaxGlow className="absolute top-40 left-1/2 -ml-72 h-[36rem] w-[36rem] rounded-full bg-blue-600/[0.10] blur-[150px]" speed={0.1} />
       <div ref={ref} data-anim={anim} className="relative max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32">
         <Reveal>
@@ -91,7 +105,7 @@ export default function Ecosystem() {
               <stop offset="1" stopColor="#60a5fa" stopOpacity="0.15" />
             </linearGradient>
           </defs>
-          {['M 500 0 C 500 60, 167 50, 167 120', 'M 500 0 L 500 120', 'M 500 0 C 500 60, 833 50, 833 120'].map((d) => (
+          {['M 500 0 C 500 60, 125 50, 125 120', 'M 500 0 C 500 60, 375 50, 375 120', 'M 500 0 C 500 60, 625 50, 625 120', 'M 500 0 C 500 60, 875 50, 875 120'].map((d) => (
             <g key={d}>
               <path d={d} className={styles.wireBase} />
               <path d={d} className={styles.wireFlow} />
@@ -99,7 +113,7 @@ export default function Ecosystem() {
           ))}
         </svg>
 
-        <Stagger className="mt-10 lg:mt-0 grid gap-4 md:grid-cols-3">
+        <Stagger className="mt-10 lg:mt-0 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {products.map(({ kind, icon: Icon, name }) => (
             <StaggerItem key={kind}>
               <SpotlightCard className="h-full p-6 sm:p-7 flex flex-col">

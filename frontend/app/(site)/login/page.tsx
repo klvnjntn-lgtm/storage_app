@@ -7,6 +7,7 @@ import { display } from '@/lib/fonts';
 import { LogIn, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { getDeviceId } from '@/lib/apifetch';
 
 
@@ -106,14 +107,15 @@ function LoginForm() {
     <main
       className="min-h-screen text-black flex items-center justify-center p-6"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
-          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
         backgroundSize: '24px 24px',
       }}
     >
       <div className="w-full max-w-sm space-y-6 bg-white/80 backdrop-blur-md border border-blue-500/15 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.06),0_8px_24px_rgba(37,99,235,0.08)] p-6 sm:p-8">
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
 

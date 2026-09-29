@@ -26,22 +26,41 @@ export class MailerService implements OnModuleInit {
       // preview URL you can open in a browser to see what was "sent".
       // This means forgot-password works out of the box in dev with
       // zero config, and you swap in real SMTP env vars for production.
-      const testAccount = await nodemailer.createTestAccount();
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: { user: testAccount.user, pass: testAccount.pass },
-      });
-      this.fromAddress = 'no-reply@example.com';
-      this.logger.warn(
-        'No SMTP_HOST/SMTP_USER/SMTP_PASS set — using Ethereal test inbox. ' +
-          'Emails will NOT be delivered. Preview URLs will be logged instead.',
-      );
+      //
+      // createTestAccount() is an outbound network call. On a LAN-only
+      // deployment with no SMTP configured, this runs at boot every time
+      // the backend starts — it must not be allowed to take the whole
+      // app down if there's no internet at that moment (see LAN/offline
+      // deployments). Degrade to "mailer disabled" instead, the same
+      // best-effort pattern PushService uses for missing VAPID keys.
+      try {
+        const testAccount = await nodemailer.createTestAccount();
+        this.transporter = nodemailer.createTransport({
+          host: 'smtp.ethereal.email',
+          port: 587,
+          secure: false,
+          auth: { user: testAccount.user, pass: testAccount.pass },
+        });
+        this.fromAddress = 'no-reply@example.com';
+        this.logger.warn(
+          'No SMTP_HOST/SMTP_USER/SMTP_PASS set — using Ethereal test inbox. ' +
+            'Emails will NOT be delivered. Preview URLs will be logged instead.',
+        );
+      } catch (err) {
+        this.logger.warn(
+          'No SMTP configured and could not reach the Ethereal test inbox ' +
+            '(no internet?) — email sending is disabled until ' +
+            'SMTP_HOST/SMTP_USER/SMTP_PASS are set.',
+        );
+      }
     }
   }
 
   async sendPasswordReset(toEmail: string, rawToken: string) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+
     const appUrl = process.env.APP_URL || 'http://localhost:3000';
     const resetLink = `${appUrl}/reset-password?token=${rawToken}`;
 
@@ -66,6 +85,10 @@ export class MailerService implements OnModuleInit {
   }
 
   async sendChangePasswordOtp(toEmail: string, code: string) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+
     const info = await this.transporter.sendMail({
       from: this.fromAddress,
       to: toEmail,

@@ -145,6 +145,10 @@ const base = {
         mediaLibrary: 'Media Library',
       },
     },
+    theme: {
+      switchToLight: 'Switch to light mode',
+      switchToDark: 'Switch to dark mode',
+    },
     appShell: {
       brand: 'WareSys',
       tagline: 'Operations hub',
@@ -401,6 +405,10 @@ const base = {
         settings: 'Pengaturan',
         mediaLibrary: 'Pustaka Media',
       },
+    },
+    theme: {
+      switchToLight: 'Beralih ke mode terang',
+      switchToDark: 'Beralih ke mode gelap',
     },
     appShell: {
       brand: 'WareSys',

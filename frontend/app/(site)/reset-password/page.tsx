@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound, AlertTriangle } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 
 // FIX — useSearchParams() requires a Suspense boundary for static
 // prerendering, or `next build` fails outright. See login/page.tsx.
@@ -61,7 +62,8 @@ function ResetPasswordForm() {
   return (
     <main className="min-h-screen bg-white text-black flex items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
 

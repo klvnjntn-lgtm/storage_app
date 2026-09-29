@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Mail, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 
 export default function ForgotPasswordPage() {
   const { t } = useLanguage();
@@ -39,7 +40,8 @@ export default function ForgotPasswordPage() {
   return (
     <main className="min-h-screen bg-white text-black flex items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
 

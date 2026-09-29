@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { LogOut, Bell } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { apiFetch } from '@/lib/apifetch';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 import { ensurePushSubscription } from '@/lib/push';
@@ -37,6 +38,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
       <header className="sticky top-0 z-10 flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3">
         <span className="text-sm font-semibold">{t('delivery.driver.title')}</span>
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <div className="relative">
             <button
               onClick={() => {

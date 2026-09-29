@@ -39,7 +39,7 @@ export default function TopCustomersBarChart({
           type="category"
           dataKey="shortName"
           width={compact ? 90 : 140}
-          tick={{ fontSize: compact ? 10 : 12, fill: '#52514e' }}
+          tick={{ fontSize: compact ? 10 : 12, fill: 'var(--chart-ink)' }}
           tickLine={false}
           axisLine={false}
         />
@@ -50,7 +50,7 @@ export default function TopCustomersBarChart({
             labelFormatter={(_: unknown, payload: unknown) =>
               (payload as { payload?: TopCustomerRow }[] | undefined)?.[0]?.payload?.name ?? ''
             }
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e1e0d9' }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--chart-grid)', background: 'var(--chart-surface)' }}
           />
         )}
         <Bar dataKey="revenue" radius={[0, 4, 4, 0]} isAnimationActive={false}>
@@ -62,7 +62,7 @@ export default function TopCustomersBarChart({
               dataKey="revenue"
               position="right"
               formatter={(value: unknown) => formatIDRCompact(Number(value))}
-              style={{ fontSize: 11, fill: '#52514e' }}
+              style={{ fontSize: 11, fill: 'var(--chart-ink)' }}
             />
           )}
         </Bar>

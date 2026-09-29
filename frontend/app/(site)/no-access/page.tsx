@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { ShieldAlert } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 
 export default function NoAccessPage() {
   const router = useRouter();
@@ -12,7 +13,8 @@ export default function NoAccessPage() {
   return (
     <main className="min-h-screen bg-white text-black flex items-center justify-center px-6">
       <div className="max-w-sm text-center space-y-4">
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <ThemeToggle />
           <LanguageSwitcher />
         </div>
         <ShieldAlert size={40} strokeWidth={1.5} className="mx-auto text-gray-400" />

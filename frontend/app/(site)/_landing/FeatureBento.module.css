@@ -8,7 +8,7 @@
   display: grid;
   place-items: center;
   border-radius: 12px;
-  color: #93c5fd;
+  color: var(--acc-blue);
   background: linear-gradient(160deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.04));
   box-shadow:
     inset 0 0 0 1px rgba(96, 165, 250, 0.25),
@@ -22,7 +22,7 @@
   font-size: 10px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #93c5fd;
+  color: var(--acc-blue);
   padding: 4px 9px;
   border-radius: 999px;
   border: 1px solid rgba(96, 165, 250, 0.3);
@@ -32,7 +32,7 @@
 .mono {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
-  color: #93c5fd;
+  color: var(--acc-blue);
 }
 
 /* ─── Scan: phone + receiving log ───────────────────────────────── */
@@ -242,8 +242,8 @@
   min-width: 0;
   padding: 12px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.025);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.025);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.07), inset 0 1px 0 rgb(var(--ink) / 0.05);
 }
 
 .logHead {
@@ -253,13 +253,13 @@
   gap: 8px;
   padding: 0 4px 10px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgb(var(--ink) / 0.6);
 }
 
 .logCount {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 10.5px;
-  color: #6ee7b7;
+  color: var(--acc-green);
   padding: 2px 7px;
   border-radius: 999px;
   background: rgba(16, 185, 129, 0.12);
@@ -286,7 +286,7 @@
 }
 
 .logRow + .logRow {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.05);
 }
 
 .logFresh {
@@ -300,14 +300,14 @@
   height: 28px;
   place-items: center;
   border-radius: 8px;
-  color: #93c5fd;
+  color: var(--acc-blue);
   background: rgba(59, 130, 246, 0.12);
 }
 
 .logName {
   display: none;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgb(var(--ink) / 0.55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -330,7 +330,7 @@
   text-align: right;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgb(var(--ink) / 0.55);
 }
 
 @media (min-width: 640px) {
@@ -364,8 +364,8 @@
   flex-direction: column;
   justify-content: space-between;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  background: rgb(var(--ink) / 0.03);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.09);
 }
 
 .rack b {
@@ -377,7 +377,7 @@
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
   font-weight: 600;
-  color: #fff;
+  color: rgb(var(--ink));
 }
 
 .rackTo {
@@ -453,7 +453,7 @@
   bottom: 0;
   text-align: center;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgb(var(--ink) / 0.6);
   white-space: nowrap;
 }
 
@@ -475,14 +475,14 @@
 .barName {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgb(var(--ink) / 0.6);
   white-space: nowrap;
 }
 
 .barTrack {
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   overflow: hidden;
 }
 
@@ -506,7 +506,7 @@
   font-size: 12.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #fff;
+  color: rgb(var(--ink));
 }
 
 /* ─── Roles ───────────────────────────────────────────────────────── */
@@ -524,8 +524,8 @@
   gap: 10px;
   padding: 8px 10px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  background: rgb(var(--ink) / 0.02);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.07);
 }
 
 .avatar {
@@ -542,7 +542,7 @@
 
 .personName {
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgb(var(--ink) / 0.88);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -558,17 +558,17 @@
 }
 
 .roleAdmin {
-  color: #93c5fd;
+  color: var(--acc-blue);
   background: rgba(59, 130, 246, 0.15);
 }
 
 .roleStaff {
-  color: #6ee7b7;
+  color: var(--acc-green);
   background: rgba(16, 185, 129, 0.15);
 }
 
 .roleDriver {
-  color: #c4b5fd;
+  color: var(--acc-violet);
   background: rgba(139, 92, 246, 0.17);
 }
 
@@ -583,13 +583,13 @@
   display: grid;
   place-items: center;
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  color: rgb(var(--ink) / 0.2);
+  background: rgb(var(--ink) / 0.03);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05);
 }
 
 .permOn {
-  color: #93c5fd;
+  color: var(--acc-blue);
   background: rgba(59, 130, 246, 0.15);
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
 }
@@ -629,7 +629,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #0a1122;
+  background: var(--l-raised);
   box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.55);
 }
 
@@ -649,24 +649,24 @@
 }
 
 .tMove {
-  color: #93c5fd;
+  color: var(--acc-blue);
   background: rgba(59, 130, 246, 0.16);
 }
 
 .tReceive {
-  color: #6ee7b7;
+  color: var(--acc-green);
   background: rgba(16, 185, 129, 0.16);
 }
 
 .tAdjust {
-  color: #fcd34d;
+  color: var(--acc-amber);
   background: rgba(245, 158, 11, 0.16);
 }
 
 .eventText {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgb(var(--ink) / 0.85);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -675,7 +675,7 @@
 .eventMeta {
   grid-column: 1 / -1;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--ink) / 0.5);
 }
 
 /* ─── Import ──────────────────────────────────────────────────────── */
@@ -696,13 +696,13 @@
   gap: 7px;
   padding: 8px 11px;
   border-radius: 10px;
-  color: #6ee7b7;
+  color: var(--acc-green);
   background: rgba(16, 185, 129, 0.08);
   box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.25);
 }
 
 .file .mono {
-  color: #d1fae5;
+  color: var(--acc-green-soft);
 }
 
 .flowArrow {
@@ -711,14 +711,14 @@
   align-items: center;
   justify-content: center;
   height: 20px;
-  color: rgba(255, 255, 255, 0.45);
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.18) 50%, transparent 50%) center / 8px 1px repeat-x;
+  color: rgb(var(--ink) / 0.45);
+  background: linear-gradient(90deg, rgb(var(--ink) / 0.18) 50%, transparent 50%) center / 8px 1px repeat-x;
 }
 
 .flowArrow svg {
   padding: 2px;
   box-sizing: content-box;
-  background: #0b1222;
+  background: var(--l-raised);
 }
 
 .importMark {
@@ -738,7 +738,7 @@
   height: 6px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
 }
 
 .progressFill {
@@ -757,7 +757,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgb(var(--ink) / 0.6);
 }
 
 /* hover: counts and import re-run, so the static tiles still respond */

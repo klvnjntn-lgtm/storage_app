@@ -710,9 +710,9 @@ export default function ProductsPage() {
       <main
         className="min-h-screen flex items-center justify-center"
         style={{
-          backgroundColor: '#f8fafc',
+          backgroundColor: 'var(--page-bg)',
           backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+            'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
           backgroundSize: '24px 24px',
         }}
       >
@@ -725,9 +725,9 @@ export default function ProductsPage() {
     <main
       className="min-h-screen text-black"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
-          'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
         backgroundSize: '24px 24px',
       }}
     >

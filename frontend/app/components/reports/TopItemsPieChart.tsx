@@ -68,7 +68,7 @@ export default function TopItemsPieChart({
           labelLine={false}
         >
           {slices.map((s, i) => (
-            <Cell key={i} fill={s.fill} stroke="#fcfcfb" strokeWidth={2} />
+            <Cell key={i} fill={s.fill} stroke="var(--chart-surface)" strokeWidth={2} />
           ))}
         </Pie>
         {!compact && (
@@ -78,13 +78,13 @@ export default function TopItemsPieChart({
                 const payload = (entry as { payload?: (typeof slices)[number] } | undefined)?.payload;
                 return [`${formatIDR(Number(value))} (${payload?.unitsSold ?? 0} sold)`, payload?.name];
               }}
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e1e0d9' }}
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--chart-grid)', background: 'var(--chart-surface)' }}
             />
             <Legend
               verticalAlign="bottom"
               iconType="circle"
               iconSize={8}
-              wrapperStyle={{ fontSize: 12, color: '#52514e' }}
+              wrapperStyle={{ fontSize: 12, color: 'var(--chart-ink)' }}
             />
           </>
         )}

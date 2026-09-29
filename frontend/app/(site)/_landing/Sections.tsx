@@ -138,7 +138,7 @@ export function WhySection() {
         <Reveal delay={0.1} className="mt-14">
           <div className="grid overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.08] gap-px sm:grid-cols-2 lg:grid-cols-4">
             {items.map(({ key, icon: Icon }, i) => (
-              <div key={key} className="group relative bg-[#070c18] p-7 sm:p-8 transition-colors duration-300 hover:bg-[#0a1122]">
+              <div key={key} className="group relative bg-[var(--l-panel)] p-7 sm:p-8 transition-colors duration-300 hover:bg-[var(--l-panel-hover)]">
                 <span aria-hidden="true" className="absolute right-6 top-6 font-mono text-[11px] text-white/25">
                   {String(i + 1).padStart(2, '0')}
                 </span>
@@ -244,7 +244,7 @@ export function Contact() {
         <Reveal>
           <Kicker index="08" label={t('landing.contact.eyebrow')} center />
           <h2
-            className={`${display.className} mt-6 text-[2.4rem] leading-[1.02] sm:text-6xl lg:text-7xl font-semibold tracking-[-0.04em] text-balance bg-[linear-gradient(180deg,#fff_40%,rgba(255,255,255,0.55))] bg-clip-text text-transparent`}
+            className={`${display.className} mt-6 text-[2.4rem] leading-[1.02] sm:text-6xl lg:text-7xl font-semibold tracking-[-0.04em] text-balance bg-[linear-gradient(180deg,rgb(var(--ink))_40%,rgb(var(--ink)/0.55))] bg-clip-text text-transparent`}
           >
             {t('landing.contact.heading')}
           </h2>
@@ -253,7 +253,7 @@ export function Contact() {
         <Reveal delay={0.12} className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
           <a
             href={WHATSAPP_URL}
-            className="group inline-flex min-h-12 items-center justify-center gap-2.5 rounded-xl bg-blue-600 px-6 py-3.5 font-semibold text-white shadow-[0_0_0_1px_rgba(147,197,253,0.35)_inset,0_12px_40px_-8px_rgba(37,99,235,0.8)] transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+            className="dark-island group inline-flex min-h-12 items-center justify-center gap-2.5 rounded-xl bg-blue-600 px-6 py-3.5 font-semibold text-white shadow-[0_0_0_1px_rgba(147,197,253,0.35)_inset,0_12px_40px_-8px_rgba(37,99,235,0.8)] transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
           >
             <MessageCircle size={18} strokeWidth={2} aria-hidden="true" />
             WhatsApp
@@ -284,7 +284,7 @@ export function SiteFooter() {
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 pt-16 pb-10">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
           <div>
-            <Image src="/WARESYS.svg" alt="WareSys" width={360} height={84} className="h-12 w-auto brightness-0 invert" />
+            <Image src="/WARESYS.svg" alt="WareSys" width={360} height={84} className="landing-logo h-12 w-auto" />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/55">{t('landing.footer.tagline')}</p>
           </div>
           <nav aria-label={t('landing.footer.product')}>
@@ -318,7 +318,7 @@ export function SiteFooter() {
       {/* oversized wordmark sinking into the bottom edge */}
       <p
         aria-hidden="true"
-        className={`${display.className} pointer-events-none select-none -mb-[0.28em] text-center text-[21vw] font-bold leading-none tracking-[-0.06em] bg-[linear-gradient(180deg,rgba(255,255,255,0.07),transparent)] bg-clip-text text-transparent`}
+        className={`${display.className} pointer-events-none select-none -mb-[0.28em] text-center text-[21vw] font-bold leading-none tracking-[-0.06em] bg-[linear-gradient(180deg,rgb(var(--ink)/0.07),transparent)] bg-clip-text text-transparent`}
       >
         WARESYS
       </p>

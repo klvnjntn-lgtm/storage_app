@@ -53,6 +53,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { ensurePushSubscription } from '@/lib/push';
 import NotificationDrawer from '@/app/components/shared/NotificationDrawer';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
+import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -610,7 +611,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div
       className="min-h-dvh text-black flex flex-col md:flex-row [--app-bottom-nav-h:calc(3.5rem+env(safe-area-inset-bottom))] md:[--app-bottom-nav-h:0px]"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
           'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.07) 1px, transparent 0)',
         backgroundSize: '24px 24px',
@@ -630,7 +631,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">{t('appShell.tagline')}</p>
           </div>
-          <LanguageSwitcher />
+          <div className="flex items-center gap-1.5 shrink-0">
+            <ThemeToggle />
+            <LanguageSwitcher />
+          </div>
         </div>
 
         <nav aria-label={t('appShell.mainNavigation')} className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
@@ -691,6 +695,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              <ThemeToggle />
               <LanguageSwitcher />
               <button
                 type="button"

@@ -1,4 +1,4 @@
-#!/bin/sh
+# entrypoint.sh
 set -e
 
 echo "==> Running database migrations..."

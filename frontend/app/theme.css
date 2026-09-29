@@ -1,0 +1,226 @@
+/* ─── Light / dark theme ─────────────────────────────────────────────
+   <html data-theme="light|dark"> is set before first paint by the
+   script in (site)/layout.tsx (saved choice, else the OS setting).
+
+   The app UI is written with Tailwind's stock palette (bg-white,
+   text-black, text-gray-500, bg-blue-50 …) rather than semantic tokens,
+   so dark mode re-points those palette variables instead of touching
+   every className:
+     • white/black and the neutral grays swap ends of the scale;
+     • pale tints (50–300) become dim tints of the same hue;
+     • deep shades (700–950) become light enough to read on dark.
+   Screen only — printing always uses the light palette.
+
+   The landing page is the opposite: designed dark, with a light variant
+   built the same way (see "Landing" below). */
+
+:root {
+  --page-bg: #f8fafc;
+  --page-dots: rgba(37, 99, 235, 0.08);
+  --chart-ink: #52514e;
+  --chart-grid: #e1e0d9;
+  --chart-surface: #fcfcfb;
+}
+
+/* the toggle renders both icons; show the one for the theme you'd switch to */
+.theme-icon-sun {
+  display: none;
+}
+html[data-theme='dark'] .theme-icon-sun {
+  display: block;
+}
+html[data-theme='dark'] .theme-icon-moon {
+  display: none;
+}
+
+/* ─── App: dark ───────────────────────────────────────────────────── */
+@media screen {
+  html[data-theme='dark']:not(:has(.landing)) {
+    --background: #0b0f17;
+    --foreground: #e8edf4;
+    --page-bg: #0b0f17;
+    --page-dots: rgba(96, 165, 250, 0.07);
+    --chart-ink: #aeb8c8;
+    --chart-grid: #263041;
+    --chart-surface: #121826;
+
+    --color-white: #121826;
+    --color-black: #e8edf4;
+
+    --color-gray-50: #161c29;
+    --color-gray-100: #1b2231;
+    --color-gray-200: #263041;
+    --color-gray-300: #334056;
+    --color-gray-400: #7c8aa0;
+    --color-gray-500: #95a1b4;
+    --color-gray-600: #aeb8c8;
+    --color-gray-700: #c8d0dc;
+    --color-gray-800: #dde3ec;
+    --color-gray-900: #eef2f7;
+
+    --color-slate-50: #161c29;
+    --color-slate-400: #7c8aa0;
+    --color-slate-700: #c8d0dc;
+    --color-slate-900: #eef2f7;
+    --color-slate-950: #f8fafc;
+
+      /* red */
+      --color-red-50: #281c29; --color-red-100: #351f2b; --color-red-200: #50242e; --color-red-300: #752c34; --color-red-600: #e63535; --color-red-700: #f45a5a; --color-red-800: #f87171; --color-red-900: #fca5a5; --color-red-950: #fecaca;
+      /* orange */
+      --color-orange-50: #292124; --color-orange-100: #372723; --color-orange-200: #533122; --color-orange-300: #7a411f; --color-orange-600: #f26611; --color-orange-700: #fa8229; --color-orange-800: #fb923c; --color-orange-900: #fdba74; --color-orange-950: #fed7aa;
+      /* amber */
+      --color-amber-50: #292523; --color-amber-100: #362d22; --color-amber-200: #523e1e; --color-amber-300: #78541a; --color-amber-600: #e78a08; --color-amber-700: #f8ae18; --color-amber-800: #fbbf24; --color-amber-900: #fcd34d; --color-amber-950: #fde68a;
+      /* yellow */
+      --color-yellow-50: #282823; --color-yellow-100: #353121; --color-yellow-200: #4e431e; --color-yellow-300: #735e19; --color-yellow-600: #da9e06; --color-yellow-700: #f2c00e; --color-yellow-800: #facc15; --color-yellow-900: #fde047; --color-yellow-950: #fef08a;
+      /* green */
+      --color-green-50: #14292c; --color-green-100: #15342f; --color-green-200: #164836; --color-green-300: #19663f; --color-green-600: #1cb454; --color-green-700: #36d26f; --color-green-800: #4ade80; --color-green-900: #86efac; --color-green-950: #bbf7d0;
+      /* emerald */
+      --color-emerald-50: #12282f; --color-emerald-100: #123235; --color-emerald-200: #11453f; --color-emerald-300: #11604f; --color-emerald-600: #0aa875; --color-emerald-700: #22c68d; --color-emerald-800: #34d399; --color-emerald-900: #6ee7b7; --color-emerald-950: #a7f3d0;
+      /* teal */
+      --color-teal-50: #122833; --color-teal-100: #12323a; --color-teal-200: #13454a; --color-teal-300: #136060; --color-teal-600: #10a697; --color-teal-700: #20c6b2; --color-teal-800: #2dd4bf; --color-teal-900: #5eead4; --color-teal-950: #99f6e4;
+      /* cyan */
+      --color-cyan-50: #112837; --color-cyan-100: #103142; --color-cyan-200: #0f4457; --color-cyan-300: #0d5f74; --color-cyan-600: #07a4c3; --color-cyan-700: #14c4e1; --color-cyan-800: #22d3ee; --color-cyan-900: #67e8f9; --color-cyan-950: #a5f3fc;
+      /* sky */
+      --color-sky-50: #12263a; --color-sky-100: #112f45; --color-sky-200: #113f5d; --color-sky-300: #10577e; --color-sky-600: #0894d8; --color-sky-700: #23b1f0; --color-sky-800: #38bdf8; --color-sky-900: #7dd3fc; --color-sky-950: #bae6fd;
+      /* blue */
+      --color-blue-50: #16233b; --color-blue-100: #192947; --color-blue-200: #1d3660; --color-blue-300: #244884; --color-blue-600: #3072f0; --color-blue-700: #4e94f8; --color-blue-800: #60a5fa; --color-blue-900: #93c5fd; --color-blue-950: #bfdbfe;
+      /* indigo */
+      --color-indigo-50: #1a203a; --color-indigo-100: #1f2446; --color-indigo-200: #292e5f; --color-indigo-300: #363b81; --color-indigo-600: #5956eb; --color-indigo-700: #7279f4; --color-indigo-800: #818cf8; --color-indigo-900: #a5b4fc; --color-indigo-950: #c7d2fe;
+      /* violet */
+      --color-violet-50: #1e1f3b; --color-violet-100: #252347; --color-violet-200: #342b60; --color-violet-300: #483784; --color-violet-600: #844bf2; --color-violet-700: #9974f8; --color-violet-800: #a78bfa; --color-violet-900: #c4b5fd; --color-violet-950: #ddd6fe;
+      /* purple */
+      --color-purple-50: #211e3b; --color-purple-100: #2a2247; --color-purple-200: #3c2961; --color-purple-300: #563384; --color-purple-600: #9e44f0; --color-purple-700: #b46cfa; --color-purple-800: #c084fc; --color-purple-900: #d8b4fe; --color-purple-950: #e9d5ff;
+      /* fuchsia */
+      --color-fuchsia-50: #261d3a; --color-fuchsia-100: #321f46; --color-fuchsia-200: #4a255e; --color-fuchsia-300: #6c2d80; --color-fuchsia-600: #cc36e1; --color-fuchsia-700: #e060f4; --color-fuchsia-800: #e879f9; --color-fuchsia-900: #f0abfc; --color-fuchsia-950: #f5d0fe;
+      /* pink */
+      --color-pink-50: #281d32; --color-pink-100: #352038; --color-pink-200: #4f2546; --color-pink-300: #742e5a; --color-pink-600: #e43888; --color-pink-700: #f05da8; --color-pink-800: #f472b6; --color-pink-900: #f9a8d4; --color-pink-950: #fbcfe8;
+      /* rose */
+      --color-rose-50: #291c2c; --color-rose-100: #361e2f; --color-rose-200: #512336; --color-rose-300: #782a3f; --color-rose-600: #ea2e53; --color-rose-700: #f85872; --color-rose-800: #fb7185; --color-rose-900: #fda4af; --color-rose-950: #fecdd3;
+  }
+
+  /* text-white always sits on a coloured fill (buttons, badges, gradient
+     icons), so it stays white even though --color-white is now dark… */
+  html[data-theme='dark']:not(:has(.landing)) {
+    & .text-white,
+    & .hover\:text-white:hover {
+      color: #fff;
+    }
+    & .text-white\/90 { color: rgb(255 255 255 / 0.9); }
+    & .text-white\/85 { color: rgb(255 255 255 / 0.85); }
+    & .text-white\/80 { color: rgb(255 255 255 / 0.8); }
+    & .text-white\/75 { color: rgb(255 255 255 / 0.75); }
+    & .text-white\/70 { color: rgb(255 255 255 / 0.7); }
+    & .text-white\/60 { color: rgb(255 255 255 / 0.6); }
+
+    /* …except on bg-black, which flips to near-white: the classic
+       black primary button becomes a light one with dark text. */
+    & .bg-black.text-white {
+      color: var(--color-white);
+    }
+
+    /* camera viewfinders stay black */
+    & .bg-black:has(> video) {
+      background-color: #000;
+    }
+
+    & ::placeholder {
+      color: var(--color-gray-400);
+    }
+
+    /* native date/time pickers, number spinners, scrollbars */
+    color-scheme: dark;
+  }
+}
+
+/* ─── Landing ─────────────────────────────────────────────────────────
+   Tokens used by the landing page and its CSS modules. Dark is the
+   original design; light re-points them plus the Tailwind colours the
+   page uses (text-white = ink, pale blues = deep blues, …). */
+.landing {
+  --l-bg: #060a13;
+  --l-bg-rgb: 6 10 19;
+  --l-panel: #070c18;
+  --l-panel-hover: #0a1122;
+  --l-raised: #0a1122;
+  --l-raised-rgb: 11 18 34;
+  --ink: 255 255 255;
+  --acc-blue: #93c5fd;
+  --acc-blue-soft: #bfdbfe;
+  --acc-green: #6ee7b7;
+  --acc-green-soft: #d1fae5;
+  --acc-violet: #c4b5fd;
+  --acc-amber: #fcd34d;
+  --l-shadow: rgba(0, 0, 0, 0.8);
+}
+
+html[data-theme='light'] .landing {
+  --l-bg: #f6f8fc;
+  --l-bg-rgb: 246 248 252;
+  --l-panel: #ffffff;
+  --l-panel-hover: #f5f8fe;
+  --l-raised: #ffffff;
+  --l-raised-rgb: 255 255 255;
+  --ink: 15 23 42;
+  --acc-blue: #1d4ed8;
+  --acc-blue-soft: #1e40af;
+  --acc-green: #047857;
+  --acc-green-soft: #065f46;
+  --acc-violet: #6d28d9;
+  --acc-amber: #b45309;
+  --l-shadow: rgba(15, 23, 42, 0.18);
+
+  --color-white: #0f172a;
+  --color-blue-100: #1e3a8a;
+  --color-blue-200: #1e40af;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #2563eb;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-violet-300: #6d28d9;
+  --color-red-300: #b91c1c;
+  --color-amber-300: #b45309;
+}
+
+/* glass cards: a faint ink wash looks grey on light — use paper instead */
+html[data-theme='light'] .landing .spotlight-card {
+  background-color: #fff;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px -16px rgba(15, 23, 42, 0.14);
+}
+
+/* Product mock-ups (and text on solid blue buttons) keep the dark
+   design in both themes — they read as screenshots of the app. */
+html[data-theme='light'] .landing .dark-island {
+  --l-panel: #070c18;
+  --l-panel-hover: #0a1122;
+  --l-raised: #0a1122;
+  --l-raised-rgb: 11 18 34;
+  --ink: 255 255 255;
+  --acc-blue: #93c5fd;
+  --acc-blue-soft: #bfdbfe;
+  --acc-green: #6ee7b7;
+  --acc-green-soft: #d1fae5;
+  --acc-violet: #c4b5fd;
+  --acc-amber: #fcd34d;
+  --l-shadow: rgba(0, 0, 0, 0.8);
+
+  --color-white: #fff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-violet-300: #c4b5fd;
+  --color-red-300: #fca5a5;
+  --color-amber-300: #fcd34d;
+}
+
+/* logo: white on the dark page, its own navy on the light one */
+.landing-logo {
+  filter: brightness(0) invert(1);
+}
+html[data-theme='light'] .landing-logo {
+  filter: none;
+}

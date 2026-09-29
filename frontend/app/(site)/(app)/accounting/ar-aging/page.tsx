@@ -152,8 +152,8 @@ export default function ARAgingPage() {
     <main
       className="min-h-screen text-black"
       style={{
-        backgroundColor: '#f8fafc',
-        backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.08) 1px, transparent 0)',
+        backgroundColor: 'var(--page-bg)',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
         backgroundSize: '24px 24px',
       }}
     >

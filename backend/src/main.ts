@@ -5,15 +5,35 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 
+// The browser never calls this server cross-origin in normal operation —
+// the frontend proxies /api and /uploads to the backend server-side (see
+// frontend/next.config.ts), so the browser only ever talks to whatever
+// origin served the page (localhost, a LAN IP, a Tailscale name, or the
+// cloud domain), and CORS never enters into that path. This allowlist only
+// matters for direct browser->backend calls, which don't exist today; it's
+// kept as an env-configurable escape hatch rather than deleted outright.
+// Falls back to the previous hardcoded dev list if unset, so behavior is
+// unchanged for anyone who hasn't set ALLOWED_ORIGINS yet.
+function getAllowedOrigins(): string[] {
+  const raw = process.env.ALLOWED_ORIGINS;
+  if (!raw) {
+    return [
+      'http://localhost:3000',
+      'http://192.168.1.4:3000',
+      'http://192.168.1.13:3000',
+    ];
+  }
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://192.168.1.4:3000',
-      'http://192.168.1.13:3000',
-    ],
+    origin: getAllowedOrigins(),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

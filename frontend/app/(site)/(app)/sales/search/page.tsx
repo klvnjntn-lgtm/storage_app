@@ -209,7 +209,7 @@ function SalesSearchPageInner() {
     <main
       className="min-h-screen text-black"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
           'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.07) 1px, transparent 0)',
         backgroundSize: '24px 24px',

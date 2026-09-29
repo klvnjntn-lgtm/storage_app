@@ -7,6 +7,7 @@ export const landing = {
   en: {
     landing: {
       nav: {
+        products: 'Products',
         howItWorks: 'How it works',
         faq: 'FAQ',
         contact: 'Contact',
@@ -23,6 +24,11 @@ export const landing = {
         ctaHowItWorks: 'See How It Works ↓',
         pauseAnimation: 'Pause animation',
         playAnimation: 'Play animation',
+        platformLabel: 'One login, four apps →',
+        platformWarehouse: 'Warehouse',
+        platformInvoice: 'Invoicing',
+        platformWorkshop: 'Workshop',
+        platformDelivery: 'Delivery',
       },
       scanFeed: {
         terminalLabel: 'warehouse@waresys — live feed',
@@ -188,6 +194,10 @@ export const landing = {
             tag: 'Workshop management',
             body: 'Manage customers, vehicles, service history, reminders, invoices and workshop operations.',
           },
+          delivery: {
+            tag: 'Delivery management',
+            body: 'Plan routes, dispatch drivers, and follow every delivery order until it arrives.',
+          },
         },
       },
       whoItsFor: {
@@ -278,6 +288,7 @@ export const landing = {
   id: {
     landing: {
       nav: {
+        products: 'Produk',
         howItWorks: 'Cara Kerja',
         faq: 'Pertanyaan Umum',
         contact: 'Kontak',
@@ -294,6 +305,11 @@ export const landing = {
         ctaHowItWorks: 'Lihat Cara Kerjanya ↓',
         pauseAnimation: 'Jeda animasi',
         playAnimation: 'Putar animasi',
+        platformLabel: 'Satu login, empat aplikasi →',
+        platformWarehouse: 'Gudang',
+        platformInvoice: 'Faktur',
+        platformWorkshop: 'Bengkel',
+        platformDelivery: 'Pengiriman',
       },
       scanFeed: {
         terminalLabel: 'warehouse@waresys — feed langsung',
@@ -458,6 +474,10 @@ export const landing = {
           workshop: {
             tag: 'Manajemen bengkel',
             body: 'Kelola pelanggan, kendaraan, riwayat servis, pengingat, faktur, dan operasional bengkel.',
+          },
+          delivery: {
+            tag: 'Manajemen pengiriman',
+            body: 'Rencanakan rute, tugaskan pengemudi, dan pantau setiap surat jalan hingga sampai tujuan.',
           },
         },
       },

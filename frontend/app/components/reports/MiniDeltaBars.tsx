@@ -18,13 +18,13 @@ export default function MiniDeltaBars({ items }: { items: { label: string; value
         <XAxis
           dataKey="label"
           tickLine={false}
-          axisLine={{ stroke: '#e1e0d9' }}
-          tick={{ fontSize: 10, fill: '#898781' }}
+          axisLine={{ stroke: 'var(--chart-grid)' }}
+          tick={{ fontSize: 10, fill: 'var(--chart-ink)' }}
         />
         <Tooltip
           cursor={{ fill: 'rgba(37,99,235,0.06)' }}
           formatter={(value: unknown) => [formatIDRCompact(Number(value)), '']}
-          contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e1e0d9' }}
+          contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--chart-grid)', background: 'var(--chart-surface)' }}
         />
         <Bar dataKey="value" radius={[3, 3, 3, 3]} isAnimationActive={false}>
           {items.map((item, i) => (
@@ -34,7 +34,7 @@ export default function MiniDeltaBars({ items }: { items: { label: string; value
             dataKey="value"
             position="top"
             formatter={(value: unknown) => formatIDRCompact(Number(value))}
-            style={{ fontSize: 10, fill: '#52514e' }}
+            style={{ fontSize: 10, fill: 'var(--chart-ink)' }}
           />
         </Bar>
       </BarChart>

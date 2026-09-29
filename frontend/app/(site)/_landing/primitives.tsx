@@ -78,7 +78,7 @@ export function SectionHeading({
     <div className={`${center ? 'text-center mx-auto' : ''} ${className}`}>
       <Kicker index={index} label={eyebrow} center={center} />
       <h2
-        className={`${display.className} mt-5 text-[2.1rem] leading-[1.04] sm:text-5xl lg:text-[3.4rem] font-semibold tracking-[-0.035em] text-balance bg-[linear-gradient(180deg,#fff_40%,rgba(255,255,255,0.6))] bg-clip-text text-transparent ${titleClassName}`}
+        className={`${display.className} mt-5 text-[2.1rem] leading-[1.04] sm:text-5xl lg:text-[3.4rem] font-semibold tracking-[-0.035em] text-balance bg-[linear-gradient(180deg,rgb(var(--ink))_40%,rgb(var(--ink)/0.6))] bg-clip-text text-transparent ${titleClassName}`}
       >
         {title}
       </h2>
@@ -169,7 +169,7 @@ export function SpotlightCard({
         el.style.setProperty('--my', `${e.clientY - r.top}px`);
       }}
       style={{ '--glow': glow } as React.CSSProperties}
-      className={`spotlight-card relative isolate overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ${className}`}
+      className={`spotlight-card relative isolate overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] shadow-[inset_0_1px_0_0_rgb(var(--ink)/0.06)] ${className}`}
     >
       {children}
     </div>
@@ -237,7 +237,7 @@ export function GridBackdrop({
 export function SectionDivider() {
   return (
     <div aria-hidden="true" className="relative h-px w-full">
-      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.09),transparent)]" />
+      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgb(var(--ink)/0.09),transparent)]" />
       <div className="absolute left-1/2 top-0 h-px w-[min(560px,70%)] -translate-x-1/2 bg-[linear-gradient(90deg,transparent,rgba(96,165,250,0.5),transparent)]" />
       <div className="absolute left-1/2 -top-6 h-12 w-[min(420px,50%)] -translate-x-1/2 rounded-full bg-blue-500/[0.07] blur-2xl" />
     </div>

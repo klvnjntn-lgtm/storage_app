@@ -29,7 +29,7 @@ function StepNode({
   const at = index / (STEPS.length - 1);
   const lit = useTransform(progress, [Math.max(0, at - 0.08), at], [0, 1]);
   return (
-    <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-white/10 bg-[#0a1122] text-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+    <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-white/10 bg-[var(--l-raised)] text-white/50 shadow-[inset_0_1px_0_rgb(var(--ink)/0.06)]">
       <Icon size={20} strokeWidth={2} aria-hidden="true" />
       <motion.span
         aria-hidden="true"

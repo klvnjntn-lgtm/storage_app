@@ -49,7 +49,7 @@ function ScanVisual() {
   ];
   return (
     <div className={styles.scanStage} aria-hidden="true">
-      <div className={styles.phone}>
+      <div className={`dark-island ${styles.phone}`}>
         <span className={styles.notch} />
         <div className={styles.phoneScreen}>
           <div className={styles.cam}>

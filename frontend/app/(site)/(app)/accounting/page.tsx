@@ -49,7 +49,8 @@ function usePrimaryItems(t: (key: string) => string) {
       description: t('accounting.overview.journalDescription'),
       href: '/accounting/journal',
       icon: BookText,
-      gradient: 'from-gray-600 to-gray-900',
+      // hex, not gray-*: the grays invert in dark mode (theme.css)
+      gradient: 'from-[#4b5563] to-[#111827]',
     },
     {
       title: t('nav.items.expenses'),
@@ -311,7 +312,7 @@ export default function AccountingHome() {
     <main
       className="min-h-screen text-black"
       style={{
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--page-bg)',
         backgroundImage:
           'radial-gradient(circle at 1px 1px, rgba(37,99,235,0.07) 1px, transparent 0)',
         backgroundSize: '24px 24px',
