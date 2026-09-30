@@ -60,23 +60,26 @@ export class AuthService {
         }
       }
 
-      if (deviceId) {
-        const result = await this.devices.registerOrCheck(
-          user.organizationId,
-          user.id,
-          deviceId,
-          userAgent,
+      // Without this, a driver whose device was rejected could log in by
+      // simply not sending x-device-id. The web client always sends one.
+      if (!deviceId) {
+        throw new UnauthorizedException('A device id is required to sign in as a driver.');
+      }
+      const result = await this.devices.registerOrCheck(
+        user.organizationId,
+        user.id,
+        deviceId,
+        userAgent,
+      );
+      if (result === 'PENDING') {
+        throw new UnauthorizedException(
+          'This device is pending admin approval.',
         );
-        if (result === 'PENDING') {
-          throw new UnauthorizedException(
-            'This device is pending admin approval.',
-          );
-        }
-        if (result === 'REJECTED') {
-          throw new UnauthorizedException(
-            'This device has been denied access. Contact your administrator.',
-          );
-        }
+      }
+      if (result === 'REJECTED') {
+        throw new UnauthorizedException(
+          'This device has been denied access. Contact your administrator.',
+        );
       }
     }
 
@@ -136,7 +139,11 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
-    if (existing) {
+    // A member removed from this same org can be re-invited: restore the
+    // account (new password/role) instead of failing on the unique email.
+    const restoring =
+      existing?.removedAt != null && existing.organizationId === inviterOrgId;
+    if (existing && !restoring) {
       throw new ConflictException('Email already registered');
     }
 
@@ -148,7 +155,7 @@ export class AuthService {
     }
 
     const activeCount = await this.prisma.user.count({
-      where: { organizationId: inviterOrgId, active: true },
+      where: { organizationId: inviterOrgId, active: true, removedAt: null },
     });
 
     if (activeCount >= org.seatLimit) {
@@ -158,6 +165,20 @@ export class AuthService {
     }
 
     const hashed = await bcrypt.hash(password, 10);
+
+    if (restoring) {
+      return this.prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          password: hashed,
+          role,
+          active: true,
+          removedAt: null,
+          currentSessionId: null,
+        },
+        select: { id: true, email: true, role: true },
+      });
+    }
 
     return this.prisma.user.create({
       data: {

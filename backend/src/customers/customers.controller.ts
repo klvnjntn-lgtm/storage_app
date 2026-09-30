@@ -6,6 +6,10 @@ import { ModuleKey } from '@prisma/client';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import {
+  CreateCustomerAddressDto,
+  UpdateCustomerAddressDto,
+} from './dto/customer-address.dto';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -55,5 +59,38 @@ export class CustomersController {
   @Delete(':id')
   remove(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.customersService.remove(organizationId, id);
+  }
+
+  @Get(':id/addresses')
+  listAddresses(@CurrentOrg() organizationId: string, @Param('id') id: string) {
+    return this.customersService.listAddresses(organizationId, id);
+  }
+
+  @Post(':id/addresses')
+  createAddress(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Body() dto: CreateCustomerAddressDto,
+  ) {
+    return this.customersService.createAddress(organizationId, id, dto);
+  }
+
+  @Patch(':id/addresses/:addressId')
+  updateAddress(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+    @Body() dto: UpdateCustomerAddressDto,
+  ) {
+    return this.customersService.updateAddress(organizationId, id, addressId, dto);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  removeAddress(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+  ) {
+    return this.customersService.removeAddress(organizationId, id, addressId);
   }
 }

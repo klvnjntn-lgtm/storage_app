@@ -3,6 +3,10 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import {
+  CreateCustomerAddressDto,
+  UpdateCustomerAddressDto,
+} from './dto/customer-address.dto';
 
 @Injectable()
 export class CustomersService {
@@ -37,6 +41,7 @@ export class CustomersService {
     const customer = await this.prisma.customer.findFirst({
       where: { id, organizationId },
       include: {
+        addresses: { orderBy: { label: 'asc' } },
         invoices: {
           where: { organizationId },
           orderBy: { createdAt: 'desc' },
@@ -94,4 +99,73 @@ async remove(organizationId: string, id: string) {
 
   await this.prisma.customer.delete({ where: { id, organizationId } });
 }
+
+  // ─── Saved delivery addresses ───────────────────────────────────────
+
+  async listAddresses(organizationId: string, customerId: string) {
+    await this.get(organizationId, customerId);
+    return this.prisma.customerAddress.findMany({
+      where: { organizationId, customerId },
+      orderBy: { label: 'asc' },
+    });
+  }
+
+  async createAddress(
+    organizationId: string,
+    customerId: string,
+    dto: CreateCustomerAddressDto,
+  ) {
+    await this.get(organizationId, customerId);
+    return this.prisma.customerAddress.create({
+      data: {
+        organizationId,
+        customerId,
+        label: dto.label.trim(),
+        address: dto.address?.trim() || null,
+        latitude: dto.latitude ?? null,
+        longitude: dto.longitude ?? null,
+      },
+    });
+  }
+
+  async updateAddress(
+    organizationId: string,
+    customerId: string,
+    addressId: string,
+    dto: UpdateCustomerAddressDto,
+  ) {
+    await this.getAddress(organizationId, customerId, addressId);
+    return this.prisma.customerAddress.update({
+      where: { id: addressId },
+      data: {
+        label: dto.label?.trim(),
+        address: dto.address !== undefined ? dto.address.trim() || null : undefined,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+      },
+    });
+  }
+
+  async removeAddress(
+    organizationId: string,
+    customerId: string,
+    addressId: string,
+  ) {
+    await this.getAddress(organizationId, customerId, addressId);
+    // Existing DeliveryOrders keep their own address/pin snapshot, so
+    // deleting a saved address never changes a shipment already made.
+    await this.prisma.customerAddress.delete({ where: { id: addressId } });
+  }
+
+  private async getAddress(
+    organizationId: string,
+    customerId: string,
+    addressId: string,
+  ) {
+    const address = await this.prisma.customerAddress.findFirst({
+      where: { id: addressId, customerId, organizationId },
+    });
+    if (!address) throw new NotFoundException('Address not found');
+    return address;
+  }
 }

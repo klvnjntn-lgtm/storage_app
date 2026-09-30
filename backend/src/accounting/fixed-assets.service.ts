@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { runSerializable } from '../prisma/serializable';
 import { DepreciationMethod, FixedAssetStatus, JournalSourceType, PaymentMethod, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from './posting-rules.service';
@@ -165,7 +166,7 @@ export class FixedAssetsService {
     }
 
     try {
-      const updated = await this.prisma.$transaction(
+      const updated = await runSerializable(this.prisma, 
         async (tx) => {
           const asset = await tx.fixedAsset.findFirst({
             where: { id: assetId, organizationId },
@@ -207,7 +208,6 @@ export class FixedAssetsService {
 
           return result;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
       return serialize(updated);

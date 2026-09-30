@@ -14,6 +14,7 @@ export class LicenseController {
   getStatus(): LicenseStatusDto {
     const state = this.licenseService.getStatus();
     return {
+      edition: this.licenseService.getEdition(),
       valid: state.valid,
       status: state.status,
       expiresAt: state.expiresAt,

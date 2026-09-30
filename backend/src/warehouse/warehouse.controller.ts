@@ -7,6 +7,10 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { ModuleKey } from '@prisma/client';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/decorators/current-user.decorator';
+import { WarehouseReceiveDto } from './dto/warehouse-receive.dto';
+import { WarehouseMoveDto } from './dto/warehouse-move.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('warehouse')
@@ -18,9 +22,10 @@ export class WarehouseController {
   @Post('receive')
   receive(
     @CurrentOrg() organizationId: string,
-    @Body() body: { productId: string; qty: number; locationId?: string },
+    @CurrentUser() user: JwtPayload,
+    @Body() body: WarehouseReceiveDto,
   ) {
-    return this.warehouseService.receive(organizationId, body.productId, body.qty, body.locationId);
+    return this.warehouseService.receive(organizationId, body.productId, body.qty, body.locationId, user.sub);
   }
 
   @UseGuards(ModuleGuard)
@@ -28,10 +33,12 @@ export class WarehouseController {
   @Post('move')
   move(
     @CurrentOrg() organizationId: string,
-    @Body()
-    body: { productId: string; qty: number; fromLocationId: string; toLocationId: string },
+    @CurrentUser() user: JwtPayload,
+    @Body() body: WarehouseMoveDto,
   ) {
-    return this.warehouseService.move(organizationId, body.productId, body.qty, body.fromLocationId, body.toLocationId);
+    return this.warehouseService.move(
+      organizationId, body.productId, body.qty, body.fromLocationId, body.toLocationId, user.sub,
+    );
   }
 
   // Read-only, ungated — same reasoning as ProductController/SessionsController.

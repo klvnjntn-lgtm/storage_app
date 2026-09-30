@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res }
 import { DeliveryOrderStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { DeliveryOrderService } from './delivery-order.service';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
@@ -10,9 +12,17 @@ import { RecordDeliveryOrderProofDto } from './dto/delivery-order-proof.dto'; //
 import { RecordDeliveryOrderFailureDto } from './dto/delivery-order-failure.dto';
 import { SetDeliveryOrderDestinationDto } from './dto/delivery-order-destination.dto';
 import { UpdateDeliveryOrderDetailsDto } from './dto/delivery-order-details.dto';
+import { ApplyDeliveryOrderAddressDto } from './dto/delivery-order-address.dto';
+import { RescheduleDeliveryOrderDto } from './dto/delivery-order-reschedule.dto';
 import type { Response } from 'express';
 
-@UseGuards(JwtAuthGuard, OrgGuard)
+// Staff-only by default. There's no global DRIVER restriction, so without
+// this class-level @Roles a DRIVER JWT could list, ship, cancel, return or
+// reschedule any delivery order in the org. The two driver-facing actions
+// (proof-of-delivery, failure) override it below, and the service then
+// scopes those to DOs on the driver's own routes.
+@UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
+@Roles('ADMIN', 'USER')
 @Controller('delivery-orders')
 export class DeliveryOrderController {
   constructor(private deliveryOrderService: DeliveryOrderService) {}
@@ -73,6 +83,7 @@ export class DeliveryOrderController {
   // Was implemented on the service but never wired up — the frontend's
   // "Save signature" button was 404ing the same way print was.
   @Patch(':id/proof-of-delivery')
+  @Roles('ADMIN', 'USER', 'DRIVER')
   recordProofOfDelivery(
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
@@ -95,6 +106,7 @@ export class DeliveryOrderController {
   }
 
   @Post(':id/failure')
+  @Roles('ADMIN', 'USER', 'DRIVER')
   recordFailedDelivery(
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
@@ -126,6 +138,15 @@ export class DeliveryOrderController {
     });
   }
 
+  @Patch(':id/address')
+  applyAddress(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Body() dto: ApplyDeliveryOrderAddressDto,
+  ) {
+    return this.deliveryOrderService.applyAddress(organizationId, id, dto.customerAddressId);
+  }
+
   @Patch(':id/details')
   updateDetails(
     @CurrentOrg() organizationId: string,
@@ -140,8 +161,17 @@ export class DeliveryOrderController {
   }
 
   @Post(':id/reschedule')
-  reschedule(@CurrentOrg() organizationId: string, @Param('id') id: string) {
-    return this.deliveryOrderService.rescheduleDelivery(organizationId, id);
+  reschedule(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: RescheduleDeliveryOrderDto,
+  ) {
+    return this.deliveryOrderService.rescheduleDelivery(organizationId, id, {
+      routeId: dto.routeId,
+      deliveryWindowStart: dto.deliveryWindowStart ? new Date(dto.deliveryWindowStart) : undefined,
+      deliveryWindowEnd: dto.deliveryWindowEnd ? new Date(dto.deliveryWindowEnd) : undefined,
+    }, req.user.sub);
   }
 
   @Post(':id/return')

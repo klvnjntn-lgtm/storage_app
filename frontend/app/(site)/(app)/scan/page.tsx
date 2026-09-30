@@ -3,8 +3,9 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ScanLine, CheckCircle2, AlertCircle, MapPin, Camera, VideoOff, Loader2, History } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { apiFetch } from '@/lib/apifetch';
+import { readErrorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const CAMERA_REGION_ID = 'scan-camera-region';
@@ -21,7 +22,25 @@ function errorFeedback() {
   if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
 }
 
-const DEBOUNCE_MS = 2000;
+// Camera only: a code that stays in view decodes on every frame, so it
+// counts once and re-arms only after it has been out of view this long.
+// Scanner guns are NOT debounced — each trigger pull is a deliberate scan,
+// and counting identical units back-to-back is the normal case (the old
+// 2-second same-code debounce silently dropped those, undercounting).
+const CAMERA_REARM_MS = 1500;
+
+// What our labels (Code 128 / QR) and typical manufacturer barcodes use.
+// Restricting formats makes decoding faster and avoids misreads.
+const CAMERA_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+];
+
+// Must match RETURN_REASONS in backend SessionsService / AddSessionItemDto.
+const RETURN_REASONS = ['DAMAGED', 'WRONG_ITEM', 'CHANGED_MIND', 'DEFECTIVE', 'OTHER'] as const;
 
 type LocationOption = { id: string; name: string };
 type ScanLogEntry = {
@@ -55,13 +74,14 @@ function ScanPageInner() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [fromLocationId, setFromLocationId] = useState('');
   const [toLocationId, setToLocationId] = useState('');
+  const [returnReason, setReturnReason] = useState('');
 
   const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [log, setLog] = useState<ScanLogEntry[]>([]);
 
-  const lastCodeRef = useRef('');
-  const lastTimeRef = useRef(0);
+  // Camera: when each code was last seen in a frame (see CAMERA_REARM_MS).
+  const cameraSeenRef = useRef(new Map<string, number>());
 
   const fromLocationRef = useRef('');
   const toLocationRef = useRef('');
@@ -96,22 +116,20 @@ function ScanPageInner() {
   const requiresFrom = effectiveType === 'PICK';
   const requiresTo = effectiveType === 'MOVE' || effectiveType === 'RETURNS';
 
+  const requiresReason = effectiveType === 'RETURNS';
+
   const missingFrom = requiresFrom && !fromLocationId;
   const missingTo = requiresTo && !toLocationId;
-  const readyToScan = !missingFrom && !missingTo && !!sessionId;
+  const missingReason = requiresReason && !returnReason;
+  const readyToScan = !missingFrom && !missingTo && !missingReason && !!sessionId;
 
   async function handleScan(barcode: string) {
-    const now = Date.now();
-    if (barcode === lastCodeRef.current && now - lastTimeRef.current < DEBOUNCE_MS) {
-      return;
-    }
-    lastCodeRef.current = barcode;
-    lastTimeRef.current = now;
-
-    if (missingFrom || missingTo) {
+    if (missingFrom || missingTo || missingReason) {
       const msg = missingFrom
         ? t('scan.selectBeforeScanning', { label: fromLabel() })
-        : t('scan.selectBeforeScanning', { label: toLabel() });
+        : missingTo
+          ? t('scan.selectBeforeScanning', { label: toLabel() })
+          : t('scan.selectBeforeScanning', { label: t('scan.returnReason') });
       setStatus('error');
       setErrorMsg(msg);
       errorFeedback();
@@ -146,12 +164,13 @@ function ScanPageInner() {
           qty: 1,
           fromLocationId: fromLocationRef.current || undefined,
           toLocationId: toLocationRef.current || undefined,
+          reason: requiresReason ? returnReason : undefined,
         }),
       });
 
       if (!itemRes.ok) {
-        const text = await itemRes.text();
-        throw new Error(text || t('scan.failedToAddItem', { status: itemRes.status }));
+        const msg = await readErrorMessage(itemRes);
+        throw new Error(msg || t('scan.failedToAddItem', { status: itemRes.status }));
       }
 
       successFeedback();
@@ -226,14 +245,32 @@ function ScanPageInner() {
     if (!cameraActive || !readyToScan) return;
 
     let cancelled = false;
-    const scanner = new Html5Qrcode(CAMERA_REGION_ID, { verbose: false });
+    const scanner = new Html5Qrcode(CAMERA_REGION_ID, {
+      verbose: false,
+      formatsToSupport: CAMERA_FORMATS,
+      // Native BarcodeDetector (Android Chrome) is much faster and more
+      // reliable on 1D barcodes than the JS decoder; falls back when absent.
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    });
     html5QrcodeRef.current = scanner;
 
     scanner
       .start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        {
+          fps: 10,
+          // Wide rather than square: a 1D barcode needs its full width inside
+          // the scan box; still tall enough for a QR label.
+          qrbox: (w: number, h: number) => ({
+            width: Math.max(50, Math.floor(Math.min(w * 0.85, 420))),
+            height: Math.max(50, Math.floor(Math.min(h * 0.55, 240))),
+          }),
+        },
         (decodedText) => {
+          const now = Date.now();
+          const lastSeen = cameraSeenRef.current.get(decodedText);
+          cameraSeenRef.current.set(decodedText, now);
+          if (lastSeen !== undefined && now - lastSeen < CAMERA_REARM_MS) return;
           handleScanRef.current(decodedText);
         },
         () => {
@@ -341,6 +378,27 @@ function ScanPageInner() {
       {/* Content */}
       <div className="p-4 sm:p-6 max-w-5xl mx-auto flex flex-col gap-5">
 
+        {/* What this session is counted against — so a returns scan isn't
+            made against the wrong sale, or a count against the wrong delivery. */}
+        {session?.returnInvoice && (
+          <p className="text-sm font-semibold text-orange-800 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
+            {t('inventory.sessionDetail.returningInvoice', {
+              number: session.returnInvoice.invoiceNumber ?? session.returnInvoice.id.slice(0, 8),
+            })}
+            {session.returnInvoice.customerName ? ` · ${session.returnInvoice.customerName}` : ''}
+          </p>
+        )}
+        {session?.importBatch && (
+          <p className="text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
+            {t('inventory.sessionDetail.receivingDelivery', {
+              date: new Date(session.importBatch.createdAt).toLocaleString(language === 'id' ? 'id-ID' : 'en-US', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              }),
+            })}
+          </p>
+        )}
+
         {/* Step 1: locations, only shown when this mode needs them */}
         {(showFrom || showTo) && (
           <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">
@@ -389,6 +447,28 @@ function ScanPageInner() {
                     {locations.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {requiresReason && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-gray-600">
+                    {t('scan.returnReason')} <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    className={`border-2 rounded-md p-2 w-52 outline-none focus:border-blue-500 ${
+                      missingReason ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                  >
+                    <option value="">{t('scan.selectPlaceholder')}</option>
+                    {RETURN_REASONS.map((r) => (
+                      <option key={r} value={r}>
+                        {t(`scan.returnReasons.${r}`)}
                       </option>
                     ))}
                   </select>
@@ -483,7 +563,11 @@ function ScanPageInner() {
 
             {!readyToScan && (
               <p className="text-xs text-gray-500">
-                {missingFrom && missingTo ? t('scan.lockedUntilLocationsChosen') : t('scan.lockedUntilLocationChosen')}
+                {missingFrom && missingTo
+                  ? t('scan.lockedUntilLocationsChosen')
+                  : missingFrom || missingTo
+                    ? t('scan.lockedUntilLocationChosen')
+                    : t('scan.lockedUntilReasonChosen')}
               </p>
             )}
           </div>

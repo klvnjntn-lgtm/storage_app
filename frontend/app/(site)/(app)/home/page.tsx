@@ -6,11 +6,13 @@ import { JetBrains_Mono } from 'next/font/google';
 import { display } from '@/lib/fonts';
 import { Receipt, ShoppingCart, ArrowUpRight, Lock, Inbox, Wrench, Calculator, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { GridBackdrop } from '@/app/(site)/_landing/primitives';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'] });
 
 type LicenseStatus = {
+  edition: 'desktop' | 'cloud';
   valid: boolean;
   status: 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'UNKNOWN';
   expiresAt: string | null;
@@ -24,12 +26,39 @@ function getGreeting(t: (key: string) => string) {
   return t('home.greetingEvening');
 }
 
-function getDateLine(language: string) {
-  return new Date().toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', {
-    weekday: 'long',
+function getDateLine(now: Date, language: string) {
+  return now.toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', {
+    weekday: 'short',
     month: 'short',
     day: 'numeric',
   });
+}
+
+// Live clock. Starts null so the server render and first paint match.
+function useNow() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the clock once after mount
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+// Numbered mono section tag, the app-palette twin of the landing page's
+// Kicker (that one is tuned for the landing's dark backdrop).
+function SectionTag({ index, label }: { index: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2.5 mb-3">
+      <span
+        className={`${mono.className} text-[10px] tracking-[0.2em] text-blue-700 px-2 py-1 rounded-full border border-blue-200 bg-blue-50`}
+      >
+        {index}
+      </span>
+      <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">{label}</h2>
+    </div>
+  );
 }
 
 // Same "local component + data array" shape as accounting/page.tsx's
@@ -159,6 +188,15 @@ export default function Home() {
   const [enabledModules, setEnabledModules] = useState<string[]>([]);
   const [openSessions, setOpenSessions] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<number | null>(null);
+  // Round-trip time of the license status call, doubling as an API health
+  // check. null = pending, 'offline' = request failed.
+  const [latency, setLatency] = useState<number | 'offline' | null>(null);
+  const now = useNow();
+
+  // Sessions and pending orders are warehouse concepts; the license only
+  // exists on the desktop edition.
+  const hasWarehouse = enabledModules.includes('WAREHOUSE_OPS');
+  const showLicense = license?.edition === 'desktop';
 
   useEffect(() => {
     (async () => {
@@ -175,10 +213,13 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
+        const started = performance.now();
         const res = await apiFetch('/license/status');
+        setLatency(res.ok ? Math.round(performance.now() - started) : 'offline');
         setLicense(await res.json());
       } catch (err) {
         console.error('License status fetch failed:', err);
+        setLatency('offline');
       }
     })();
   }, []);
@@ -197,6 +238,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!hasWarehouse) return;
     (async () => {
       try {
         const res = await apiFetch('/sessions');
@@ -209,9 +251,6 @@ export default function Home() {
         console.error('Sessions fetch failed:', err);
       }
     })();
-  }, []);
-
-  useEffect(() => {
     (async () => {
       try {
         const res = await apiFetch('/integrations/orders/pending');
@@ -222,75 +261,120 @@ export default function Home() {
         console.error('Pending orders fetch failed:', err);
       }
     })();
-  }, []);
+  }, [hasWarehouse]);
 
   const MODULE_ITEMS = useModuleItems(t, enabledModules);
+  const activeModules = MODULE_ITEMS.filter((m) => m.enabled).length;
   const notEnabledLabel = t('home.notEnabled');
 
   return (
-    <main
-      className="min-h-screen text-black"
-      style={{
-        backgroundColor: 'var(--page-bg)',
-        backgroundImage:
-          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
-        backgroundSize: '24px 24px',
-      }}
-    >
-      <div className="max-w-5xl mx-auto w-full px-6 pt-10 pb-16">
+    <main className="relative min-h-screen overflow-hidden text-black" style={{ backgroundColor: 'var(--page-bg)' }}>
+      {/* Blueprint grid + glow, borrowed from the landing hero */}
+      <GridBackdrop size={44} opacity={0.07} mask="radial-gradient(ellipse at 70% 0%, black 10%, transparent 70%)" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 right-[-10%] h-[26rem] w-[26rem] rounded-full bg-blue-500/15 blur-[120px]"
+      />
+
+      <div className="relative max-w-5xl mx-auto w-full px-4 sm:px-6 pt-10 pb-16">
         {/* GREETING */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-6 h-6 rounded-md bg-blue-600 text-white text-[11px] font-bold shrink-0">
-              {(profile?.organization?.name ?? 'Y')[0].toUpperCase()}
+        <header className="animate-hero-in motion-reduce:animate-none">
+          <div className={`${mono.className} flex items-center justify-between flex-wrap gap-2 text-xs`}>
+            <span className="uppercase tracking-[0.2em] text-gray-500">~/home</span>
+            <span className="flex items-center gap-2 text-gray-500 tabular-nums">
+              {now && (
+                <>
+                  {getDateLine(now, language)}
+                  <span aria-hidden="true" className="text-gray-300">
+                    /
+                  </span>
+                  <time dateTime={now.toISOString()} className="text-gray-900">
+                    {now.toLocaleTimeString(language === 'id' ? 'id-ID' : 'en-GB', { hour12: false })}
+                  </time>
+                </>
+              )}
             </span>
-            <p className="text-sm font-semibold text-gray-900">
-              {profile?.organization?.name ?? t('home.yourOrganization')}
-            </p>
           </div>
-          <p className={`${mono.className} text-xs text-gray-400`}>{getDateLine(language)}</p>
-        </div>
-        <h2 className={`${display.className} mt-2 text-3xl font-bold tracking-tight`}>
-          {getGreeting(t)}{profile?.email ? `, ${profile.email.split('@')[0]}` : ''}
-        </h2>
+          <h1 className={`${display.className} mt-4 text-4xl sm:text-5xl font-bold tracking-[-0.035em] leading-[1.02]`}>
+            {getGreeting(t)}
+            {profile?.email && (
+              <>
+                ,{' '}
+                <span className="bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
+                  {profile.email.split('@')[0]}
+                </span>
+              </>
+            )}
+          </h1>
+          <p className="mt-3 text-sm text-gray-500">{t('home.subtitle')}</p>
+        </header>
 
         {/* STATUS STRIP */}
-        <div className={`${mono.className} mt-6 flex flex-wrap items-stretch gap-0 border border-blue-500/20 rounded-xl overflow-hidden text-xs bg-white/60 backdrop-blur-sm`}>
-          <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                license?.valid ? 'bg-emerald-500' : license ? 'bg-red-500' : 'bg-gray-300'
-              }`}
-            />
-            <span className="text-gray-500 uppercase">{t('home.license')}</span>
-            <span className="ml-auto font-medium">{license ? license.status : '—'}</span>
+        <section className="mt-10">
+          <SectionTag index="01" label={t('home.system')} />
+          <div
+            className={`${mono.className} flex flex-wrap items-stretch gap-0 border border-blue-500/20 rounded-xl overflow-hidden text-xs bg-white/60 backdrop-blur-sm divide-y sm:divide-y-0 sm:divide-x divide-blue-500/15`}
+          >
+            <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
+              <span className="relative flex w-1.5 h-1.5">
+                {typeof latency === 'number' && (
+                  <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-75 animate-ping motion-reduce:animate-none" />
+                )}
+                <span
+                  className={`relative w-1.5 h-1.5 rounded-full ${
+                    latency === 'offline' ? 'bg-red-500' : latency === null ? 'bg-gray-300' : 'bg-emerald-500'
+                  }`}
+                />
+              </span>
+              <span className="text-gray-500 uppercase">{t('home.system')}</span>
+              <span className="ml-auto font-medium">
+                {latency === null
+                  ? '—'
+                  : latency === 'offline'
+                    ? t('home.offline')
+                    : `${t('home.online')} · ${latency}ms`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+              <span className="text-gray-500 uppercase">{t('home.modules')}</span>
+              <span className="ml-auto font-medium">
+                {activeModules}/{MODULE_ITEMS.length}
+              </span>
+            </div>
+            {showLicense && (
+              <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
+                <span className={`w-1.5 h-1.5 rounded-full ${license?.valid ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <span className="text-gray-500 uppercase">{t('home.license')}</span>
+                <span className="ml-auto font-medium">{license?.status}</span>
+              </div>
+            )}
+            {hasWarehouse && (
+              <>
+                <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span className="text-gray-500 uppercase">{t('home.openSessions')}</span>
+                  <span className="ml-auto font-medium">{openSessions === null ? '—' : openSessions}</span>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px]">
+                  <span className={`w-1.5 h-1.5 rounded-full ${pendingOrders ? 'bg-cyan-500' : 'bg-gray-300'}`} />
+                  <span className="text-gray-500 uppercase">{t('home.pendingOrders')}</span>
+                  <span className="ml-auto font-medium">{pendingOrders === null ? '—' : pendingOrders}</span>
+                </div>
+              </>
+            )}
           </div>
-          <div className="w-px bg-blue-500/15 hidden sm:block" />
-          <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px] border-t sm:border-t-0 border-blue-500/15">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            <span className="text-gray-500 uppercase">{t('home.openSessions')}</span>
-            <span className="ml-auto font-medium">{openSessions === null ? '—' : openSessions}</span>
-          </div>
-          <div className="w-px bg-blue-500/15 hidden sm:block" />
-          <div className="flex items-center gap-2 px-4 py-3 flex-1 min-w-[160px] border-t sm:border-t-0 border-blue-500/15">
-            <span className={`w-1.5 h-1.5 rounded-full ${pendingOrders ? 'bg-cyan-500' : 'bg-gray-300'}`} />
-            <span className="text-gray-500 uppercase">{t('home.pendingOrders')}</span>
-            <span className="ml-auto font-medium">{pendingOrders === null ? '—' : pendingOrders}</span>
-          </div>
-        </div>
+        </section>
 
         {/* MODULES */}
-        <div className="mt-10">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            {t('home.modules')}
-          </h3>
-
+        <section className="mt-10">
+          <SectionTag index="02" label={t('home.modules')} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {MODULE_ITEMS.map((item) => (
               <ModuleCard key={item.href} {...item} notEnabledLabel={notEnabledLabel} onNavigate={router.push} />
             ))}
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );

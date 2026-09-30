@@ -199,6 +199,26 @@ body {
   animation-play-state: paused !important;
 }
 
+/* Lite mode (low-end devices, set by useLowEndDevice): swap the 120–150px
+   blur glows for a radial mask — same soft look, no full-layer blur pass —
+   drop backdrop blurs, and let the browser skip offscreen sections. */
+.landing[data-lite] .landing-glow {
+  filter: none;
+  -webkit-mask-image: radial-gradient(closest-side, #000, transparent);
+  mask-image: radial-gradient(closest-side, #000, transparent);
+}
+
+.landing[data-lite] * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.landing[data-lite] > section:not(:first-of-type),
+.landing[data-lite] > footer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
+}
+
 /* Glass card spotlight: a soft glow and a lit border that follow the
    cursor (position written to --mx/--my by SpotlightCard). The layers
    only exist while hovered — an idle masked layer on every card costs

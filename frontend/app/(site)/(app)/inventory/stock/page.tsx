@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { LayoutDashboard, Search, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes, AlertTriangle, CheckCircle2, List, LayoutGrid, ImageOff, ArrowUpDown } from 'lucide-react';
+import { LayoutDashboard, Search, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes, AlertTriangle, CheckCircle2, List, LayoutGrid, ImageOff, ArrowUpDown, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { useSortableData } from '@/lib/hooks/useSortableData';
+import type { SortState } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import Pagination from '@/app/components/shared/Pagination';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -27,6 +27,7 @@ type ProductSummary = {
   // than a separate fetch per card) avoids an N+1 in Grid View.
   image: string | null;
   locations: {
+    locationId: string;
     location: string;
     qty: number;
   }[];
@@ -254,6 +255,18 @@ export default function StockPage() {
   // product's detail page restores the same search/page instead of
   // resetting to page 1 with no search.
   const [search, setSearch] = useState<string>(() => getInitialParam('search', ''));
+  // `search` is what the input shows; `debouncedSearch` drives the fetch,
+  // so each keystroke doesn't fire a request (same as the invoices list).
+  const [debouncedSearch, setDebouncedSearch] = useState<string>(() => getInitialParam('search', ''));
+  // "What's at this location" — also the target of the warehouse hub's
+  // location search results (/inventory/stock?location=<id>).
+  const [locationFilter, setLocationFilter] = useState<string>(() => getInitialParam('location', ''));
+  const [locationOptions, setLocationOptions] = useState<Option[]>([]);
+  const [sort, setSort] = useState<SortState<SortKey> | null>(null);
+  // Total rows for the current filters, as reported by the server — drives
+  // Pagination. `products` is only ever the current page.
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
   // Oversold report, folded into this page as a filter rather than a
@@ -278,12 +291,34 @@ export default function StockPage() {
       .finally(() => setOversoldSalesLoading(false));
   }, [oversoldOnly, oversoldFrom, oversoldTo]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   useSyncQueryParams({
-    search,
+    search: debouncedSearch,
+    location: locationFilter || null,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
     oversold: oversoldOnly ? '1' : null,
   });
+
+  const activeFilterCount = (debouncedSearch ? 1 : 0) + (locationFilter ? 1 : 0) + (oversoldOnly ? 1 : 0);
+
+  function clearFilters() {
+    setSearch('');
+    setLocationFilter('');
+    setOversoldOnly(false);
+  }
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, direction: 'asc' };
+      if (prev.direction === 'asc') return { key, direction: 'desc' };
+      return null;
+    });
+  }
 
   const [categories, setCategories] = useState<Option[]>([]);
   const [brands, setBrands] = useState<Option[]>([]);
@@ -325,15 +360,50 @@ export default function StockPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ isDown: false, startX: 0, startScrollLeft: 0 });
 
+  // Filtering, sorting and pagination all happen server-side — this page
+  // used to pull the whole catalog and slice it in the browser, which
+  // doesn't hold up for a large imported catalog.
+  // Filter changes fire this twice (once for the filter, once for the page
+  // reset), so only the newest request is allowed to write state.
+  const loadSeqRef = useRef(0);
+
   async function loadProducts() {
+    const seq = ++loadSeqRef.current;
+    setLoadError(null);
     try {
-      const res = await apiFetch('/sessions/summary');
-      const data = await res.json();
-      console.log('SUMMARY:', data);
-      setProducts(data);
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (locationFilter) params.set('location', locationFilter);
+      if (oversoldOnly) params.set('oversold', '1');
+      if (sort) {
+        params.set('sort', sort.key);
+        params.set('dir', sort.direction);
+      }
+      const res = await apiFetch(`/sessions/summary?${params}`);
+      if (seq !== loadSeqRef.current) return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setLoadError(body?.message ?? t('inventory.stockPage.loadFailed'));
+        setProducts([]);
+        setTotalProducts(0);
+        return;
+      }
+      const body = await res.json();
+      if (seq !== loadSeqRef.current) return;
+      setProducts(body.data ?? []);
+      setTotalProducts(body.total ?? 0);
     } catch (err) {
       console.error(err);
+      if (seq === loadSeqRef.current) setLoadError(t('inventory.stockPage.loadFailed'));
     }
+  }
+
+  async function loadLocations() {
+    const res = await apiFetch('/locations');
+    if (!res.ok) return;
+    setLocationOptions(await res.json());
   }
 
   async function loadCategories() {
@@ -350,7 +420,9 @@ export default function StockPage() {
 
   useEffect(() => {
     loadProducts();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, debouncedSearch, locationFilter, oversoldOnly, sort]);
+
 
   useEffect(() => {
     async function loadModules() {
@@ -374,6 +446,7 @@ export default function StockPage() {
   useEffect(() => {
     loadCategories();
     loadBrands();
+    loadLocations();
   }, []);
 
   const showCostPrice =
@@ -388,61 +461,26 @@ export default function StockPage() {
   // everyone else is here to look up stock, not manage the catalog.
   const canCreateProduct = currentUser?.role === 'ADMIN';
 
-  // Filter by product name
-  const filteredProducts = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let result = q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
-    if (oversoldOnly) result = result.filter((p) => p.totalStock < 0);
-    return result;
-  }, [products, search, oversoldOnly]);
-
-  // Column sorting — applied to the full filtered set, before pagination,
-  // so sorting reorders across all pages rather than just the visible one.
-  // Shared by both views: List sorts via clickable column headers, Grid
-  // sorts via the dropdown next to the view toggle below.
-  const { sorted: sortedProducts, sort, toggleSort } = useSortableData<ProductSummary, SortKey>(
-    filteredProducts,
-    {
-      sku: (p) => p.sku ?? '',
-      name: (p) => p.name,
-      sellingPrice: (p) => p.sellingPrice,
-      costPrice: (p) => p.costPrice,
-      totalStock: (p) => p.totalStock,
-    },
-  );
-
-  // Reset to page 1 whenever the search term or sort changes — but not on
+  // Reset to page 1 whenever a filter or the sort changes — but not on
   // the very first run, or a `page` restored from the URL (e.g. via the
   // browser's Back button) would get clobbered back to 1 on mount.
-  const isFirstSearchResetRef = useRef(true);
+  const isFirstFilterResetRef = useRef(true);
   useEffect(() => {
-    if (isFirstSearchResetRef.current) {
-      isFirstSearchResetRef.current = false;
+    if (isFirstFilterResetRef.current) {
+      isFirstFilterResetRef.current = false;
       return;
     }
     setPage(1);
-  }, [search, oversoldOnly]);
+  }, [debouncedSearch, locationFilter, oversoldOnly, sort]);
 
-  const isFirstSortResetRef = useRef(true);
-  useEffect(() => {
-    if (isFirstSortResetRef.current) {
-      isFirstSortResetRef.current = false;
-      return;
-    }
-    setPage(1);
-  }, [sort]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalProducts / pageSize));
 
   // Clamp page if filtering shrinks the result set below the current page
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+    if (totalProducts > 0 && page > totalPages) setPage(totalPages);
+  }, [page, totalPages, totalProducts]);
 
-  const paginatedProducts = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return sortedProducts.slice(start, start + pageSize);
-  }, [sortedProducts, page, pageSize]);
+  const paginatedProducts = products;
 
   // Small helper so the active sorted column's cells get the same subtle
   // highlight as its header, making it easy to visually track down a
@@ -477,11 +515,30 @@ export default function StockPage() {
     return n;
   }
 
-  const duplicateSku = useMemo(() => {
+  // `products` is only the current page now, so the duplicate-SKU hint asks
+  // the server instead. Advisory only — the backend enforces uniqueness.
+  const [takenSku, setTakenSku] = useState<string | null>(null);
+  const duplicateSku = !!takenSku && takenSku === sku.trim().toLowerCase();
+  useEffect(() => {
     const trimmed = sku.trim().toLowerCase();
-    if (!trimmed) return false;
-    return products.some((p) => (p.sku ?? '').trim().toLowerCase() === trimmed);
-  }, [sku, products]);
+    if (!trimmed) return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(`/products/search?q=${encodeURIComponent(trimmed)}`);
+        if (!res.ok || stale) return;
+        const body = await res.json();
+        const matches: { sku: string | null }[] = body.products ?? [];
+        if (matches.some((p) => (p.sku ?? '').trim().toLowerCase() === trimmed)) setTakenSku(trimmed);
+      } catch {
+        // advisory only
+      }
+    }, 350);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [sku]);
 
   // Margin preview only makes sense (and is only shown) where cost price
   // itself is visible — i.e. admins with the invoicing module enabled.
@@ -713,11 +770,60 @@ export default function StockPage() {
               </button>
             </div>
           </div>
+
+          {/* Location filter + clear-all — same captioned-group and
+              clear-filters pattern as the invoices list. Location only
+              means anything for WAREHOUSE_OPS orgs, but stays visible if a
+              link arrived with ?location= so it can be cleared. */}
+          {((showLocations || locationFilter) || activeFilterCount > 0) && (
+            <div className="flex flex-wrap items-end justify-between gap-3 mt-3">
+              {(showLocations || locationFilter) && (
+                <div>
+                  <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
+                    {t('inventory.stockPage.locationLabel')}
+                  </p>
+                  <select
+                    value={locationFilter}
+                    onChange={(e) => setLocationFilter(e.target.value)}
+                    className={`text-xs px-3 py-1.5 rounded-md border font-semibold outline-none transition-colors ${
+                      locationFilter
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'border-blue-500/20 text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-500/35'
+                    }`}
+                  >
+                    <option value="">{t('inventory.stockPage.allLocations')}</option>
+                    {locationOptions.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-blue-700 shrink-0 transition-colors py-1"
+                >
+                  <X size={12} strokeWidth={2.5} />
+                  {t('inventory.stockPage.clearFilters')}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Content */}
       <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
+
+        {loadError && (
+          <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-3 text-sm">
+            <AlertTriangle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
+            {loadError}
+          </div>
+        )}
 
         {/* New Product dropdown (admins only) */}
         {canCreateProduct && (
@@ -1112,7 +1218,10 @@ export default function StockPage() {
                             <span className="text-gray-500">{t('inventory.stockPage.noStock')}</span>
                           ) : (
                             product.locations.map((location, index) => (
-                              <div key={index} className="whitespace-nowrap">
+                              <div
+                                key={index}
+                                className={`whitespace-nowrap ${location.locationId === locationFilter ? 'font-bold text-blue-800' : ''}`}
+                              >
                                 {location.location}: {location.qty}
                               </div>
                             ))
@@ -1125,9 +1234,9 @@ export default function StockPage() {
               </table>
             </div>
 
-            {filteredProducts.length === 0 && (
+            {totalProducts === 0 && (
               <div className="p-8 text-center text-sm text-gray-500">
-                {search ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
+                {activeFilterCount > 0 ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
               </div>
             )}
           </div>
@@ -1135,7 +1244,7 @@ export default function StockPage() {
           <div className="space-y-3">
             {/* Grid View has no column headers to sort by, so the same sort
                 state gets a small explicit control instead. */}
-            {filteredProducts.length > 0 && (
+            {totalProducts > 0 && (
               <div className="flex items-center gap-2 justify-end">
                 <ArrowUpDown size={14} strokeWidth={2} className="text-gray-400" />
                 <label className="text-xs text-gray-500">{t('inventory.stockPage.sortBy')}</label>
@@ -1200,7 +1309,10 @@ export default function StockPage() {
                   {showLocations && product.locations.length > 0 && (
                     <div className="text-[11px] text-gray-500 border-t border-gray-100 pt-1.5 space-y-0.5">
                       {product.locations.map((location, index) => (
-                        <div key={index} className="flex justify-between gap-2 truncate">
+                        <div
+                          key={index}
+                          className={`flex justify-between gap-2 truncate ${location.locationId === locationFilter ? 'text-blue-800' : ''}`}
+                        >
                           <span className="truncate">{location.location}</span>
                           <span className="font-semibold shrink-0">{location.qty}</span>
                         </div>
@@ -1211,20 +1323,20 @@ export default function StockPage() {
               ))}
             </div>
 
-            {filteredProducts.length === 0 && (
+            {totalProducts === 0 && (
               <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
-                {search ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
+                {activeFilterCount > 0 ? t('inventory.stockPage.noProductsMatch') : t('inventory.stockPage.noProductsFound')}
               </div>
             )}
           </div>
         )}
 
         {/* Pagination */}
-        {filteredProducts.length > 0 && (
+        {totalProducts > 0 && (
           <Pagination
             page={page}
             pageSize={pageSize}
-            totalItems={filteredProducts.length}
+            totalItems={totalProducts}
             onPageChange={setPage}
             onPageSizeChange={(size) => {
               setPageSize(size);

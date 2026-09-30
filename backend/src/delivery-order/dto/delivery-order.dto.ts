@@ -48,6 +48,12 @@ export class CreateDeliveryOrderDto {
   @IsString()
   deliveryAddress?: string;
 
+  // Deliver to one of the customer's saved addresses (CustomerAddress.id)
+  // instead of their default — copies its address and pin onto the DO.
+  @IsOptional()
+  @IsString()
+  customerAddressId?: string;
+
   @IsOptional()
   @IsString()
   notes?: string;

@@ -7,6 +7,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -16,6 +17,8 @@ import { chmod, unlink } from 'fs/promises';
 import { Request } from 'express';
 import { GdbImportService } from './gdb-import.service';
 import { InvoiceFormat } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 // JwtAuthGuard is registered globally in AppModule (APP_GUARD), so
 // req.user.organizationId is already populated on every route by the time
@@ -42,6 +45,10 @@ const VALID_TARGETS: GdbImportTarget[] = [
   'full_invoices_and_purchase_orders',
 ];
 
+// Admin-only: a confirmed import bulk-writes products, invoices and
+// purchase orders (and their ledger entries) into the organization.
+@UseGuards(RolesGuard)
+@Roles('ADMIN')
 @Controller('integrations/accurate-gdb')
 export class GdbImportController {
   constructor(private readonly gdbImportService: GdbImportService) {}

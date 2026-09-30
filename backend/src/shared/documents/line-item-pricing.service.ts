@@ -83,7 +83,7 @@ export class LineItemPricingService {
   async priceLines(
     organizationId: string,
     items: PriceableLine[],
-    client: Pick<PrismaService, 'product' | 'organizationTaxRate' | 'organization'> = this.prisma,
+    client: Pick<PrismaService, 'product' | 'organizationTaxRate' | 'organization' | 'location'> = this.prisma,
     options: {
       serviceLineModuleKey?: ModuleKey | null;
       // NEW — when false, a product line is allowed to have no
@@ -148,6 +148,22 @@ export class LineItemPricingService {
       where: { id: { in: productIds }, organizationId },
     });
     const byId = new Map(products.map((p) => [p.id, p]));
+
+    // Line-level locationId isn't covered by TenantOwnershipService (that
+    // only checks header refs), and InvoiceItem/SalesOrderItem/
+    // SalesQuotationItem have a single-column FK to Location — so without
+    // this, another org's location id would attach without complaint.
+    const lineLocationIds = Array.from(
+      new Set(productItems.map((i) => i.locationId).filter((id): id is string => !!id)),
+    );
+    if (lineLocationIds.length > 0) {
+      const found = await client.location.count({
+        where: { id: { in: lineLocationIds }, organizationId },
+      });
+      if (found !== lineLocationIds.length) {
+        throw new BadRequestException('One or more line item locations were not found');
+      }
+    }
 
     const org = await client.organization.findUniqueOrThrow({
       where: { id: organizationId },

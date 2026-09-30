@@ -3,6 +3,7 @@ import { Prisma, JournalSourceType, PaymentMethod, SystemAccountKey } from '@pri
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from './account-resolver.service';
 import { JournalService } from './journal.service';
+import { deriveStatus } from '../payments/payment-status.util';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -614,9 +615,22 @@ export class PostingRulesService {
     // their original invoiced values on purpose (see recordReturn) — this
     // is the one place that tracks "how much of that total no longer
     // applies," same in-tx guarantee as the journal entry below.
-    await db.invoice.update({
+    const credited = await db.invoice.update({
       where: { id: params.invoiceId },
       data: { creditedAmount: { increment: totalReversal } },
+      select: { total: true, amountPaid: true, creditedAmount: true },
+    });
+    // A return can be what settles an invoice (e.g. 100 invoiced, 70 paid,
+    // 30 returned), so re-derive paymentStatus against the net total the
+    // same way PaymentService does.
+    await db.invoice.update({
+      where: { id: params.invoiceId },
+      data: {
+        paymentStatus: deriveStatus(
+          Number(credited.amountPaid),
+          this.round2(Number(credited.total) - Number(credited.creditedAmount)),
+        ),
+      },
     });
 
     const [ar, revenue, taxPayable] = await Promise.all([

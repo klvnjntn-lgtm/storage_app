@@ -66,6 +66,9 @@ export type DeliveryOrderDetail = {
   customerPhone: string | null;
   customerPoNumber: string | null;
   deliveryAddress: string | null;
+  customerId: string | null;
+  destinationLatitude: string | null;
+  destinationLongitude: string | null;
   notes: string | null;
   createdAt: string;
   shippedAt: string | null;

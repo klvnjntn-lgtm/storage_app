@@ -59,18 +59,41 @@ model Customer {
   latitude  Decimal? @db.Decimal(9, 6)
   longitude Decimal? @db.Decimal(9, 6)
 
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
   npwp         String?
   companyName  String?
-  organization Organization @relation(fields: [organizationId], references: [id])
+  organization Organization      @relation(fields: [organizationId], references: [id])
   invoices     Invoice[]
   vehicles     Vehicle[]
+  addresses    CustomerAddress[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
   @@index([organizationId])
   @@index([organizationId, name])
+}
+
+// Extra saved delivery sites for a customer (branches, warehouses, job
+// sites). Customer.address/latitude/longitude stays the default; picking
+// one of these when creating a DeliveryOrder copies its address and pin
+// onto that DO (snapshot — editing the saved address later doesn't move
+// already-created shipments).
+model CustomerAddress {
+  id             String   @id @default(cuid())
+  organizationId String
+  customerId     String
+  label          String
+  address        String?
+  latitude       Decimal? @db.Decimal(9, 6)
+  longitude      Decimal? @db.Decimal(9, 6)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@index([organizationId, customerId])
 }
 
 model Vehicle {
@@ -139,6 +162,7 @@ model Organization {
   brands                       Brand[]
   categories                   Category[]
   customers                    Customer[]
+  customerAddresses            CustomerAddress[]
   events                       Event[]
   externalOrders               ExternalOrder[]
   integrationConnections       IntegrationConnection[]
@@ -158,14 +182,15 @@ model Organization {
   goodsReceipts                GoodsReceipt[]
   suppliers                    Supplier[]
 
-  stocks           Stock[]
-  users            User[]
-  vehicles         Vehicle[]
-  vehicleReminders VehicleReminder[]
-  bankAccounts     OrganizationBankAccount[]
-  fixedAssets      FixedAsset[]
-  mediaAssets      MediaAsset[]
-  notifications    Notification[]
+  stocks             Stock[]
+  users              User[]
+  vehicles           Vehicle[]
+  vehicleReminders   VehicleReminder[]
+  bankAccounts       OrganizationBankAccount[]
+  fixedAssets        FixedAsset[]
+  mediaAssets        MediaAsset[]
+  notifications      Notification[]
+  stockImportBatches StockImportBatch[]
 }
 
 model User {
@@ -189,10 +214,16 @@ model User {
 
   role             Role           @default(USER)
   active           Boolean        @default(true)
+  // Set when an admin removes the member from the org. Users can't be
+  // hard-deleted (invoices, journals, routes… reference them), so removal
+  // = inactive + hidden from member lists + seat freed. Re-inviting the
+  // same email restores the account (AuthService.invite).
+  removedAt        DateTime?
   organizationId   String
   createdAt        DateTime       @default(now())
   currentSessionId String?
   avatarUrl        String?
+  displayName      String? // admin-set label for drivers; UI only, falls back to email
   teamId           String? // NEW — only meaningful for role=DRIVER; groups drivers for organization/reporting
   team             Team?          @relation(fields: [teamId], references: [id])
   mediaAssets      MediaAsset[]
@@ -451,27 +482,42 @@ model Stock {
   product        Product      @relation(fields: [productId], references: [id])
 
   @@unique([productId, locationId], name: "productId_locationId")
+  @@index([organizationId])
+  @@index([locationId])
 }
 
 model Session {
-  id             String               @id @default(cuid())
-  status         String               @default("OPEN")
-  createdAt      DateTime             @default(now())
-  completedAt    DateTime?
-  organizationId String
-  type           SessionType
-  stage          EventType?
-  events         Event[]
-  externalOrder  ExternalOrder?
-  invoiceId      String?              @unique // unchanged — still exactly one session per invoice
-  salesOrderId   String? // NOT unique — an SO can have many sessions over time
-  invoice        Invoice?             @relation(fields: [invoiceId], references: [id])
-  salesOrder     SalesOrder?          @relation(fields: [salesOrderId], references: [id])
-  deliveryOrders DeliveryOrder[] // reverse of DeliveryOrder.sessionId
-  organization   Organization         @relation(fields: [organizationId], references: [id])
-  items          SessionItem[]
-  notes          SessionNote[]
-  reopenEvents   SessionReopenEvent[]
+  id              String               @id @default(cuid())
+  status          String               @default("OPEN")
+  createdAt       DateTime             @default(now())
+  completedAt     DateTime?
+  organizationId  String
+  type            SessionType
+  stage           EventType?
+  events          Event[]
+  externalOrder   ExternalOrder?
+  invoiceId       String?              @unique // unchanged — still exactly one session per invoice
+  salesOrderId    String? // NOT unique — an SO can have many sessions over time
+  invoice         Invoice?             @relation(fields: [invoiceId], references: [id])
+  salesOrder      SalesOrder?          @relation(fields: [salesOrderId], references: [id])
+  deliveryOrders  DeliveryOrder[] // reverse of DeliveryOrder.sessionId
+  organization    Organization         @relation(fields: [organizationId], references: [id])
+  items           SessionItem[]
+  notes           SessionNote[]
+  reopenEvents    SessionReopenEvent[]
+  // RECEIVE: the stock import this session is counting against
+  // (import-first receiving — arriving goods have no barcodes until the
+  // import has created them and labels are printed).
+  importBatchId   String?
+  importBatch     StockImportBatch?    @relation(fields: [importBatchId], references: [id])
+  // RETURNS: the sale being returned. Not @unique like invoiceId — an
+  // invoice can have several return sessions over time.
+  returnInvoiceId String?
+  returnInvoice   Invoice?             @relation("SessionReturnInvoice", fields: [returnInvoiceId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([returnInvoiceId])
+  @@index([importBatchId])
 }
 
 model SessionItem {
@@ -482,14 +528,16 @@ model SessionItem {
   events    Event[]
   product   Product @relation(fields: [productId], references: [id])
   session   Session @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
 }
 
 model Event {
-  id             Int          @id @default(autoincrement())
+  id             Int               @id @default(autoincrement())
   fromLocationId String?
   toLocationId   String?
-  quantity       Decimal      @db.Decimal(12, 2) // FIX — was Int; stockService.increase/decrease/fulfill write the same qty to Stock (now Decimal) and here in one call, so this must match
-  createdAt      DateTime     @default(now())
+  quantity       Decimal           @db.Decimal(12, 2) // FIX — was Int; stockService.increase/decrease/fulfill write the same qty to Stock (now Decimal) and here in one call, so this must match
+  createdAt      DateTime          @default(now())
   productId      String
   type           EventType
   metadata       Json?
@@ -501,21 +549,27 @@ model Event {
   salesOrderId   String?
   // queried/joined the same way invoice-driven ones already are,
   // instead of being buried inside `metadata`.
-  balanceAfter   Decimal?     @db.Decimal(12, 2) // resulting Stock.quantity after this movement; null on rows written before this field existed
-  oversold       Boolean      @default(false) // true when this movement (a SALE under WARN/ALLOW policy) pushed balanceAfter below zero
-  fromLocation   Location?    @relation("FromLocation", fields: [fromLocationId], references: [id])
-  invoice        Invoice?     @relation(fields: [invoiceId], references: [id])
-  salesOrder     SalesOrder?  @relation(fields: [salesOrderId], references: [id])
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  product        Product      @relation(fields: [productId], references: [id])
-  session        Session?     @relation(fields: [sessionId], references: [id])
-  sessionItem    SessionItem? @relation(fields: [sessionItemId], references: [id])
-  toLocation     Location?    @relation("ToLocation", fields: [toLocationId], references: [id])
-  user           User?        @relation(fields: [userId], references: [id])
+  balanceAfter   Decimal?          @db.Decimal(12, 2) // resulting Stock.quantity after this movement; null on rows written before this field existed
+  oversold       Boolean           @default(false) // true when this movement (a SALE under WARN/ALLOW policy) pushed balanceAfter below zero
+  fromLocation   Location?         @relation("FromLocation", fields: [fromLocationId], references: [id])
+  invoice        Invoice?          @relation(fields: [invoiceId], references: [id])
+  salesOrder     SalesOrder?       @relation(fields: [salesOrderId], references: [id])
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  product        Product           @relation(fields: [productId], references: [id])
+  session        Session?          @relation(fields: [sessionId], references: [id])
+  sessionItem    SessionItem?      @relation(fields: [sessionItemId], references: [id])
+  toLocation     Location?         @relation("ToLocation", fields: [toLocationId], references: [id])
+  user           User?             @relation(fields: [userId], references: [id])
+  importBatchId  String?
+  importBatch    StockImportBatch? @relation(fields: [importBatchId], references: [id])
 
   @@index([invoiceId])
   @@index([salesOrderId])
   @@index([organizationId, oversold])
+  @@index([sessionId, productId, type])
+  @@index([organizationId, createdAt])
+  @@index([productId, createdAt])
+  @@index([importBatchId])
 }
 
 model License {
@@ -952,17 +1006,22 @@ model DeliveryOrder {
   // as history rather than cleared.
   rescheduledAt DateTime?
 
-  organization Organization        @relation(fields: [organizationId], references: [id])
-  salesOrderId String? // CHANGED: was required — now optional
-  salesOrder   SalesOrder?         @relation(fields: [salesOrderId], references: [id])
-  session      Session?            @relation(fields: [sessionId], references: [id])
-  location     Location?           @relation(fields: [locationId], references: [id])
-  user         User?               @relation(fields: [userId], references: [id])
-  customer     Customer?           @relation(fields: [customerId, organizationId], references: [id, organizationId])
-  items        DeliveryOrderItem[]
-  invoiceId    String? // NEW
-  invoice      Invoice?            @relation(fields: [invoiceId], references: [id])
-  routeStop    RouteStop? // NEW — inverse; most DOs aren't on a route
+  organization     Organization        @relation(fields: [organizationId], references: [id])
+  salesOrderId     String? // CHANGED: was required — now optional
+  salesOrder       SalesOrder?         @relation(fields: [salesOrderId], references: [id])
+  session          Session?            @relation(fields: [sessionId], references: [id])
+  location         Location?           @relation(fields: [locationId], references: [id])
+  user             User?               @relation(fields: [userId], references: [id])
+  customer         Customer?           @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  items            DeliveryOrderItem[]
+  invoiceId        String? // NEW
+  invoice          Invoice?            @relation(fields: [invoiceId], references: [id])
+  // The DO's current (live) stop, if it's on a route — most DOs aren't.
+  // Relation runs through RouteStop.activeDeliveryOrderId, so a stop
+  // superseded by rescheduleDelivery() drops out of this and the DO can go
+  // onto a new route. routeStopHistory is every stop it has ever had.
+  routeStop        RouteStop?          @relation("ActiveRouteStop")
+  routeStopHistory RouteStop[]         @relation("RouteStopDeliveryOrder")
 
   @@unique([organizationId, doNumber])
   @@index([invoiceId])
@@ -971,7 +1030,7 @@ model DeliveryOrder {
 model DeliveryOrderItem {
   id               String   @id @default(uuid())
   deliveryOrderId  String
-  returnedQuantity Decimal  @default(0)
+  returnedQuantity Decimal  @default(0) @db.Decimal(12, 2)
   unitCost         Decimal? @db.Decimal(12, 2)
 
   // Denormalized snapshot for print stability (matches how InvoiceItem
@@ -1012,6 +1071,10 @@ model Route {
   startLatitude      Decimal?  @db.Decimal(9, 6)
   startLongitude     Decimal?  @db.Decimal(9, 6)
   plannedDepartureAt DateTime?
+  // Bumped on every change to the stop list/order (see
+  // DeliveryRoutesService.recordHistory); each such history event stores
+  // the version it produced plus a snapshot of the stop order.
+  version            Int       @default(1)
 
   organization  Organization        @relation(fields: [organizationId], references: [id])
   driver        User                @relation("DriverRoutes", fields: [driverId], references: [id])
@@ -1028,12 +1091,24 @@ model Route {
 // from its DeliveryOrder at read time, per the spec's "delivery status is
 // the source of truth, not a parallel tracking state" rule.
 model RouteStop {
-  id              String    @id @default(cuid())
-  routeId         String
-  deliveryOrderId String    @unique // a DO belongs to at most one route
-  sequence        Int // 1-based order within the route
-  plannedEta      DateTime? // computed by DeliveryRoutesService.optimize()/recalculateEtasAfterResolution()
-  createdAt       DateTime  @default(now())
+  id                    String    @id @default(cuid())
+  routeId               String
+  deliveryOrderId       String // every stop, live or superseded
+  // = deliveryOrderId while this stop is live, NULL once superseded. The
+  // unique index on it (NULLs are distinct in Postgres) is what enforces
+  // "a DO has at most one live stop" while still letting a rescheduled
+  // DO's failed stop stay on its original route as history.
+  activeDeliveryOrderId String?   @unique
+  // Set by rescheduleDelivery(): this stop's attempt failed and the DO was
+  // put back into SHIPPED for a new attempt elsewhere. A superseded stop
+  // always presents as FAILED, whatever the DO's current status.
+  supersededAt          DateTime?
+  // Set once the at-risk cron has alerted dispatch about this stop, so a
+  // slipping stop produces one notification, not one per cron tick.
+  atRiskNotifiedAt      DateTime?
+  sequence              Int // 1-based order within the route
+  plannedEta            DateTime? // computed by DeliveryRoutesService.optimize()/recalculateEtasAfterResolution()
+  createdAt             DateTime  @default(now())
 
   // NEW — cached leg data from the last optimize() call, from this stop's
   // previous stop (or the route's start point for the first pending stop).
@@ -1042,11 +1117,13 @@ model RouteStop {
   travelMetersFromPrevious  Decimal? @db.Decimal(10, 2)
   travelSecondsFromPrevious Int?
 
-  route         Route         @relation(fields: [routeId], references: [id])
-  deliveryOrder DeliveryOrder @relation(fields: [deliveryOrderId], references: [id])
+  route               Route          @relation(fields: [routeId], references: [id])
+  deliveryOrder       DeliveryOrder  @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id])
+  activeDeliveryOrder DeliveryOrder? @relation("ActiveRouteStop", fields: [activeDeliveryOrderId], references: [id])
 
   @@unique([routeId, sequence])
   @@index([routeId])
+  @@index([deliveryOrderId])
 }
 
 // Groups driver accounts for organization/reporting purposes — no
@@ -1072,6 +1149,8 @@ enum RouteHistoryEventType {
   STOP_REMOVED
   STOPS_REORDERED
   OPTIMIZED
+  STATUS_CHANGED
+  STOP_RESCHEDULED
 }
 
 // Append-only audit trail of route changes — spec's "route version, time
@@ -1206,8 +1285,9 @@ model Invoice {
   customerPhone          String?
   customerNpwp           String?
 
-  discountType  DiscountType?
-  discountValue Decimal?
+  discountType   DiscountType?
+  discountValue  Decimal?
+  returnSessions Session[]     @relation("SessionReturnInvoice")
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, employeeId]) // NEW
@@ -2150,4 +2230,19 @@ model JournalEntryLine {
 
   @@index([journalEntryId])
   @@index([accountId])
+}
+
+// One POST /stock/import call. Groups its IMPORT_* events so a delivery
+// can be labelled and count-checked (RECEIVE session) as a unit.
+model StockImportBatch {
+  id             String       @id @default(cuid())
+  organizationId String
+  mode           String // 'REPLACE' | 'INCREMENT' — mirrors ImportMode in stock.service.ts
+  userId         String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  events         Event[]
+  sessions       Session[]
+
+  @@index([organizationId, createdAt])
 }

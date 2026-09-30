@@ -184,7 +184,16 @@ async create(
             { oem: { contains: q, mode: 'insensitive' } },
           ],
         },
-        include: { category: true, brand: true },
+        // Explicit select — this endpoint is ungated and readable by every
+        // role, so it must not return costPrice (or any other full-row
+        // field) the way `include` would.
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          category: { select: { id: true, name: true } },
+          brand: { select: { id: true, name: true } },
+        },
         take: 20,
       }),
 
@@ -197,7 +206,14 @@ async create(
             { product: { sku: { contains: q, mode: 'insensitive' } } },
           ],
         },
-        include: { product: true, location: true },
+        select: {
+          id: true,
+          productId: true,
+          locationId: true,
+          quantity: true,
+          product: { select: { id: true, sku: true, name: true } },
+          location: { select: { id: true, name: true } },
+        },
         take: 20,
       }),
 
@@ -206,6 +222,7 @@ async create(
           organizationId,
           name: { contains: q, mode: 'insensitive' },
         },
+        select: { id: true, name: true },
         take: 20,
       }),
 
@@ -218,9 +235,9 @@ async create(
           ],
         },
         include: {
-          product: true,
-          fromLocation: true,
-          toLocation: true,
+          product: { select: { id: true, sku: true, name: true } },
+          fromLocation: { select: { name: true } },
+          toLocation: { select: { name: true } },
           session: { select: { id: true, type: true, stage: true, status: true } },
         },
         orderBy: { createdAt: 'desc' },

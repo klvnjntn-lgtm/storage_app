@@ -34,6 +34,8 @@ export class DeliveryRoutesController {
   constructor(private readonly deliveryRoutesService: DeliveryRoutesService) {}
 
   @Post()
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   create(
     @CurrentOrg() organizationId: string,
     @Req() req,
@@ -80,6 +82,8 @@ export class DeliveryRoutesController {
   }
 
   @Get('monitoring/summary')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   monitoringSummary(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -88,6 +92,8 @@ export class DeliveryRoutesController {
   }
 
   @Get('monitoring/drivers')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   monitoringByDriver(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -96,6 +102,8 @@ export class DeliveryRoutesController {
   }
 
   @Get('monitoring/map')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   monitoringMap(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -106,6 +114,8 @@ export class DeliveryRoutesController {
   // Static segment — MUST stay above the :id routes below, same reasoning
   // as 'mine' and 'monitoring/*'.
   @Get('drivers')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   listDrivers(@CurrentOrg() organizationId: string) {
     return this.deliveryRoutesService.listDrivers(organizationId);
   }
@@ -120,6 +130,8 @@ export class DeliveryRoutesController {
   }
 
   @Get(':id/history')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
   getHistory(
     @CurrentOrg() organizationId: string,
     @Param('id') routeId: string,
@@ -127,7 +139,8 @@ export class DeliveryRoutesController {
     return this.deliveryRoutesService.getHistory(organizationId, routeId);
   }
 
-  // Route-mutation endpoints are ADMIN/USER-only — a DRIVER may view their
+  // Route-mutation endpoints (and create, monitoring, drivers, history
+  // above) are ADMIN/USER-only — a DRIVER may view their
   // own routes (see 'mine' above) but must not be able to reorder, add,
   // remove, optimize, or otherwise change routes, including ones assigned
   // to other drivers.

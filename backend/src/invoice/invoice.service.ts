@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { SessionsService } from '../sessions/sessions.service';
+import { recomputeInvoiceFulfillmentStatus } from './fulfillment-status.util';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
@@ -265,12 +266,13 @@ constructor(
     invoiceId: string,
     dto: UpdateDraftInvoiceDto,
   ) {
-    const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
+    await this.getDraftOrThrow(organizationId, invoiceId);
     await this.tenantOwnership.validate(organizationId, dto);
 
     if (!dto.items) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
           const resolvedVehicleId = dto.vehicleId ?? invoice.vehicleId;
           if (resolvedVehicleId && dto.odometer != null) {
             await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
@@ -319,6 +321,7 @@ constructor(
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, dto.items!, tx);
 
@@ -477,17 +480,23 @@ async issue(
   const ownedByDeliveryWorkflow = (hasWarehouseOps || soHasDeliveries) && !!invoice.salesOrderId;
   const decreasesStockHere = !hasWarehouseOps && !ownedByDeliveryWorkflow;
 
-  if (decreasesStockHere) {
-    const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
-    if (missingLocation) {
-      throw new BadRequestException(
-        `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
-      );
-    }
-  }
-
   try {
     return await this.prisma.$transaction(async (tx) => {
+      // Re-read under a row lock: the lines checked above may have been
+      // edited by a concurrent updateDraft() before this transaction began.
+      const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
+      if (invoice.items.length === 0) {
+        throw new BadRequestException('Cannot print an empty invoice');
+      }
+      if (decreasesStockHere) {
+        const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
+        if (missingLocation) {
+          throw new BadRequestException(
+            `Item ${missingLocation.id} has a product but no location set; cannot decrease stock`,
+          );
+        }
+      }
+
       const claim = await tx.invoice.updateMany({
         where: { id: invoice.id, organizationId, status: InvoiceStatus.DRAFT },
         data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() },
@@ -642,25 +651,7 @@ async issue(
     invoiceId: string,
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    const invoice = await tx.invoice.findFirst({
-      where: { id: invoiceId, organizationId },
-      include: { items: true },
-    });
-    if (!invoice) throw new NotFoundException('Invoice not found');
-
-    const physicalItems = invoice.items.filter((i) => i.productId);
-    const totalQuantity = physicalItems.reduce((sum, i) => sum + Number(i.quantity), 0);
-    const totalFulfilled = physicalItems.reduce((sum, i) => sum + Number(i.fulfilledQuantity), 0);
-
-    const newStatus =
-      totalQuantity === 0 || totalFulfilled >= totalQuantity
-        ? FulfillmentStatus.FULFILLED
-        : totalFulfilled > 0
-        ? FulfillmentStatus.PARTIALLY_FULFILLED
-        : FulfillmentStatus.UNFULFILLED;
-
-    if (newStatus === invoice.fulfillmentStatus) return invoice;
-    return tx.invoice.update({ where: { id: invoiceId }, data: { fulfillmentStatus: newStatus } });
+    return recomputeInvoiceFulfillmentStatus(tx, organizationId, invoiceId);
   }
 
   async getRevenueReport(
@@ -1106,9 +1097,10 @@ async issue(
   }
 
   async discardDraft(organizationId: string, id: string, userId: string) {
-    const invoice = await this.getDraftOrThrow(organizationId, id);
+    await this.getDraftOrThrow(organizationId, id);
 
     return this.prisma.$transaction(async (tx) => {
+      const invoice = await this.getDraftOrThrow(organizationId, id, tx);
       if (invoice.quotationId) {
         await this.quotationService.reopenIfConverted(
           organizationId,
@@ -1144,8 +1136,14 @@ async issue(
     return Math.round(n * 100) / 100;
   }
 
-  private async getDraftOrThrow(organizationId: string, invoiceId: string) {
-    const invoice = await this.prisma.invoice.findFirst({
+  // Pass `tx` from inside a transaction to row-lock the invoice first:
+  // issue(), updateDraft() and discardDraft() on the same draft then run
+  // one at a time, and each re-reads the status the previous one committed.
+  // Without the lock, a slow cart save could rewrite an invoice's lines
+  // after issue() had already taken stock and posted it to the ledger.
+  private async getDraftOrThrow(organizationId: string, invoiceId: string, tx?: Prisma.TransactionClient) {
+    if (tx) await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
+    const invoice = await (tx ?? this.prisma).invoice.findFirst({
       where: { id: invoiceId, organizationId },
       include: { items: true },
     });
@@ -1286,7 +1284,12 @@ async getCustomerStatement(
   const periodPaidAsOfNow = this.round2(
     periodInvoices.reduce((sum, inv) => sum + paid(inv), 0),
   );
-  const closingBalance = this.round2(openingBalance + periodInvoiced - periodPaidAsOfNow);
+  const periodCredited = this.round2(
+    periodInvoices.reduce((sum, inv) => sum + credited(inv), 0),
+  );
+  const closingBalance = this.round2(
+    openingBalance + periodInvoiced - periodPaidAsOfNow - periodCredited,
+  );
 
   return {
     customer,

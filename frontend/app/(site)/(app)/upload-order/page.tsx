@@ -6,6 +6,7 @@ import { display } from '@/lib/fonts';
 import { UploadCloud, AlertCircle, CheckCircle2, PlugZap, Database } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -115,6 +116,10 @@ export default function ImportOrdersPage() {
     }));
 
   const [mode, setMode] = useState<ImportMode>('csv');
+  // The Accurate GDB import is admin-only on the backend (it bulk-writes
+  // products, invoices and POs), so only admins see its toggle.
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
 
   // ── CSV state ──────────────────────────────────────────────
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -408,6 +413,7 @@ export default function ImportOrdersPage() {
               <UploadCloud size={16} strokeWidth={2} />
               {t('upload.uploadOrderPage.csvFileButton')}
             </button>
+            {isAdmin && (
             <button
               onClick={() => handleModeChange('gdb')}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
@@ -419,6 +425,7 @@ export default function ImportOrdersPage() {
               <Database size={16} strokeWidth={2} />
               {t('upload.uploadOrderPage.accurateGdbButton')}
             </button>
+            )}
           </div>
         </div>
       </div>

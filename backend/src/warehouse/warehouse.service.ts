@@ -17,6 +17,7 @@ export class WarehouseService {
     productId: string,
     qty: number,
     locationId?: string,
+    userId?: string,
   ) {
     await this.assertProductActive(organizationId, productId);
     return this.receiveService.receive(
@@ -24,6 +25,8 @@ export class WarehouseService {
       productId,
       qty,
       locationId,
+      undefined,
+      userId,
     );
   }
 
@@ -36,6 +39,7 @@ export class WarehouseService {
     qty: number,
     fromLocationId: string,
     toLocationId: string,
+    userId?: string,
   ) {
     if (fromLocationId === toLocationId) {
       throw new BadRequestException(
@@ -114,6 +118,7 @@ export class WarehouseService {
           quantity: qty,
           fromLocationId,
           toLocationId,
+          userId,
           organizationId,
         },
       });

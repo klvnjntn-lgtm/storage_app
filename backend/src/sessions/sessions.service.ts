@@ -1,10 +1,12 @@
 // src/sessions/sessions.service.ts
 import { Injectable, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { runSerializable } from '../prisma/serializable';
 import { EventType, SessionType, FulfillmentMode, ModuleKey, Prisma, DeliveryOrderStatus } from '@prisma/client';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { JwtPayload } from '../auth/decorators/current-user.decorator';
+import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status.util';
 
 const RETURN_REASONS = [
   'DAMAGED',
@@ -16,6 +18,24 @@ const RETURN_REASONS = [
 type ReturnReason = (typeof RETURN_REASONS)[number];
 
 const MOVE_STAGES: EventType[] = [EventType.PICK, EventType.MOVE];
+
+const SUMMARY_PRODUCT_SELECT = {
+  id: true, sku: true, name: true, image: true,
+  sellingPrice: true, costPrice: true,
+  stocks: { select: { quantity: true, location: { select: { id: true, name: true } } } },
+} satisfies Prisma.ProductSelect;
+
+export type SummarySortKey = 'sku' | 'name' | 'sellingPrice' | 'costPrice' | 'totalStock';
+
+export type SummaryQuery = {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  locationId?: string;
+  oversold?: boolean;
+  sort?: SummarySortKey;
+  dir?: 'asc' | 'desc';
+};
 
 @Injectable()
 export class SessionsService {
@@ -49,22 +69,258 @@ export class SessionsService {
     return null;
   }
 
-  async summary(organizationId: string, user: JwtPayload) {
+  // A returns session can only link to a sale whose goods left through a
+  // path this session can reverse: issued directly (DIRECT_ISSUE) or
+  // picked in a warehouse session (SESSION). Anything shipped on a
+  // delivery order is returned on that delivery order instead — it tracks
+  // per-shipment returnedQuantity that a session can't keep in step.
+  private async assertReturnableInvoice(
+    organizationId: string,
+    invoiceId: string,
+    client: Pick<Prisma.TransactionClient, 'invoice'>,
+  ) {
+    const invoice = await client.invoice.findFirst({
+      where: { id: invoiceId, organizationId },
+      select: { id: true, invoiceNumber: true, status: true, fulfillmentPath: true, salesOrderId: true },
+    });
+    if (!invoice) throw new BadRequestException('Invoice not found');
+    const label = invoice.invoiceNumber ?? invoice.id.slice(0, 8);
+    if (invoice.status !== 'ISSUED') {
+      throw new BadRequestException(`Invoice ${label} is not issued, so nothing on it can be returned`);
+    }
+    if (invoice.fulfillmentPath === 'DELIVERY_ORDER' || invoice.salesOrderId) {
+      throw new BadRequestException(
+        `Invoice ${label} was delivered on a delivery order — record the return on that delivery order instead.`,
+      );
+    }
+    if (!invoice.fulfillmentPath) {
+      throw new BadRequestException(`Nothing on invoice ${label} has been fulfilled yet, so there is nothing to return`);
+    }
+    return invoice;
+  }
+
+  // Reverses one returns-session scan against its linked invoice, exactly
+  // like DeliveryOrderService.recordReturn() does for a delivery: lines are
+  // consumed in line order, fulfilledQuantity is decremented with a gte
+  // guard (the shared ceiling), and revenue/tax/AR plus COGS are reversed
+  // at the invoice line's own snapshot. Stock itself is incremented by the
+  // caller.
+  private async applyLinkedReturn(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    params: {
+      sessionId: string;
+      sessionItemId: number;
+      invoiceId: string;
+      productId: string;
+      qty: number;
+      toLocationId: string;
+      reason?: string;
+    },
+  ) {
+    const { invoiceId, productId, qty } = params;
+    const invoice = await tx.invoice.findFirstOrThrow({
+      where: { id: invoiceId, organizationId },
+      select: { invoiceNumber: true, id: true },
+    });
+    const label = invoice.invoiceNumber ?? invoice.id.slice(0, 8);
+
+    const lines = await tx.invoiceItem.findMany({
+      where: { invoiceId, productId },
+      orderBy: { id: 'asc' },
+      select: { id: true, fulfilledQuantity: true, unitCost: true },
+    });
+    if (lines.length === 0) {
+      throw new BadRequestException(`This product is not on invoice ${label}`);
+    }
+    const returnable = lines.reduce((sum, l) => sum + l.fulfilledQuantity, 0);
+    if (qty > returnable) {
+      throw new BadRequestException(
+        returnable <= 0
+          ? `Everything of this product on invoice ${label} has already been returned`
+          : `Cannot return ${qty} — only ${returnable} unit(s) of this product can still be returned on invoice ${label}`,
+      );
+    }
+
+    const allocations: { invoiceItemId: number; quantity: number; unitCost: number | null }[] = [];
+    let remaining = qty;
+    for (const line of lines) {
+      if (remaining <= 0) break;
+      const take = Math.min(line.fulfilledQuantity, remaining);
+      if (take <= 0) continue;
+      const dec = await tx.invoiceItem.updateMany({
+        where: { id: line.id, fulfilledQuantity: { gte: take } },
+        data: { fulfilledQuantity: { decrement: take } },
+      });
+      if (dec.count === 0) {
+        throw new ConflictException('This invoice line changed during the return, please retry');
+      }
+      allocations.push({
+        invoiceItemId: line.id,
+        quantity: take,
+        unitCost: line.unitCost != null ? Number(line.unitCost) : null,
+      });
+      remaining -= take;
+    }
+
+    await this.postingRules.postCogsReturn(
+      organizationId,
+      {
+        sourceId: `${params.sessionId}:cogs:return:${params.sessionItemId}`,
+        date: new Date(),
+        memo: `COGS reversal for return of invoice ${label} (${params.reason ?? 'no reason'})`,
+        lines: allocations.map((a) => ({
+          productId,
+          quantity: a.quantity,
+          unitCost: a.unitCost,
+          locationId: params.toLocationId,
+        })),
+      },
+      tx,
+    );
+    await this.postingRules.postSalesReturn(
+      organizationId,
+      {
+        sourceId: `${params.sessionId}:sales-return:${params.sessionItemId}`,
+        date: new Date(),
+        memo: `Sales return against invoice ${label} (returns session ${params.sessionId})`,
+        invoiceId,
+        lines: allocations.map((a) => ({ invoiceItemId: a.invoiceItemId, quantity: a.quantity })),
+      },
+      tx,
+    );
+    await recomputeInvoiceFulfillmentStatus(tx, organizationId, invoiceId);
+    return allocations;
+  }
+
+  // Warehouse picks are what physically fulfil a SESSION-path invoice, so
+  // they advance InvoiceItem.fulfilledQuantity (line order) the same way
+  // issue()/delivery-order ship() do for the other paths. Previously
+  // nothing did, leaving these invoices UNFULFILLED forever and giving a
+  // linked return nothing to count against.
+  private async recordInvoicePick(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    invoiceId: string,
+    productId: string,
+    qty: number,
+  ) {
+    const lines = await tx.invoiceItem.findMany({
+      where: { invoiceId, productId },
+      orderBy: { id: 'asc' },
+      select: { id: true, quantity: true, fulfilledQuantity: true },
+    });
+    let remaining = qty;
+    for (const line of lines) {
+      if (remaining <= 0) break;
+      const room = Number(line.quantity) - line.fulfilledQuantity;
+      const take = Math.min(room, remaining);
+      if (take <= 0) continue;
+      await tx.invoiceItem.update({
+        where: { id: line.id },
+        data: { fulfilledQuantity: { increment: take } },
+      });
+      remaining -= take;
+    }
+    await recomputeInvoiceFulfillmentStatus(tx, organizationId, invoiceId);
+  }
+
+  async summary(organizationId: string, user: JwtPayload, query: SummaryQuery = {}) {
     const canSeeCostPrice =
       user.role === 'ADMIN' &&
           (await this.organizationModulesService.isModuleEnabled(organizationId, ModuleKey.INVOICE_POS));
 
-    const products = await this.prisma.product.findMany({
-      where: { organizationId },
-      orderBy: { sku: 'asc' },
-      select: {
-        id: true, sku: true, name: true, image: true,
-        sellingPrice: true, costPrice: true,
-        stocks: { select: { quantity: true, location: { select: { name: true } } } },
-      },
-    });
+    // No `page` → legacy full-array response (admin/products still reads
+    // the whole catalog client-side). With `page`, filtering, sorting and
+    // pagination all happen in the database — the Stock page used to pull
+    // every product + stock row on each load, which doesn't scale to a
+    // large imported catalog.
+    if (query.page == null) {
+      const products = await this.prisma.product.findMany({
+        where: { organizationId },
+        orderBy: { sku: 'asc' },
+        select: SUMMARY_PRODUCT_SELECT,
+      });
+      return products.map((p) => this.toSummaryRow(p, canSeeCostPrice));
+    }
 
-    return products.map((product) => ({
+    const page = query.page > 0 ? query.page : 1;
+    const pageSize = query.pageSize && query.pageSize > 0 ? Math.min(query.pageSize, 200) : 20;
+
+    const conditions: Prisma.Sql[] = [Prisma.sql`p."organizationId" = ${organizationId}`];
+    const search = query.search?.trim();
+    if (search) {
+      const pattern = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      conditions.push(Prisma.sql`(p.name ILIKE ${pattern} OR p.sku ILIKE ${pattern})`);
+    }
+    if (query.locationId) {
+      // "What's at this location" — products with non-zero stock there.
+      conditions.push(Prisma.sql`EXISTS (
+        SELECT 1 FROM "Stock" ls
+        WHERE ls."productId" = p.id AND ls."locationId" = ${query.locationId} AND ls.quantity <> 0
+      )`);
+    }
+    const having = query.oversold ? Prisma.sql`HAVING COALESCE(SUM(s.quantity), 0) < 0` : Prisma.empty;
+
+    // Whitelisted — never interpolate the raw sort key. costPrice sorting
+    // is refused for anyone who can't see cost price, since the row order
+    // alone would reveal it.
+    const sortColumns: Record<SummarySortKey, string> = {
+      sku: 'p.sku',
+      name: 'p.name',
+      sellingPrice: 'p."sellingPrice"',
+      costPrice: 'p."costPrice"',
+      totalStock: '"totalStock"',
+    };
+    const sortAllowed =
+      !!query.sort && query.sort in sortColumns && (query.sort !== 'costPrice' || canSeeCostPrice);
+    const sortKey: SummarySortKey = sortAllowed ? query.sort! : 'sku';
+    // A refused sort falls back to the plain default order, direction included.
+    const dir = sortAllowed && query.dir === 'desc' ? 'DESC' : 'ASC';
+    const orderBy = Prisma.raw(`${sortColumns[sortKey]} ${dir} NULLS LAST, p.id ASC`);
+
+    const base = Prisma.sql`
+      FROM "Product" p
+      LEFT JOIN "Stock" s ON s."productId" = p.id
+      WHERE ${Prisma.join(conditions, ' AND ')}
+      GROUP BY p.id
+      ${having}
+    `;
+
+    const [pageRows, countRows] = await Promise.all([
+      this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT p.id, COALESCE(SUM(s.quantity), 0) AS "totalStock"
+        ${base}
+        ORDER BY ${orderBy}
+        LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      `),
+      this.prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`
+        SELECT COUNT(*) AS total FROM (SELECT p.id ${base}) t
+      `),
+    ]);
+
+    const ids = pageRows.map((r) => r.id);
+    const products = ids.length
+      ? await this.prisma.product.findMany({ where: { id: { in: ids } }, select: SUMMARY_PRODUCT_SELECT })
+      : [];
+    const byId = new Map(products.map((p) => [p.id, p]));
+
+    return {
+      data: ids
+        .map((id) => byId.get(id))
+        .filter((p): p is NonNullable<typeof p> => !!p)
+        .map((p) => this.toSummaryRow(p, canSeeCostPrice)),
+      total: Number(countRows[0]?.total ?? 0),
+      page,
+      pageSize,
+    };
+  }
+
+  private toSummaryRow(
+    product: Prisma.ProductGetPayload<{ select: typeof SUMMARY_PRODUCT_SELECT }>,
+    canSeeCostPrice: boolean,
+  ) {
+    return {
       productId: product.id,
       sku: product.sku,
       name: product.name,
@@ -72,8 +328,12 @@ export class SessionsService {
       sellingPrice: product.sellingPrice != null ? Number(product.sellingPrice) : null,
       costPrice: canSeeCostPrice && product.costPrice != null ? Number(product.costPrice) : null,
       totalStock: product.stocks.reduce((sum, s) => sum + Number(s.quantity), 0),
-      locations: product.stocks.map((s) => ({ location: s.location.name, qty: Number(s.quantity) })),
-    }));
+      locations: product.stocks.map((s) => ({
+        locationId: s.location.id,
+        location: s.location.name,
+        qty: Number(s.quantity),
+      })),
+    };
   }
 
   // NEW: guards the single choke point every session passes through.
@@ -93,8 +353,37 @@ async create(
   organizationId: string,
   type: SessionType,
   invoiceId?: string,
-  client: Pick<PrismaService, 'session' | 'organization' | 'deliveryOrder' | 'invoice'> = this.prisma,
+  client: Pick<PrismaService, 'session' | 'organization' | 'deliveryOrder' | 'invoice' | 'stockImportBatch'> = this.prisma,
+  links: { importBatchId?: string; returnInvoiceId?: string } = {},
 ) {
+  if (links.importBatchId && type !== SessionType.RECEIVE) {
+    throw new BadRequestException('Only a receive session can be linked to an import');
+  }
+  if (links.returnInvoiceId && type !== SessionType.RETURNS) {
+    throw new BadRequestException('Only a returns session can be linked to a sale');
+  }
+
+  // Import-first receiving: arriving goods have no barcodes until the
+  // import has created their products and labels have been printed, so a
+  // receive session always counts against one import.
+  if (type === SessionType.RECEIVE && !links.importBatchId) {
+    throw new BadRequestException(
+      'Receiving starts from an import — import the delivery first, then start the receiving check from the import results.',
+    );
+  }
+
+  // Returns are tied to the sale they reverse, so what can come back is
+  // capped by what actually went out — shared with delivery-order returns
+  // through InvoiceItem.fulfilledQuantity, so the same goods can't be
+  // returned twice through the two paths. Required whenever the org
+  // invoices at all; an org without INVOICE_POS has no sale to link.
+  if (type === SessionType.RETURNS && !links.returnInvoiceId) {
+    const invoices = await this.organizationModulesService.isModuleEnabled(organizationId, ModuleKey.INVOICE_POS);
+    if (invoices) {
+      throw new BadRequestException('Choose the invoice being returned before starting a returns session');
+    }
+  }
+
   if (type === SessionType.FULFILLMENT) {
     const hasWarehouseOps = await this.organizationModulesService.isModuleEnabled(
       organizationId,
@@ -141,6 +430,22 @@ async create(
       }
     }
 
+    if (links.importBatchId) {
+      const batch = await tx.stockImportBatch.findFirst({
+        where: { id: links.importBatchId, organizationId },
+      });
+      if (!batch) throw new BadRequestException('Import not found');
+      if (batch.mode !== 'INCREMENT') {
+        throw new BadRequestException(
+          'Only an "add to stock" import can be count-checked — a replace import is a stock-take, not a delivery',
+        );
+      }
+    }
+
+    if (links.returnInvoiceId) {
+      await this.assertReturnableInvoice(organizationId, links.returnInvoiceId, tx);
+    }
+
     const stages = await this.getStagesForSession(organizationId, type, tx);
 
     return tx.session.create({
@@ -150,6 +455,8 @@ async create(
         status: 'OPEN',
         organizationId,
         invoiceId,
+        importBatchId: links.importBatchId,
+        returnInvoiceId: links.returnInvoiceId,
       },
     });
   };
@@ -234,6 +541,8 @@ async findAll(
           orderBy: { createdAt: 'desc' },
           include: { user: { select: { id: true, email: true } } },
         },
+        returnInvoice: { select: { id: true, invoiceNumber: true, customerName: true } },
+        importBatch: { select: { id: true, createdAt: true } },
         notes: {
           orderBy: { createdAt: 'desc' },
           include: { user: { select: { id: true, email: true } } },
@@ -244,7 +553,104 @@ async findAll(
     if (!session) throw new BadRequestException('Session not found');
 
     const stages = await this.getStagesForSession(organizationId, session.type);
-    return { ...session, stages };
+    const pendingPutaway =
+      session.type === SessionType.MOVE ? await this.pendingPutaway(session.id) : [];
+    const receiveCheck = session.importBatchId
+      ? await this.receiveCheck(organizationId, session.id, session.importBatchId)
+      : null;
+    const returnLines = session.returnInvoiceId
+      ? await this.returnLines(session.id, session.returnInvoiceId)
+      : null;
+    return { ...session, stages, pendingPutaway, receiveCheck, returnLines };
+  }
+
+  // Expected (what the import added) vs counted (RECEIVE scans in this
+  // session), per product. Products scanned but not in the import show up
+  // with expected 0, so an extra item is as visible as a missing one.
+  private async receiveCheck(organizationId: string, sessionId: string, importBatchId: string) {
+    const [expectedRows, countedRows] = await Promise.all([
+      this.prisma.event.groupBy({
+        by: ['productId'],
+        where: { importBatchId, organizationId },
+        _sum: { quantity: true },
+      }),
+      this.prisma.event.groupBy({
+        by: ['productId'],
+        where: { sessionId, type: EventType.RECEIVE },
+        _sum: { quantity: true },
+      }),
+    ]);
+    const expected = new Map(expectedRows.map((r) => [r.productId, Number(r._sum.quantity ?? 0)]));
+    const counted = new Map(countedRows.map((r) => [r.productId, Number(r._sum.quantity ?? 0)]));
+    const productIds = [...new Set([...expected.keys(), ...counted.keys()])];
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, organizationId },
+      select: { id: true, name: true, sku: true },
+    });
+    return products
+      .map((p) => {
+        const exp = expected.get(p.id) ?? 0;
+        const cnt = counted.get(p.id) ?? 0;
+        return { productId: p.id, name: p.name, sku: p.sku, expected: exp, counted: cnt, difference: cnt - exp };
+      })
+      .sort((a, b) => (a.sku ?? '').localeCompare(b.sku ?? ''));
+  }
+
+  // Per product on the linked invoice: sold, still returnable (shared with
+  // delivery-order returns via fulfilledQuantity), and returned in this
+  // session.
+  private async returnLines(sessionId: string, invoiceId: string) {
+    const [items, returnedHere] = await Promise.all([
+      this.prisma.invoiceItem.findMany({
+        where: { invoiceId, productId: { not: null } },
+        select: {
+          productId: true, quantity: true, fulfilledQuantity: true,
+          productName: true, sku: true, product: { select: { name: true, sku: true } },
+        },
+      }),
+      this.prisma.event.groupBy({
+        by: ['productId'],
+        where: { sessionId, type: EventType.RETURNS },
+        _sum: { quantity: true },
+      }),
+    ]);
+    const returned = new Map(returnedHere.map((r) => [r.productId, Number(r._sum.quantity ?? 0)]));
+    const byProduct = new Map<string, { productId: string; name: string; sku: string | null; sold: number; returnable: number; returnedHere: number }>();
+    for (const i of items) {
+      const row = byProduct.get(i.productId!) ?? {
+        productId: i.productId!,
+        name: i.productName ?? i.product?.name ?? '',
+        sku: i.sku ?? i.product?.sku ?? null,
+        sold: 0,
+        returnable: 0,
+        returnedHere: returned.get(i.productId!) ?? 0,
+      };
+      row.sold += Number(i.quantity);
+      row.returnable += i.fulfilledQuantity;
+      byProduct.set(i.productId!, row);
+    }
+    return [...byProduct.values()];
+  }
+
+  // Stage/status transitions below all read the session, validate, then
+  // write. The write is conditional on the values that were validated
+  // (status + stage), so two concurrent clicks — or a click racing a
+  // reopen/complete — can't both apply against the same starting state.
+  private async guardedSessionUpdate(
+    organizationId: string,
+    id: string,
+    expected: { status: string; stage: EventType | null },
+    data: Prisma.SessionUpdateManyMutationInput,
+    client: Pick<Prisma.TransactionClient, 'session'> = this.prisma,
+  ) {
+    const res = await client.session.updateMany({
+      where: { id, organizationId, status: expected.status, stage: expected.stage },
+      data,
+    });
+    if (res.count === 0) {
+      throw new ConflictException('Session changed since it was loaded, please refresh and retry');
+    }
+    return client.session.findUniqueOrThrow({ where: { id } });
   }
 
   // Quantity-weighted average of unitCost across rows for one product, so
@@ -315,9 +721,16 @@ async findAll(
   // each portion at its own line's cost. Tries the linked Invoice's
   // item(s) first (same unitCost snapshot DeliveryOrderService already
   // relies on), then the linked SalesOrder's item(s). Returns [] — not
-  // Product.costPrice — when none has a snapshot, since costPrice can
-  // drift after the order was placed and postCogs() already treats a null
-  // unitCost as "skip this line" rather than posting a fabricated amount.
+  // Product.costPrice — when a linked document exists but has no snapshot,
+  // since costPrice can drift after the order was placed and postCogs()
+  // already treats a null unitCost as "skip this line" rather than posting
+  // a fabricated amount.
+  //
+  // The one exception is a session with NO source document at all (an
+  // ad-hoc FULFILLMENT started from the warehouse hub, or an integration
+  // order): there's no order-time snapshot to drift from, so the product's
+  // current costPrice IS the pick-time snapshot. Without this, those picks
+  // took stock out with no COGS entry at all.
   //
   // Only the invoice path gets exact FIFO attribution: InvoiceItem.id is
   // an autoincrement int, so ordering by it reliably reflects the order
@@ -331,6 +744,7 @@ async findAll(
     productId: string,
     qty: number,
     alreadyPicked: number,
+    productCostPrice: Prisma.Decimal | null,
     tx: Prisma.TransactionClient,
   ): Promise<{ quantity: number; unitCost: number }[]> {
     if (session.invoiceId) {
@@ -357,7 +771,78 @@ async findAll(
       select: { quantity: true, unitCost: true },
     });
     const cost = this.weightedAvgUnitCost(deliveryItems);
-    return cost != null ? [{ quantity: qty, unitCost: cost }] : [];
+    if (cost != null) return [{ quantity: qty, unitCost: cost }];
+
+    const unlinked = !session.invoiceId && !session.salesOrderId && deliveryItems.length === 0;
+    if (unlinked && productCostPrice != null) {
+      return [{ quantity: qty, unitCost: Number(productCostPrice) }];
+    }
+    return [];
+  }
+
+  // Unit cost to put returned stock back on the books at. Mirrors
+  // resolvePickCostSlices' source order (invoice → sales order), falling
+  // back to the product's current costPrice — a RETURNS session is usually
+  // not linked to the original sale, so that's the common path.
+  private async resolveReturnUnitCost(
+    session: { invoiceId: string | null; salesOrderId?: string | null },
+    productId: string,
+    productCostPrice: Prisma.Decimal | null,
+    tx: Prisma.TransactionClient,
+  ): Promise<number | null> {
+    if (session.invoiceId) {
+      const invoiceItems = await tx.invoiceItem.findMany({
+        where: { invoiceId: session.invoiceId, productId },
+        select: { quantity: true, unitCost: true },
+      });
+      const cost = this.weightedAvgUnitCost(invoiceItems);
+      if (cost != null) return cost;
+    }
+    if (session.salesOrderId) {
+      const salesOrderItems = await tx.salesOrderItem.findMany({
+        where: { salesOrderId: session.salesOrderId, productId },
+        select: { quantity: true, unitCost: true },
+      });
+      const cost = this.weightedAvgUnitCost(salesOrderItems);
+      if (cost != null) return cost;
+    }
+    return productCostPrice != null ? Number(productCostPrice) : null;
+  }
+
+  // Per-product quantity picked in a MOVE session that hasn't been put
+  // away at a destination yet. PICK already decremented the source, and
+  // only the MOVE stage increments the destination, so anything left here
+  // when the session completes would silently vanish from inventory.
+  async pendingPutaway(
+    sessionId: string,
+    client: Pick<Prisma.TransactionClient, 'event' | 'product'> = this.prisma,
+  ) {
+    const sums = await client.event.groupBy({
+      by: ['productId', 'type'],
+      where: { sessionId, type: { in: [EventType.PICK, EventType.MOVE] } },
+      _sum: { quantity: true },
+    });
+
+    const byProduct = new Map<string, { picked: number; moved: number }>();
+    for (const row of sums) {
+      const entry = byProduct.get(row.productId) ?? { picked: 0, moved: 0 };
+      const qty = Math.abs(Number(row._sum.quantity ?? 0));
+      if (row.type === EventType.PICK) entry.picked += qty;
+      else entry.moved += qty;
+      byProduct.set(row.productId, entry);
+    }
+
+    const pending = [...byProduct.entries()]
+      .map(([productId, { picked, moved }]) => ({ productId, picked, moved, pending: picked - moved }))
+      .filter((p) => p.pending > 0);
+    if (pending.length === 0) return [];
+
+    const products = await client.product.findMany({
+      where: { id: { in: pending.map((p) => p.productId) } },
+      select: { id: true, name: true, sku: true },
+    });
+    const productById = new Map(products.map((p) => [p.id, p]));
+    return pending.map((p) => ({ ...p, product: productById.get(p.productId) ?? null }));
   }
   async addItem(
     organizationId: string,
@@ -377,10 +862,9 @@ async findAll(
       where: { id: sessionId, organizationId },
     });
     if (!session) throw new BadRequestException('Session not found');
-    if (session.status === 'COMPLETED') {
-      throw new BadRequestException(
-        'Session is completed — reopen it before adding items',
-      );
+    this.assertOpenForScanning(session.status);
+    if ((session.invoiceId || session.returnInvoiceId) && !Number.isInteger(qty)) {
+      throw new BadRequestException('Quantity must be a whole number for a session linked to an invoice');
     }
 
     const product = await this.prisma.product.findFirst({
@@ -448,7 +932,7 @@ async findAll(
     // stock decrement further down (PICK case) is already a safe atomic
     // updateMany, so this closes the business-rule race, not a stock one.
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      return await runSerializable(this.prisma, async (tx) => {
       // The status/stage read above happened outside this transaction, so
       // a concurrent complete()/advanceStage()/regressStage() call (none of
       // which run at Serializable isolation) could have changed either
@@ -462,11 +946,7 @@ async findAll(
         select: { status: true, stage: true },
       });
       if (!freshSession) throw new BadRequestException('Session not found');
-      if (freshSession.status === 'COMPLETED') {
-        throw new BadRequestException(
-          'Session is completed — reopen it before adding items',
-        );
-      }
+      this.assertOpenForScanning(freshSession.status);
       if (freshSession.stage !== session.stage) {
         throw new ConflictException(
           'Session stage changed since this scan started, please retry',
@@ -552,6 +1032,12 @@ async findAll(
           sessionItemId: item.id,
           type: effectiveType,
           quantity: effectiveType === EventType.PICK ? -qty : qty,
+          invoiceId:
+            effectiveType === EventType.RETURNS
+              ? session.returnInvoiceId ?? undefined
+              : effectiveType === EventType.PICK && session.type === SessionType.FULFILLMENT
+                ? session.invoiceId ?? undefined
+                : undefined,
           fromLocationId,
           toLocationId,
           userId,
@@ -582,6 +1068,40 @@ async findAll(
               organizationId,
             },
           });
+
+          if (session.returnInvoiceId) {
+            await this.applyLinkedReturn(tx, organizationId, {
+              sessionId,
+              sessionItemId: item.id,
+              invoiceId: session.returnInvoiceId,
+              productId,
+              qty,
+              toLocationId: toLocationId!,
+              reason,
+            });
+            break;
+          }
+
+          // Unlinked return (org without invoicing): returned stock goes
+          // back on the books at cost — Dr Inventory, Cr COGS — so the GL
+          // inventory balance keeps tracking the physical increment.
+          const unitCost = await this.resolveReturnUnitCost(session, productId, product.costPrice, tx);
+          if (unitCost != null) {
+            await this.postingRules.postCogsReturn(
+              organizationId,
+              {
+                sourceId: `${sessionId}:cogs:return:${item.id}`,
+                date: new Date(),
+                memo: `COGS reversal for returns session ${sessionId} (${reason})`,
+                lines: [{ productId, quantity: qty, unitCost, locationId: toLocationId ?? null }],
+              },
+              tx,
+            );
+          } else {
+            this.logger.warn(
+              `No unitCost for product ${productId} in returns session ${sessionId}; COGS reversal not posted`,
+            );
+          }
           break;
         }
 
@@ -609,6 +1129,9 @@ const picked = await tx.stock.updateMany({
 if (picked.count === 0) {
   throw new BadRequestException('Insufficient stock at source location');
 }
+if (session.type === SessionType.FULFILLMENT && session.invoiceId) {
+  await this.recordInvoicePick(tx, organizationId, session.invoiceId, productId, qty);
+}
 
           // This is the pick-time stock decrement that DeliveryOrder.ship()'s
           // comment points at as the COGS trigger for warehouse-ops orgs:
@@ -633,7 +1156,7 @@ if (session.type === SessionType.FULFILLMENT) {
   // pickedAgg already includes this pick's own event (inserted above with
   // quantity -qty), so back it out to get what was picked before this call.
   const alreadyPicked = Math.abs(Number(pickedAgg._sum.quantity ?? 0)) - qty;
-  const costSlices = await this.resolvePickCostSlices(session, productId, qty, alreadyPicked, tx);
+  const costSlices = await this.resolvePickCostSlices(session, productId, qty, alreadyPicked, product.costPrice, tx);
   if (costSlices.length > 0) {
     await this.postingRules.postCogs(
       organizationId,
@@ -668,7 +1191,7 @@ if (session.type === SessionType.FULFILLMENT) {
       }
 
       return item;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
         throw new ConflictException('This session item conflicted with a concurrent update, please retry');
@@ -682,8 +1205,8 @@ if (session.type === SessionType.FULFILLMENT) {
       where: { id, organizationId },
     });
     if (!session) throw new BadRequestException('Session not found');
-    if (session.status === 'COMPLETED') {
-      throw new BadRequestException('Session is already completed');
+    if (session.status !== 'OPEN') {
+      throw new BadRequestException(`Session is ${session.status.toLowerCase()} — stages can only change on an open session`);
     }
 
     const stages = await this.getStagesForSession(organizationId, session.type);
@@ -699,10 +1222,11 @@ if (session.type === SessionType.FULFILLMENT) {
       );
     }
 
-    return this.prisma.session.update({
-      where: { id },
-      data: { stage: nextStage },
-    });
+    return this.guardedSessionUpdate(
+      organizationId, id,
+      { status: session.status, stage: session.stage },
+      { stage: nextStage },
+    );
   }
 
   async regressStage(organizationId: string, id: string) {
@@ -714,6 +1238,9 @@ if (session.type === SessionType.FULFILLMENT) {
       throw new BadRequestException(
         'Session is already completed — reopen it before changing stage',
       );
+    }
+    if (session.status !== 'OPEN') {
+      throw new BadRequestException(`Session is ${session.status.toLowerCase()} — stages can only change on an open session`);
     }
 
     const stages = await this.getStagesForSession(organizationId, session.type);
@@ -727,10 +1254,11 @@ if (session.type === SessionType.FULFILLMENT) {
       throw new BadRequestException('Already at the first stage');
     }
 
-    return this.prisma.session.update({
-      where: { id },
-      data: { stage: prevStage },
-    });
+    return this.guardedSessionUpdate(
+      organizationId, id,
+      { status: session.status, stage: session.stage },
+      { stage: prevStage },
+    );
   }
 
   async complete(organizationId: string, id: string) {
@@ -740,6 +1268,9 @@ if (session.type === SessionType.FULFILLMENT) {
 
     if (!session) throw new BadRequestException('Session not found');
     if (session.status === 'COMPLETED') return session;
+    if (session.status !== 'OPEN') {
+      throw new BadRequestException(`Session is ${session.status.toLowerCase()} and cannot be completed`);
+    }
 
     const stages = await this.getStagesForSession(organizationId, session.type);
     if (stages) {
@@ -751,13 +1282,36 @@ if (session.type === SessionType.FULFILLMENT) {
       }
     }
 
-    return this.prisma.session.update({
-      where: { id },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    });
+    // Serializable so a put-away scan committing concurrently can't slip
+    // between the pending check and the status flip (addItem runs at the
+    // same level, so one of the two gets a P2034 instead).
+    try {
+      return await runSerializable(this.prisma, async (tx) => {
+        if (session.type === SessionType.MOVE) {
+          const pending = await this.pendingPutaway(id, tx);
+          if (pending.length > 0) {
+            const list = pending
+              .map((p) => `${p.product?.sku ?? p.productId} (${p.pending})`)
+              .join(', ');
+            throw new BadRequestException(
+              `Cannot complete — picked stock has not been put away yet: ${list}. Scan it into a destination location first.`,
+            );
+          }
+        }
+
+        return this.guardedSessionUpdate(
+          organizationId, id,
+          { status: session.status, stage: session.stage },
+          { status: 'COMPLETED', completedAt: new Date() },
+          tx,
+        );
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('Session changed while completing, please retry');
+      }
+      throw e;
+    }
   }
 
   async reopen(organizationId: string, id: string, reason: string, userId?: string) {
@@ -776,19 +1330,110 @@ if (session.type === SessionType.FULFILLMENT) {
     const stages = await this.getStagesForSession(organizationId, session.type);
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.sessionReopenEvent.create({
-        data: { sessionId: id, reason, userId },
-      });
-
-      return tx.session.update({
-        where: { id },
-        data: {
+      // Guarded first, so a double-submitted reopen doesn't log two
+      // reopen events for one actual reopen.
+      const reopened = await this.guardedSessionUpdate(
+        organizationId, id,
+        { status: 'COMPLETED', stage: session.stage },
+        {
           status: 'OPEN',
           completedAt: null,
           stage: stages ? stages[0] : session.stage,
         },
+        tx,
+      );
+
+      await tx.sessionReopenEvent.create({
+        data: { sessionId: id, reason, userId },
       });
+
+      return reopened;
     });
+  }
+
+  // Scans are only accepted on an OPEN session. CANCELLED (set by an
+  // admin cancel, or by InvoiceService's void flow) must block them too —
+  // previously only COMPLETED was checked, so a voided invoice's session
+  // could still be picked, decrementing stock and posting COGS against a
+  // sale that no longer exists.
+  private assertOpenForScanning(status: string) {
+    if (status === 'COMPLETED') {
+      throw new BadRequestException('Session is completed — reopen it before adding items');
+    }
+    if (status !== 'OPEN') {
+      throw new BadRequestException(`Session is ${status.toLowerCase()} — no further items can be added`);
+    }
+  }
+
+  // Admin-only (enforced at the controller). Cancelling is only allowed
+  // while the session has had no physical or financial effect, because
+  // there's no safe automatic undo: a pick has decremented stock and
+  // posted COGS, a put-away/return has incremented stock that may since
+  // have been consumed. RECEIVE (count-only) and PACK/SHIP events don't
+  // move stock, so they don't block. Invoice-linked sessions are refused
+  // too — the invoice holds the one-session-per-invoice claim, and voiding
+  // the invoice already cancels its session while releasing everything
+  // else consistently.
+  async cancel(organizationId: string, id: string, reason: string, userId?: string) {
+    if (!reason?.trim()) {
+      throw new BadRequestException('A reason is required to cancel a session');
+    }
+
+    try {
+      return await runSerializable(this.prisma, async (tx) => {
+        const session = await tx.session.findFirst({
+          where: { id, organizationId },
+          include: {
+            invoice: { select: { invoiceNumber: true } },
+            _count: { select: { deliveryOrders: true } },
+          },
+        });
+        if (!session) throw new BadRequestException('Session not found');
+        if (session.status !== 'OPEN') {
+          throw new BadRequestException(`Only open sessions can be cancelled (this one is ${session.status.toLowerCase()})`);
+        }
+        if (session.invoiceId) {
+          throw new BadRequestException(
+            `This session fulfils invoice ${session.invoice?.invoiceNumber ?? session.invoiceId} — void the invoice instead, which cancels this session with it.`,
+          );
+        }
+        if (session._count.deliveryOrders > 0) {
+          throw new BadRequestException(
+            'Delivery orders have already been generated from this session — cancel those first.',
+          );
+        }
+
+        const stockEvents = await tx.event.count({
+          where: {
+            sessionId: id,
+            type: { in: [EventType.PICK, EventType.MOVE, EventType.RETURNS] },
+          },
+        });
+        if (stockEvents > 0) {
+          throw new BadRequestException(
+            'Stock has already moved in this session, so it cannot be cancelled. Finish it instead — for a move, put picked stock back at its source location, then complete.',
+          );
+        }
+
+        const cancelled = await this.guardedSessionUpdate(
+          organizationId, id,
+          { status: 'OPEN', stage: session.stage },
+          { status: 'CANCELLED' },
+          tx,
+        );
+
+        await tx.sessionNote.create({
+          data: { sessionId: id, note: `Session cancelled: ${reason.trim()}`, userId },
+        });
+
+        return cancelled;
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('Session changed while cancelling, please retry');
+      }
+      throw e;
+    }
   }
 
   async addNote(organizationId: string, id: string, note: string, userId?: string) {

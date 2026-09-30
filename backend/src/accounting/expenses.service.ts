@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { runSerializable } from '../prisma/serializable';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
@@ -210,7 +211,7 @@ async update(
     }
 
     try {
-      const updated = await this.prisma.$transaction(
+      const updated = await runSerializable(this.prisma, 
         async (tx) => {
           const expense = await tx.expense.findFirst({
             where: { id: expenseId, organizationId },
@@ -268,7 +269,6 @@ async update(
 
           return result;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
       // Keep the response shape stable: amountPaid/payment amounts would

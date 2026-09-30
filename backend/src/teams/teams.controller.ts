@@ -4,13 +4,18 @@ import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { TeamsService } from './teams.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 
-@UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
+// Dispatcher-side, same as delivery-routes' route-editing endpoints:
+// office staff manage teams, drivers never do.
+@UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
+@Roles('ADMIN', 'USER')
 @RequireModule(ModuleKey.DELIVERY_DMS)
 @Controller('teams')
 export class TeamsController {

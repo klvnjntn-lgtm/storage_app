@@ -11,7 +11,12 @@ export class TeamsService {
   async list(organizationId: string) {
     return this.prisma.team.findMany({
       where: { organizationId },
-      include: { members: { select: { id: true, email: true } } },
+      include: {
+        members: {
+          where: { removedAt: null },
+          select: { id: true, email: true, displayName: true },
+        },
+      },
       orderBy: { name: 'asc' },
     });
   }

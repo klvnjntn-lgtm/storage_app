@@ -112,6 +112,7 @@ function getCurrentUserEmail(): string | null {
 export default function ImportPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useLanguage();
+  const router = useRouter();
 
   function rowErrorMessage(r: Row): string | null {
     const code = getValidationErrorCode(r);
@@ -126,7 +127,11 @@ export default function ImportPage() {
     accepted: number;
     rejected: RejectedRow[];
     importedBy: string | null;
+    // Set for an "add to stock" import — the delivery can then be labelled
+    // and count-checked as a unit (import-first receiving).
+    deliveryBatchId: string | null;
   } | null>(null);
+  const [startingCheck, setStartingCheck] = useState(false);
   const [importError, setImportError] = useState('');
 
   // No default — the person has to actively pick one. REPLACE and
@@ -288,6 +293,7 @@ export default function ImportPage() {
         accepted: data?.accepted?.length ?? 0,
         rejected: Array.isArray(data?.rejected) ? data.rejected : [],
         importedBy: getCurrentUserEmail(),
+        deliveryBatchId: data?.mode === 'INCREMENT' ? data?.batchId ?? null : null,
       });
 
       // clear everything so there's nothing left to accidentally re-submit
@@ -350,6 +356,48 @@ export default function ImportPage() {
                 )}
               </span>
             </div>
+
+            {/* Import-first receiving: the delivery's products now exist,
+                so print a label per unit, then count it in a receive
+                session against this import. */}
+            {importResult.deliveryBatchId && (
+              <div className="border border-emerald-200 bg-emerald-50/60 rounded-xl p-3 space-y-2">
+                <p className="text-sm text-emerald-900 font-semibold">{t('upload.uploadPage.nextStepsTitle')}</p>
+                <p className="text-xs text-emerald-800">{t('upload.uploadPage.nextStepsHint')}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => router.push(`/inventory/labels?batch=${importResult.deliveryBatchId}`)}
+                    className="px-3 py-2 rounded-lg text-sm font-semibold border-2 border-emerald-600 text-emerald-800 bg-white hover:bg-emerald-50 transition-colors"
+                  >
+                    {t('upload.uploadPage.printDeliveryLabels')}
+                  </button>
+                  <button
+                    disabled={startingCheck}
+                    onClick={async () => {
+                      setStartingCheck(true);
+                      try {
+                        const res = await apiFetch('/sessions', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ type: 'RECEIVE', importBatchId: importResult.deliveryBatchId }),
+                        });
+                        const body = await res.json().catch(() => null);
+                        if (!res.ok) {
+                          setImportError(body?.message ?? t('upload.uploadPage.startCheckFailed'));
+                          return;
+                        }
+                        router.push(`/inventory/sessions/${body.id}`);
+                      } finally {
+                        setStartingCheck(false);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white transition-colors"
+                  >
+                    {t('upload.uploadPage.startReceivingCheck')}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {importResult.rejected.length > 0 && (
               <div className="border border-red-200 rounded-xl overflow-hidden">

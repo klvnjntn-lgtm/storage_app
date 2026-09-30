@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
+import { ReceiveBatchPicker, ReturnInvoicePicker } from '@/app/components/warehouse/SessionStartPickers';
 
 type Mode = 'RECEIVE' | 'RETURNS' | 'MOVE' | 'FULFILLMENT';
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -27,13 +29,9 @@ type SearchResult = {
 const statusStyle = (status: string) => {
   switch (status?.toUpperCase()) {
     case 'OPEN':
-    case 'IN_PROGRESS':
       return 'bg-blue-100 text-blue-800 border-blue-300';
-    case 'COMPLETE':
-    case 'DONE':
+    case 'COMPLETED':
       return 'bg-green-100 text-green-800 border-green-300';
-    case 'CANCELLED':
-      return 'bg-gray-100 text-gray-600 border-gray-300';
     default:
       return 'bg-gray-100 text-gray-600 border-gray-300';
   }
@@ -46,8 +44,21 @@ export default function Warehouse() {
   const [query, setQuery] = useState('');
   const [data, setData] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState(false);
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>('PICK_PACK_SHIP');
   const [pendingOrderCount, setPendingOrderCount] = useState<number | null>(null);
+  const { profile } = useAuth();
+  // Receive and (for invoicing orgs) Returns need a delivery/sale chosen
+  // before the session exists — this is which picker is open, if any.
+  const [picker, setPicker] = useState<'RECEIVE' | 'RETURNS' | null>(null);
+  const [hasInvoicing, setHasInvoicing] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/organizations/modules')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((mods: string[]) => setHasInvoicing(Array.isArray(mods) && mods.includes('INVOICE_POS')))
+      .catch(() => {});
+  }, []);
 
   const MODES: {
     mode: Mode;
@@ -118,6 +129,10 @@ export default function Warehouse() {
   }, []);
 
   const start = async (mode: Mode) => {
+    if (mode === 'RECEIVE' || (mode === 'RETURNS' && hasInvoicing)) {
+      setPicker((current) => (current === mode ? null : mode));
+      return;
+    }
     const res = await apiFetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -139,19 +154,39 @@ export default function Warehouse() {
   useEffect(() => {
     if (!query.trim()) {
       setData(null);
+      setSearchError(false);
       return;
     }
+    // `stale` flips when the query changes again, so a slow response for
+    // an older query can't overwrite results for the newer one.
+    let stale = false;
     const timeout = setTimeout(async () => {
       setLoading(true);
       try {
         const res = await apiFetch(`/products/search?q=${encodeURIComponent(query)}`);
+        if (stale) return;
+        if (!res.ok) {
+          setData(null);
+          setSearchError(true);
+          return;
+        }
         const json = await res.json();
+        if (stale) return;
         setData(json);
+        setSearchError(false);
+      } catch {
+        if (!stale) {
+          setData(null);
+          setSearchError(true);
+        }
       } finally {
-        setLoading(false);
+        if (!stale) setLoading(false);
       }
     }, 300);
-    return () => clearTimeout(timeout);
+    return () => {
+      stale = true;
+      clearTimeout(timeout);
+    };
   }, [query]);
 
   useEffect(() => {
@@ -207,6 +242,10 @@ export default function Warehouse() {
             <div className="mt-2 bg-white border border-blue-500/20 rounded-md overflow-hidden shadow-md text-left">
               {loading && <div className="p-3 text-sm text-gray-500">{t('inventory.warehousePage.searching')}</div>}
 
+              {!loading && searchError && (
+                <div className="p-3 text-sm text-red-600">{t('inventory.warehousePage.searchFailed')}</div>
+              )}
+
               {!loading && data && (
                 <div className="max-h-72 overflow-auto text-sm">
                   {data.products?.length > 0 && (
@@ -232,7 +271,7 @@ export default function Warehouse() {
                         <div
                           key={s.id}
                           className="p-2 hover:bg-blue-50 rounded cursor-pointer"
-                          onClick={() => router.push(`/products/${s.productId}`)}
+                          onClick={() => router.push(`/inventory/stock/${s.productId}`)}
                         >
                           <p>{s.product?.name}</p>
                           <p className="text-xs text-gray-500">{s.location?.name} • qty {s.quantity}</p>
@@ -245,10 +284,11 @@ export default function Warehouse() {
                     <div className="p-2 border-t border-gray-200">
                       <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsLocations')}</p>
                       {data.locations.map((l: any) => (
+                        // Opens the stock page filtered to what's at this location.
                         <div
                           key={l.id}
                           className="p-2 hover:bg-blue-50 rounded cursor-pointer"
-                          onClick={() => router.push(`/locations/${l.id}`)}
+                          onClick={() => router.push(`/inventory/stock?location=${encodeURIComponent(l.id)}`)}
                         >
                           {l.name}
                         </div>
@@ -379,6 +419,11 @@ export default function Warehouse() {
               </button>
             ))}
           </div>
+
+          {picker === 'RECEIVE' && (
+            <ReceiveBatchPicker isAdmin={profile?.role === 'ADMIN'} onClose={() => setPicker(null)} />
+          )}
+          {picker === 'RETURNS' && <ReturnInvoicePicker onClose={() => setPicker(null)} />}
         </div>
       </div>
 

@@ -25,6 +25,15 @@ type OsrmTripResponse = {
   waypoints?: OsrmWaypoint[];
   trips?: { legs: OsrmLeg[] }[];
 };
+type OsrmRouteResponse = {
+  code: string;
+  message?: string;
+  routes?: { legs: OsrmLeg[] }[];
+};
+
+// A hung OSRM must not hold a request (and its DB connection) open
+// indefinitely — fail fast into the ServiceUnavailableException path.
+const OSRM_TIMEOUT_MS = 15_000;
 
 @Injectable()
 export class OsrmService {
@@ -50,18 +59,7 @@ export class OsrmService {
     const coords = points.map((p) => `${p.lng},${p.lat}`).join(';');
     const url = `${this.baseUrl}/trip/v1/driving/${coords}?source=first&roundtrip=true&overview=false`;
 
-    let body: OsrmTripResponse;
-    try {
-      const res = await fetch(url);
-      body = await res.json();
-      if (!res.ok || body.code !== 'Ok') {
-        throw new Error(body.message ?? `OSRM returned ${body.code ?? res.status}`);
-      }
-    } catch (err) {
-      throw new ServiceUnavailableException(
-        `Route optimization service is unavailable: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const body = await this.request<OsrmTripResponse>(url);
 
     const waypoints = body.waypoints ?? [];
     const trip = body.trips?.[0];
@@ -86,5 +84,38 @@ export class OsrmService {
     const legs = trip.legs.slice(0, -1).map((leg) => ({ distanceMeters: leg.distance, durationSeconds: leg.duration }));
 
     return { order, legs };
+  }
+
+  // Travel legs for visiting `points` in exactly the given order (no
+  // re-sequencing) — used after a manual reorder, where the order is the
+  // dispatcher's choice and only the legs/ETAs need recomputing.
+  // legs[i] is the travel from points[i] to points[i + 1].
+  async route(points: LatLng[]): Promise<TripLeg[]> {
+    if (points.length < 2) return [];
+
+    const coords = points.map((p) => `${p.lng},${p.lat}`).join(';');
+    const url = `${this.baseUrl}/route/v1/driving/${coords}?overview=false`;
+    const body = await this.request<OsrmRouteResponse>(url);
+
+    const route = body.routes?.[0];
+    if (!route) {
+      throw new ServiceUnavailableException('Route optimization service returned no route');
+    }
+    return route.legs.map((leg) => ({ distanceMeters: leg.distance, durationSeconds: leg.duration }));
+  }
+
+  private async request<T extends { code: string; message?: string }>(url: string): Promise<T> {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(OSRM_TIMEOUT_MS) });
+      const body = (await res.json()) as T;
+      if (!res.ok || body.code !== 'Ok') {
+        throw new Error(body.message ?? `OSRM returned ${body.code ?? res.status}`);
+      }
+      return body;
+    } catch (err) {
+      throw new ServiceUnavailableException(
+        `Route optimization service is unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }

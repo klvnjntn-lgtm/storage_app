@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ArrowLeft, ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, X, Navigation, AlertTriangle } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, UserCog, CalendarClock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
+import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import DriverPicker, { driverLabel, type PickerDriver } from '@/app/components/delivery/DriverPicker';
+import DatePicker from '@/app/components/shared/DatePicker';
+import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -18,9 +22,11 @@ type Stop = {
   status: StopStatus;
   plannedEta: string | null;
   atRisk: boolean;
+  superseded: boolean;
   deliveryOrder: {
     id: string;
     doNumber: string | null;
+    customerId: string | null;
     customerName: string | null;
     deliveryAddress: string | null;
     failureReason: string | null;
@@ -37,15 +43,23 @@ type HistoryEvent = {
   id: string;
   type: string;
   createdAt: string;
-  createdBy: { id: string; email: string } | null;
+  createdBy: { id: string; email: string; displayName: string | null } | null;
+  // Stop-changing events carry the route version they produced and a
+  // snapshot of the stop order at that version (see recordHistory).
+  metadata: {
+    version?: number;
+    stops?: { sequence: number; label: string | null; superseded: boolean }[];
+  } | null;
 };
+
+type RouteOption = { id: string; name: string | null; status: string; driver: { email: string; displayName: string | null } };
 
 type RouteDetail = {
   id: string;
   name: string | null;
   routeDate: string;
   status: string;
-  driver: { id: string; email: string };
+  driver: { id: string; email: string; displayName: string | null };
   stops: Stop[];
   currentStop: Stop | null;
   // Prisma Decimal/DateTime fields serialize as strings over JSON.
@@ -92,7 +106,6 @@ function statusBadge(status: StopStatus, label: string) {
 export default function DeliveryRouteDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const router = useRouter();
   const { t } = useLanguage();
   const { user } = useCurrentUser();
   // Route mutation (reorder/add/remove/optimize/set-start) is ADMIN/USER-only
@@ -113,6 +126,7 @@ export default function DeliveryRouteDetailPage() {
   const [pickingStart, setPickingStart] = useState(false);
   const [pickedPosition, setPickedPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
+  const { addresses: savedAddresses } = useCustomerAddresses(pickingStop?.deliveryOrder.customerId);
 
   const [departureTime, setDepartureTime] = useState('');
   const [optimizing, setOptimizing] = useState(false);
@@ -126,6 +140,18 @@ export default function DeliveryRouteDetailPage() {
 
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
+
+  const [changingDriver, setChangingDriver] = useState(false);
+  const [drivers, setDrivers] = useState<PickerDriver[]>([]);
+  const [savingDriver, setSavingDriver] = useState(false);
+
+  const [rescheduleStop, setRescheduleStop] = useState<Stop | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleRoutes, setRescheduleRoutes] = useState<RouteOption[]>([]);
+  const [rescheduleRouteId, setRescheduleRouteId] = useState('');
+  const [rescheduleWindowStart, setRescheduleWindowStart] = useState('');
+  const [rescheduleWindowEnd, setRescheduleWindowEnd] = useState('');
 
   async function load() {
     setLoading(true);
@@ -269,6 +295,29 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
+  async function handleApplySavedAddress(customerAddressId: string) {
+    if (!pickingStop) return;
+    setSavingLocation(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/delivery-orders/${pickingStop.deliveryOrder.id}/address`, {
+        method: 'PATCH',
+        body: JSON.stringify({ customerAddressId }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        return;
+      }
+      setPickingStop(null);
+      await load();
+    } catch {
+      setError(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   function openStartPicker() {
     setPickingStart(true);
     setPickedPosition(
@@ -356,22 +405,87 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
-  async function handleReschedule(stop: Stop) {
-    if (!confirm(t('delivery.routeDetail.rescheduleConfirm'))) return;
+  async function loadRescheduleRoutes(date: string) {
+    setRescheduleRouteId('');
+    setRescheduleRoutes([]);
+    if (!date) return;
+    const res = await apiFetch(`/delivery-routes?date=${date}`);
+    if (res.ok) {
+      const rows: RouteOption[] = await res.json();
+      setRescheduleRoutes(rows.filter((r) => r.id !== id && r.status !== 'COMPLETED' && r.status !== 'CANCELLED'));
+    }
+  }
+
+  function openReschedule(stop: Stop) {
+    // Default to tomorrow — the usual "try again next day" case.
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    setRescheduleStop(stop);
+    setRescheduleDate(tomorrow);
+    setRescheduleWindowStart('');
+    setRescheduleWindowEnd('');
+    loadRescheduleRoutes(tomorrow);
+  }
+
+  async function handleReschedule() {
+    const stop = rescheduleStop;
+    if (!stop) return;
     setReschedulingId(stop.id);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${stop.deliveryOrder.id}/reschedule`, { method: 'POST' });
+      const res = await apiFetch(`/delivery-orders/${stop.deliveryOrder.id}/reschedule`, {
+        method: 'POST',
+        body: JSON.stringify({
+          routeId: rescheduleRouteId || undefined,
+          deliveryWindowStart: rescheduleWindowStart ? new Date(rescheduleWindowStart).toISOString() : undefined,
+          deliveryWindowEnd: rescheduleWindowEnd ? new Date(rescheduleWindowEnd).toISOString() : undefined,
+        }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
+      setRescheduleStop(null);
       await load();
+      if (showHistory) await loadHistory();
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
       setReschedulingId(null);
+    }
+  }
+
+  async function openChangeDriver() {
+    setChangingDriver(true);
+    if (drivers.length === 0) {
+      const res = await apiFetch('/delivery-routes/drivers');
+      if (res.ok) setDrivers(await res.json());
+    }
+  }
+
+  async function handleChangeDriver(driverId: string) {
+    if (!route || !driverId || driverId === route.driver.id) {
+      setChangingDriver(false);
+      return;
+    }
+    const next = drivers.find((d) => d.id === driverId);
+    if (next && !confirm(t('delivery.routeDetail.confirmChangeDriver', { name: driverLabel(next) }))) return;
+    setSavingDriver(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/delivery-routes/${id}`, { method: 'PATCH', body: JSON.stringify({ driverId }) });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        return;
+      }
+      setChangingDriver(false);
+      await load();
+      if (showHistory) await loadHistory();
+    } catch {
+      setError(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      setSavingDriver(false);
     }
   }
 
@@ -397,17 +511,40 @@ export default function DeliveryRouteDetailPage() {
     <div className="min-h-screen bg-gray-50 text-black">
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15">
         <div className="max-w-5xl mx-auto min-w-0">
-          <button
-            onClick={() => router.push('/delivery/routes')}
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-700 mb-1 py-1 -my-1"
-          >
-            <ArrowLeft size={12} />
-            {t('delivery.routeDetail.backToRoutes')}
-          </button>
           <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
             {route.name ?? new Date(route.routeDate).toLocaleDateString()}
           </h1>
-          <p className="text-xs text-gray-500 truncate">{route.driver.email}</p>
+          {changingDriver ? (
+            <div className="mt-1 flex items-center gap-2 max-w-sm">
+              <DriverPicker
+                className="flex-1 min-w-0"
+                drivers={drivers}
+                value={route.driver.id}
+                onChange={handleChangeDriver}
+                disabled={savingDriver}
+              />
+              <button
+                onClick={() => setChangingDriver(false)}
+                aria-label={t('common.cancel')}
+                className="p-2 text-gray-400 hover:text-gray-600 shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 truncate flex items-center gap-1.5">
+              {driverLabel(route.driver)}
+              {!isDriver && (
+                <button
+                  onClick={openChangeDriver}
+                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  <UserCog size={12} />
+                  {t('delivery.routeDetail.changeDriver')}
+                </button>
+              )}
+            </p>
+          )}
         </div>
       </div>
 
@@ -435,11 +572,13 @@ export default function DeliveryRouteDetailPage() {
             <button
               onClick={openStartPicker}
               className={`flex items-center justify-center gap-1.5 text-sm font-medium border rounded-md px-3 py-2.5 sm:py-1.5 ${
-                route.startLatitude ? 'border-blue-200 text-blue-700' : 'border-gray-300'
+                route.startLatitude
+                  ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
+                  : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
               }`}
             >
-              <MapPin size={14} />
-              {t('delivery.routeDetail.setStart')}
+              {route.startLatitude ? <Check size={14} /> : <MapPinOff size={14} />}
+              {route.startLatitude ? t('delivery.routeDetail.startSet') : t('delivery.routeDetail.setStart')}
             </button>
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -534,6 +673,11 @@ export default function DeliveryRouteDetailPage() {
                           {t('delivery.routeDetail.currentStopBadge')}
                         </span>
                       )}
+                      {stop.superseded && (
+                        <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-300 rounded-full px-1.5 font-medium">
+                          {t('delivery.routeDetail.rescheduledBadge')}
+                        </span>
+                      )}
                       {stop.deliveryOrder.priority === 'HIGH' && (
                         <span className="text-[10px] bg-purple-100 text-purple-800 border border-purple-300 rounded-full px-1.5 font-medium">
                           {t('delivery.routeDetail.priorityHigh')}
@@ -623,10 +767,10 @@ export default function DeliveryRouteDetailPage() {
                   >
                     {t('delivery.routeDetail.editDetails')}
                   </button>
-                  {stop.status === 'FAILED' && (
+                  {stop.status === 'FAILED' && !stop.superseded && !isDriver && (
                     <button
                       disabled={reschedulingId === stop.id}
-                      onClick={() => handleReschedule(stop)}
+                      onClick={() => openReschedule(stop)}
                       className="text-xs sm:text-[11px] font-medium text-amber-700 border border-amber-300 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
                     >
                       {reschedulingId === stop.id
@@ -636,14 +780,17 @@ export default function DeliveryRouteDetailPage() {
                   )}
                   <button
                     onClick={() => openLocationPicker(stop)}
-                    aria-label={t('delivery.routeDetail.setLocation')}
-                    className={`p-2 sm:p-1 rounded border ${
+                    title={t('delivery.routeDetail.setLocation')}
+                    className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 ${
                       stop.deliveryOrder.destinationLatitude
-                        ? 'border-blue-200 text-blue-600'
-                        : 'border-gray-200 text-gray-400'
+                        ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
                     }`}
                   >
-                    <MapPin size={14} />
+                    {stop.deliveryOrder.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
+                    {stop.deliveryOrder.destinationLatitude
+                      ? t('delivery.routeDetail.locationSet')
+                      : t('delivery.routeDetail.noLocation')}
                   </button>
                   {!isDriver && (
                     <>
@@ -692,18 +839,141 @@ export default function DeliveryRouteDetailPage() {
           {showHistory && (
             <div className="mt-2 space-y-1.5">
               {history.length === 0 && <p className="text-xs text-gray-500">{t('delivery.routeDetail.historyEmpty')}</p>}
-              {history.map((h) => (
-                <div key={h.id} className="text-xs text-gray-600 flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 border-b border-gray-100 pb-1.5">
-                  <span className="font-medium sm:font-normal">{t(`delivery.routeDetail.historyType.${h.type}`)}</span>
-                  <span className="text-gray-400 break-all sm:break-normal">
-                    {h.createdBy?.email ?? '—'} · {new Date(h.createdAt).toLocaleString()}
-                  </span>
-                </div>
-              ))}
+              {history.map((h) => {
+                const version = h.metadata?.version;
+                const snapshot = h.metadata?.stops;
+                const open = expandedVersion === h.id;
+                return (
+                  <div key={h.id} className="text-xs text-gray-600 border-b border-gray-100 pb-1.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0.5">
+                      <span className="flex items-center gap-1.5 font-medium sm:font-normal">
+                        {version != null && (
+                          <span className="text-[10px] font-semibold font-mono bg-blue-50 text-blue-700 border border-blue-200 rounded px-1">
+                            v{version}
+                          </span>
+                        )}
+                        {t(`delivery.routeDetail.historyType.${h.type}`)}
+                        {snapshot && (
+                          <button
+                            onClick={() => setExpandedVersion(open ? null : h.id)}
+                            className="text-blue-600 hover:underline font-normal"
+                          >
+                            {open ? t('delivery.routeDetail.hideStops') : t('delivery.routeDetail.showStops', { count: snapshot.length })}
+                          </button>
+                        )}
+                      </span>
+                      <span className="text-gray-400 break-all sm:break-normal">
+                        {h.createdBy ? driverLabel(h.createdBy) : '—'} · {new Date(h.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    {open && snapshot && (
+                      <ol className="mt-1.5 ml-2 pl-3 border-l-2 border-blue-100 space-y-0.5">
+                        {snapshot.length === 0 && <li className="text-gray-400">{t('delivery.routeDetail.noStops')}</li>}
+                        {snapshot.map((s) => (
+                          <li key={s.sequence} className={s.superseded ? 'text-gray-400 line-through' : ''}>
+                            #{s.sequence} {s.label ?? '—'}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
+
+      {rescheduleStop && (
+        <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                <CalendarClock size={16} className="text-amber-600" />
+                {t('delivery.routeDetail.rescheduleTitle', {
+                  name: rescheduleStop.deliveryOrder.customerName ?? rescheduleStop.deliveryOrder.doNumber ?? '',
+                })}
+              </h3>
+              <button onClick={() => setRescheduleStop(null)} aria-label={t('common.cancel')} className="p-2 -m-2 text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            {rescheduleStop.deliveryOrder.failureReason && (
+              <p className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-md px-2 py-1.5">
+                {t('delivery.routeDetail.failureReasonLabel')}: {rescheduleStop.deliveryOrder.failureReason}
+              </p>
+            )}
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
+                {t('delivery.routeDetail.rescheduleDate')}
+              </label>
+              <DatePicker
+                value={rescheduleDate}
+                onChange={(d) => {
+                  setRescheduleDate(d);
+                  loadRescheduleRoutes(d);
+                }}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
+                {t('delivery.routeDetail.rescheduleRoute')}
+              </label>
+              <select
+                value={rescheduleRouteId}
+                onChange={(e) => setRescheduleRouteId(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+              >
+                <option value="">{t('delivery.routeDetail.rescheduleNoRoute')}</option>
+                {rescheduleRoutes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {(r.name ?? driverLabel(r.driver)) + (r.name ? ` — ${driverLabel(r.driver)}` : '')}
+                  </option>
+                ))}
+              </select>
+              {rescheduleDate && rescheduleRoutes.length === 0 && (
+                <p className="text-xs text-gray-500 mt-1">{t('delivery.routeDetail.rescheduleNoRoutesOnDate')}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="block">
+                <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowStartLabel')}</span>
+                <input
+                  type="datetime-local"
+                  value={rescheduleWindowStart}
+                  onChange={(e) => setRescheduleWindowStart(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowEndLabel')}</span>
+                <input
+                  type="datetime-local"
+                  value={rescheduleWindowEnd}
+                  onChange={(e) => setRescheduleWindowEnd(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                />
+              </label>
+            </div>
+            <p className="text-xs text-gray-500">{t('delivery.routeDetail.rescheduleHint')}</p>
+            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
+              <button
+                onClick={() => setRescheduleStop(null)}
+                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                disabled={reschedulingId === rescheduleStop.id}
+                onClick={handleReschedule}
+                className="bg-amber-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-amber-700 disabled:opacity-50"
+              >
+                {reschedulingId === rescheduleStop.id ? t('delivery.routeDetail.rescheduling') : t('delivery.routeDetail.reschedule')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(pickingStop || pickingStart) && (
         <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
@@ -723,6 +993,25 @@ export default function DeliveryRouteDetailPage() {
                 <X size={18} />
               </button>
             </div>
+            {pickingStop && savedAddresses.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1">{t('delivery.addresses.useSaved')}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {savedAddresses.map((a) => (
+                    <button
+                      key={a.id}
+                      disabled={savingLocation}
+                      onClick={() => handleApplySavedAddress(a.id)}
+                      title={a.address ?? undefined}
+                      className="inline-flex items-center gap-1 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-full px-2.5 py-1.5 sm:py-1 disabled:opacity-50"
+                    >
+                      {a.latitude && a.longitude ? <MapPin size={11} /> : <MapPinOff size={11} />}
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <DeliveryMap
               // Shown as context/centering only, not editable here — keeps
               // the picker from defaulting to the Jakarta fallback center
@@ -741,6 +1030,7 @@ export default function DeliveryRouteDetailPage() {
               pickedPosition={pickedPosition}
               onPick={(lat, lng) => setPickedPosition({ lat, lng })}
             />
+            <CoordinateInputs value={pickedPosition} onChange={setPickedPosition} />
             {!pickedPosition && <p className="text-xs text-gray-500">{t('delivery.routeDetail.noLocationSet')}</p>}
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button

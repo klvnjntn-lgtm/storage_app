@@ -30,6 +30,7 @@ import {
   Kicker,
   MotionPauseContext,
   ParallaxGlow,
+  useLowEndDevice,
   Reveal,
   SectionDivider,
   SectionHeading,
@@ -83,9 +84,13 @@ export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [navHidden, setNavHidden] = useState(false);
-  const [motionPaused, setMotionPaused] = useState(false);
+  // null = the user hasn't touched the pause control; follow the device default.
+  const [userPaused, setUserPaused] = useState<boolean | null>(null);
   const heroRef = useRef<HTMLElement>(null);
-  const reduceMotion = useReducedMotion();
+  const lite = useLowEndDevice();
+  const motionPaused = userPaused ?? lite;
+  const toggleMotion = () => setUserPaused(!motionPaused);
+  const reduceMotion = useReducedMotion() || lite;
 
   // Nav: transparent over the hero, solid once scrolled; slides away while
   // scrolling down and comes back on any upward scroll.
@@ -120,14 +125,14 @@ export default function LandingPage() {
   }, [theme]);
 
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (lite || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const html = document.documentElement;
     const prev = html.style.scrollBehavior;
     html.style.scrollBehavior = 'smooth';
     return () => {
       html.style.scrollBehavior = prev;
     };
-  }, []);
+  }, [lite]);
 
   const navLinks = [
     { href: '#products', label: t('landing.nav.products') },
@@ -137,10 +142,11 @@ export default function LandingPage() {
   ];
 
   return (
-    <MotionConfig reducedMotion="user">
-    <MotionPauseContext.Provider value={{ paused: motionPaused, toggle: () => setMotionPaused((p) => !p) }}>
+    <MotionConfig reducedMotion={lite ? 'always' : 'user'}>
+    <MotionPauseContext.Provider value={{ paused: motionPaused, lite, toggle: toggleMotion }}>
     <main
       data-anim={motionPaused ? 'paused' : undefined}
+      data-lite={lite ? '' : undefined}
       className="landing relative min-h-screen bg-[var(--l-bg)] text-white font-sans antialiased flex flex-col overflow-x-hidden selection:bg-blue-500/40"
     >
       {/* ─── NAV ─────────────────────────────────────────────── */}
@@ -305,7 +311,7 @@ export default function LandingPage() {
         {/* one control pauses every decorative loop on the page (WCAG 2.2.2) */}
         <button
           type="button"
-          onClick={() => setMotionPaused((p) => !p)}
+          onClick={toggleMotion}
           aria-label={motionPaused ? t('landing.hero.playAnimation') : t('landing.hero.pauseAnimation')}
           title={motionPaused ? t('landing.hero.playAnimation') : t('landing.hero.pauseAnimation')}
           className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-20 grid h-10 w-10 place-items-center rounded-full border border-white/12 bg-white/[0.04] text-white/70 backdrop-blur-md transition hover:bg-white/10 hover:text-white motion-reduce:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"

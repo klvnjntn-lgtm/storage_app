@@ -23,6 +23,9 @@ type LicenseState = {
 
 type PersistedState = {
   lastSuccessfulCheckIn: string; // ISO date
+  // What that check-in said. Missing on files written before this field
+  // existed — treated as valid so an upgrade doesn't lock anyone out.
+  lastKnownValid?: boolean;
 };
 
 @Injectable()
@@ -41,6 +44,12 @@ export class LicenseService implements OnModuleInit {
     expiresAt: null,
     lastSuccessfulCheckIn: null,
   };
+
+  // Result of the last check-in that actually reached Keygen. The offline
+  // grace period only applies if that answer was "valid" — otherwise an
+  // expired/suspended license could buy another GRACE_PERIOD_DAYS just by
+  // blocking api.keygen.sh.
+  private lastKnownValid = true;
 
   constructor(private readonly keygen: KeygenService) {}
 
@@ -62,6 +71,7 @@ export class LicenseService implements OnModuleInit {
         if (parsed.lastSuccessfulCheckIn) {
           this.state.lastSuccessfulCheckIn = new Date(parsed.lastSuccessfulCheckIn);
         }
+        this.lastKnownValid = parsed.lastKnownValid !== false;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -77,6 +87,7 @@ export class LicenseService implements OnModuleInit {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const payload: PersistedState = {
         lastSuccessfulCheckIn: this.state.lastSuccessfulCheckIn?.toISOString() ?? '',
+        lastKnownValid: this.lastKnownValid,
       };
       fs.writeFileSync(this.stateFilePath, JSON.stringify(payload), 'utf-8');
     } catch (err) {
@@ -149,6 +160,7 @@ export class LicenseService implements OnModuleInit {
         expiresAt,
         lastSuccessfulCheckIn: new Date(),
       };
+      this.lastKnownValid = valid;
 
       this.persistState();
 
@@ -162,7 +174,7 @@ export class LicenseService implements OnModuleInit {
       // successful check-in.
       this.state = {
         ...this.state,
-        valid: !this.isGraceExpired(),
+        valid: this.lastKnownValid && !this.isGraceExpired(),
       };
     }
   }
@@ -176,6 +188,14 @@ export class LicenseService implements OnModuleInit {
 
     const elapsedMs = Date.now() - this.state.lastSuccessfulCheckIn.getTime();
     return elapsedMs > this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+  }
+
+  // WARESYS_EDITION wins when set; otherwise a LICENSE_KEY means this is a
+  // desktop install, since install.ps1 always writes one into .env.
+  getEdition(): 'desktop' | 'cloud' {
+    const edition = process.env.WARESYS_EDITION;
+    if (edition === 'desktop' || edition === 'cloud') return edition;
+    return process.env.LICENSE_KEY ? 'desktop' : 'cloud';
   }
 
   getStatus(): LicenseState {

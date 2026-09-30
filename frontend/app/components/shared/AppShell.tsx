@@ -290,7 +290,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const res = await apiFetch('/license/status');
-        setLicense(await res.json());
+        const json = await res.json();
+        // Licensing only exists on the desktop edition.
+        if (json.edition === 'desktop') setLicense(json);
       } catch (err) {
         console.error('License status fetch failed:', err);
       }

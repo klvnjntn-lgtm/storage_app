@@ -19,7 +19,14 @@ type SalesOrderDetail = {
   orderNumber: string | null;
   status: SalesOrderStatus;
   customerName: string | null;
-  customer: { name: string; phone: string | null } | null;
+  customerId: string | null;
+  customer: {
+    name: string;
+    phone: string | null;
+    address: string | null;
+    latitude: string | null;
+    longitude: string | null;
+  } | null;
   location: { name: string } | null;
   locationId: string | null;
   subtotal: number | string;
@@ -346,6 +353,8 @@ export default function SalesOrderDetailPage() {
   <DeliveryOrdersPanel
     salesOrderId={order.id}
     locationId={order.locationId}
+    customerId={order.customerId}
+    customerDefault={order.customer}
     items={order.items}
     status={order.status}
     onChanged={load}

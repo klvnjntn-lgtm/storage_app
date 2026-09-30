@@ -1,23 +1,17 @@
 // payments/payments.service.ts
+import { runSerializable } from '../prisma/serializable';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceActivityEventType, JournalSourceType, Prisma, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import { deriveStatus } from './payment-status.util';
 
 const EPS = 0.005; // half a cent: amounts are 2dp, so anything smaller is float noise
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
-}
-
-// Exported so voidPayment() below can derive the same UNPAID/PARTIAL/PAID
-// thresholds when removing a payment, instead of reimplementing them.
-export function deriveStatus(amountPaid: number, total: number): PaymentStatus {
-  if (amountPaid <= 0) return PaymentStatus.UNPAID;
-  if (amountPaid >= total - EPS) return PaymentStatus.PAID;
-  return PaymentStatus.PARTIAL;
 }
 
 @Injectable()
@@ -59,11 +53,11 @@ export class PaymentService {
     }
 
     try {
-      const updated = await this.prisma.$transaction(
+      const updated = await runSerializable(this.prisma, 
         async (tx) => {
           const invoice = await tx.invoice.findFirst({
             where: { id: invoiceId, organizationId },
-            select: { id: true, status: true, total: true, amountPaid: true, paymentStatus: true },
+            select: { id: true, status: true, total: true, amountPaid: true, creditedAmount: true, paymentStatus: true },
           });
           if (!invoice) throw new NotFoundException('Invoice not found');
           if (invoice.status !== 'ISSUED') {
@@ -71,7 +65,9 @@ export class PaymentService {
           }
 
           // Both are Decimal(12,2) now; compare as 2dp numbers with a tolerance.
-          const total = invoice.total.toNumber();
+          // A sales return credits part of the invoice (creditedAmount), so
+          // what the customer still owes is measured against the net total.
+          const total = round2(invoice.total.toNumber() - invoice.creditedAmount.toNumber());
           const alreadyPaid = invoice.amountPaid.toNumber();
           const balance = round2(total - alreadyPaid);
 
@@ -133,7 +129,6 @@ export class PaymentService {
 
           return result;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
       // Keep this endpoint's response shape stable: amountPaid and payment
@@ -168,7 +163,7 @@ export class PaymentService {
     reason?: string,
   ) {
     try {
-      const updated = await this.prisma.$transaction(
+      const updated = await runSerializable(this.prisma, 
         async (tx) => {
           const payment = await tx.payment.findFirst({
             where: { id: paymentId, invoiceId, invoice: { organizationId } },
@@ -178,7 +173,7 @@ export class PaymentService {
 
           const invoice = await tx.invoice.findFirst({
             where: { id: invoiceId, organizationId },
-            select: { id: true, total: true, amountPaid: true },
+            select: { id: true, total: true, amountPaid: true, creditedAmount: true },
           });
           if (!invoice) throw new NotFoundException('Invoice not found');
 
@@ -194,7 +189,7 @@ export class PaymentService {
 
           await tx.payment.delete({ where: { id: paymentId } });
 
-          const total = invoice.total.toNumber();
+          const total = round2(invoice.total.toNumber() - invoice.creditedAmount.toNumber());
           const alreadyPaid = invoice.amountPaid.toNumber();
           const newAmountPaid = round2(alreadyPaid - payment.amount.toNumber());
           const newStatus = deriveStatus(newAmountPaid, total);
@@ -217,7 +212,6 @@ export class PaymentService {
 
           return result;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
       return {

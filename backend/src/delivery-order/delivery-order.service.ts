@@ -18,6 +18,7 @@ import {
   EventType,
   Prisma,
   DeliveryPriority,
+  SessionType,
 } from '@prisma/client';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
@@ -127,6 +128,27 @@ export class DeliveryOrderService {
         );
       }
 
+      // sessionId is what makes ship() skip the stock decrement and COGS
+      // (stock already moved at pick time), so it must be a real
+      // fulfillment session for THIS sales order — otherwise any id could
+      // be passed to ship goods without moving stock.
+      if (dto.sessionId) {
+        const session = await tx.session.findFirst({
+          where: {
+            id: dto.sessionId,
+            organizationId,
+            type: SessionType.FULFILLMENT,
+            salesOrderId: salesOrder.id,
+          },
+          select: { id: true },
+        });
+        if (!session) {
+          throw new BadRequestException(
+            'Session not found, or it is not a fulfillment session for this sales order',
+          );
+        }
+      }
+
       const itemsById = new Map(salesOrder.items.map((i) => [i.id, i]));
       for (const line of dto.items) {
         const soItem = itemsById.get(line.salesOrderItemId);
@@ -159,6 +181,21 @@ export class DeliveryOrderService {
         : [];
       const productNameById = new Map(products.map((p) => [p.id, p.name]));
 
+      const savedAddress = dto.customerAddressId
+        ? await tx.customerAddress.findFirst({
+            where: {
+              id: dto.customerAddressId,
+              organizationId,
+              customerId: salesOrder.customerId ?? undefined,
+            },
+          })
+        : null;
+      if (dto.customerAddressId && (!savedAddress || !salesOrder.customerId)) {
+        throw new BadRequestException(
+          "Saved address not found for this order's customer",
+        );
+      }
+
       const doNumber = await this.numbering.nextSequential(
         tx,
         organizationId,
@@ -181,12 +218,18 @@ export class DeliveryOrderService {
           customerPhone: salesOrder.customer?.phone ?? null,
           customerPoNumber: salesOrder.customerPoNumber,
           deliveryAddress:
-            dto.deliveryAddress ?? salesOrder.customer?.address ?? null,
-          // Inherit the customer's saved default location, if any — set
-          // once on the customer, reused on every new shipment; still
-          // correctable per-shipment via the existing destination picker.
-          destinationLatitude: salesOrder.customer?.latitude ?? null,
-          destinationLongitude: salesOrder.customer?.longitude ?? null,
+            dto.deliveryAddress ??
+            (savedAddress ? savedAddress.address : salesOrder.customer?.address) ??
+            null,
+          // Inherit the chosen saved address's pin, else the customer's
+          // default location — still correctable per-shipment via the
+          // existing destination picker.
+          destinationLatitude: savedAddress
+            ? savedAddress.latitude
+            : (salesOrder.customer?.latitude ?? null),
+          destinationLongitude: savedAddress
+            ? savedAddress.longitude
+            : (salesOrder.customer?.longitude ?? null),
           notes: dto.notes ?? null,
           items: {
             create: dto.items.map((line) => {
@@ -382,7 +425,10 @@ export class DeliveryOrderService {
   ) {
     if (!requester || requester.role !== 'DRIVER') return;
     const stop = await this.prisma.routeStop.findFirst({
-      where: { deliveryOrderId, route: { driverId: requester.sub } },
+      where: {
+        activeDeliveryOrderId: deliveryOrderId,
+        route: { driverId: requester.sub },
+      },
       select: { id: true },
     });
     if (!stop) {
@@ -529,6 +575,48 @@ export class DeliveryOrderService {
     });
   }
 
+  // Point an existing DO at one of its customer's saved addresses (or
+  // back to the customer default when customerAddressId is omitted).
+  // Copies address text + pin; like setDestination, no status gate.
+  async applyAddress(
+    organizationId: string,
+    id: string,
+    customerAddressId?: string,
+  ) {
+    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
+      where: { id, organizationId },
+      include: { customer: true },
+    });
+    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+    if (!deliveryOrder.customerId || !deliveryOrder.customer) {
+      throw new BadRequestException('Delivery order has no linked customer');
+    }
+
+    const source = customerAddressId
+      ? await this.prisma.customerAddress.findFirst({
+          where: {
+            id: customerAddressId,
+            organizationId,
+            customerId: deliveryOrder.customerId,
+          },
+        })
+      : deliveryOrder.customer;
+    if (!source) {
+      throw new BadRequestException(
+        "Saved address not found for this delivery order's customer",
+      );
+    }
+
+    return this.prisma.deliveryOrder.update({
+      where: { id },
+      data: {
+        deliveryAddress: source.address,
+        destinationLatitude: source.latitude,
+        destinationLongitude: source.longitude,
+      },
+    });
+  }
+
   // Planning data (priority, requested delivery window) — like
   // setDestination, correctable any time, no status gate.
   async updateDetails(
@@ -555,16 +643,26 @@ export class DeliveryOrderService {
     });
   }
 
-  // Puts a FAILED delivery back into SHIPPED so it can be re-attempted —
-  // unlinks it from whatever route it was on (bypassing removeStop's
-  // "must be PENDING" guard, since this IS the recovery path for a
-  // resolved-but-failed stop) so it becomes addable to a new route via the
-  // ordinary addStop flow, on any date. failedAt/failureReason are kept as
-  // history, not cleared — rescheduledAt records that this happened.
-  async rescheduleDelivery(organizationId: string, id: string) {
+  // Puts a FAILED delivery back into SHIPPED so it can be re-attempted.
+  // The failed stop stays on its original route as history (superseded —
+  // it keeps reading FAILED there) and the DO is freed for a new live
+  // stop: either straight onto `routeId` (typically a route on a later
+  // date) or back into the unassigned pool for the ordinary addStop flow.
+  // An optional new delivery window applies to the next attempt.
+  // failedAt/failureReason are kept as history; rescheduledAt records it.
+  async rescheduleDelivery(
+    organizationId: string,
+    id: string,
+    params: {
+      routeId?: string;
+      deliveryWindowStart?: Date;
+      deliveryWindowEnd?: Date;
+    } = {},
+    userId?: string,
+  ) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
-      include: { routeStop: { select: { id: true } } },
+      include: { routeStop: { select: { id: true, routeId: true } } },
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
     if (deliveryOrder.status !== DeliveryOrderStatus.FAILED) {
@@ -572,21 +670,70 @@ export class DeliveryOrderService {
         'Only a failed delivery can be rescheduled',
       );
     }
+    if (
+      params.deliveryWindowStart &&
+      params.deliveryWindowEnd &&
+      params.deliveryWindowStart >= params.deliveryWindowEnd
+    ) {
+      throw new BadRequestException(
+        'Delivery window end must be after its start',
+      );
+    }
+    if (params.routeId) {
+      const target = await this.prisma.route.findFirst({
+        where: { id: params.routeId, organizationId },
+        select: { status: true },
+      });
+      if (!target) throw new NotFoundException('Route not found');
+      if (target.status === 'COMPLETED' || target.status === 'CANCELLED') {
+        throw new BadRequestException(
+          'Cannot reschedule onto a completed or cancelled route',
+        );
+      }
+    }
 
-    return this.prisma.$transaction(async (tx) => {
-      if (deliveryOrder.routeStop) {
-        await tx.routeStop.delete({
-          where: { id: deliveryOrder.routeStop.id },
+    const oldStop = deliveryOrder.routeStop;
+    await this.prisma.$transaction(async (tx) => {
+      if (oldStop) {
+        await tx.routeStop.update({
+          where: { id: oldStop.id },
+          data: { supersededAt: new Date(), activeDeliveryOrderId: null },
         });
       }
-      return tx.deliveryOrder.update({
+      await tx.deliveryOrder.update({
         where: { id },
         data: {
           status: DeliveryOrderStatus.SHIPPED,
           rescheduledAt: new Date(),
+          ...(params.deliveryWindowStart
+            ? { deliveryWindowStart: params.deliveryWindowStart }
+            : {}),
+          ...(params.deliveryWindowEnd
+            ? { deliveryWindowEnd: params.deliveryWindowEnd }
+            : {}),
         },
       });
     });
+
+    if (oldStop) {
+      await this.deliveryRoutesService.afterStopRescheduled(
+        organizationId,
+        oldStop.routeId,
+        id,
+        userId,
+        params.routeId,
+      );
+    }
+    if (params.routeId) {
+      await this.deliveryRoutesService.addStop(
+        organizationId,
+        params.routeId,
+        { deliveryOrderId: id },
+        userId,
+      );
+    }
+
+    return this.prisma.deliveryOrder.findUniqueOrThrow({ where: { id } });
   }
 
   // Only valid PACKED → CANCELLED. Nothing has physically left the
@@ -605,7 +752,8 @@ export class DeliveryOrderService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    let detachedRouteId: string | null = null;
+    const cancelled = await this.prisma.$transaction(async (tx) => {
       // Atomic status claim — same pattern as ship() — so two concurrent
       // cancel() calls on the same delivery order can't both pass the
       // (unlocked) status check above and both decrement quantities.
@@ -617,6 +765,18 @@ export class DeliveryOrderService {
         throw new BadRequestException(
           'This delivery order is no longer packed — it may have already been shipped or cancelled',
         );
+      }
+
+      // A cancelled DO can never be delivered, so leaving it on a route
+      // would strand it as a permanently PENDING stop (the driver's
+      // "current stop" forever). Detach it in the same transaction.
+      const stop = await tx.routeStop.findUnique({
+        where: { activeDeliveryOrderId: id },
+        select: { id: true, routeId: true },
+      });
+      if (stop) {
+        await tx.routeStop.delete({ where: { id: stop.id } });
+        detachedRouteId = stop.routeId;
       }
 
       for (const item of deliveryOrder.items) {
@@ -632,7 +792,7 @@ export class DeliveryOrderService {
           });
         }
       }
-      const cancelled = await tx.deliveryOrder.findUniqueOrThrow({
+      const result = await tx.deliveryOrder.findUniqueOrThrow({
         where: { id },
       });
       if (deliveryOrder.salesOrderId) {
@@ -642,8 +802,23 @@ export class DeliveryOrderService {
           tx,
         );
       }
-      return cancelled;
+      return result;
     });
+
+    if (detachedRouteId) {
+      try {
+        await this.deliveryRoutesService.afterStopDetached(
+          organizationId,
+          detachedRouteId,
+          id,
+          userId,
+          'DELIVERY_ORDER_CANCELLED',
+        );
+      } catch {
+        // ignore — best-effort, see recordProofOfDelivery's identical comment
+      }
+    }
+    return cancelled;
   }
 
   // Finds the InvoiceItem that recognized revenue for a returned line,
@@ -717,12 +892,17 @@ export class DeliveryOrderService {
       include: { items: true },
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
-    if (
-      deliveryOrder.status !== DeliveryOrderStatus.SHIPPED &&
-      deliveryOrder.status !== DeliveryOrderStatus.PARTIALLY_RETURNED
-    ) {
+    // FAILED is included: stock and COGS already moved at ship(), so goods
+    // brought back from a failed attempt that won't be rescheduled must be
+    // able to come back into stock the same way a customer return does.
+    const returnableStatuses: DeliveryOrderStatus[] = [
+      DeliveryOrderStatus.SHIPPED,
+      DeliveryOrderStatus.PARTIALLY_RETURNED,
+      DeliveryOrderStatus.FAILED,
+    ];
+    if (!returnableStatuses.includes(deliveryOrder.status)) {
       throw new BadRequestException(
-        'Only a shipped delivery order can have items returned',
+        'Only a shipped or failed delivery order can have items returned',
       );
     }
 

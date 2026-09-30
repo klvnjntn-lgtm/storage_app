@@ -52,7 +52,9 @@ export class ProductController {
   }
 
   @Post('import-excel')
-  @UseInterceptors(FileInterceptor('file'))
+  // Same 10MB cap as the CSV order import (integration.controller.ts): the
+  // whole workbook is buffered in memory and parsed synchronously.
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   async importExcel(@CurrentOrg() organizationId: string, @UploadedFile() file: any) {
     if (!file) {
       throw new BadRequestException('No file uploaded');

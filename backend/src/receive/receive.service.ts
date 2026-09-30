@@ -50,6 +50,11 @@ export class ReceiveService {
           'Session is completed — reopen it before adding items',
         );
       }
+      if (session.status !== 'OPEN') {
+        throw new BadRequestException(
+          `Session is ${session.status.toLowerCase()} — no further items can be added`,
+        );
+      }
     }
 
     if (!locationId) {

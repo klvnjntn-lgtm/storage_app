@@ -20,12 +20,34 @@ export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
    page — hero scene, marquee, bento demos, flow lines — which is what
    WCAG 2.2.2 asks for with auto-playing motion. Sections additionally
    pause themselves while offscreen, so nothing animates unseen. */
-export const MotionPauseContext = createContext<{ paused: boolean; toggle: () => void }>({
+export const MotionPauseContext = createContext<{ paused: boolean; lite: boolean; toggle: () => void }>({
   paused: false,
+  lite: false,
   toggle: () => {},
 });
 
 export const useMotionPause = () => useContext(MotionPauseContext);
+
+/* ─── Low-end device detection ───────────────────────────────────────
+   True for Save-Data, ≤4 GB RAM, or ≤4 CPU cores. The page then runs in
+   "lite" mode: loops start paused, no scroll parallax, and the big blur
+   glows swap for cheap masked gradients (see `.landing[data-lite]`).
+   Starts false so SSR and first paint match; flips after mount. */
+type NavigatorHints = Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
+
+export function useLowEndDevice() {
+  const [lowEnd, setLowEnd] = useState(false);
+  useEffect(() => {
+    const nav = navigator as NavigatorHints;
+    const detected =
+      nav.connection?.saveData === true ||
+      (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) ||
+      (nav.hardwareConcurrency !== undefined && nav.hardwareConcurrency <= 4);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only APIs once after mount
+    if (detected) setLowEnd(true);
+  }, []);
+  return lowEnd;
+}
 
 /** `data-anim` value for a decorative-animation root: paused when the
  *  user paused motion or the element is offscreen. Pair with the global
@@ -195,14 +217,15 @@ export function ParallaxGlow({ className, speed }: { className: string; speed: n
   const ref = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
   const desktop = useIsDesktop();
+  const { lite } = useMotionPause();
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] });
   const y = useTransform(scrollYProgress, [0, 1], [speed * 600, speed * -600]);
   return (
     <motion.div
       ref={ref}
       aria-hidden="true"
-      className={`pointer-events-none ${className}`}
-      style={reduce || !desktop ? undefined : { y }}
+      className={`landing-glow pointer-events-none ${className}`}
+      style={reduce || lite || !desktop ? undefined : { y }}
     />
   );
 }
@@ -239,7 +262,7 @@ export function SectionDivider() {
     <div aria-hidden="true" className="relative h-px w-full">
       <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgb(var(--ink)/0.09),transparent)]" />
       <div className="absolute left-1/2 top-0 h-px w-[min(560px,70%)] -translate-x-1/2 bg-[linear-gradient(90deg,transparent,rgba(96,165,250,0.5),transparent)]" />
-      <div className="absolute left-1/2 -top-6 h-12 w-[min(420px,50%)] -translate-x-1/2 rounded-full bg-blue-500/[0.07] blur-2xl" />
+      <div className="absolute left-1/2 -top-6 h-12 w-[min(420px,50%)] -translate-x-1/2 rounded-full bg-blue-500/[0.07] blur-2xl landing-glow" />
     </div>
   );
 }

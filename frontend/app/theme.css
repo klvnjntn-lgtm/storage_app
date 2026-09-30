@@ -132,6 +132,25 @@ html[data-theme='dark'] .theme-icon-moon {
   }
 }
 
+/* Preflight leaves <select> transparent with inherited (light) text, so
+   its native option list rendered light-on-light. Give selects and their
+   options a surface; in the base layer so bg-* utilities still win. */
+@layer base {
+  @media screen {
+    html[data-theme='dark']:not(:has(.landing)) {
+      & select {
+        background-color: var(--color-white);
+        color: var(--color-gray-900);
+      }
+      & option,
+      & optgroup {
+        background-color: var(--color-white);
+        color: var(--color-gray-900);
+      }
+    }
+  }
+}
+
 /* ─── Landing ─────────────────────────────────────────────────────────
    Tokens used by the landing page and its CSS modules. Dark is the
    original design; light re-points them plus the Tailwind colours the

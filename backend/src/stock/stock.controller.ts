@@ -26,6 +26,17 @@ export class StockController {
     return this.stockService.getOversoldSales(orgId, fromDate, toDate);
   }
 
+  // Also before :productId — see note above.
+  @Get('import-batches')
+  listImportBatches(@CurrentOrg() orgId: string, @Query('limit') limit?: string) {
+    return this.stockService.listImportBatches(orgId, limit ? Number(limit) : undefined);
+  }
+
+  @Get('import-batches/:batchId')
+  getImportBatch(@CurrentOrg() orgId: string, @Param('batchId') batchId: string) {
+    return this.stockService.getImportBatch(orgId, batchId);
+  }
+
   @Get(':productId')
   getStock(
     @CurrentOrg() orgId: string,

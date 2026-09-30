@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { runSerializable } from '../prisma/serializable';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from '../accounting/account-resolver.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
@@ -112,7 +113,7 @@ export class SupplierPaymentsService {
     // A genuine concurrent double-payment against the same PO used to
     // surface as an unhandled 500 instead of a friendly, retryable error.
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      return await runSerializable(this.prisma, async (tx) => {
         const outstanding = await this.getOutstanding(organizationId, dto.purchaseOrderId, tx);
         if (outstanding <= 0) {
           throw new BadRequestException('This purchase order has no outstanding balance to pay against');
@@ -140,7 +141,7 @@ export class SupplierPaymentsService {
 
         return payment;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      );
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
         throw new ConflictException('This payment conflicted with a concurrent payment against the same purchase order, please retry');

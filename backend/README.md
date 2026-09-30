@@ -46,7 +46,15 @@ $ npm run start:prod
 
 ## Run tests
 
+Several specs run against a real Postgres. They use a separate throwaway
+database (`waresys_test` on port 5434), never the app's own — see
+`test/setup-test-env.ts`, which refuses any database not named `*_test`.
+
 ```bash
+# one-time: start the test database and apply migrations
+$ npm run test:db:up
+$ npm run test:db:migrate
+
 # unit tests
 $ npm run test
 

@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Truck, Plus, UserPlus, Users, Trash2 } from 'lucide-react';
+import { Truck, Plus, UserPlus, Users, UserCog, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 
 
 type RouteStatus = 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
@@ -16,31 +17,12 @@ type RouteListItem = {
   name: string | null;
   routeDate: string;
   status: RouteStatus;
-  driver: { id: string; email: string };
+  driver: { id: string; email: string; displayName: string | null };
   _count: { stops: number };
 };
 
-type Team = { id: string; name: string; members: { id: string; email: string }[] };
-type Driver = { id: string; email: string; team: { id: string; name: string } | null };
-
-// Buckets drivers under their team name for <optgroup> rendering; drivers
-// with no team fall under a synthetic "Unassigned" bucket, listed last.
-function groupDriversByTeam(drivers: Driver[], unassignedLabel: string): { label: string; drivers: Driver[] }[] {
-  const byTeam = new Map<string, Driver[]>();
-  const unassigned: Driver[] = [];
-  for (const d of drivers) {
-    if (!d.team) {
-      unassigned.push(d);
-      continue;
-    }
-    const list = byTeam.get(d.team.name) ?? [];
-    list.push(d);
-    byTeam.set(d.team.name, list);
-  }
-  const groups = [...byTeam.entries()].map(([label, ds]) => ({ label, drivers: ds }));
-  if (unassigned.length > 0) groups.push({ label: unassignedLabel, drivers: unassigned });
-  return groups;
-}
+type Team = { id: string; name: string; members: { id: string; email: string; displayName: string | null }[] };
+type Driver = { id: string; email: string; displayName: string | null; team: { id: string; name: string } | null };
 
 function statusStyle(status: RouteStatus) {
   switch (status) {
@@ -275,22 +257,12 @@ export default function DeliveryRoutesPage() {
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.routes.driverFilterLabel')}
             </label>
-            <select
+            <DriverPicker
+              drivers={drivers}
               value={driverFilter}
-              onChange={(e) => setDriverFilter(e.target.value)}
-              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
-            >
-              <option value="">{t('delivery.routes.allDrivers')}</option>
-              {groupDriversByTeam(drivers, t('delivery.routes.unassigned')).map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.email}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+              onChange={setDriverFilter}
+              clearLabel={t('delivery.routes.allDrivers')}
+            />
           </div>
           <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -315,7 +287,7 @@ export default function DeliveryRoutesPage() {
               onClick={() => router.push('/delivery/drivers')}
               className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
             >
-              <Users size={14} />
+              <UserCog size={14} />
               {t('delivery.driversAdmin.title')}
             </button>
             <button
@@ -379,7 +351,13 @@ export default function DeliveryRoutesPage() {
                     .filter((d) => d.team?.id === team.id)
                     .map((d) => (
                       <div key={d.id} className="flex items-center justify-between gap-2 text-xs text-gray-600">
-                        <span className="truncate">{d.email}</span>
+                        <span className="flex items-center gap-2 min-w-0">
+                          <DriverAvatar driver={d} size={22} />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm text-gray-800">{driverLabel(d)}</span>
+                            {d.displayName && <span className="block truncate text-[11px] text-gray-400">{d.email}</span>}
+                          </span>
+                        </span>
                         <button
                           disabled={assigningDriverId === d.id}
                           onClick={() => handleAssignDriver(d.id, '')}
@@ -391,20 +369,14 @@ export default function DeliveryRoutesPage() {
                       </div>
                     ))}
                 </div>
-                <select
+                <DriverPicker
+                  className="mt-2"
+                  drivers={drivers.filter((d) => d.team?.id !== team.id)}
                   value=""
-                  onChange={(e) => e.target.value && handleAssignDriver(e.target.value, team.id)}
-                  className="mt-1.5 w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
-                >
-                  <option value="">{t('delivery.routes.selectDriver')}</option>
-                  {drivers
-                    .filter((d) => d.team?.id !== team.id)
-                    .map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.email}
-                      </option>
-                    ))}
-                </select>
+                  onChange={(driverId) => driverId && handleAssignDriver(driverId, team.id)}
+                  placeholder={t('delivery.routes.addDriverToTeam')}
+                  disabled={assigningDriverId !== null}
+                />
               </div>
             ))}
           </div>
@@ -450,22 +422,12 @@ export default function DeliveryRoutesPage() {
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
                 {t('delivery.routes.driverLabel')}
               </label>
-              <select
+              <DriverPicker
+                drivers={drivers}
                 value={newRouteDriverId}
-                onChange={(e) => setNewRouteDriverId(e.target.value)}
-                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm sm:min-w-[200px]"
-              >
-                <option value="">{t('delivery.routes.selectDriver')}</option>
-                {groupDriversByTeam(drivers, t('delivery.routes.unassigned')).map((group) => (
-                  <optgroup key={group.label} label={group.label}>
-                    {group.drivers.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.email}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+                onChange={setNewRouteDriverId}
+                placeholder={t('delivery.routes.selectDriver')}
+              />
               {drivers.length === 0 && <p className="text-xs text-gray-500 mt-1">{t('delivery.routes.noDrivers')}</p>}
             </div>
             <div>
@@ -498,9 +460,9 @@ export default function DeliveryRoutesPage() {
               className="w-full text-left bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors flex items-center justify-between gap-3"
             >
               <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{route.name ?? route.driver.email}</div>
+                <div className="text-sm font-semibold truncate">{route.name ?? driverLabel(route.driver)}</div>
                 <div className="text-xs text-gray-500 truncate">
-                  {route.driver.email} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
+                  {driverLabel(route.driver)} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
                 </div>
               </div>
               <span

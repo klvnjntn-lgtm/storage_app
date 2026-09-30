@@ -4,12 +4,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Truck, Ban, Printer, Download, PackageCheck, FileText } from 'lucide-react';
+import { Truck, Ban, Printer, Download, PackageCheck, FileText, MapPin, MapPinOff, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/templates/DeliveryOrderA4Template';
 import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 
 
 function statusStyle(status: string) {
@@ -41,6 +42,11 @@ export default function DeliveryOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  const [changingAddress, setChangingAddress] = useState(false);
+  const [addressChoice, setAddressChoice] = useState('');
+  const [defaultCustomer, setDefaultCustomer] = useState<{ address: string | null; hasLocation: boolean } | null>(null);
+  const { addresses } = useCustomerAddresses(changingAddress ? order?.customerId : null);
 
   const [deliveredBy, setDeliveredBy] = useState('');
   const [receivedBy, setReceivedBy] = useState('');
@@ -130,6 +136,27 @@ export default function DeliveryOrderDetailPage() {
         signedAt: new Date().toISOString(),
       })
     ) {
+      load();
+    }
+  }
+
+  async function openChangeAddress() {
+    if (!order?.customerId) return;
+    setAddressChoice('');
+    setChangingAddress(true);
+    const res = await apiFetch(`/customers/${order.customerId}`);
+    if (res.ok) {
+      const c = await res.json();
+      setDefaultCustomer({ address: c.address ?? null, hasLocation: !!(c.latitude && c.longitude) });
+    }
+  }
+
+  async function handleApplyAddress() {
+    const ok = await runAction('address', `/delivery-orders/${id}/address`, 'PATCH', {
+      customerAddressId: addressChoice || undefined,
+    });
+    if (ok) {
+      setChangingAddress(false);
       load();
     }
   }
@@ -302,6 +329,45 @@ export default function DeliveryOrderDetailPage() {
           </div>
         )}
 
+        <div
+          className={`flex items-start justify-between gap-3 border-2 rounded-md p-3 ${
+            order.destinationLatitude ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'
+          }`}
+        >
+          <div className="flex items-start gap-2 min-w-0">
+            {order.destinationLatitude ? (
+              <MapPin size={16} className="text-green-700 shrink-0 mt-0.5" />
+            ) : (
+              <MapPinOff size={16} className="text-amber-700 shrink-0 mt-0.5" />
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                {t('delivery.addresses.deliveryAddress')}
+                <span
+                  className={`ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full border ${
+                    order.destinationLatitude
+                      ? 'bg-green-100 text-green-800 border-green-300'
+                      : 'bg-amber-100 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  {order.destinationLatitude ? t('delivery.routeDetail.locationSet') : t('delivery.routeDetail.noLocation')}
+                </span>
+              </p>
+              <p className="text-xs text-gray-600 whitespace-pre-line">
+                {order.deliveryAddress || t('delivery.addresses.noAddressText')}
+              </p>
+            </div>
+          </div>
+          {order.customerId && (
+            <button
+              onClick={openChangeAddress}
+              className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 transition-colors shrink-0"
+            >
+              {t('delivery.addresses.change')}
+            </button>
+          )}
+        </div>
+
         {needsProof && (
           <div className="border-2 border-gray-300 rounded-md p-3 space-y-2">
             <div className="flex items-center gap-1.5 font-semibold text-sm">
@@ -332,6 +398,42 @@ export default function DeliveryOrderDetailPage() {
           </div>
         )}
       </div>
+
+      {changingAddress && (
+        <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4 print:hidden">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{t('delivery.addresses.changeTitle')}</h3>
+              <button onClick={() => setChangingAddress(false)} aria-label={t('common.cancel')} className="p-2 -m-2 text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <CustomerAddressPicker
+              addresses={addresses}
+              defaultAddress={defaultCustomer?.address}
+              defaultHasLocation={defaultCustomer?.hasLocation}
+              value={addressChoice}
+              onChange={setAddressChoice}
+            />
+            {addresses.length === 0 && <p className="text-xs text-gray-500">{t('delivery.addresses.noneSavedHint')}</p>}
+            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
+              <button
+                onClick={() => setChangingAddress(false)}
+                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                disabled={actionLoading === 'address'}
+                onClick={handleApplyAddress}
+                className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
+              >
+                {actionLoading === 'address' ? t('common.saving') : t('delivery.addresses.useThisAddress')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Paper preview — see QuotationDetailPage for the identical pattern.
           Item table/signature blocks live inside DeliveryOrderA4Template. */}

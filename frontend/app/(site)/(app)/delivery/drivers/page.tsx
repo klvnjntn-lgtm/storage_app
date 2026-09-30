@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban } from 'lucide-react';
+import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban, Pencil } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
+import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 
 
-type Driver = { id: string; email: string; active: boolean; teamId: string | null; createdAt: string };
+type Driver = { id: string; email: string; displayName: string | null; active: boolean; teamId: string | null; createdAt: string };
 
 type DeviceStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVOKED';
 type Device = { id: string; deviceId: string; label: string | null; userAgent: string | null; status: DeviceStatus; lastSeenAt: string };
@@ -57,6 +58,10 @@ export default function DriversAdminPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [savedTick, setSavedTick] = useState(false);
+
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     if (!userLoading && (!user || user.role !== 'ADMIN')) {
@@ -115,6 +120,34 @@ export default function DriversAdminPage() {
       setError(t('delivery.driversAdmin.couldNotReachServer'));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function startEditName(driver: Driver) {
+    setEditingNameId(driver.id);
+    setNameDraft(driver.displayName ?? '');
+  }
+
+  async function saveName(driver: Driver) {
+    setSavingName(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/users/${driver.id}/display-name`, {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: nameDraft.trim() || null }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('delivery.driversAdmin.requestFailed', { status: res.status }));
+        return;
+      }
+      const updated: { displayName: string | null } = await res.json();
+      setDrivers((ds) => ds.map((d) => (d.id === driver.id ? { ...d, displayName: updated.displayName } : d)));
+      setEditingNameId(null);
+    } catch {
+      setError(t('delivery.driversAdmin.couldNotReachServer'));
+    } finally {
+      setSavingName(false);
     }
   }
 
@@ -239,8 +272,66 @@ export default function DriversAdminPage() {
         {paginatedDrivers.map((driver) => (
           <div key={driver.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <div className="p-3 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{driver.email}</div>
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <DriverAvatar driver={driver} size={34} />
+              <div className="min-w-0 flex-1">
+                {editingNameId === driver.id ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      saveName(driver);
+                    }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <input
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Escape' && setEditingNameId(null)}
+                      maxLength={80}
+                      placeholder={t('delivery.driversAdmin.namePlaceholder')}
+                      className="flex-1 min-w-0 border border-gray-300 rounded px-2 py-1.5 sm:py-1 text-base sm:text-sm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingName}
+                      aria-label={t('delivery.driversAdmin.save')}
+                      className="p-2 sm:p-1 rounded border border-green-200 text-green-700 disabled:opacity-40"
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingNameId(null)}
+                      aria-label={t('common.cancel')}
+                      className="p-2 sm:p-1 rounded border border-gray-200 text-gray-500"
+                    >
+                      <X size={14} />
+                    </button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`text-sm font-semibold truncate ${driver.displayName ? '' : 'text-gray-700'}`}>
+                      {driverLabel(driver)}
+                    </span>
+                    <button
+                      onClick={() => startEditName(driver)}
+                      aria-label={t('delivery.driversAdmin.editName')}
+                      title={t('delivery.driversAdmin.editName')}
+                      className="p-1.5 sm:p-0.5 rounded text-gray-400 hover:text-blue-700 shrink-0"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
+                {driver.displayName && editingNameId !== driver.id && (
+                  <div className="text-xs text-gray-500 truncate">{driver.email}</div>
+                )}
+                {!driver.displayName && editingNameId !== driver.id && (
+                  <button onClick={() => startEditName(driver)} className="text-xs text-blue-600 hover:underline">
+                    {t('delivery.driversAdmin.addName')}
+                  </button>
+                )}
                 <span
                   className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
                     driver.active ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-800 border-red-300'
@@ -248,6 +339,7 @@ export default function DriversAdminPage() {
                 >
                   {driver.active ? t('delivery.driversAdmin.active') : t('delivery.driversAdmin.locked')}
                 </span>
+              </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button

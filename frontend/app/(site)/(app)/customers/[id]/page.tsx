@@ -4,13 +4,16 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { User, Car, Plus, X, Check, MapPin } from 'lucide-react';
+import { User, Car, Plus, X, Check, MapPin, MapPinOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
+import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
+import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 
 
 type CustomerInvoice = {
@@ -34,6 +37,7 @@ type CustomerDetail = {
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   latitude: string | null;
   longitude: string | null;
+  addresses?: CustomerAddress[];
 };
 
 type NewVehicleState = {
@@ -232,12 +236,33 @@ export default function CustomerDetailPage() {
         )}
 
         {customer && hasDelivery && (
-          <div className="flex items-center justify-between border-2 border-gray-300 rounded-md p-3 mb-6 bg-white">
+          <div
+            className={`flex items-center justify-between border-2 rounded-md p-3 mb-6 ${
+              customer.latitude && customer.longitude ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'
+            }`}
+          >
             <div className="flex items-center gap-2 min-w-0">
-              <MapPin size={16} strokeWidth={2} className="text-gray-500 shrink-0" />
+              {customer.latitude && customer.longitude ? (
+                <MapPin size={16} strokeWidth={2} className="text-green-700 shrink-0" />
+              ) : (
+                <MapPinOff size={16} strokeWidth={2} className="text-amber-700 shrink-0" />
+              )}
               <div className="min-w-0">
-                <p className="text-sm font-semibold">{t('customers.detailPage.deliveryLocation')}</p>
-                <p className="text-xs text-gray-500 truncate">
+                <p className="text-sm font-semibold">
+                  {t('customers.detailPage.deliveryLocation')}
+                  <span
+                    className={`ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full border ${
+                      customer.latitude && customer.longitude
+                        ? 'bg-green-100 text-green-800 border-green-300'
+                        : 'bg-amber-100 text-amber-800 border-amber-300'
+                    }`}
+                  >
+                    {customer.latitude && customer.longitude
+                      ? t('delivery.routeDetail.locationSet')
+                      : t('delivery.routeDetail.noLocation')}
+                  </span>
+                </p>
+                <p className="text-xs text-gray-600 truncate tabular-nums">
                   {customer.latitude && customer.longitude
                     ? `${Number(customer.latitude).toFixed(5)}, ${Number(customer.longitude).toFixed(5)}`
                     : t('customers.detailPage.noLocationSet')}
@@ -246,11 +271,19 @@ export default function CustomerDetailPage() {
             </div>
             <button
               onClick={openLocationPicker}
-              className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 font-semibold hover:border-blue-500/40 transition-colors shrink-0"
+              className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 transition-colors shrink-0"
             >
               {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
             </button>
           </div>
+        )}
+
+        {customer && hasDelivery && (
+          <CustomerAddressesSection
+            customerId={customer.id}
+            addresses={customer.addresses ?? []}
+            onChange={(addresses) => setCustomer({ ...customer, addresses })}
+          />
         )}
 
         {customer && hasWorkshopRms && (
@@ -416,6 +449,7 @@ export default function CustomerDetailPage() {
               pickedPosition={pickedPosition}
               onPick={(lat, lng) => setPickedPosition({ lat, lng })}
             />
+            <CoordinateInputs value={pickedPosition} onChange={setPickedPosition} />
             {locationError && <p className="text-xs text-red-600">{locationError}</p>}
             <div className="flex justify-end gap-2">
               <button

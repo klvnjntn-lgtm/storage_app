@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma, EventType, StockPolicy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductService } from '../product/product.service'; // adjust path if different
@@ -437,6 +437,12 @@ export class StockService {
     const accepted: any[] = [];
     const rejected: any[] = [];
 
+    // Groups this call's events so the delivery can be labelled and
+    // count-checked as a unit (see getImportBatch / RECEIVE sessions).
+    const batch = await this.prisma.stockImportBatch.create({
+      data: { organizationId: orgId, mode, userId },
+    });
+
     for (const row of rows) {
       try {
         if (
@@ -503,6 +509,7 @@ export class StockService {
           const importEvent = await tx.event.create({
             data: {
               type: mode === ImportMode.REPLACE ? 'IMPORT_REPLACE' : 'IMPORT_INCREMENT',
+              importBatchId: batch.id,
               productId: product.id,
               toLocationId: location.id,
               quantity: afterQty - beforeQty,
@@ -563,7 +570,83 @@ export class StockService {
       }
     }
 
-    return { accepted, rejected };
+    if (accepted.length === 0) {
+      await this.prisma.stockImportBatch.delete({ where: { id: batch.id } });
+      return { accepted, rejected, batchId: null };
+    }
+    return { accepted, rejected, batchId: batch.id, mode };
+  }
+
+  // Recent "add to stock" imports — the deliveries a RECEIVE session can
+  // be started against — with how many receive checks each already has.
+  async listImportBatches(orgId: string, limit = 20) {
+    const batches = await this.prisma.stockImportBatch.findMany({
+      where: { organizationId: orgId, mode: ImportMode.INCREMENT },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 100),
+      include: {
+        sessions: { select: { id: true, status: true } },
+        _count: { select: { events: true } },
+      },
+    });
+    const totals = await this.prisma.event.groupBy({
+      by: ['importBatchId'],
+      where: { importBatchId: { in: batches.map((b) => b.id) } },
+      _sum: { quantity: true },
+    });
+    const totalById = new Map(totals.map((t) => [t.importBatchId, Number(t._sum.quantity ?? 0)]));
+    return batches.map((b) => ({
+      id: b.id,
+      createdAt: b.createdAt,
+      lineCount: b._count.events,
+      totalQty: totalById.get(b.id) ?? 0,
+      receiveSessions: b.sessions,
+    }));
+  }
+
+  // What one import brought in, per product+location — the "expected"
+  // side of a RECEIVE count, and the label print list for the delivery.
+  async getImportBatch(orgId: string, batchId: string) {
+    const batch = await this.prisma.stockImportBatch.findFirst({
+      where: { id: batchId, organizationId: orgId },
+    });
+    if (!batch) throw new NotFoundException('Import not found');
+
+    const events = await this.prisma.event.findMany({
+      where: { importBatchId: batch.id, organizationId: orgId },
+      select: {
+        quantity: true,
+        productId: true,
+        toLocationId: true,
+        product: { select: { sku: true, name: true } },
+        toLocation: { select: { name: true } },
+      },
+    });
+
+    const byKey = new Map<string, {
+      productId: string; sku: string | null; name: string;
+      locationId: string | null; location: string | null; qty: number;
+    }>();
+    for (const e of events) {
+      const key = `${e.productId}|${e.toLocationId ?? ''}`;
+      const row = byKey.get(key) ?? {
+        productId: e.productId,
+        sku: e.product.sku,
+        name: e.product.name,
+        locationId: e.toLocationId,
+        location: e.toLocation?.name ?? null,
+        qty: 0,
+      };
+      row.qty += Number(e.quantity);
+      byKey.set(key, row);
+    }
+
+    return {
+      id: batch.id,
+      mode: batch.mode,
+      createdAt: batch.createdAt,
+      items: [...byKey.values()].sort((a, b) => (a.sku ?? '').localeCompare(b.sku ?? '')),
+    };
   }
 
   // -----------------------------

@@ -11,6 +11,7 @@ import {
   RouteHistoryEventType,
   RouteStatus,
 } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   OsrmService,
@@ -37,10 +38,22 @@ const STOP_DWELL_SECONDS = 5 * 60;
 // minutes doesn't immediately read as a delay.
 const AT_RISK_GRACE_MINUTES = 15;
 
+// History events that change the stop list/order — each produces a new
+// route version (see recordHistory).
+const VERSIONED_EVENTS = new Set<RouteHistoryEventType>([
+  RouteHistoryEventType.CREATED,
+  RouteHistoryEventType.STOP_ADDED,
+  RouteHistoryEventType.STOP_REMOVED,
+  RouteHistoryEventType.STOPS_REORDERED,
+  RouteHistoryEventType.OPTIMIZED,
+  RouteHistoryEventType.STOP_RESCHEDULED,
+]);
+
 const stopSelect = {
   id: true,
   sequence: true,
   plannedEta: true,
+  supersededAt: true,
   travelSecondsFromPrevious: true,
   deliveryOrder: {
     select: {
@@ -48,6 +61,7 @@ const stopSelect = {
       doNumber: true,
       status: true,
       signedAt: true,
+      customerId: true,
       customerName: true,
       deliveryAddress: true,
       completedLatitude: true,
@@ -78,17 +92,38 @@ export class DeliveryRoutesService {
   // Delivery status is the source of truth (spec's own rule) — a stop's
   // state is always derived here, never stored, so it can never drift
   // from the delivery order it wraps.
+  //
+  // A (partial) return is post-resolution: goods that were signed for and
+  // later came back still count as DELIVERED for the route; goods returned
+  // without ever being signed for (e.g. brought back after a failed
+  // attempt) count as FAILED. Either way the stop must not fall back to
+  // PENDING, or it would become the driver's current stop again.
+  // CANCELLED never appears here — cancel() detaches the stop.
   deriveStopStatus(deliveryOrder: {
     status: DeliveryOrderStatus;
     signedAt: Date | null;
   }): StopStatus {
-    if (deliveryOrder.status === DeliveryOrderStatus.FAILED) return 'FAILED';
-    if (
-      deliveryOrder.status === DeliveryOrderStatus.SHIPPED &&
-      deliveryOrder.signedAt != null
-    )
-      return 'DELIVERED';
-    return 'PENDING';
+    switch (deliveryOrder.status) {
+      case DeliveryOrderStatus.FAILED:
+        return 'FAILED';
+      case DeliveryOrderStatus.SHIPPED:
+        return deliveryOrder.signedAt != null ? 'DELIVERED' : 'PENDING';
+      case DeliveryOrderStatus.RETURNED:
+      case DeliveryOrderStatus.PARTIALLY_RETURNED:
+        return deliveryOrder.signedAt != null ? 'DELIVERED' : 'FAILED';
+      default:
+        return 'PENDING';
+    }
+  }
+
+  // A superseded stop (its DO was rescheduled onto another route) always
+  // reads as FAILED here, whatever the DO's current status — that attempt
+  // did fail; the new attempt lives on the new stop.
+  stopStatus(stop: {
+    supersededAt: Date | null;
+    deliveryOrder: { status: DeliveryOrderStatus; signedAt: Date | null };
+  }): StopStatus {
+    return stop.supersededAt ? 'FAILED' : this.deriveStopStatus(stop.deliveryOrder);
   }
 
   // Never a physical-position check — purely "is it past the time we
@@ -119,12 +154,14 @@ export class DeliveryRoutesService {
   }
 
   private presentStop(stop: StopRow) {
-    const status = this.deriveStopStatus(stop.deliveryOrder);
+    const status = this.stopStatus(stop);
     return {
       id: stop.id,
       sequence: stop.sequence,
       plannedEta: stop.plannedEta,
       status,
+      // Failed attempt whose DO was rescheduled elsewhere — history only.
+      superseded: stop.supersededAt != null,
       atRisk: this.isAtRisk(
         status,
         stop.plannedEta,
@@ -161,6 +198,7 @@ export class DeliveryRoutesService {
       select: {
         id: true,
         email: true,
+        displayName: true,
         team: { select: { id: true, name: true } },
       },
       orderBy: { email: 'asc' },
@@ -193,6 +231,10 @@ export class DeliveryRoutesService {
 
   // Append-only audit log — best-effort, like ETA recalculation: a
   // logging hiccup must never block the mutation it's describing.
+  //
+  // Events that change the stop list/order also bump Route.version and
+  // snapshot the resulting stop order, so the history reads as numbered
+  // route versions (v1, v2, …) with the exact sequence at each.
   private async recordHistory(
     routeId: string,
     type: RouteHistoryEventType,
@@ -200,12 +242,46 @@ export class DeliveryRoutesService {
     metadata?: Record<string, unknown>,
   ) {
     try {
+      let versionData: Record<string, unknown> = {};
+      if (VERSIONED_EVENTS.has(type)) {
+        const route =
+          type === RouteHistoryEventType.CREATED
+            ? await this.prisma.route.findUniqueOrThrow({
+                where: { id: routeId },
+                select: { version: true },
+              })
+            : await this.prisma.route.update({
+                where: { id: routeId },
+                data: { version: { increment: 1 } },
+                select: { version: true },
+              });
+        const stops = await this.prisma.routeStop.findMany({
+          where: { routeId },
+          select: {
+            sequence: true,
+            supersededAt: true,
+            deliveryOrder: {
+              select: { id: true, doNumber: true, customerName: true },
+            },
+          },
+          orderBy: { sequence: 'asc' },
+        });
+        versionData = {
+          version: route.version,
+          stops: stops.map((s) => ({
+            sequence: s.sequence,
+            deliveryOrderId: s.deliveryOrder.id,
+            label: s.deliveryOrder.customerName ?? s.deliveryOrder.doNumber,
+            superseded: s.supersededAt != null,
+          })),
+        };
+      }
       await this.prisma.routeHistoryEvent.create({
         data: {
           routeId,
           type,
           createdByUserId,
-          metadata: metadata as Prisma.InputJsonValue,
+          metadata: { ...metadata, ...versionData } as Prisma.InputJsonValue,
         },
       });
     } catch {
@@ -222,7 +298,9 @@ export class DeliveryRoutesService {
 
     return this.prisma.routeHistoryEvent.findMany({
       where: { routeId },
-      include: { createdBy: { select: { id: true, email: true } } },
+      include: {
+        createdBy: { select: { id: true, email: true, displayName: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -281,7 +359,7 @@ export class DeliveryRoutesService {
         ...(filters.date ? { routeDate: this.dayRange(filters.date) } : {}),
       },
       include: {
-        driver: { select: { id: true, email: true } },
+        driver: { select: { id: true, email: true, displayName: true } },
         _count: { select: { stops: true } },
       },
       orderBy: [{ routeDate: 'desc' }, { createdAt: 'desc' }],
@@ -300,7 +378,7 @@ export class DeliveryRoutesService {
         ...(requester?.role === 'DRIVER' ? { driverId: requester.sub } : {}),
       },
       include: {
-        driver: { select: { id: true, email: true } },
+        driver: { select: { id: true, email: true, displayName: true } },
         stops: { select: stopSelect, orderBy: { sequence: 'asc' } },
       },
     });
@@ -453,7 +531,7 @@ export class DeliveryRoutesService {
     }
 
     const pendingStops = route.stops.filter(
-      (s) => this.deriveStopStatus(s.deliveryOrder) === 'PENDING',
+      (s) => this.stopStatus(s) === 'PENDING',
     );
     const missingDestination = pendingStops.filter(
       (s) =>
@@ -504,7 +582,7 @@ export class DeliveryRoutesService {
     }
 
     const highestResolvedSequence = route.stops
-      .filter((s) => this.deriveStopStatus(s.deliveryOrder) !== 'PENDING')
+      .filter((s) => this.stopStatus(s) !== 'PENDING')
       .reduce((max, s) => Math.max(max, s.sequence), 0);
 
     const departureAt = dto.departureAt
@@ -533,6 +611,8 @@ export class DeliveryRoutesService {
           travelMetersFromPrevious: leg.distanceMeters,
           travelSecondsFromPrevious: Math.round(leg.durationSeconds),
           plannedEta,
+          // New ETA — a later slip deserves a fresh alert.
+          atRiskNotifiedAt: null,
         },
       });
     });
@@ -575,7 +655,7 @@ export class DeliveryRoutesService {
     resolvedAt: Date,
   ) {
     const resolvedStop = await this.prisma.routeStop.findUnique({
-      where: { deliveryOrderId },
+      where: { activeDeliveryOrderId: deliveryOrderId },
       select: { routeId: true, sequence: true },
     });
     if (!resolvedStop) return; // not on a route — nothing to recalculate
@@ -591,12 +671,12 @@ export class DeliveryRoutesService {
 
     let cumulativeMs = resolvedAt.getTime();
     for (const stop of remaining) {
-      if (this.deriveStopStatus(stop.deliveryOrder) !== 'PENDING') continue;
+      if (this.stopStatus(stop) !== 'PENDING') continue;
       if (stop.travelSecondsFromPrevious == null) break; // never optimized — nothing to walk forward from
       cumulativeMs += stop.travelSecondsFromPrevious * 1000;
       await this.prisma.routeStop.update({
         where: { id: stop.id },
-        data: { plannedEta: new Date(cumulativeMs) },
+        data: { plannedEta: new Date(cumulativeMs), atRiskNotifiedAt: null },
       });
       cumulativeMs += STOP_DWELL_SECONDS * 1000;
     }
@@ -637,7 +717,12 @@ export class DeliveryRoutesService {
       }
 
       return tx.routeStop.create({
-        data: { routeId, deliveryOrderId: dto.deliveryOrderId, sequence },
+        data: {
+          routeId,
+          deliveryOrderId: dto.deliveryOrderId,
+          activeDeliveryOrderId: dto.deliveryOrderId,
+          sequence,
+        },
       });
     });
     await this.recordHistory(
@@ -740,7 +825,7 @@ export class DeliveryRoutesService {
     // Use the same derived status as everywhere else — DeliveryOrder.status
     // alone can't tell "still shipped, awaiting proof" from "delivered"
     // (both are DeliveryOrderStatus.SHIPPED; see deriveStopStatus).
-    if (this.deriveStopStatus(stop.deliveryOrder) !== 'PENDING') {
+    if (this.stopStatus(stop) !== 'PENDING') {
       throw new BadRequestException(
         'Cannot remove a stop once its delivery has been resolved (delivered/failed)',
       );
@@ -763,6 +848,138 @@ export class DeliveryRoutesService {
           payload: { routeId },
         },
       );
+    }
+  }
+
+  // Follow-up for a stop deleted from outside this service (e.g.
+  // DeliveryOrderService.cancel() removing a cancelled DO from its route
+  // inside its own transaction) — same history/notification side effects
+  // as removeStop(), both best-effort.
+  async afterStopDetached(
+    organizationId: string,
+    routeId: string,
+    deliveryOrderId: string,
+    userId: string | undefined,
+    reason: string,
+  ) {
+    await this.recordHistory(
+      routeId,
+      RouteHistoryEventType.STOP_REMOVED,
+      userId,
+      { deliveryOrderId, reason },
+    );
+    const route = await this.prisma.route.findUnique({
+      where: { id: routeId },
+      select: { driverId: true, status: true },
+    });
+    if (route?.status === RouteStatus.ACTIVE) {
+      await this.notifications.create(
+        organizationId,
+        route.driverId,
+        'ROUTE_STOPS_CHANGED',
+        'A stop was removed from your route',
+        { link: '/driver', payload: { routeId } },
+      );
+    }
+  }
+
+  // Follow-up for DeliveryOrderService.rescheduleDelivery(): the failed
+  // stop stays on this route as superseded history — record it (bumps the
+  // route version) and tell the driver if they're mid-route.
+  async afterStopRescheduled(
+    organizationId: string,
+    routeId: string,
+    deliveryOrderId: string,
+    userId: string | undefined,
+    toRouteId?: string,
+  ) {
+    await this.recordHistory(
+      routeId,
+      RouteHistoryEventType.STOP_RESCHEDULED,
+      userId,
+      { deliveryOrderId, toRouteId: toRouteId ?? null },
+    );
+    const route = await this.prisma.route.findUnique({
+      where: { id: routeId },
+      select: { driverId: true, status: true },
+    });
+    if (route?.status === RouteStatus.ACTIVE) {
+      await this.notifications.create(
+        organizationId,
+        route.driverId,
+        'ROUTE_STOPS_CHANGED',
+        'A failed stop on your route was rescheduled',
+        { link: '/driver', payload: { routeId } },
+      );
+    }
+  }
+
+  // ─── At-risk alerts ─────────────────────────────────────────────────
+  // isAtRisk() is derived at read time; this sweep turns a stop *becoming*
+  // at risk into a DELIVERY_AT_RISK notification — once per stop
+  // (atRiskNotifiedAt), reset whenever its ETA is recomputed. Dispatch
+  // staff and the stop's driver are both told. Only today's/yesterday's
+  // open routes are scanned, so the query stays small.
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async notifyAtRiskStops() {
+    const since = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const candidates = await this.prisma.routeStop.findMany({
+      where: {
+        atRiskNotifiedAt: null,
+        supersededAt: null,
+        plannedEta: { not: null },
+        route: {
+          status: { in: [RouteStatus.PLANNED, RouteStatus.ACTIVE] },
+          routeDate: { gte: since },
+        },
+      },
+      select: {
+        ...stopSelect,
+        route: {
+          select: { id: true, organizationId: true, driverId: true },
+        },
+      },
+      take: 500,
+    });
+
+    for (const stop of candidates) {
+      const status = this.stopStatus(stop);
+      if (
+        !this.isAtRisk(status, stop.plannedEta, stop.deliveryOrder.deliveryWindowEnd)
+      )
+        continue;
+      // Claim first so an overlapping run can't double-notify.
+      const claim = await this.prisma.routeStop.updateMany({
+        where: { id: stop.id, atRiskNotifiedAt: null },
+        data: { atRiskNotifiedAt: new Date() },
+      });
+      if (claim.count === 0) continue;
+
+      const who =
+        stop.deliveryOrder.customerName ??
+        stop.deliveryOrder.doNumber ??
+        stop.deliveryOrder.id;
+      const payload = {
+        routeId: stop.route.id,
+        deliveryOrderId: stop.deliveryOrder.id,
+      };
+      try {
+        await this.notifications.notifyOrgStaff(
+          stop.route.organizationId,
+          'DELIVERY_AT_RISK',
+          `Delivery at risk of being late: ${who}`,
+          { link: `/delivery/routes/${stop.route.id}`, payload },
+        );
+        await this.notifications.create(
+          stop.route.organizationId,
+          stop.route.driverId,
+          'DELIVERY_AT_RISK',
+          `You may be late for ${who}`,
+          { link: '/driver', payload },
+        );
+      } catch {
+        // best-effort, like every other notification side effect here
+      }
     }
   }
 
@@ -798,7 +1015,7 @@ export class DeliveryRoutesService {
       atRisk: 0,
     };
     for (const stop of stops) {
-      const status = this.deriveStopStatus(stop.deliveryOrder);
+      const status = this.stopStatus(stop);
       if (status === 'DELIVERED') counts.delivered++;
       else if (status === 'FAILED') counts.failed++;
       else counts.pending++;
@@ -819,7 +1036,7 @@ export class DeliveryRoutesService {
     const routes = await this.prisma.route.findMany({
       where: { organizationId, routeDate: this.dayRange(routeDate) },
       include: {
-        driver: { select: { id: true, email: true } },
+        driver: { select: { id: true, email: true, displayName: true } },
         stops: { select: stopSelect },
       },
     });
@@ -833,7 +1050,7 @@ export class DeliveryRoutesService {
         atRisk: 0,
       };
       for (const stop of route.stops) {
-        const status = this.deriveStopStatus(stop.deliveryOrder);
+        const status = this.stopStatus(stop);
         if (status === 'DELIVERED') counts.delivered++;
         else if (status === 'FAILED') counts.failed++;
         else counts.pending++;
@@ -864,7 +1081,7 @@ export class DeliveryRoutesService {
 
     return stops
       .map((stop) => {
-        const status = this.deriveStopStatus(stop.deliveryOrder);
+        const status = this.stopStatus(stop);
         const latitude =
           stop.deliveryOrder.destinationLatitude ??
           stop.deliveryOrder.completedLatitude ??

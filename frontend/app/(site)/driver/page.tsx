@@ -17,6 +17,8 @@ type Stop = {
   atRisk: boolean;
   deliveryOrder: {
     id: string;
+    // Raw DeliveryOrder status — proof/failure only work once it's SHIPPED.
+    status: string;
     doNumber: string | null;
     customerName: string | null;
     deliveryAddress: string | null;
@@ -285,7 +287,13 @@ export default function DriverRoutePage() {
                   <p className="text-xs text-red-600 mt-2">{stop.deliveryOrder.failureReason}</p>
                 )}
 
-                {stop.status === 'PENDING' && (
+                {stop.status === 'PENDING' && stop.deliveryOrder.status === 'PACKED' && (
+                  <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                    {t('delivery.driver.awaitingDispatch')}
+                  </p>
+                )}
+
+                {stop.status === 'PENDING' && stop.deliveryOrder.status === 'SHIPPED' && (
                   <div className="mt-3 space-y-2">
                     {googleMapsUrl(stop.deliveryOrder) && (
                       <a

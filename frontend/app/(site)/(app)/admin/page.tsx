@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Settings, Database, Package, ChevronRight } from 'lucide-react';
+import { Settings, Database, Package, ChevronRight, Users } from 'lucide-react';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -13,6 +13,12 @@ export default function AdminPage() {
   const { t } = useLanguage();
 
   const ADMIN_SECTIONS = [
+    {
+      href: '/admin/members',
+      title: t('admin.overview.membersTitle'),
+      description: t('admin.overview.membersDescription'),
+      icon: Users,
+    },
     {
       href: '/admin/database',
       title: t('admin.overview.referenceDataTitle'),

@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react';
 import { Truck, Package, RotateCcw, AlertCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 
-type DeliveryOrderStatus = 'PACKED' | 'SHIPPED' | 'CANCELLED' | 'PARTIALLY_RETURNED' | 'RETURNED';
+type DeliveryOrderStatus = 'PACKED' | 'SHIPPED' | 'FAILED' | 'CANCELLED' | 'PARTIALLY_RETURNED' | 'RETURNED';
 
 type DeliveryOrderItem = {
   id: string;
@@ -45,6 +46,7 @@ function statusStyle(status: DeliveryOrderStatus) {
       return 'bg-orange-100 text-orange-800 border-orange-300';
     case 'RETURNED':
       return 'bg-purple-100 text-purple-800 border-purple-300';
+    case 'FAILED':
     case 'CANCELLED':
       return 'bg-red-100 text-red-800 border-red-300';
     default:
@@ -64,12 +66,16 @@ function statusStyle(status: DeliveryOrderStatus) {
 export function DeliveryOrdersPanel({
   salesOrderId,
   locationId,
+  customerId,
+  customerDefault,
   status,
   items,
   onChanged,
 }: {
   salesOrderId: string;
   locationId: string;
+  customerId?: string | null;
+  customerDefault?: { address: string | null; latitude: string | null; longitude: string | null } | null;
     status: 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED'; // NEW
 
   items: DeliverableSourceItem[];
@@ -88,6 +94,8 @@ export function DeliveryOrdersPanel({
   // ---- create-new-delivery form state ----
   const [createQty, setCreateQty] = useState<Record<string, number>>({});
   const [creating, setCreating] = useState(false);
+  const [deliverTo, setDeliverTo] = useState('');
+  const { addresses } = useCustomerAddresses(customerId);
 
   const deliverable = items.filter((i) => i.quantity - i.deliveredQuantity > 0);
 
@@ -197,7 +205,12 @@ export function DeliveryOrdersPanel({
     try {
       const res = await apiFetch('/delivery-orders', {
         method: 'POST',
-        body: JSON.stringify({ salesOrderId, locationId, items: payloadItems }),
+        body: JSON.stringify({
+          salesOrderId,
+          locationId,
+          items: payloadItems,
+          customerAddressId: deliverTo || undefined,
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -229,7 +242,11 @@ export function DeliveryOrdersPanel({
       {/* ---- existing delivery orders ---- */}
       {orders.map((deliveryOrder) => {
         const isReturning = returningId === deliveryOrder.id;
-        const canReturn = deliveryOrder.status === 'SHIPPED' || deliveryOrder.status === 'PARTIALLY_RETURNED';
+        // FAILED included — goods brought back from a failed attempt return to stock the same way.
+        const canReturn =
+          deliveryOrder.status === 'SHIPPED' ||
+          deliveryOrder.status === 'PARTIALLY_RETURNED' ||
+          deliveryOrder.status === 'FAILED';
 
         return (
           <div key={deliveryOrder.id} className="border-2 border-gray-300 rounded-md p-3">
@@ -350,6 +367,19 @@ export function DeliveryOrdersPanel({
               );
             })}
           </div>
+
+          {addresses.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-semibold text-gray-500 mb-1.5">{t('delivery.addresses.deliverTo')}</p>
+              <CustomerAddressPicker
+                addresses={addresses}
+                defaultAddress={customerDefault?.address}
+                defaultHasLocation={!!(customerDefault?.latitude && customerDefault?.longitude)}
+                value={deliverTo}
+                onChange={setDeliverTo}
+              />
+            </div>
+          )}
 
           <button
             onClick={handleCreate}
