@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { DeliveryOrderStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -15,6 +17,7 @@ import { UpdateDeliveryOrderDetailsDto } from './dto/delivery-order-details.dto'
 import { ApplyDeliveryOrderAddressDto } from './dto/delivery-order-address.dto';
 import { RescheduleDeliveryOrderDto } from './dto/delivery-order-reschedule.dto';
 import type { Response } from 'express';
+import { DeliveryProofService } from './delivery-proof.service';
 
 // Staff-only by default. There's no global DRIVER restriction, so without
 // this class-level @Roles a DRIVER JWT could list, ship, cancel, return or
@@ -25,7 +28,10 @@ import type { Response } from 'express';
 @Roles('ADMIN', 'USER')
 @Controller('delivery-orders')
 export class DeliveryOrderController {
-  constructor(private deliveryOrderService: DeliveryOrderService) {}
+  constructor(
+    private deliveryOrderService: DeliveryOrderService,
+    private deliveryProofService: DeliveryProofService,
+  ) {}
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreateDeliveryOrderDto) {
@@ -99,10 +105,38 @@ export class DeliveryOrderController {
         signedAt: dto.signedAt ? new Date(dto.signedAt) : undefined,
         completedLatitude: dto.completedLatitude,
         completedLongitude: dto.completedLongitude,
-        proofPhotoUrl: dto.proofPhotoUrl,
       },
       req.user,
     );
+  }
+
+  // Private proof photo — stored outside the media library and viewable
+  // only through a short-lived signed link (see DeliveryProofService).
+  @Post(':id/proof-photo')
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadProofPhoto(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.deliveryProofService.uploadPhoto(organizationId, id, file, req.user);
+  }
+
+  @Get(':id/proof-photo-link')
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  proofPhotoLink(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+  ) {
+    return this.deliveryProofService.photoLink(organizationId, id, req.user);
   }
 
   @Post(':id/failure')

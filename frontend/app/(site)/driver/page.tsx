@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, XCircle, Circle, MapPin, Navigation, AlertTriangle, Camera } from 'lucide-react';
-import { apiFetch } from '@/lib/apifetch';
+import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
@@ -75,18 +75,18 @@ function statusBadge(status: StopStatus, label: string) {
 // No Content-Type set here deliberately — the browser fills in the
 // multipart boundary itself. apiFetch always sets Content-Type:
 // application/json, so this bypasses it rather than fighting it.
-async function uploadPhoto(file: File): Promise<string | null> {
+// Goes to the delivery order's private proof storage, not the media
+// library.
+async function uploadProofPhoto(deliveryOrderId: string, file: File): Promise<boolean> {
   const token = localStorage.getItem('accessToken');
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch('/api/media', {
+  const res = await fetch(`/api/delivery-orders/${deliveryOrderId}/proof-photo`, {
     method: 'POST',
-    headers: { Authorization: token ? `Bearer ${token}` : '' },
+    headers: { Authorization: token ? `Bearer ${token}` : '', 'X-Device-Id': getDeviceId() },
     body: formData,
   });
-  if (!res.ok) return null;
-  const body = await res.json();
-  return body?.url ?? null;
+  return res.ok;
 }
 
 // Best-effort single-shot GPS capture — never blocks the action on
@@ -156,17 +156,17 @@ export default function DriverRoutePage() {
     try {
       const { latitude, longitude } = await captureLocation();
 
-      let proofPhotoUrl: string | undefined;
+      // Photo first: it attaches to the delivery order directly, and the
+      // proof locks it once the delivery is signed for.
       const photo = photoDraft[deliveryOrderId];
       if (photo) {
         setUploadingPhotoFor(deliveryOrderId);
-        const url = await uploadPhoto(photo);
+        const ok = await uploadProofPhoto(deliveryOrderId, photo);
         setUploadingPhotoFor(null);
-        if (!url) {
+        if (!ok) {
           setError(t('delivery.driver.photoUploadFailed'));
           return;
         }
-        proofPhotoUrl = url;
       }
 
       const res = await apiFetch(`/delivery-orders/${deliveryOrderId}/proof-of-delivery`, {
@@ -176,7 +176,6 @@ export default function DriverRoutePage() {
           signedAt: new Date().toISOString(),
           completedLatitude: latitude,
           completedLongitude: longitude,
-          proofPhotoUrl,
         }),
       });
       const body = await res.json().catch(() => null);

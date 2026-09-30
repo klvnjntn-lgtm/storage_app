@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
 import { PrismaModule } from './prisma/prisma.module';
+import { StorageModule } from './storage/storage.module';
 
 import { LocationModule } from './location/location.module';
 import { ProductModule } from './product/product.module';
@@ -59,6 +60,7 @@ import { AccessControlModule } from './access-control/access-control.module';
     // @Throttle() override it.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 100 }]),
     PrismaModule,
+    StorageModule,
     WarehouseModule,
     AuthModule,
     CategoryModule,

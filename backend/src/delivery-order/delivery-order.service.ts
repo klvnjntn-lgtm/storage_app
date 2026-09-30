@@ -419,7 +419,7 @@ export class DeliveryOrderService {
   // one of their own routes (see backend/src/delivery-routes) — ADMIN/USER
   // are unrestricted, same as every other delivery-order action, since
   // staff have always been able to record proof directly without a route.
-  private async assertRequesterCanActOnDeliveryOrder(
+  async assertRequesterCanActOnDeliveryOrder(
     deliveryOrderId: string,
     requester?: { sub: string; role: string },
   ) {
@@ -447,7 +447,6 @@ export class DeliveryOrderService {
       signedAt?: Date;
       completedLatitude?: number;
       completedLongitude?: number;
-      proofPhotoUrl?: string;
     },
     requester?: { sub: string; role: string },
   ) {
@@ -473,7 +472,6 @@ export class DeliveryOrderService {
           params.completedLatitude ?? deliveryOrder.completedLatitude,
         completedLongitude:
           params.completedLongitude ?? deliveryOrder.completedLongitude,
-        proofPhotoUrl: params.proofPhotoUrl ?? deliveryOrder.proofPhotoUrl,
       },
     });
 

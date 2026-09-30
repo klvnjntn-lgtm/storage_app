@@ -159,6 +159,10 @@ export const salesOrdersDelivery = {
         deliveredByPlaceholder: 'Delivered by',
         receivedByPlaceholder: 'Received by',
         saveSignature: 'Save signature',
+        proofPhoto: 'Proof photo',
+        showProofPhoto: 'Show photo',
+        proofPhotoPrivate: 'Private — the link expires after a few minutes.',
+        proofPhotoFailed: 'Could not load the proof photo.',
         previewError: 'Could not load a print preview for this delivery order.',
         loadingPreview: 'Loading preview...',
         badge: {
@@ -489,6 +493,10 @@ export const salesOrdersDelivery = {
         deliveredByPlaceholder: 'Dikirim oleh',
         receivedByPlaceholder: 'Diterima oleh',
         saveSignature: 'Simpan tanda tangan',
+        proofPhoto: 'Foto bukti',
+        showProofPhoto: 'Lihat foto',
+        proofPhotoPrivate: 'Private — link kedaluwarsa setelah beberapa menit.',
+        proofPhotoFailed: 'Foto bukti tidak bisa dimuat.',
         previewError: 'Tidak dapat memuat pratinjau cetak untuk surat jalan ini.',
         loadingPreview: 'Memuat pratinjau...',
         badge: {

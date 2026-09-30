@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { AppModule } from './app.module';
+import { uploadsRoot } from './storage/local-file-storage';
 import { ValidationPipe } from '@nestjs/common';
 
 // The browser never calls this server cross-origin in normal operation —
@@ -46,7 +47,14 @@ async function bootstrap() {
     }),
   );
 
-  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
+  // Only the public key prefixes are served straight off disk. Anything
+  // else under the uploads root (delivery-proofs/) is private and only
+  // reachable through a signed link (storage/files.controller.ts).
+  for (const publicPrefix of ['media', 'logos']) {
+    app.useStaticAssets(join(uploadsRoot(), publicPrefix), {
+      prefix: `/uploads/${publicPrefix}/`,
+    });
+  }
 
   // Large GDB file uploads (400-500MB+) can take longer than Node's
   // default 5-minute requestTimeout, which aborts the connection mid-upload.

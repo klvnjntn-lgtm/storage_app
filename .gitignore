@@ -5,3 +5,6 @@
 !.env.example
 gdb-imports/
 osrm-data/
+# Local backups and credentials (see ops/backup/README.md)
+/backups/
+/secrets/

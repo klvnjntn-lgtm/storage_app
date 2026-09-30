@@ -75,6 +75,9 @@ export type DeliveryOrderDetail = {
   deliveredBy: string | null;
   receivedBy: string | null;
   signedAt: string | null;
+  // Private photo (or a legacy media-library one) — view via
+  // GET /delivery-orders/:id/proof-photo-link.
+  hasProofPhoto: boolean;
   salesOrder: { orderNumber: string | null } | null;
   invoice: { invoiceNumber: string | null } | null; // NEW
   location: { name: string | null } | null;

@@ -995,11 +995,18 @@ model DeliveryOrder {
   deliveryWindowStart DateTime?
   deliveryWindowEnd   DateTime?
 
-  // NEW — set by DeliveryOrderService.recordProofOfDelivery() alongside
-  // completedLatitude/Longitude; uploaded via the existing media module
-  // (POST /media) first, then referenced here as a plain URL — same
-  // denormalized-URL convention as Organization.logoUrl/User.avatarUrl.
+  // LEGACY — proofs recorded before proofPhotoKey existed were uploaded
+  // through the media library (POST /media) and referenced here as a
+  // plain public URL. No longer written; still read for old deliveries.
+  // MediaService refuses to delete or recompress assets referenced here.
   proofPhotoUrl String?
+  // Private delivery-proof photo, as a FileStorage key
+  // ("delivery-proofs/<orgId>/<doId>/<uuid>.webp") — never a public URL.
+  // Uploaded via POST /delivery-orders/:id/proof-photo and viewed through a
+  // short-lived signed link. Kept apart from the media library: no
+  // recompression, not deletable from the gallery. proofPhotoUrl above is
+  // the legacy field from when proofs went through the media library.
+  proofPhotoKey String?
 
   // NEW — set by rescheduleDelivery() when a FAILED delivery is put back
   // into SHIPPED status for re-attempt. failedAt/failureReason are kept

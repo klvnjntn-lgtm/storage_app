@@ -19,6 +19,79 @@ services:
       retries: 5
 
 
+  db-backup:
+    image: postgres:16-alpine
+    container_name: waresys-db-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Daily pg_dump at BACKUP_TIME (validated before it counts), plus an
+    # archive of uploaded files; keeps 14 daily + 8 weekly in ./backups.
+    # See ops/backup/README.md. Take one on demand (e.g. before a deploy):
+    #   docker compose exec db-backup sh /scripts/backup.sh once
+    entrypoint: ["sh", "/scripts/backup.sh", "daemon"]
+
+    environment:
+      TZ: ${BACKUP_TZ:-Asia/Jakarta}
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_TIME: ${BACKUP_TIME:-02:00}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
+
+    volumes:
+      - ./backups:/backups
+      - ./ops/backup:/scripts:ro
+      # Uploaded files, archived with each dump. Read-only.
+      - backend_uploads:/uploads:ro
+
+    healthcheck:
+      test: ["CMD", "sh", "/scripts/backup.sh", "health"]
+      interval: 10m
+      timeout: 30s
+      start_period: 15m
+      retries: 1
+
+
+  # Off-server copy of ./backups to Google Drive (rclone). OFF by default:
+  # it only runs with the "offsite" profile, e.g. COMPOSE_PROFILES=offsite
+  # in .env, after rclone is set up — see ops/backup/README.md.
+  backup-offsite:
+    image: rclone/rclone:1.71
+    container_name: waresys-backup-offsite
+    profiles: ["offsite"]
+    restart: unless-stopped
+    depends_on:
+      - db-backup
+    entrypoint: ["sh", "/scripts/offsite-sync.sh", "daemon"]
+
+    environment:
+      TZ: ${BACKUP_TZ:-Asia/Jakarta}
+      OFFSITE_REMOTE: ${OFFSITE_REMOTE:-gdrive:WareSys/backups}
+      OFFSITE_INTERVAL_MINUTES: ${OFFSITE_INTERVAL_MINUTES:-60}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
+
+    volumes:
+      # Read-only: this container can never damage the local backups.
+      - ./backups:/backups:ro
+      - ./backups/status:/backups/status
+      - ./ops/backup:/scripts:ro
+      # rclone.conf with the Google Drive token — never committed.
+      - ./secrets/rclone:/config/rclone
+
+    healthcheck:
+      test: ["CMD", "sh", "/scripts/offsite-sync.sh", "health"]
+      interval: 30m
+      timeout: 30s
+      start_period: 2h
+      retries: 1
+
+
   firebird:
     image: dimenziokft/firebird:2.5.9-sc
     container_name: waresys-firebird

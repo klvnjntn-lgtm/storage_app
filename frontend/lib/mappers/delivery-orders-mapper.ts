@@ -56,6 +56,7 @@ export function mapDeliveryOrderToDetail(raw: any): DeliveryOrderDetail {
     deliveredBy: raw.deliveredBy ?? null,
     receivedBy: raw.receivedBy ?? null,
     signedAt: raw.signedAt ?? null,
+    hasProofPhoto: !!(raw.proofPhotoKey || raw.proofPhotoUrl),
         invoice: raw.invoice ? { invoiceNumber: raw.invoice.invoiceNumber } : null, // NEW
 
     salesOrder: raw.salesOrder ? { orderNumber: raw.salesOrder.orderNumber } : null,

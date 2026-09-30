@@ -1,5 +1,11 @@
 // src/delivery-order/dto/delivery-order-proof.dto.ts
-import { IsDateString, IsLatitude, IsLongitude, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsLatitude,
+  IsLongitude,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 // All fields optional — the frontend only sends whichever of
 // deliveredBy/receivedBy the user actually filled in (see
@@ -29,9 +35,6 @@ export class RecordDeliveryOrderProofDto {
   @IsLongitude()
   completedLongitude?: number;
 
-  // Uploaded separately via the existing POST /media first; this is just
-  // the returned URL, same denormalized-URL convention as avatarUrl/logoUrl.
-  @IsOptional()
-  @IsString()
-  proofPhotoUrl?: string;
+  // The proof photo is uploaded separately via
+  // POST /delivery-orders/:id/proof-photo (private storage), not here.
 }

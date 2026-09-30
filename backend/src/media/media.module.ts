@@ -4,9 +4,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), PrismaModule], // skip if you already register this globally elsewhere
+  imports: [ScheduleModule.forRoot(), PrismaModule, StorageModule], // skip if you already register this globally elsewhere
   controllers: [MediaController],
   providers: [MediaService],
   exports: [MediaService],
