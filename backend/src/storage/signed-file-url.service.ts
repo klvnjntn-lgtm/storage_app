@@ -4,7 +4,11 @@ import { createHmac, timingSafeEqual } from 'crypto';
 
 // Keys under these prefixes are never served publicly — only through a
 // short-lived URL signed here and checked by FilesController.
-export const PRIVATE_KEY_PREFIXES = ['delivery-proofs/'];
+export const PRIVATE_KEY_PREFIXES = [
+  'delivery-proofs/',
+  'stop-proofs/',
+  'customer-locations/',
+];
 
 export const isPrivateKey = (key: string) =>
   PRIVATE_KEY_PREFIXES.some((p) => key.startsWith(p));

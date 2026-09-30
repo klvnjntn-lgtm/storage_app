@@ -15,8 +15,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
-// Customers are usable under either plan — INVOICE_POS or WORKSHOP_RMS.
+// Customers are usable under INVOICE_POS, WORKSHOP_RMS or DELIVERY_DMS
+// (a delivery-only org picks route stops from its customer list).
 // (Previously hard-locked to INVOICE_POS only via @RequireModule; an
 // org with WORKSHOP_RMS but not INVOICE_POS would have been rejected
 // here, which contradicted the "either is fine" intent.)
@@ -26,8 +29,12 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 // not here. In practice, by the time an org has WORKSHOP_RMS active at
 // all, INVOICE_POS is guaranteed active too — so this OR-gate mostly
 // matters for INVOICE_POS-only orgs who never added WORKSHOP_RMS.
-@UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
-@RequireModule(ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS)
+//
+// Office staff only — a DRIVER sees a customer's directions and photos on
+// their own route stops (DeliveryRoutesService), never the customer list.
+@UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
+@Roles('ADMIN', 'USER')
+@RequireModule(ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS, ModuleKey.DELIVERY_DMS)
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}

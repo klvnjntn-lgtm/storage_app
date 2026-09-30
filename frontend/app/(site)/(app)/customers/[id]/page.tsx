@@ -14,6 +14,7 @@ import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
+import CustomerDriverInfoSection from '@/app/components/delivery/CustomerDriverInfoSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 
 
@@ -38,6 +39,7 @@ type CustomerDetail = {
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   latitude: string | null;
   longitude: string | null;
+  deliveryNotes: string | null;
   addresses?: CustomerAddress[];
 };
 
@@ -278,6 +280,14 @@ export default function CustomerDetailPage() {
               {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
             </button>
           </div>
+        )}
+
+        {customer && hasDelivery && (
+          <CustomerDriverInfoSection
+            customerId={customer.id}
+            deliveryNotes={customer.deliveryNotes}
+            onNotesSaved={(deliveryNotes) => setCustomer({ ...customer, deliveryNotes })}
+          />
         )}
 
         {customer && hasDelivery && (

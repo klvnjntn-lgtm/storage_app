@@ -9,19 +9,21 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OsrmService, type LatLng } from '../routing/osrm.service';
 import { VroomService, type VroomSolution } from '../routing/vroom.service';
 
-// "Optimize all drivers" against the real database, with OSRM and VROOM
+// "Optimize all teams" against the real database, with OSRM and VROOM
 // stubbed: the stub VROOM assigns by pin latitude, so each test decides
 // exactly who gets what, and the assertions are about what WareSys does
 // with that — which routes are rebuilt, shrunk, cancelled or left alone.
-describe('RoutePlannerService — optimize all drivers', () => {
+describe('RoutePlannerService — optimize all teams', () => {
   let prisma: PrismaService;
   let planner: RoutePlannerService;
   let orgId: string;
   let adminId: string;
-  const driver: Record<'d1' | 'd2' | 'd3', string> = { d1: '', d2: '', d3: '' };
+  // One team = one driver; the key names the team.
+  const team: Record<'d1' | 'd2' | 'd3' | 'd4', string> = { d1: '', d2: '', d3: '', d4: '' };
+  let customerId: string;
   const routeDate = '2030-01-15';
 
-  // lat → driver key; anything unmapped comes back unassigned.
+  // lat → team key; anything unmapped comes back unassigned.
   let assign: Record<number, 'd1' | 'd2'> = {};
   let lastPoints: LatLng[] = [];
 
@@ -64,13 +66,21 @@ describe('RoutePlannerService — optimize all drivers', () => {
         data: { email: `admin-${randomUUID()}@example.com`, password: 'x', role: 'ADMIN', organizationId: orgId },
       })
     ).id;
-    for (const key of Object.keys(driver) as (keyof typeof driver)[]) {
-      driver[key] = (
-        await prisma.user.create({
-          data: { email: `${key}-${randomUUID()}@example.com`, password: 'x', role: 'DRIVER', organizationId: orgId },
-        })
-      ).id;
+    for (const key of Object.keys(team) as (keyof typeof team)[]) {
+      team[key] = (await prisma.team.create({ data: { organizationId: orgId, name: key } })).id;
+      await prisma.user.create({
+        data: {
+          email: `${key}-${randomUUID()}@example.com`,
+          password: 'x',
+          role: 'DRIVER',
+          organizationId: orgId,
+          teamId: team[key],
+        },
+      });
     }
+    customerId = (
+      await prisma.customer.create({ data: { organizationId: orgId, name: 'Cust', latitude: 1.9, longitude: 104 } })
+    ).id;
   });
 
   afterAll(async () => {
@@ -79,7 +89,9 @@ describe('RoutePlannerService — optimize all drivers', () => {
     await prisma.route.deleteMany({ where: { organizationId: orgId } });
     await prisma.notification.deleteMany({ where: { organizationId: orgId } });
     await prisma.deliveryOrder.deleteMany({ where: { organizationId: orgId } });
+    await prisma.customer.deleteMany({ where: { organizationId: orgId } });
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
+    await prisma.team.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
   });
 
@@ -95,11 +107,11 @@ describe('RoutePlannerService — optimize all drivers', () => {
       },
     });
 
-  const makeRoute = async (driverId: string, stops: { id: string }[]) => {
+  const makeRoute = async (teamId: string, stops: { id: string }[]) => {
     const route = await prisma.route.create({
       data: {
         organizationId: orgId,
-        driverId,
+        teamId,
         routeDate: new Date(`${routeDate}T00:00:00.000Z`),
       },
     });
@@ -115,8 +127,10 @@ describe('RoutePlannerService — optimize all drivers', () => {
     prisma.routeStop.findMany({
       where: { routeId },
       orderBy: { sequence: 'asc' },
-      select: { sequence: true, plannedEta: true, deliveryOrder: { select: { customerName: true } } },
-    });
+      select: { sequence: true, plannedEta: true, customerName: true, deliveryOrder: { select: { customerName: true } } },
+    }).then((rows) =>
+      rows.map((r) => ({ ...r, name: r.deliveryOrder?.customerName ?? r.customerName })),
+    );
 
   it('previews, then saves exactly the preview — leaving started routes alone', async () => {
     const A = await makeDo('A', 1.1);
@@ -129,29 +143,33 @@ describe('RoutePlannerService — optimize all drivers', () => {
     const I = await makeDo('I', 1.8);
     const noPin = await makeDo('NoPin', null);
 
-    // d1's not-started route: D gets dropped from the plan.
-    const r1 = await makeRoute(driver.d1, [D]);
+    // d1's not-started route: D gets dropped from the plan; its customer
+    // stop stays, after the planned stops.
+    const r1 = await makeRoute(team.d1, [D]);
+    await prisma.routeStop.create({
+      data: { routeId: r1.id, sequence: 2, customerId, customerName: 'Cust', destinationLatitude: 1.9, destinationLongitude: 104 },
+    });
     // d3 isn't planned, but F is taken from its route; G stays.
-    const r2 = await makeRoute(driver.d3, [F, G]);
-    // d2's route has started (H delivered) — locked.
-    const r3 = await makeRoute(driver.d2, [H, I]);
+    const r2 = await makeRoute(team.d3, [F, G]);
+    // d4's route has started (H delivered) — locked.
+    const r3 = await makeRoute(team.d4, [H, I]);
 
     assign = { 1.1: 'd1', 1.5: 'd1', 1.2: 'd2' }; // C left over
     const input = {
       routeDate,
       departureAt: '2030-01-15T01:00:00.000Z',
       depot: { latitude: 1.0, longitude: 104 },
-      driverIds: [driver.d1, driver.d2],
+      teamIds: [team.d1, team.d2],
       deliveryOrderIds: [A.id, B.id, C.id, F.id, noPin.id],
     };
 
     const preview = await planner.preview(orgId, input);
-    const byDriver = Object.fromEntries(preview.routes.map((r) => [r.driver.id, r]));
-    expect(byDriver[driver.d1].existingRouteId).toBe(r1.id);
-    expect(byDriver[driver.d1].stops.map((s) => s.customerName)).toEqual(['A', 'F']);
-    expect(byDriver[driver.d1].stops[1].movedFromRouteId).toBe(r2.id);
-    expect(byDriver[driver.d2].existingRouteId).toBeNull(); // r3 is locked
-    expect(byDriver[driver.d2].stops.map((s) => s.customerName)).toEqual(['B']);
+    const byTeam = Object.fromEntries(preview.routes.map((r) => [r.team.id, r]));
+    expect(byTeam[team.d1].existingRouteId).toBe(r1.id);
+    expect(byTeam[team.d1].stops.map((s) => s.customerName)).toEqual(['A', 'F']);
+    expect(byTeam[team.d1].stops[1].movedFromRouteId).toBe(r2.id);
+    expect(byTeam[team.d2].existingRouteId).toBeNull(); // no route yet
+    expect(byTeam[team.d2].stops.map((s) => s.customerName)).toEqual(['B']);
     expect(preview.unassigned.map((u) => [u.label, u.reason]).sort()).toEqual([
       ['C', 'NO_TIME'],
       ['NoPin', 'NO_PIN'],
@@ -163,29 +181,31 @@ describe('RoutePlannerService — optimize all drivers', () => {
     const saved = await planner.apply(orgId, adminId, {
       ...input,
       routes: preview.routes.map((r) => ({
-        driverId: r.driver.id,
+        teamId: r.team.id,
         deliveryOrderIds: r.stops.map((s) => s.deliveryOrderId),
       })),
       expectedVersions: preview.expectedVersions,
     });
 
-    // d1's existing route rebuilt from the plan, with ETAs.
+    // d1's existing route rebuilt from the plan, with ETAs; the customer
+    // stop kept at the end.
     const r1Stops = await stopsOf(r1.id);
-    expect(r1Stops.map((s) => [s.sequence, s.deliveryOrder.customerName])).toEqual([
+    expect(r1Stops.map((s) => [s.sequence, s.name])).toEqual([
       [1, 'A'],
       [2, 'F'],
+      [3, 'Cust'],
     ]);
     // Depot → A: 0.1° × 1000 = 100s after departure.
     expect(r1Stops[0].plannedEta).toEqual(new Date('2030-01-15T01:01:40.000Z'));
 
     // d2 got a new route; the started one is untouched.
-    const newRoute = saved.routes.find((r) => r.driverId === driver.d2)!;
+    const newRoute = saved.routes.find((r) => r.teamId === team.d2)!;
     expect(newRoute.created).toBe(true);
-    expect((await stopsOf(newRoute.routeId)).map((s) => s.deliveryOrder.customerName)).toEqual(['B']);
-    expect((await stopsOf(r3.id)).map((s) => s.deliveryOrder.customerName)).toEqual(['H', 'I']);
+    expect((await stopsOf(newRoute.routeId)).map((s) => s.name)).toEqual(['B']);
+    expect((await stopsOf(r3.id)).map((s) => s.name)).toEqual(['H', 'I']);
 
     // d3's route kept G, renumbered.
-    expect((await stopsOf(r2.id)).map((s) => [s.sequence, s.deliveryOrder.customerName])).toEqual([[1, 'G']]);
+    expect((await stopsOf(r2.id)).map((s) => [s.sequence, s.name])).toEqual([[1, 'G']]);
 
     // D (dropped) and C (didn't fit) are off every route.
     for (const o of [C, D]) {
@@ -205,18 +225,23 @@ describe('RoutePlannerService — optimize all drivers', () => {
     await expect(
       planner.preview(orgId, { ...input, deliveryOrderIds: [I.id] }),
     ).rejects.toBeInstanceOf(BadRequestException);
+
+    // A team whose route already started can't get a second one that day.
+    await expect(
+      planner.preview(orgId, { ...input, teamIds: [team.d4], deliveryOrderIds: [C.id] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('cancels a not-started route the plan empties', async () => {
     const P = await makeDo('P', 2.1);
     const Q = await makeDo('Q', 2.2);
-    const r = await makeRoute(driver.d3, [P, Q]);
+    const r = await makeRoute(team.d3, [P, Q]);
 
     assign = { 2.1: 'd1', 2.2: 'd1' };
     const input = {
       routeDate: '2030-01-16',
       depot: { latitude: 2.0, longitude: 104 },
-      driverIds: [driver.d1],
+      teamIds: [team.d1],
       deliveryOrderIds: [P.id, Q.id],
     };
     // makeRoute used the first test's date — move this route to the 16th.
@@ -231,7 +256,7 @@ describe('RoutePlannerService — optimize all drivers', () => {
     await planner.apply(orgId, adminId, {
       ...input,
       routes: preview.routes.map((x) => ({
-        driverId: x.driver.id,
+        teamId: x.team.id,
         deliveryOrderIds: x.stops.map((s) => s.deliveryOrderId),
       })),
       expectedVersions: preview.expectedVersions,

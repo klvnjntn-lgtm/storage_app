@@ -20,6 +20,7 @@ import {
   LogOut,
   TrendingUp,
   Users,
+  Contact,
   Car,
   Bell,
   Search,
@@ -483,6 +484,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Truck },
             { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
             { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
+            // Stops are picked from customers; with INVOICE_POS the link
+            // already lives under Sales.
+            ...(!hasInvoicePos ? [{ href: '/customers', label: t('nav.items.customers'), icon: Contact }] : []),
             ...(profile?.role === 'ADMIN'
               ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
               : []),

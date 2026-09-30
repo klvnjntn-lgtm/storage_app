@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
+import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 
 
 type RouteStatus = 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
@@ -17,7 +18,7 @@ type RouteListItem = {
   name: string | null;
   routeDate: string;
   status: RouteStatus;
-  driver: { id: string; email: string; displayName: string | null };
+  team: PickerTeam;
   _count: { stops: number };
 };
 
@@ -55,12 +56,12 @@ function DeliveryRoutesPageInner() {
   const searchParams = useSearchParams();
   const { t } = useLanguage();
 
-  // Honors ?date= (e.g. coming back from "Optimize all drivers").
+  // Honors ?date= (e.g. coming back from "Optimize all teams").
   const [date, setDate] = useState(() => {
     const fromUrl = searchParams.get('date');
     return fromUrl && /^\d{4}-\d{2}-\d{2}$/.test(fromUrl) ? fromUrl : todayIso();
   });
-  const [driverFilter, setDriverFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
   const [routes, setRoutes] = useState<RouteListItem[]>([]);
@@ -69,7 +70,7 @@ function DeliveryRoutesPageInner() {
   const [error, setError] = useState<string | null>(null);
 
   const [showNewRoute, setShowNewRoute] = useState(false);
-  const [newRouteDriverId, setNewRouteDriverId] = useState('');
+  const [newRouteTeamId, setNewRouteTeamId] = useState('');
   const [newRouteName, setNewRouteName] = useState('');
   const [creatingRoute, setCreatingRoute] = useState(false);
 
@@ -151,7 +152,7 @@ function DeliveryRoutesPageInner() {
     try {
       const params = new URLSearchParams();
       if (date) params.set('date', date);
-      if (driverFilter) params.set('driverId', driverFilter);
+      if (teamFilter) params.set('teamId', teamFilter);
       if (statusFilter) params.set('status', statusFilter);
       const res = await apiFetch(`/delivery-routes?${params}`);
       if (!res.ok) {
@@ -177,16 +178,16 @@ function DeliveryRoutesPageInner() {
   useEffect(() => {
     loadRoutes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, driverFilter, statusFilter]);
+  }, [date, teamFilter, statusFilter]);
 
   async function handleCreateRoute() {
-    if (!newRouteDriverId || !date) return;
+    if (!newRouteTeamId || !date) return;
     setCreatingRoute(true);
     setError(null);
     try {
       const res = await apiFetch('/delivery-routes', {
         method: 'POST',
-        body: JSON.stringify({ driverId: newRouteDriverId, routeDate: date, name: newRouteName.trim() || undefined }),
+        body: JSON.stringify({ teamId: newRouteTeamId, routeDate: date, name: newRouteName.trim() || undefined }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -194,7 +195,7 @@ function DeliveryRoutesPageInner() {
         return;
       }
       setShowNewRoute(false);
-      setNewRouteDriverId('');
+      setNewRouteTeamId('');
       setNewRouteName('');
       router.push(`/delivery/routes/${body.id}`);
     } catch {
@@ -230,6 +231,8 @@ function DeliveryRoutesPageInner() {
   }
 
   const statusOptions: RouteStatus[] = ['PLANNED', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+  const pickerTeams = teams.map(toPickerTeam);
+  const noDriver = t('delivery.teams.noDriver');
 
   return (
     <main
@@ -269,13 +272,13 @@ function DeliveryRoutesPageInner() {
           </div>
           <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-              {t('delivery.routes.driverFilterLabel')}
+              {t('delivery.routes.teamFilterLabel')}
             </label>
-            <DriverPicker
-              drivers={drivers}
-              value={driverFilter}
-              onChange={setDriverFilter}
-              clearLabel={t('delivery.routes.allDrivers')}
+            <TeamPicker
+              teams={pickerTeams}
+              value={teamFilter}
+              onChange={setTeamFilter}
+              clearLabel={t('delivery.routes.allTeams')}
             />
           </div>
           <div className="min-w-0">
@@ -354,8 +357,11 @@ function DeliveryRoutesPageInner() {
               </button>
             </div>
 
+            <p className="text-xs text-gray-500">{t('delivery.routes.teamsHint')}</p>
             {teams.length === 0 && <p className="text-xs text-gray-500">{t('delivery.routes.noTeams')}</p>}
-            {teams.map((team) => (
+            {teams.map((team) => {
+              const teamDriver = drivers.find((d) => d.team?.id === team.id);
+              return (
               <div key={team.id} className="border border-gray-200 rounded-md p-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold">{team.name}</span>
@@ -367,39 +373,40 @@ function DeliveryRoutesPageInner() {
                     <Trash2 size={14} />
                   </button>
                 </div>
-                <div className="mt-1.5 space-y-1">
-                  {drivers
-                    .filter((d) => d.team?.id === team.id)
-                    .map((d) => (
-                      <div key={d.id} className="flex items-center justify-between gap-2 text-xs text-gray-600">
-                        <span className="flex items-center gap-2 min-w-0">
-                          <DriverAvatar driver={d} size={22} />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm text-gray-800">{driverLabel(d)}</span>
-                            {d.displayName && <span className="block truncate text-[11px] text-gray-400">{d.email}</span>}
-                          </span>
-                        </span>
-                        <button
-                          disabled={assigningDriverId === d.id}
-                          onClick={() => handleAssignDriver(d.id, '')}
-                          aria-label={t('delivery.routeDetail.remove')}
-                          className="shrink-0 text-base leading-none px-2.5 py-1 sm:px-1 sm:py-0 text-red-600 disabled:opacity-50"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                </div>
-                <DriverPicker
-                  className="mt-2"
-                  drivers={drivers.filter((d) => d.team?.id !== team.id)}
-                  value=""
-                  onChange={(driverId) => driverId && handleAssignDriver(driverId, team.id)}
-                  placeholder={t('delivery.routes.addDriverToTeam')}
-                  disabled={assigningDriverId !== null}
-                />
+                {/* One team = one driver: show the driver, or a picker to set one. */}
+                {teamDriver ? (
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-gray-600">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <DriverAvatar driver={teamDriver} size={22} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm text-gray-800">{driverLabel(teamDriver)}</span>
+                        {teamDriver.displayName && (
+                          <span className="block truncate text-[11px] text-gray-400">{teamDriver.email}</span>
+                        )}
+                      </span>
+                    </span>
+                    <button
+                      disabled={assigningDriverId === teamDriver.id}
+                      onClick={() => handleAssignDriver(teamDriver.id, '')}
+                      aria-label={t('delivery.routeDetail.remove')}
+                      className="shrink-0 text-base leading-none px-2.5 py-1 sm:px-1 sm:py-0 text-red-600 disabled:opacity-50"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <DriverPicker
+                    className="mt-2"
+                    drivers={drivers.filter((d) => !d.team)}
+                    value=""
+                    onChange={(driverId) => driverId && handleAssignDriver(driverId, team.id)}
+                    placeholder={t('delivery.routes.setTeamDriver')}
+                    disabled={assigningDriverId !== null}
+                  />
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -441,15 +448,10 @@ function DeliveryRoutesPageInner() {
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-                {t('delivery.routes.driverLabel')}
+                {t('delivery.routes.teamLabel')}
               </label>
-              <DriverPicker
-                drivers={drivers}
-                value={newRouteDriverId}
-                onChange={setNewRouteDriverId}
-                placeholder={t('delivery.routes.selectDriver')}
-              />
-              {drivers.length === 0 && <p className="text-xs text-gray-500 mt-1">{t('delivery.routes.noDrivers')}</p>}
+              <TeamPicker teams={pickerTeams} value={newRouteTeamId} onChange={setNewRouteTeamId} />
+              {teams.length === 0 && <p className="text-xs text-gray-500 mt-1">{t('delivery.routes.noTeams')}</p>}
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -463,7 +465,7 @@ function DeliveryRoutesPageInner() {
               />
             </div>
             <button
-              disabled={creatingRoute || !newRouteDriverId}
+              disabled={creatingRoute || !newRouteTeamId}
               onClick={handleCreateRoute}
               className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
@@ -481,9 +483,9 @@ function DeliveryRoutesPageInner() {
               className="w-full text-left bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors flex items-center justify-between gap-3"
             >
               <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{route.name ?? driverLabel(route.driver)}</div>
+                <div className="text-sm font-semibold truncate">{route.name ?? route.team.name}</div>
                 <div className="text-xs text-gray-500 truncate">
-                  {driverLabel(route.driver)} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
+                  {teamLabel(route.team, noDriver)} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
                 </div>
               </div>
               <span

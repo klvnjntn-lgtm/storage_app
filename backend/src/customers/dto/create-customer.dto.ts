@@ -35,4 +35,10 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsLongitude()
   longitude?: number;
+
+  // DELIVERY_DMS — directions for the driver, see Customer.deliveryNotes.
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  deliveryNotes?: string;
 }

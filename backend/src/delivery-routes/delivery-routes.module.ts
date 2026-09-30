@@ -6,11 +6,25 @@ import { DeliveryRoutesService } from './delivery-routes.service';
 import { DeliveryRoutesController } from './delivery-routes.controller';
 import { RouteOptimizerService } from './route-optimizer.service';
 import { RoutePlannerService } from './route-planner.service';
+import { StopProofService } from './stop-proof.service';
+import { OrganizationModulesModule } from '../organization-module/organization-modules.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [PrismaModule, RoutingModule, NotificationsModule],
+  imports: [
+    PrismaModule,
+    RoutingModule,
+    NotificationsModule,
+    OrganizationModulesModule,
+    StorageModule,
+  ],
   controllers: [DeliveryRoutesController],
-  providers: [DeliveryRoutesService, RouteOptimizerService, RoutePlannerService],
+  providers: [
+    DeliveryRoutesService,
+    RouteOptimizerService,
+    RoutePlannerService,
+    StopProofService,
+  ],
   exports: [DeliveryRoutesService],
 })
 export class DeliveryRoutesModule {}

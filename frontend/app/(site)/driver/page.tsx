@@ -2,31 +2,36 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, XCircle, Circle, MapPin, Navigation, AlertTriangle, Camera } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, MapPin, Navigation, AlertTriangle, Camera, Phone, StickyNote } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
+// A DO stop or a customer visit — see DeliveryRoutesService.presentStop.
 type Stop = {
   id: string;
   sequence: number;
   status: StopStatus;
   plannedEta: string | null;
   atRisk: boolean;
-  deliveryOrder: {
-    id: string;
-    // Raw DeliveryOrder status — proof/failure only work once it's SHIPPED.
-    status: string;
-    doNumber: string | null;
-    customerName: string | null;
-    deliveryAddress: string | null;
-    failureReason: string | null;
-    // Prisma Decimal fields serialize as strings over JSON, not numbers.
-    destinationLatitude: string | null;
-    destinationLongitude: string | null;
-  };
+  kind: 'DELIVERY_ORDER' | 'CUSTOMER';
+  label: string;
+  address: string | null;
+  failureReason: string | null;
+  // Prisma Decimal fields serialize as strings over JSON, not numbers.
+  destinationLatitude: string | null;
+  destinationLongitude: string | null;
+  // Raw DeliveryOrder status — proof/failure only work once it's SHIPPED.
+  deliveryOrder: { id: string; status: string } | null;
+  // Directions set on the customer record (notes + building photos,
+  // photos as short-lived signed paths).
+  customerInfo: {
+    phone: string | null;
+    deliveryNotes: string | null;
+    locationPhotos: { id: string; path: string }[];
+  } | null;
 };
 
 function formatEta(iso: string | null): string {
@@ -34,12 +39,12 @@ function formatEta(iso: string | null): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function googleMapsUrl(deliveryOrder: Stop['deliveryOrder']): string {
-  if (deliveryOrder.destinationLatitude && deliveryOrder.destinationLongitude) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${deliveryOrder.destinationLatitude},${deliveryOrder.destinationLongitude}`;
+function googleMapsUrl(stop: Stop): string {
+  if (stop.destinationLatitude && stop.destinationLongitude) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${stop.destinationLatitude},${stop.destinationLongitude}`;
   }
-  if (deliveryOrder.deliveryAddress) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(deliveryOrder.deliveryAddress)}`;
+  if (stop.address) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(stop.address)}`;
   }
   return '';
 }
@@ -48,9 +53,21 @@ type RouteWithStops = {
   id: string;
   name: string | null;
   status: string;
+  team: { id: string; name: string };
   stops: Stop[];
   currentStop: Stop | null;
 };
+
+// Where a stop's proof/failure go: a DO stop through its delivery order
+// (as before), a customer stop through the route.
+function stopEndpoints(routeId: string, stop: Stop) {
+  if (stop.deliveryOrder) {
+    const base = `/delivery-orders/${stop.deliveryOrder.id}`;
+    return { photo: `${base}/proof-photo`, proof: `${base}/proof-of-delivery`, failure: `${base}/failure` };
+  }
+  const base = `/delivery-routes/${routeId}/stops/${stop.id}`;
+  return { photo: `${base}/proof-photo`, proof: `${base}/proof`, failure: `${base}/failure` };
+}
 
 function statusBadge(status: StopStatus, label: string) {
   const styles: Record<StopStatus, string> = {
@@ -75,13 +92,12 @@ function statusBadge(status: StopStatus, label: string) {
 // No Content-Type set here deliberately — the browser fills in the
 // multipart boundary itself. apiFetch always sets Content-Type:
 // application/json, so this bypasses it rather than fighting it.
-// Goes to the delivery order's private proof storage, not the media
-// library.
-async function uploadProofPhoto(deliveryOrderId: string, file: File): Promise<boolean> {
+// Goes to private proof storage, not the media library.
+async function uploadProofPhoto(path: string, file: File): Promise<boolean> {
   const token = localStorage.getItem('accessToken');
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`/api/delivery-orders/${deliveryOrderId}/proof-photo`, {
+  const res = await fetch(`/api${path}`, {
     method: 'POST',
     headers: { Authorization: token ? `Bearer ${token}` : '', 'X-Device-Id': getDeviceId() },
     body: formData,
@@ -150,18 +166,20 @@ export default function DriverRoutePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  async function handleMarkDelivered(deliveryOrderId: string) {
-    setActionLoading(deliveryOrderId);
+  async function handleMarkDelivered(routeId: string, stop: Stop) {
+    const key = stop.id;
+    const urls = stopEndpoints(routeId, stop);
+    setActionLoading(key);
     setError(null);
     try {
       const { latitude, longitude } = await captureLocation();
 
-      // Photo first: it attaches to the delivery order directly, and the
-      // proof locks it once the delivery is signed for.
-      const photo = photoDraft[deliveryOrderId];
+      // Photo first: it attaches to the stop/delivery order directly, and
+      // the proof locks it once the delivery is signed for.
+      const photo = photoDraft[key];
       if (photo) {
-        setUploadingPhotoFor(deliveryOrderId);
-        const ok = await uploadProofPhoto(deliveryOrderId, photo);
+        setUploadingPhotoFor(key);
+        const ok = await uploadProofPhoto(urls.photo, photo);
         setUploadingPhotoFor(null);
         if (!ok) {
           setError(t('delivery.driver.photoUploadFailed'));
@@ -169,14 +187,19 @@ export default function DriverRoutePage() {
         }
       }
 
-      const res = await apiFetch(`/delivery-orders/${deliveryOrderId}/proof-of-delivery`, {
+      const receivedBy = receivedByDraft[key]?.trim() || undefined;
+      const res = await apiFetch(urls.proof, {
         method: 'PATCH',
-        body: JSON.stringify({
-          receivedBy: receivedByDraft[deliveryOrderId]?.trim() || undefined,
-          signedAt: new Date().toISOString(),
-          completedLatitude: latitude,
-          completedLongitude: longitude,
-        }),
+        body: JSON.stringify(
+          stop.deliveryOrder
+            ? {
+                receivedBy,
+                signedAt: new Date().toISOString(),
+                completedLatitude: latitude,
+                completedLongitude: longitude,
+              }
+            : { receivedBy, latitude, longitude },
+        ),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -191,15 +214,16 @@ export default function DriverRoutePage() {
     }
   }
 
-  async function handleMarkFailed(deliveryOrderId: string) {
-    setActionLoading(deliveryOrderId);
+  async function handleMarkFailed(routeId: string, stop: Stop) {
+    const key = stop.id;
+    setActionLoading(key);
     setError(null);
     try {
       const { latitude, longitude } = await captureLocation();
-      const res = await apiFetch(`/delivery-orders/${deliveryOrderId}/failure`, {
+      const res = await apiFetch(stopEndpoints(routeId, stop).failure, {
         method: 'POST',
         body: JSON.stringify({
-          reason: failureDraft[deliveryOrderId]?.trim() || undefined,
+          reason: failureDraft[key]?.trim() || undefined,
           latitude,
           longitude,
         }),
@@ -246,10 +270,19 @@ export default function DriverRoutePage() {
 
       {routes.map((route) => (
         <div key={route.id} className="space-y-2">
+          <p className="text-xs font-semibold text-gray-500">{route.team.name}{route.name ? ` · ${route.name}` : ''}</p>
           {route.stops.map((stop) => {
             const isCurrent = route.currentStop?.id === stop.id;
-            const doId = stop.deliveryOrder.id;
+            const doId = stop.id; // draft/busy key — one per stop, whatever its kind
             const busy = actionLoading === doId;
+            // A DO must be shipped before it can be delivered; a customer
+            // visit can be recorded any time it's pending.
+            const awaitingDispatch = stop.deliveryOrder?.status === 'PACKED';
+            const actionable = stop.status === 'PENDING' && (stop.deliveryOrder ? stop.deliveryOrder.status === 'SHIPPED' : true);
+            // Customer stops require receiver + photo (the DO flow keeps
+            // its existing optional fields).
+            const proofMissing = !stop.deliveryOrder && (!receivedByDraft[doId]?.trim() || !photoDraft[doId]);
+            const info = stop.customerInfo;
             return (
               <div
                 key={stop.id}
@@ -258,13 +291,11 @@ export default function DriverRoutePage() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="text-xs text-gray-400 font-medium">#{stop.sequence}</div>
-                    <div className="text-sm font-semibold">
-                      {stop.deliveryOrder.customerName ?? stop.deliveryOrder.doNumber ?? doId}
-                    </div>
-                    {stop.deliveryOrder.deliveryAddress && (
+                    <div className="text-sm font-semibold">{stop.label}</div>
+                    {stop.address && (
                       <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                         <MapPin size={12} />
-                        {stop.deliveryOrder.deliveryAddress}
+                        {stop.address}
                       </div>
                     )}
                     {stop.plannedEta && (
@@ -282,21 +313,52 @@ export default function DriverRoutePage() {
                   {statusBadge(stop.status, statusLabels[stop.status])}
                 </div>
 
-                {stop.status === 'FAILED' && stop.deliveryOrder.failureReason && (
-                  <p className="text-xs text-red-600 mt-2">{stop.deliveryOrder.failureReason}</p>
+                {stop.status === 'FAILED' && stop.failureReason && (
+                  <p className="text-xs text-red-600 mt-2">{stop.failureReason}</p>
                 )}
 
-                {stop.status === 'PENDING' && stop.deliveryOrder.status === 'PACKED' && (
+                {stop.status === 'PENDING' && info && (info.deliveryNotes || info.locationPhotos.length > 0 || info.phone) && (
+                  <div className="mt-2 rounded-md bg-blue-50 border border-blue-100 p-2 space-y-1.5">
+                    {info.deliveryNotes && (
+                      <p className="text-xs text-blue-900 flex gap-1.5 whitespace-pre-line">
+                        <StickyNote size={12} className="shrink-0 mt-0.5" />
+                        {info.deliveryNotes}
+                      </p>
+                    )}
+                    {info.phone && (
+                      <a href={`tel:${info.phone}`} className="text-xs text-blue-700 font-medium inline-flex items-center gap-1">
+                        <Phone size={12} />
+                        {info.phone}
+                      </a>
+                    )}
+                    {info.locationPhotos.length > 0 && (
+                      <div className="flex gap-2">
+                        {info.locationPhotos.map((p) => (
+                          <a key={p.id} href={`/api${p.path}`} target="_blank" rel="noreferrer" className="block">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, not optimizable */}
+                            <img
+                              src={`/api${p.path}`}
+                              alt={t('delivery.driver.locationPhotoAlt')}
+                              className="h-20 w-28 object-cover rounded border border-blue-200"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {stop.status === 'PENDING' && awaitingDispatch && (
                   <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
                     {t('delivery.driver.awaitingDispatch')}
                   </p>
                 )}
 
-                {stop.status === 'PENDING' && stop.deliveryOrder.status === 'SHIPPED' && (
+                {actionable && (
                   <div className="mt-3 space-y-2">
-                    {googleMapsUrl(stop.deliveryOrder) && (
+                    {googleMapsUrl(stop) && (
                       <a
-                        href={googleMapsUrl(stop.deliveryOrder)}
+                        href={googleMapsUrl(stop)}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-200 text-blue-700 rounded-md py-1.5"
@@ -307,7 +369,7 @@ export default function DriverRoutePage() {
                     )}
                     <input
                       type="text"
-                      placeholder={t('delivery.driver.receivedByLabel')}
+                      placeholder={t(stop.deliveryOrder ? 'delivery.driver.receivedByLabel' : 'delivery.driver.receivedByRequired')}
                       value={receivedByDraft[doId] ?? ''}
                       onChange={(e) => setReceivedByDraft((d) => ({ ...d, [doId]: e.target.value }))}
                       className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm"
@@ -315,7 +377,9 @@ export default function DriverRoutePage() {
 
                     <label className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md py-1.5 cursor-pointer">
                       <Camera size={14} />
-                      {photoDraft[doId] ? photoDraft[doId].name : t('delivery.driver.photoLabel')}
+                      {photoDraft[doId]
+                        ? photoDraft[doId].name
+                        : t(stop.deliveryOrder ? 'delivery.driver.photoLabel' : 'delivery.driver.photoRequired')}
                       <input
                         type="file"
                         accept="image/*"
@@ -343,7 +407,7 @@ export default function DriverRoutePage() {
                         <div className="flex gap-2">
                           <button
                             disabled={busy}
-                            onClick={() => handleMarkFailed(doId)}
+                            onClick={() => handleMarkFailed(route.id, stop)}
                             className="flex-1 bg-red-600 text-white text-sm font-medium rounded-md py-1.5 disabled:opacity-50"
                           >
                             {busy ? t('delivery.driver.marking') : t('delivery.driver.confirm')}
@@ -360,8 +424,8 @@ export default function DriverRoutePage() {
                     ) : (
                       <div className="flex gap-2">
                         <button
-                          disabled={busy}
-                          onClick={() => handleMarkDelivered(doId)}
+                          disabled={busy || proofMissing}
+                          onClick={() => handleMarkDelivered(route.id, stop)}
                           className="flex-1 bg-green-600 text-white text-sm font-medium rounded-md py-1.5 disabled:opacity-50"
                         >
                           {busy ? t('delivery.driver.marking') : t('delivery.driver.markDelivered')}

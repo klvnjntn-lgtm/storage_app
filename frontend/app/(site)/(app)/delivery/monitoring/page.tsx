@@ -8,11 +8,11 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
 import DatePicker from '@/app/components/shared/DatePicker';
-import { driverLabel } from '@/app/components/delivery/DriverPicker';
+import { teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 
 
 type Summary = { total: number; delivered: number; pending: number; failed: number; atRisk: number };
-type DriverProgress = Summary & { routeId: string; driver: { id: string; email: string; displayName: string | null } };
+type TeamProgress = Summary & { routeId: string; team: PickerTeam };
 // Prisma Decimal fields serialize as strings over JSON, not numbers.
 type MapStopRaw = { id: string; status: MapStop['status']; latitude: string; longitude: string; label: string };
 
@@ -36,7 +36,7 @@ export default function DeliveryMonitoringPage() {
   const { t } = useLanguage();
   const [date, setDate] = useState(todayIso());
   const [summary, setSummary] = useState<Summary>({ total: 0, delivered: 0, pending: 0, failed: 0, atRisk: 0 });
-  const [byDriver, setByDriver] = useState<DriverProgress[]>([]);
+  const [byTeam, setByTeam] = useState<TeamProgress[]>([]);
   const [mapStops, setMapStops] = useState<MapStop[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,18 +54,18 @@ export default function DeliveryMonitoringPage() {
       setError(null);
     }
     try {
-      const [summaryRes, driversRes, mapRes] = await Promise.all([
+      const [summaryRes, teamsRes, mapRes] = await Promise.all([
         apiFetch(`/delivery-routes/monitoring/summary?date=${date}`),
-        apiFetch(`/delivery-routes/monitoring/drivers?date=${date}`),
+        apiFetch(`/delivery-routes/monitoring/teams?date=${date}`),
         apiFetch(`/delivery-routes/monitoring/map?date=${date}`),
       ]);
-      if (!summaryRes.ok || !driversRes.ok) {
-        const body = await (summaryRes.ok ? driversRes : summaryRes).json().catch(() => null);
+      if (!summaryRes.ok || !teamsRes.ok) {
+        const body = await (summaryRes.ok ? teamsRes : summaryRes).json().catch(() => null);
         setError(body?.message ?? t('delivery.monitoring.requestFailed', { status: summaryRes.status }));
         return;
       }
       setSummary(await summaryRes.json());
-      setByDriver(await driversRes.json());
+      setByTeam(await teamsRes.json());
       if (mapRes.ok) {
         const raw: MapStopRaw[] = await mapRes.json();
         setMapStops(raw.map((s) => ({ ...s, latitude: Number(s.latitude), longitude: Number(s.longitude) })));
@@ -182,11 +182,11 @@ export default function DeliveryMonitoringPage() {
         )}
 
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold">{t('delivery.monitoring.byDriver')}</h2>
-          {!loading && byDriver.length === 0 && (
-            <p className="text-sm text-gray-500">{t('delivery.monitoring.noDrivers')}</p>
+          <h2 className="text-sm font-semibold">{t('delivery.monitoring.byTeam')}</h2>
+          {!loading && byTeam.length === 0 && (
+            <p className="text-sm text-gray-500">{t('delivery.monitoring.noTeams')}</p>
           )}
-          {byDriver.map((d) => {
+          {byTeam.map((d) => {
             const done = d.delivered + d.failed;
             return (
               <Link
@@ -195,7 +195,7 @@ export default function DeliveryMonitoringPage() {
                 className="block bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium truncate min-w-0">{driverLabel(d.driver)}</span>
+                  <span className="text-sm font-medium truncate min-w-0">{teamLabel(d.team, t('delivery.teams.noDriver'))}</span>
                   <span className="text-xs text-gray-600 shrink-0 flex items-center gap-2">
                     {d.atRisk > 0 && (
                       <span className="inline-flex items-center gap-0.5 text-red-600 font-semibold">

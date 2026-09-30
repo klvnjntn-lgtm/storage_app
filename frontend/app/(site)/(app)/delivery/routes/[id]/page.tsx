@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, UserCog, CalendarClock } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, CalendarClock, Store, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
@@ -11,13 +11,19 @@ import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
-import DriverPicker, { driverLabel, type PickerDriver } from '@/app/components/delivery/DriverPicker';
+import { driverLabel } from '@/app/components/delivery/DriverPicker';
+import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
+import CustomerStopPicker, { type StopCustomer } from '@/app/components/delivery/CustomerStopPicker';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
+// One shape for both stop kinds (see DeliveryRoutesService.presentStop):
+// a DO stop or a customer visit (orgs without INVOICE_POS). Top-level
+// fields are the stop's target; `deliveryOrder` is only set on DO stops.
 type Stop = {
   id: string;
   sequence: number;
@@ -25,20 +31,21 @@ type Stop = {
   plannedEta: string | null;
   atRisk: boolean;
   superseded: boolean;
-  deliveryOrder: {
-    id: string;
-    doNumber: string | null;
-    customerId: string | null;
-    customerName: string | null;
-    deliveryAddress: string | null;
-    failureReason: string | null;
-    // Prisma Decimal fields serialize as strings over JSON, not numbers.
-    destinationLatitude: string | null;
-    destinationLongitude: string | null;
-    priority: 'NORMAL' | 'HIGH';
-    deliveryWindowStart: string | null;
-    deliveryWindowEnd: string | null;
-  };
+  kind: 'DELIVERY_ORDER' | 'CUSTOMER';
+  label: string;
+  customerId: string | null;
+  customerName: string | null;
+  doNumber: string | null;
+  address: string | null;
+  // Prisma Decimal fields serialize as strings over JSON, not numbers.
+  destinationLatitude: string | null;
+  destinationLongitude: string | null;
+  priority: 'NORMAL' | 'HIGH';
+  deliveryWindowStart: string | null;
+  deliveryWindowEnd: string | null;
+  receivedBy: string | null;
+  failureReason: string | null;
+  deliveryOrder: { id: string } | null;
 };
 
 type HistoryEvent = {
@@ -54,14 +61,14 @@ type HistoryEvent = {
   } | null;
 };
 
-type RouteOption = { id: string; name: string | null; status: string; driver: { email: string; displayName: string | null } };
+type RouteOption = { id: string; name: string | null; status: string; team: PickerTeam };
 
 type RouteDetail = {
   id: string;
   name: string | null;
   routeDate: string;
   status: string;
-  driver: { id: string; email: string; displayName: string | null };
+  team: PickerTeam;
   stops: Stop[];
   currentStop: Stop | null;
   // Prisma Decimal/DateTime fields serialize as strings over JSON.
@@ -114,6 +121,9 @@ export default function DeliveryRouteDetailPage() {
   // server-side (see delivery-routes.controller.ts) — hide those controls for
   // DRIVER so the UI doesn't offer actions that would now 403.
   const isDriver = user?.role === 'DRIVER';
+  // With INVOICE_POS every stop is a delivery order; without it, stops
+  // are picked from the customer list (DOs still allowed if the org has any).
+  const hasInvoicePos = useHasModule('INVOICE_POS');
 
   const [route, setRoute] = useState<RouteDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -123,12 +133,18 @@ export default function DeliveryRouteDetailPage() {
   const [availableOrders, setAvailableOrders] = useState<AvailableOrder[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [showAddStop, setShowAddStop] = useState(false);
+  const [addMode, setAddMode] = useState<'CUSTOMER' | 'DELIVERY_ORDER'>('CUSTOMER');
+  const [selectedCustomer, setSelectedCustomer] = useState<StopCustomer | null>(null);
+  const [newStopPriority, setNewStopPriority] = useState<'NORMAL' | 'HIGH'>('NORMAL');
+  const [newStopWindowStart, setNewStopWindowStart] = useState('');
+  const [newStopWindowEnd, setNewStopWindowEnd] = useState('');
+  const stopMode = hasInvoicePos ? 'DELIVERY_ORDER' : addMode;
 
   const [pickingStop, setPickingStop] = useState<Stop | null>(null);
   const [pickingStart, setPickingStart] = useState(false);
   const [pickedPosition, setPickedPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
-  const { addresses: savedAddresses } = useCustomerAddresses(pickingStop?.deliveryOrder.customerId);
+  const { addresses: savedAddresses } = useCustomerAddresses(pickingStop?.customerId);
 
   const [departureTime, setDepartureTime] = useState('');
   const [optimizing, setOptimizing] = useState(false);
@@ -146,9 +162,9 @@ export default function DeliveryRouteDetailPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
 
-  const [changingDriver, setChangingDriver] = useState(false);
-  const [drivers, setDrivers] = useState<PickerDriver[]>([]);
-  const [savingDriver, setSavingDriver] = useState(false);
+  const [changingTeam, setChangingTeam] = useState(false);
+  const [teams, setTeams] = useState<PickerTeam[]>([]);
+  const [savingTeam, setSavingTeam] = useState(false);
 
   const [rescheduleStop, setRescheduleStop] = useState<Stop | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
@@ -193,13 +209,22 @@ export default function DeliveryRouteDetailPage() {
   }, [id]);
 
   async function handleAddStop() {
-    if (!selectedOrderId) return;
+    const payload =
+      stopMode === 'CUSTOMER'
+        ? selectedCustomer && {
+            customerId: selectedCustomer.id,
+            priority: newStopPriority,
+            deliveryWindowStart: newStopWindowStart ? new Date(newStopWindowStart).toISOString() : undefined,
+            deliveryWindowEnd: newStopWindowEnd ? new Date(newStopWindowEnd).toISOString() : undefined,
+          }
+        : selectedOrderId && { deliveryOrderId: selectedOrderId };
+    if (!payload) return;
     setBusy('add-stop');
     setError(null);
     try {
       const res = await apiFetch(`/delivery-routes/${id}/stops`, {
         method: 'POST',
-        body: JSON.stringify({ deliveryOrderId: selectedOrderId }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -208,6 +233,10 @@ export default function DeliveryRouteDetailPage() {
       }
       setShowAddStop(false);
       setSelectedOrderId('');
+      setSelectedCustomer(null);
+      setNewStopPriority('NORMAL');
+      setNewStopWindowStart('');
+      setNewStopWindowEnd('');
       await load();
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
@@ -270,20 +299,21 @@ export default function DeliveryRouteDetailPage() {
   function openLocationPicker(stop: Stop) {
     setPickingStop(stop);
     setPickedPosition(
-      stop.deliveryOrder.destinationLatitude && stop.deliveryOrder.destinationLongitude
-        ? { lat: Number(stop.deliveryOrder.destinationLatitude), lng: Number(stop.deliveryOrder.destinationLongitude) }
+      stop.destinationLatitude && stop.destinationLongitude
+        ? { lat: Number(stop.destinationLatitude), lng: Number(stop.destinationLongitude) }
         : null,
     );
   }
 
-  async function handleSaveLocation() {
-    if (!pickingStop || !pickedPosition) return;
+  // For a customer stop this changes the pin on this route only — the
+  // customer's own pin stays as it is (see setStopDestination).
+  async function saveStopPin(stop: Stop, position: { lat: number; lng: number }) {
     setSavingLocation(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${pickingStop.deliveryOrder.id}/destination`, {
+      const res = await apiFetch(`/delivery-routes/${id}/stops/${stop.id}/destination`, {
         method: 'PATCH',
-        body: JSON.stringify({ latitude: pickedPosition.lat, longitude: pickedPosition.lng }),
+        body: JSON.stringify({ latitude: position.lat, longitude: position.lng }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -299,12 +329,25 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
+  async function handleSaveLocation() {
+    if (!pickingStop || !pickedPosition) return;
+    await saveStopPin(pickingStop, pickedPosition);
+  }
+
   async function handleApplySavedAddress(customerAddressId: string) {
     if (!pickingStop) return;
+    // A customer stop has no DO to copy the address onto — just take the
+    // saved address's pin for this route.
+    if (!pickingStop.deliveryOrder) {
+      const a = savedAddresses.find((x) => x.id === customerAddressId);
+      if (a?.latitude && a.longitude) await saveStopPin(pickingStop, { lat: Number(a.latitude), lng: Number(a.longitude) });
+      return;
+    }
+    const deliveryOrderId = pickingStop.deliveryOrder.id;
     setSavingLocation(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${pickingStop.deliveryOrder.id}/address`, {
+      const res = await apiFetch(`/delivery-orders/${deliveryOrderId}/address`, {
         method: 'PATCH',
         body: JSON.stringify({ customerAddressId }),
       });
@@ -379,9 +422,9 @@ export default function DeliveryRouteDetailPage() {
 
   function openEditDetails(stop: Stop) {
     setEditingStop(stop);
-    setEditPriority(stop.deliveryOrder.priority);
-    setEditWindowStart(toLocalInputValue(stop.deliveryOrder.deliveryWindowStart));
-    setEditWindowEnd(toLocalInputValue(stop.deliveryOrder.deliveryWindowEnd));
+    setEditPriority(stop.priority);
+    setEditWindowStart(toLocalInputValue(stop.deliveryWindowStart));
+    setEditWindowEnd(toLocalInputValue(stop.deliveryWindowEnd));
   }
 
   async function handleSaveDetails() {
@@ -389,7 +432,11 @@ export default function DeliveryRouteDetailPage() {
     setSavingDetails(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${editingStop.deliveryOrder.id}/details`, {
+      // A DO stop's details live on its delivery order; a customer stop's on the stop.
+      const url = editingStop.deliveryOrder
+        ? `/delivery-orders/${editingStop.deliveryOrder.id}/details`
+        : `/delivery-routes/${id}/stops/${editingStop.id}/details`;
+      const res = await apiFetch(url, {
         method: 'PATCH',
         body: JSON.stringify({
           priority: editPriority,
@@ -435,10 +482,15 @@ export default function DeliveryRouteDetailPage() {
   async function handleReschedule() {
     const stop = rescheduleStop;
     if (!stop) return;
+    // A customer stop has no unrouted pool to return to — it needs a route.
+    if (!stop.deliveryOrder && !rescheduleRouteId) return;
     setReschedulingId(stop.id);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${stop.deliveryOrder.id}/reschedule`, {
+      const url = stop.deliveryOrder
+        ? `/delivery-orders/${stop.deliveryOrder.id}/reschedule`
+        : `/delivery-routes/${id}/stops/${stop.id}/reschedule`;
+      const res = await apiFetch(url, {
         method: 'POST',
         body: JSON.stringify({
           routeId: rescheduleRouteId || undefined,
@@ -461,37 +513,37 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
-  async function openChangeDriver() {
-    setChangingDriver(true);
-    if (drivers.length === 0) {
-      const res = await apiFetch('/delivery-routes/drivers');
-      if (res.ok) setDrivers(await res.json());
+  async function openChangeTeam() {
+    setChangingTeam(true);
+    if (teams.length === 0) {
+      const res = await apiFetch('/teams');
+      if (res.ok) setTeams((await res.json()).map(toPickerTeam));
     }
   }
 
-  async function handleChangeDriver(driverId: string) {
-    if (!route || !driverId || driverId === route.driver.id) {
-      setChangingDriver(false);
+  async function handleChangeTeam(teamId: string) {
+    if (!route || !teamId || teamId === route.team.id) {
+      setChangingTeam(false);
       return;
     }
-    const next = drivers.find((d) => d.id === driverId);
-    if (next && !confirm(t('delivery.routeDetail.confirmChangeDriver', { name: driverLabel(next) }))) return;
-    setSavingDriver(true);
+    const next = teams.find((x) => x.id === teamId);
+    if (next && !confirm(t('delivery.routeDetail.confirmChangeTeam', { name: teamLabel(next, t('delivery.teams.noDriver')) }))) return;
+    setSavingTeam(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-routes/${id}`, { method: 'PATCH', body: JSON.stringify({ driverId }) });
+      const res = await apiFetch(`/delivery-routes/${id}`, { method: 'PATCH', body: JSON.stringify({ teamId }) });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
-      setChangingDriver(false);
+      setChangingTeam(false);
       await load();
       if (showHistory) await loadHistory();
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
-      setSavingDriver(false);
+      setSavingTeam(false);
     }
   }
 
@@ -507,6 +559,17 @@ export default function DeliveryRouteDetailPage() {
     return <p className="text-sm text-red-600 p-6">{error}</p>;
   }
 
+  const routeOpen = route.status !== 'COMPLETED' && route.status !== 'CANCELLED';
+  const mapStops = route.stops
+    .filter((s) => s.destinationLatitude && s.destinationLongitude)
+    .map<MapStop>((s) => ({
+      id: s.id,
+      status: s.status,
+      latitude: Number(s.destinationLatitude),
+      longitude: Number(s.destinationLongitude),
+      label: s.label,
+    }));
+
   const statusLabels: Record<StopStatus, string> = {
     PENDING: t('delivery.routeDetail.statusLabel.PENDING'),
     DELIVERED: t('delivery.routeDetail.statusLabel.DELIVERED'),
@@ -520,17 +583,17 @@ export default function DeliveryRouteDetailPage() {
           <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
             {route.name ?? new Date(route.routeDate).toLocaleDateString()}
           </h1>
-          {changingDriver ? (
+          {changingTeam ? (
             <div className="mt-1 flex items-center gap-2 max-w-sm">
-              <DriverPicker
+              <TeamPicker
                 className="flex-1 min-w-0"
-                drivers={drivers}
-                value={route.driver.id}
-                onChange={handleChangeDriver}
-                disabled={savingDriver}
+                teams={teams}
+                value={route.team.id}
+                onChange={handleChangeTeam}
+                disabled={savingTeam}
               />
               <button
-                onClick={() => setChangingDriver(false)}
+                onClick={() => setChangingTeam(false)}
                 aria-label={t('common.cancel')}
                 className="p-2 text-gray-400 hover:text-gray-600 shrink-0"
               >
@@ -539,14 +602,14 @@ export default function DeliveryRouteDetailPage() {
             </div>
           ) : (
             <p className="text-xs text-gray-500 truncate flex items-center gap-1.5">
-              {driverLabel(route.driver)}
-              {!isDriver && (
+              {teamLabel(route.team, t('delivery.teams.noDriver'))}
+              {!isDriver && routeOpen && (
                 <button
-                  onClick={openChangeDriver}
+                  onClick={openChangeTeam}
                   className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
                 >
-                  <UserCog size={12} />
-                  {t('delivery.routeDetail.changeDriver')}
+                  <Users size={12} />
+                  {t('delivery.routeDetail.changeTeam')}
                 </button>
               )}
             </p>
@@ -571,19 +634,7 @@ export default function DeliveryRouteDetailPage() {
           </div>
         )}
 
-        {route.stops.some((s) => s.deliveryOrder.destinationLatitude && s.deliveryOrder.destinationLongitude) && (
-          <DeliveryMap
-            stops={route.stops
-              .filter((s) => s.deliveryOrder.destinationLatitude && s.deliveryOrder.destinationLongitude)
-              .map<MapStop>((s) => ({
-                id: s.id,
-                status: s.status,
-                latitude: Number(s.deliveryOrder.destinationLatitude),
-                longitude: Number(s.deliveryOrder.destinationLongitude),
-                label: s.deliveryOrder.customerName ?? s.deliveryOrder.doNumber ?? s.deliveryOrder.id,
-              }))}
-          />
-        )}
+        {mapStops.length > 0 && <DeliveryMap stops={mapStops} />}
 
         {!isDriver && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
@@ -623,7 +674,7 @@ export default function DeliveryRouteDetailPage() {
 
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t('delivery.routeDetail.stopsTitle')}</h2>
-          {!isDriver && (
+          {!isDriver && routeOpen && (
             <button
               onClick={async () => {
                 setShowAddStop((v) => !v);
@@ -639,23 +690,78 @@ export default function DeliveryRouteDetailPage() {
 
         {!isDriver && showAddStop && (
           <div className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
-            <select
-              value={selectedOrderId}
-              onChange={(e) => setSelectedOrderId(e.target.value)}
-              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm sm:min-w-[220px]"
-            >
-              <option value="">{t('delivery.routeDetail.selectDeliveryOrder')}</option>
-              {availableOrders.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.doNumber ?? o.id} — {o.customerName ?? '—'}
-                </option>
-              ))}
-            </select>
-            {availableOrders.length === 0 && (
-              <p className="text-xs text-gray-500">{t('delivery.routeDetail.noAvailableOrders')}</p>
+            {!hasInvoicePos && (
+              <div className="inline-flex rounded-md border border-gray-300 overflow-hidden text-sm w-full sm:w-auto">
+                {(['CUSTOMER', 'DELIVERY_ORDER'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setAddMode(mode)}
+                    className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 ${
+                      addMode === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {mode === 'CUSTOMER' ? <Store size={14} /> : <Truck size={14} />}
+                    {t(mode === 'CUSTOMER' ? 'delivery.routeDetail.addCustomerStop' : 'delivery.routeDetail.addDeliveryOrderStop')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {stopMode === 'CUSTOMER' ? (
+              <>
+                <CustomerStopPicker className="w-full sm:w-auto" value={selectedCustomer} onChange={setSelectedCustomer} />
+                <select
+                  value={newStopPriority}
+                  onChange={(e) => setNewStopPriority(e.target.value as 'NORMAL' | 'HIGH')}
+                  aria-label={t('delivery.routeDetail.priorityLabel')}
+                  className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+                >
+                  <option value="NORMAL">{t('delivery.routeDetail.priorityNormal')}</option>
+                  <option value="HIGH">{t('delivery.routeDetail.priorityHigh')}</option>
+                </select>
+                <label className="block">
+                  <span className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+                    {t('delivery.routeDetail.windowStartLabel')}
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={newStopWindowStart}
+                    onChange={(e) => setNewStopWindowStart(e.target.value)}
+                    className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+                    {t('delivery.routeDetail.windowEndLabel')}
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={newStopWindowEnd}
+                    onChange={(e) => setNewStopWindowEnd(e.target.value)}
+                    className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <select
+                  value={selectedOrderId}
+                  onChange={(e) => setSelectedOrderId(e.target.value)}
+                  className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm sm:min-w-[220px]"
+                >
+                  <option value="">{t('delivery.routeDetail.selectDeliveryOrder')}</option>
+                  {availableOrders.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.doNumber ?? o.id} — {o.customerName ?? '—'}
+                    </option>
+                  ))}
+                </select>
+                {availableOrders.length === 0 && (
+                  <p className="text-xs text-gray-500">{t('delivery.routeDetail.noAvailableOrders')}</p>
+                )}
+              </>
             )}
             <button
-              disabled={busy === 'add-stop' || !selectedOrderId}
+              disabled={busy === 'add-stop' || (stopMode === 'CUSTOMER' ? !selectedCustomer : !selectedOrderId)}
               onClick={handleAddStop}
               className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
@@ -677,13 +783,24 @@ export default function DeliveryRouteDetailPage() {
                 <div className="flex items-start sm:items-center gap-3 min-w-0">
                   <div className="text-xs text-gray-400 font-medium w-6 shrink-0">#{stop.sequence}</div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate">
-                      {stop.deliveryOrder.customerName ?? stop.deliveryOrder.doNumber ?? stop.deliveryOrder.id}
+                    <div className="text-sm font-semibold truncate flex items-center gap-1.5">
+                      {stop.kind === 'CUSTOMER' ? (
+                        <Store size={13} className="text-blue-500 shrink-0" aria-label={t('delivery.routeDetail.customerStopBadge')} />
+                      ) : (
+                        stop.doNumber && <span className="text-[10px] font-mono text-gray-400 shrink-0">{stop.doNumber}</span>
+                      )}
+                      <span className="truncate">{stop.label}</span>
                     </div>
-                    {stop.deliveryOrder.deliveryAddress && (
+                    {stop.address && (
                       // Wraps on phones where a truncated address is useless;
                       // single-line on wider screens where the row has room.
-                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">{stop.deliveryOrder.deliveryAddress}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">{stop.address}</div>
+                    )}
+                    {stop.status === 'DELIVERED' && stop.receivedBy && (
+                      <div className="text-xs text-green-700">{t('delivery.routeDetail.receivedByLabel')}: {stop.receivedBy}</div>
+                    )}
+                    {stop.status === 'FAILED' && stop.failureReason && (
+                      <div className="text-xs text-red-600">{stop.failureReason}</div>
                     )}
                     <div className="flex items-center gap-2 flex-wrap">
                       {isCurrent && (
@@ -696,7 +813,7 @@ export default function DeliveryRouteDetailPage() {
                           {t('delivery.routeDetail.rescheduledBadge')}
                         </span>
                       )}
-                      {stop.deliveryOrder.priority === 'HIGH' && (
+                      {stop.priority === 'HIGH' && (
                         <span className="text-[10px] bg-purple-100 text-purple-800 border border-purple-300 rounded-full px-1.5 font-medium">
                           {t('delivery.routeDetail.priorityHigh')}
                         </span>
@@ -706,9 +823,9 @@ export default function DeliveryRouteDetailPage() {
                           {t('delivery.routeDetail.eta')} {formatEta(stop.plannedEta)}
                         </span>
                       )}
-                      {stop.deliveryOrder.deliveryWindowEnd && (
+                      {stop.deliveryWindowEnd && (
                         <span className="text-[10px] text-gray-500 font-medium">
-                          {t('delivery.routeDetail.windowEndLabel')} {formatEta(stop.deliveryOrder.deliveryWindowEnd)}
+                          {t('delivery.routeDetail.windowEndLabel')} {formatEta(stop.deliveryWindowEnd)}
                         </span>
                       )}
                       {stop.atRisk && (
@@ -779,12 +896,14 @@ export default function DeliveryRouteDetailPage() {
                     squeezing the stop details down to nothing beside them. */}
                 <div className="flex items-center gap-2 flex-wrap pl-9 sm:pl-0 sm:flex-nowrap sm:shrink-0">
                   {statusBadge(stop.status, statusLabels[stop.status])}
-                  <button
-                    onClick={() => openEditDetails(stop)}
-                    className="text-xs sm:text-[11px] font-medium text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5"
-                  >
-                    {t('delivery.routeDetail.editDetails')}
-                  </button>
+                  {(stop.deliveryOrder || (stop.status === 'PENDING' && routeOpen && !isDriver)) && (
+                    <button
+                      onClick={() => openEditDetails(stop)}
+                      className="text-xs sm:text-[11px] font-medium text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5"
+                    >
+                      {t('delivery.routeDetail.editDetails')}
+                    </button>
+                  )}
                   {stop.status === 'FAILED' && !stop.superseded && !isDriver && (
                     <button
                       disabled={reschedulingId === stop.id}
@@ -798,24 +917,21 @@ export default function DeliveryRouteDetailPage() {
                   )}
                   <button
                     onClick={() => openLocationPicker(stop)}
+                    disabled={isDriver || !routeOpen || stop.status !== 'PENDING'}
                     title={t('delivery.routeDetail.setLocation')}
-                    className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 ${
-                      stop.deliveryOrder.destinationLatitude
-                        ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
-                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:cursor-default ${
+                      stop.destinationLatitude
+                        ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100 disabled:hover:bg-green-50'
+                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:hover:bg-amber-50'
                     }`}
                   >
-                    {stop.deliveryOrder.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
-                    {stop.deliveryOrder.destinationLatitude
+                    {stop.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
+                    {stop.destinationLatitude
                       ? t('delivery.routeDetail.locationSet')
                       : t('delivery.routeDetail.noLocation')}
                   </button>
-                  <GoogleMapsLink
-                    lat={stop.deliveryOrder.destinationLatitude}
-                    lng={stop.deliveryOrder.destinationLongitude}
-                    className="px-1"
-                  />
-                  {!isDriver && (
+                  <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} className="px-1" />
+                  {!isDriver && routeOpen && (
                     <>
                       <button
                         disabled={rowBusy || idx === 0}
@@ -913,17 +1029,15 @@ export default function DeliveryRouteDetailPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
                 <CalendarClock size={16} className="text-amber-600" />
-                {t('delivery.routeDetail.rescheduleTitle', {
-                  name: rescheduleStop.deliveryOrder.customerName ?? rescheduleStop.deliveryOrder.doNumber ?? '',
-                })}
+                {t('delivery.routeDetail.rescheduleTitle', { name: rescheduleStop.label })}
               </h3>
               <button onClick={() => setRescheduleStop(null)} aria-label={t('common.cancel')} className="p-2 -m-2 text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
-            {rescheduleStop.deliveryOrder.failureReason && (
+            {rescheduleStop.failureReason && (
               <p className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-md px-2 py-1.5">
-                {t('delivery.routeDetail.failureReasonLabel')}: {rescheduleStop.deliveryOrder.failureReason}
+                {t('delivery.routeDetail.failureReasonLabel')}: {rescheduleStop.failureReason}
               </p>
             )}
             <div>
@@ -947,10 +1061,14 @@ export default function DeliveryRouteDetailPage() {
                 onChange={(e) => setRescheduleRouteId(e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               >
-                <option value="">{t('delivery.routeDetail.rescheduleNoRoute')}</option>
+                {rescheduleStop.deliveryOrder ? (
+                  <option value="">{t('delivery.routeDetail.rescheduleNoRoute')}</option>
+                ) : (
+                  <option value="">{t('delivery.routeDetail.rescheduleSelectRoute')}</option>
+                )}
                 {rescheduleRoutes.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {(r.name ?? driverLabel(r.driver)) + (r.name ? ` — ${driverLabel(r.driver)}` : '')}
+                    {(r.name ?? r.team.name) + (r.name ? ` — ${r.team.name}` : '')}
                   </option>
                 ))}
               </select>
@@ -978,7 +1096,9 @@ export default function DeliveryRouteDetailPage() {
                 />
               </label>
             </div>
-            <p className="text-xs text-gray-500">{t('delivery.routeDetail.rescheduleHint')}</p>
+            <p className="text-xs text-gray-500">
+              {t(rescheduleStop.deliveryOrder ? 'delivery.routeDetail.rescheduleHint' : 'delivery.routeDetail.rescheduleCustomerHint')}
+            </p>
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button
                 onClick={() => setRescheduleStop(null)}
@@ -987,7 +1107,7 @@ export default function DeliveryRouteDetailPage() {
                 {t('common.cancel')}
               </button>
               <button
-                disabled={reschedulingId === rescheduleStop.id}
+                disabled={reschedulingId === rescheduleStop.id || (!rescheduleStop.deliveryOrder && !rescheduleRouteId)}
                 onClick={handleReschedule}
                 className="bg-amber-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-amber-700 disabled:opacity-50"
               >
@@ -1016,6 +1136,11 @@ export default function DeliveryRouteDetailPage() {
                 <X size={18} />
               </button>
             </div>
+            {pickingStop?.kind === 'CUSTOMER' && (
+              <p className="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded-md px-2 py-1.5">
+                {t('delivery.routeDetail.customerPinThisRouteOnly')}
+              </p>
+            )}
             {pickingStop && savedAddresses.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-500 mb-1">{t('delivery.addresses.useSaved')}</p>
@@ -1039,15 +1164,7 @@ export default function DeliveryRouteDetailPage() {
               // Shown as context/centering only, not editable here — keeps
               // the picker from defaulting to the Jakarta fallback center
               // when the route's actual stops are somewhere else entirely.
-              stops={route.stops
-                .filter((s) => s.deliveryOrder.destinationLatitude && s.deliveryOrder.destinationLongitude)
-                .map<MapStop>((s) => ({
-                  id: s.id,
-                  status: s.status,
-                  latitude: Number(s.deliveryOrder.destinationLatitude),
-                  longitude: Number(s.deliveryOrder.destinationLongitude),
-                  label: s.deliveryOrder.customerName ?? s.deliveryOrder.doNumber ?? s.deliveryOrder.id,
-                }))}
+              stops={mapStops}
               height={320}
               pickMode
               pickedPosition={pickedPosition}

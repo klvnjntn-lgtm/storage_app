@@ -3,7 +3,7 @@ import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 export class CreateRouteDto {
   @IsString()
-  driverId: string;
+  teamId: string;
 
   @IsDateString()
   routeDate: string;

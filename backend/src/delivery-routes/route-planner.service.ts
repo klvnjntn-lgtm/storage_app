@@ -45,7 +45,7 @@ type PlanDeliveryOrder = Prisma.DeliveryOrderGetPayload<{
 
 type RouteSummary = {
   id: string;
-  driverId: string;
+  teamId: string;
   status: RouteStatus;
   version: number;
   createdAt: Date;
@@ -53,27 +53,38 @@ type RouteSummary = {
   // touched by the planner.
   locked: boolean;
   deliveryOrderIds: string[];
+  // Customer stops (no DO) — the planner never moves them, but keeps them
+  // on the route after its planned stops.
+  customerStopCount: number;
+};
+
+type PlanTeam = {
+  id: string;
+  name: string;
+  driver: { id: string; email: string; displayName: string | null } | null;
 };
 
 // Everything preview and save both need to agree on.
 type PlanContext = {
-  drivers: { id: string; email: string; displayName: string | null }[];
+  teams: PlanTeam[];
   deliveryOrders: PlanDeliveryOrder[];
   availability: Map<string, DriverAvailability>;
   // Unlocked PLANNED routes on the date that the plan rebuilds or takes
   // stops from, with their versions for the stale-preview check.
   affectedRoutes: RouteSummary[];
-  // DOs currently on a selected driver's route but left out of the plan —
+  // DOs currently on a selected team's route but left out of the plan —
   // saving takes them off (back to unrouted).
   removedDeliveryOrderIds: string[];
-  // Per driver: the existing route the plan reuses, if any.
-  targetRouteIdByDriver: Map<string, string | null>;
+  // Per team: its existing route that day, which the plan reuses (one
+  // route per team per day).
+  targetRouteIdByTeam: Map<string, string | null>;
 };
 
 const label = (d: { customerName: string | null; doNumber: string | null; id: string }) =>
   d.customerName ?? d.doNumber ?? d.id;
 
-// "Optimize all drivers": VROOM splits a day's deliveries across drivers.
+// "Optimize all teams": VROOM splits a day's deliveries across teams (one
+// team = one driver = one vehicle = one route per day).
 // Preview first, save second — nothing moves until the dispatcher has seen
 // the result. Only routes that haven't started are ever changed; started
 // ones are locked.
@@ -98,14 +109,17 @@ export class RoutePlannerService {
       },
       select: {
         id: true,
-        driverId: true,
+        teamId: true,
         status: true,
         version: true,
         createdAt: true,
         stops: {
           select: {
             activeDeliveryOrderId: true,
+            deliveryOrderId: true,
             supersededAt: true,
+            signedAt: true,
+            failedAt: true,
             deliveryOrder: { select: { status: true, signedAt: true } },
           },
         },
@@ -114,7 +128,7 @@ export class RoutePlannerService {
     });
     return rows.map((r) => ({
       id: r.id,
-      driverId: r.driverId,
+      teamId: r.teamId,
       status: r.status,
       version: r.version,
       createdAt: r.createdAt,
@@ -124,7 +138,25 @@ export class RoutePlannerService {
       deliveryOrderIds: r.stops
         .map((s) => s.activeDeliveryOrderId)
         .filter((id): id is string => id != null),
+      customerStopCount: r.stops.filter((s) => s.deliveryOrderId == null).length,
     }));
+  }
+
+  private async loadTeams(organizationId: string, teamIds?: string[]): Promise<PlanTeam[]> {
+    const teams = await this.prisma.team.findMany({
+      where: { organizationId, ...(teamIds ? { id: { in: teamIds } } : {}) },
+      select: {
+        id: true,
+        name: true,
+        members: {
+          where: { role: 'DRIVER', active: true, removedAt: null },
+          select: { id: true, email: true, displayName: true },
+          take: 1,
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return teams.map((t) => ({ id: t.id, name: t.name, driver: t.members[0] ?? null }));
   }
 
   // Deliveries still to be sent: packed, or shipped but not yet signed for.
@@ -136,13 +168,13 @@ export class RoutePlannerService {
     };
   }
 
-  // What the planner page offers: drivers (with their hours and existing
-  // routes that day) and deliveries that can be planned — not on any route
-  // yet, or on a not-yet-started route that day.
+  // What the planner page offers: teams (with their driver's hours and
+  // their route that day) and deliveries that can be planned — not on any
+  // route yet, or on a not-yet-started route that day.
   async candidates(organizationId: string, routeDate: string) {
     this.routes.dayRange(routeDate); // validates the date
-    const [drivers, dayRoutes, lastStart] = await Promise.all([
-      this.routes.listDrivers(organizationId),
+    const [teams, dayRoutes, lastStart] = await Promise.all([
+      this.loadTeams(organizationId),
       this.routesOnDate(organizationId, routeDate),
       this.prisma.route.findFirst({
         where: { organizationId, startLatitude: { not: null } },
@@ -151,9 +183,9 @@ export class RoutePlannerService {
       }),
     ]);
     const unlockedRouteIds = dayRoutes.filter((r) => !r.locked).map((r) => r.id);
-    const availability = await this.optimizer.driverAvailability(
+    const availability = await this.routes.teamAvailability(
       organizationId,
-      drivers.map((d) => d.id),
+      teams.map((t) => t.id),
       routeDate,
     );
 
@@ -178,11 +210,11 @@ export class RoutePlannerService {
             longitude: Number(lastStart.startLongitude),
           }
         : null,
-      drivers: drivers.map((d) => {
-        const a = availability.get(d.id)!;
-        const mine = dayRoutes.filter((r) => r.driverId === d.id);
+      teams: teams.map((t) => {
+        const a = availability.get(t.id)!;
+        const mine = dayRoutes.filter((r) => r.teamId === t.id);
         return {
-          ...d,
+          ...t,
           hours: a.hoursLabel,
           restricted: a.restricted,
           offDuty: a.offDuty,
@@ -190,7 +222,7 @@ export class RoutePlannerService {
             id: r.id,
             status: r.status,
             locked: r.locked,
-            stopCount: r.deliveryOrderIds.length,
+            stopCount: r.deliveryOrderIds.length + r.customerStopCount,
           })),
         };
       }),
@@ -205,7 +237,7 @@ export class RoutePlannerService {
           deliveryWindowStart: o.deliveryWindowStart,
           deliveryWindowEnd: o.deliveryWindowEnd,
           hasPin: o.destinationLatitude != null && o.destinationLongitude != null,
-          currentRoute: route ? { id: route.id, driverId: route.driverId } : null,
+          currentRoute: route ? { id: route.id, teamId: route.teamId } : null,
         };
       }),
     };
@@ -217,23 +249,29 @@ export class RoutePlannerService {
   ): Promise<PlanContext> {
     this.routes.dayRange(dto.routeDate);
 
-    const drivers = await this.prisma.user.findMany({
-      where: {
-        id: { in: dto.driverIds },
-        organizationId,
-        role: 'DRIVER',
-        active: true,
-      },
-      select: { id: true, email: true, displayName: true },
-    });
-    if (drivers.length !== dto.driverIds.length) {
-      throw new NotFoundException(
-        'One or more drivers not found (must be active users with the DRIVER role)',
+    const teams = await this.loadTeams(organizationId, dto.teamIds);
+    if (teams.length !== dto.teamIds.length) {
+      throw new NotFoundException('One or more teams not found');
+    }
+    const noDriver = teams.filter((t) => !t.driver);
+    if (noDriver.length > 0) {
+      throw new BadRequestException(
+        `These teams have no driver: ${noDriver.map((t) => t.name).join(', ')}`,
       );
     }
 
     const dayRoutes = await this.routesOnDate(organizationId, dto.routeDate);
     const routeById = new Map(dayRoutes.map((r) => [r.id, r]));
+    // One route per team per day: a team whose route already started can't
+    // get a second one.
+    const started = teams.filter((t) =>
+      dayRoutes.some((r) => r.teamId === t.id && r.locked),
+    );
+    if (started.length > 0) {
+      throw new BadRequestException(
+        `These teams' routes for the day have already started: ${started.map((t) => t.name).join(', ')}`,
+      );
+    }
 
     const deliveryOrders = await this.prisma.deliveryOrder.findMany({
       where: { id: { in: dto.deliveryOrderIds }, organizationId },
@@ -258,41 +296,41 @@ export class RoutePlannerService {
       );
     }
 
-    const selectedDrivers = new Set(dto.driverIds);
+    const selectedTeams = new Set(dto.teamIds);
     const selectedOrders = new Set(dto.deliveryOrderIds);
     const affectedRoutes = dayRoutes.filter(
       (r) =>
         !r.locked &&
-        (selectedDrivers.has(r.driverId) ||
+        (selectedTeams.has(r.teamId) ||
           r.deliveryOrderIds.some((id) => selectedOrders.has(id))),
     );
     const removedDeliveryOrderIds = affectedRoutes
-      .filter((r) => selectedDrivers.has(r.driverId))
+      .filter((r) => selectedTeams.has(r.teamId))
       .flatMap((r) => r.deliveryOrderIds)
       .filter((id) => !selectedOrders.has(id));
 
-    const targetRouteIdByDriver = new Map<string, string | null>();
-    for (const driverId of dto.driverIds) {
-      targetRouteIdByDriver.set(
-        driverId,
-        affectedRoutes.find((r) => r.driverId === driverId)?.id ?? null,
+    const targetRouteIdByTeam = new Map<string, string | null>();
+    for (const teamId of dto.teamIds) {
+      targetRouteIdByTeam.set(
+        teamId,
+        affectedRoutes.find((r) => r.teamId === teamId)?.id ?? null,
       );
     }
 
-    const availability = await this.optimizer.driverAvailability(
+    const availability = await this.routes.teamAvailability(
       organizationId,
-      dto.driverIds,
+      dto.teamIds,
       dto.routeDate,
       dto.departureAt ? new Date(dto.departureAt) : undefined,
     );
 
     return {
-      drivers,
+      teams,
       deliveryOrders,
       availability,
       affectedRoutes,
       removedDeliveryOrderIds,
-      targetRouteIdByDriver,
+      targetRouteIdByTeam,
     };
   }
 
@@ -310,19 +348,21 @@ export class RoutePlannerService {
   }
 
   // What happens to each affected route that isn't being rebuilt as some
-  // driver's plan: it loses the stops the plan takes, and is cancelled if
-  // that leaves it empty.
+  // team's plan: it loses the stops the plan takes, and is cancelled if
+  // that leaves it empty (customer stops count — they stay).
   private leftoverRoutes(
     ctx: PlanContext,
-    plannedDriverIds: Set<string>,
+    plannedTeamIds: Set<string>,
     takenOff: Set<string>,
   ) {
     const rebuilt = (r: RouteSummary) =>
-      plannedDriverIds.has(r.driverId) &&
-      ctx.targetRouteIdByDriver.get(r.driverId) === r.id;
+      plannedTeamIds.has(r.teamId) &&
+      ctx.targetRouteIdByTeam.get(r.teamId) === r.id;
     const leftovers = ctx.affectedRoutes.filter((r) => !rebuilt(r));
-    const emptied = leftovers.filter((r) =>
-      r.deliveryOrderIds.every((id) => takenOff.has(id)),
+    const emptied = leftovers.filter(
+      (r) =>
+        r.customerStopCount === 0 &&
+        r.deliveryOrderIds.every((id) => takenOff.has(id)),
     );
     return {
       cancelledRouteIds: emptied.map((r) => r.id),
@@ -335,8 +375,8 @@ export class RoutePlannerService {
   async preview(organizationId: string, dto: PlanRoutesDto) {
     const ctx = await this.loadContext(organizationId, dto);
 
-    // Drivers with hours configured but none on this day aren't planned.
-    const onDuty = dto.driverIds.filter((id) => !ctx.availability.get(id)!.offDuty);
+    // Teams whose driver has hours configured but none on this day aren't planned.
+    const onDuty = dto.teamIds.filter((id) => !ctx.availability.get(id)!.offDuty);
     const { routes, unassigned } = onDuty.length
       ? await this.optimizer.optimize({
           depot: { lat: dto.depot.latitude, lng: dto.depot.longitude },
@@ -356,7 +396,7 @@ export class RoutePlannerService {
         };
 
     const orderById = new Map(ctx.deliveryOrders.map((o) => [o.id, o]));
-    const plannedDriverIds = new Set(
+    const plannedTeamIds = new Set(
       [...routes.entries()].filter(([, stops]) => stops.length > 0).map(([id]) => id),
     );
     const currentRouteOf = (o: PlanDeliveryOrder) => o.routeStop?.routeId ?? null;
@@ -364,16 +404,16 @@ export class RoutePlannerService {
     return {
       routeDate: dto.routeDate,
       depot: dto.depot,
-      routes: ctx.drivers.map((driver) => {
-        const a = ctx.availability.get(driver.id)!;
-        const stops = routes.get(driver.id) ?? [];
+      routes: ctx.teams.map((team) => {
+        const a = ctx.availability.get(team.id)!;
+        const stops = routes.get(team.id) ?? [];
         const last = stops[stops.length - 1];
         return {
-          driver,
+          team,
           hours: a.hoursLabel,
           offDuty: a.offDuty,
           departureAt: a.availableFrom,
-          existingRouteId: ctx.targetRouteIdByDriver.get(driver.id) ?? null,
+          existingRouteId: ctx.targetRouteIdByTeam.get(team.id) ?? null,
           totalMeters: stops.reduce((sum, s) => sum + (s.leg?.distanceMeters ?? 0), 0),
           totalSeconds: stops.reduce((sum, s) => sum + (s.leg?.durationSeconds ?? 0), 0),
           finishEta: last?.eta ?? null,
@@ -394,7 +434,7 @@ export class RoutePlannerService {
               travelSeconds: s.leg?.durationSeconds ?? null,
               travelMeters: s.leg?.distanceMeters ?? null,
               movedFromRouteId:
-                currentRouteOf(o) && currentRouteOf(o) !== ctx.targetRouteIdByDriver.get(driver.id)
+                currentRouteOf(o) && currentRouteOf(o) !== ctx.targetRouteIdByTeam.get(team.id)
                   ? currentRouteOf(o)
                   : null,
             };
@@ -414,7 +454,7 @@ export class RoutePlannerService {
       removedDeliveryOrderIds: ctx.removedDeliveryOrderIds,
       cancelledRouteIds: this.leftoverRoutes(
         ctx,
-        plannedDriverIds,
+        plannedTeamIds,
         new Set([...dto.deliveryOrderIds, ...ctx.removedDeliveryOrderIds]),
       ).cancelledRouteIds,
       expectedVersions: Object.fromEntries(
@@ -439,8 +479,8 @@ export class RoutePlannerService {
     const orderById = new Map(ctx.deliveryOrders.map((o) => [o.id, o]));
     const seen = new Set<string>();
     for (const r of dto.routes) {
-      if (!ctx.targetRouteIdByDriver.has(r.driverId)) {
-        throw new BadRequestException('Plan contains a driver that was not selected');
+      if (!ctx.targetRouteIdByTeam.has(r.teamId)) {
+        throw new BadRequestException('Plan contains a team that was not selected');
       }
       for (const id of r.deliveryOrderIds) {
         const o = orderById.get(id);
@@ -459,22 +499,22 @@ export class RoutePlannerService {
       dto.routes
         .filter((r) => r.deliveryOrderIds.length > 0)
         .map(async (r) => {
-          const departAt = ctx.availability.get(r.driverId)!.availableFrom;
+          const departAt = ctx.availability.get(r.teamId)!.availableFrom;
           const jobs = r.deliveryOrderIds.map((id) => {
             const job = this.toJob(orderById.get(id)!);
             return { ...job, location: job.location! };
           });
           const stops = await this.optimizer.scheduleFixedOrder(depot, departAt, jobs);
-          return { driverId: r.driverId, departAt, stops };
+          return { teamId: r.teamId, departAt, stops };
         }),
     );
-    const plannedDriverIds = new Set(planned.map((p) => p.driverId));
+    const plannedTeamIds = new Set(planned.map((p) => p.teamId));
     // Every selected delivery comes off its current route (even ones the
-    // plan left unassigned), plus those dropped from a selected driver's.
+    // plan left unassigned), plus those dropped from a selected team's.
     const takenOff = [...dto.deliveryOrderIds, ...ctx.removedDeliveryOrderIds];
     const { cancelledRouteIds, shrunkRouteIds } = this.leftoverRoutes(
       ctx,
-      plannedDriverIds,
+      plannedTeamIds,
       new Set(takenOff),
     );
     const affectedIds = ctx.affectedRoutes.map((r) => r.id);
@@ -499,16 +539,16 @@ export class RoutePlannerService {
         where: { routeId: { in: affectedIds }, activeDeliveryOrderId: { in: takenOff } },
       });
 
-      const saved: { routeId: string; driverId: string; created: boolean }[] = [];
+      const saved: { routeId: string; teamId: string; created: boolean }[] = [];
       for (const p of planned) {
-        let routeId = ctx.targetRouteIdByDriver.get(p.driverId) ?? null;
+        let routeId = ctx.targetRouteIdByTeam.get(p.teamId) ?? null;
         const created = routeId == null;
         if (routeId == null) {
           routeId = (
             await tx.route.create({
               data: {
                 organizationId,
-                driverId: p.driverId,
+                teamId: p.teamId,
                 routeDate: new Date(`${dto.routeDate}T00:00:00.000Z`),
                 createdByUserId: userId,
               },
@@ -524,6 +564,18 @@ export class RoutePlannerService {
             plannedDepartureAt: p.departAt,
           },
         });
+        // Customer stops left on a reused route go after the planned ones
+        // (moved out of the way first — @@unique([routeId, sequence])).
+        const kept = created
+          ? []
+          : await tx.routeStop.findMany({
+              where: { routeId },
+              select: { id: true },
+              orderBy: { sequence: 'asc' },
+            });
+        for (const [i, stop] of kept.entries()) {
+          await tx.routeStop.update({ where: { id: stop.id }, data: { sequence: -(i + 1) } });
+        }
         await tx.routeStop.createMany({
           data: p.stops.map((s, i) => ({
             routeId: routeId!,
@@ -536,7 +588,13 @@ export class RoutePlannerService {
               s.leg != null ? Math.round(s.leg.durationSeconds) : null,
           })),
         });
-        saved.push({ routeId, driverId: p.driverId, created });
+        for (const [i, stop] of kept.entries()) {
+          await tx.routeStop.update({
+            where: { id: stop.id },
+            data: { sequence: p.stops.length + i + 1 },
+          });
+        }
+        saved.push({ routeId, teamId: p.teamId, created });
       }
 
       // Close the gaps left in routes that kept some stops (two-phase, same
@@ -576,13 +634,16 @@ export class RoutePlannerService {
           plan: true,
         });
       }
-      await this.notifications.create(
-        organizationId,
-        r.driverId,
-        r.created ? 'DELIVERY_ASSIGNED' : 'ROUTE_REOPTIMIZED',
-        r.created ? 'A new route was assigned to you' : 'Your route was re-optimized',
-        { link: '/driver', payload: { routeId: r.routeId } },
-      );
+      const driverId = ctx.teams.find((t) => t.id === r.teamId)?.driver?.id;
+      if (driverId) {
+        await this.notifications.create(
+          organizationId,
+          driverId,
+          r.created ? 'DELIVERY_ASSIGNED' : 'ROUTE_REOPTIMIZED',
+          r.created ? 'A new route was assigned to your team' : 'Your route was re-optimized',
+          { link: '/driver', payload: { routeId: r.routeId } },
+        );
+      }
     }
     for (const r of ctx.affectedRoutes) {
       if (savedIds.has(r.id)) continue;
@@ -596,7 +657,7 @@ export class RoutePlannerService {
     }
 
     return {
-      routes: result.map((r) => ({ routeId: r.routeId, driverId: r.driverId, created: r.created })),
+      routes: result.map((r) => ({ routeId: r.routeId, teamId: r.teamId, created: r.created })),
       cancelledRouteIds,
     };
   }

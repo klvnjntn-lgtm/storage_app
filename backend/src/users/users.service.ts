@@ -137,20 +137,8 @@ export class UsersService {
       }
     }
 
-    if (user.role === 'DRIVER') {
-      const openRoutes = await this.prisma.route.count({
-        where: {
-          organizationId,
-          driverId: userId,
-          status: { in: ['PLANNED', 'ACTIVE'] },
-        },
-      });
-      if (openRoutes > 0) {
-        throw new BadRequestException(
-          `This driver still has ${openRoutes} planned/active route(s) — reassign or finish them first`,
-        );
-      }
-    }
+    // Routes belong to the driver's team, not the driver — removing the
+    // driver leaves the team (and its routes) waiting for a new driver.
 
     await this.prisma.$transaction([
       this.prisma.user.update({

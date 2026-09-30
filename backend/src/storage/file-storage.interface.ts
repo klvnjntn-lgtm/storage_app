@@ -10,7 +10,8 @@ export const FILE_STORAGE = Symbol('FILE_STORAGE');
 //
 // Key prefixes carry visibility, not the storage backend:
 // - media/, logos/        public, served at /uploads/<key>
-// - delivery-proofs/      private, only via a signed URL (SignedFileUrlService)
+// - delivery-proofs/, stop-proofs/, customer-locations/
+//                         private, only via a signed URL (SignedFileUrlService)
 export interface FileStorage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
   // Throws FileNotFoundError when the key doesn't exist.

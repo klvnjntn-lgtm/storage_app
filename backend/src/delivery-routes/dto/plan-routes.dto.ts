@@ -21,8 +21,8 @@ export class PlanDepotDto {
   longitude: number;
 }
 
-// "Optimize all drivers" preview: VROOM splits the chosen deliveries across
-// the chosen drivers. Nothing is saved.
+// "Optimize all teams" preview: VROOM splits the chosen deliveries across
+// the chosen teams (one vehicle each). Nothing is saved.
 export class PlanRoutesDto {
   @IsDateString()
   routeDate: string;
@@ -40,7 +40,7 @@ export class PlanRoutesDto {
   @ArrayMinSize(1)
   @ArrayUnique()
   @IsString({ each: true })
-  driverIds: string[];
+  teamIds: string[];
 
   @IsArray()
   @ArrayUnique()
@@ -48,9 +48,9 @@ export class PlanRoutesDto {
   deliveryOrderIds: string[];
 }
 
-export class PlannedDriverRouteDto {
+export class PlannedTeamRouteDto {
   @IsString()
-  driverId: string;
+  teamId: string;
 
   // Visiting order, exactly as the preview returned it.
   @IsArray()
@@ -64,8 +64,8 @@ export class PlannedDriverRouteDto {
 export class ApplyRoutePlanDto extends PlanRoutesDto {
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => PlannedDriverRouteDto)
-  routes: PlannedDriverRouteDto[];
+  @Type(() => PlannedTeamRouteDto)
+  routes: PlannedTeamRouteDto[];
 
   // routeId → Route.version at preview time; a route that changed since
   // (someone edited it) fails the save instead of being overwritten.

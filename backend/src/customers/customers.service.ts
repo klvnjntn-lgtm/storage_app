@@ -1,6 +1,7 @@
 // src/customers/customers.service.ts
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomerLocationService } from './customer-location.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import {
@@ -10,7 +11,10 @@ import {
 
 @Injectable()
 export class CustomersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private locations: CustomerLocationService,
+  ) {}
 
   async list(organizationId: string, search?: string) {
     return this.prisma.customer.findMany({
@@ -97,7 +101,9 @@ async remove(organizationId: string, id: string) {
     throw new ConflictException(`Cannot delete: ${blockers.join(', ')} reference this customer`);
   }
 
+  const photoKeys = await this.locations.storageKeys(organizationId, id);
   await this.prisma.customer.delete({ where: { id, organizationId } });
+  for (const key of photoKeys) await this.locations.deleteFile(key);
 }
 
   // ─── Saved delivery addresses ───────────────────────────────────────

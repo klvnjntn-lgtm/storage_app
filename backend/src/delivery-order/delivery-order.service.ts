@@ -416,7 +416,7 @@ export class DeliveryOrderService {
   }
 
   // A DRIVER account may only act on a delivery order that's actually on
-  // one of their own routes (see backend/src/delivery-routes) — ADMIN/USER
+  // their team's route (see backend/src/delivery-routes) — ADMIN/USER
   // are unrestricted, same as every other delivery-order action, since
   // staff have always been able to record proof directly without a route.
   async assertRequesterCanActOnDeliveryOrder(
@@ -427,7 +427,7 @@ export class DeliveryOrderService {
     const stop = await this.prisma.routeStop.findFirst({
       where: {
         activeDeliveryOrderId: deliveryOrderId,
-        route: { driverId: requester.sub },
+        route: { team: { members: { some: { id: requester.sub } } } },
       },
       select: { id: true },
     });

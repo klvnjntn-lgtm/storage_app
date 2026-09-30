@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, Search, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check, MapPin, MapPinOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -12,6 +12,9 @@ import Pagination from '@/app/components/shared/Pagination';
 import { useSortableData } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useHasModule } from '@/lib/hooks/useHasModule';
+import DeliveryMap from '@/app/components/delivery/DeliveryMap';
+import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 
 
 // Columns the (desktop) table can be sorted by. Address is deliberately
@@ -25,13 +28,26 @@ type EditState = {
   companyName: string;
   phone: string;
   address: string;
+  // DELIVERY_DMS only — see Customer.latitude / deliveryNotes.
+  position: { lat: number; lng: number } | null;
+  deliveryNotes: string;
 };
 
-const EMPTY_EDIT: EditState = { id: null, name: '', companyName: '', phone: '', address: '' };
+const EMPTY_EDIT: EditState = {
+  id: null,
+  name: '',
+  companyName: '',
+  phone: '',
+  address: '',
+  position: null,
+  deliveryNotes: '',
+};
 
 export default function CustomersPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  // Location pin + driver directions only matter with the delivery module.
+  const hasDelivery = useHasModule('DELIVERY_DMS');
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -133,6 +149,8 @@ export default function CustomersPage() {
       companyName: c.companyName ?? '',
       phone: c.phone ?? '',
       address: c.address ?? '',
+      position: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
+      deliveryNotes: c.deliveryNotes ?? '',
     });
   }
 
@@ -150,6 +168,13 @@ export default function CustomersPage() {
         companyName: editing.companyName.trim() || undefined,
         phone: editing.phone.trim() || undefined,
         address: editing.address.trim() || undefined,
+        ...(hasDelivery
+          ? {
+              latitude: editing.position?.lat,
+              longitude: editing.position?.lng,
+              deliveryNotes: editing.id ? editing.deliveryNotes.trim() : editing.deliveryNotes.trim() || undefined,
+            }
+          : {}),
       });
 
       const res = editing.id
@@ -311,6 +336,7 @@ export default function CustomersPage() {
                   onSort={toggleSort}
                 />
                 <th className="text-left px-4 py-3 font-semibold">{t('common.address')}</th>
+                {hasDelivery && <th className="text-left px-4 py-3 font-semibold">{t('customers.listPage.locationColumn')}</th>}
                 <th className="text-right px-4 py-3 font-semibold">{t('common.actions')}</th>
               </tr>
             </thead>
@@ -324,6 +350,21 @@ export default function CustomersPage() {
                   <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{c.name}</td>
                   <td className={`px-4 py-3 text-gray-600 ${cellHighlight('phone')}`}>{c.phone ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600 truncate max-w-xs">{c.address ?? '—'}</td>
+                  {hasDelivery && (
+                    <td className="px-4 py-3">
+                      {c.latitude && c.longitude ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-700">
+                          <MapPin size={13} />
+                          {t('customers.listPage.locationSet')}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                          <MapPinOff size={13} />
+                          {t('customers.listPage.locationMissing')}
+                        </span>
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
@@ -369,7 +410,7 @@ export default function CustomersPage() {
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-md border-2 border-gray-300 w-full max-w-sm p-5">
+          <div className={`bg-white rounded-md border-2 border-gray-300 w-full ${hasDelivery ? 'max-w-md' : 'max-w-sm'} p-5 max-h-[95vh] overflow-y-auto`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{editing.id ? t('customers.listPage.editCustomer') : t('customers.listPage.newCustomerTitle')}</h2>
               <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
@@ -403,6 +444,27 @@ export default function CustomersPage() {
                 placeholder={t('customers.listPage.addressPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
+              {hasDelivery && (
+                <div className="border-t border-gray-200 pt-2.5 mt-1 space-y-2">
+                  <p className="text-xs font-semibold text-gray-600">{t('customers.listPage.deliveryLocation')}</p>
+                  <DeliveryMap
+                    stops={[]}
+                    height={200}
+                    pickMode
+                    pickedPosition={editing.position}
+                    onPick={(lat, lng) => setEditing({ ...editing, position: { lat, lng } })}
+                  />
+                  <CoordinateInputs value={editing.position} onChange={(position) => setEditing({ ...editing, position })} />
+                  <textarea
+                    value={editing.deliveryNotes}
+                    onChange={(e) => setEditing({ ...editing, deliveryNotes: e.target.value })}
+                    placeholder={t('customers.listPage.deliveryNotesPlaceholder')}
+                    rows={2}
+                    maxLength={1000}
+                    className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
             </div>
 
             {error && <p className="text-xs text-red-600 mt-2">{error}</p>}

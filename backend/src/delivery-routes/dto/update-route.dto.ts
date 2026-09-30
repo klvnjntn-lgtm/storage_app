@@ -13,5 +13,5 @@ export class UpdateRouteDto {
 
   @IsOptional()
   @IsString()
-  driverId?: string;
+  teamId?: string;
 }

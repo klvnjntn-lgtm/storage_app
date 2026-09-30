@@ -59,6 +59,13 @@ model Customer {
   latitude  Decimal? @db.Decimal(9, 6)
   longitude Decimal? @db.Decimal(9, 6)
 
+  // DELIVERY_DMS — directions for the driver ("gate behind the mosque,
+  // ring the bell twice"), shown on every route stop for this customer
+  // together with locationPhotos.
+  deliveryNotes  String?
+  locationPhotos CustomerLocationPhoto[]
+  routeStops     RouteStop[]
+
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   npwp         String?
@@ -89,6 +96,23 @@ model CustomerAddress {
   longitude      Decimal? @db.Decimal(9, 6)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@index([organizationId, customerId])
+}
+
+// DELIVERY_DMS — photos of the customer's building/entrance so a driver
+// can recognise the place (max 2 per customer, CustomerLocationService).
+// Private files under "customer-locations/", viewed via signed links like
+// delivery proofs — a customer's premises aren't public media.
+model CustomerLocationPhoto {
+  id             String   @id @default(cuid())
+  organizationId String
+  customerId     String
+  storageKey     String
+  createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
@@ -163,6 +187,7 @@ model Organization {
   categories                   Category[]
   customers                    Customer[]
   customerAddresses            CustomerAddress[]
+  customerLocationPhotos       CustomerLocationPhoto[]
   events                       Event[]
   externalOrders               ExternalOrder[]
   integrationConnections       IntegrationConnection[]
@@ -224,7 +249,7 @@ model User {
   currentSessionId String?
   avatarUrl        String?
   displayName      String? // admin-set label for drivers; UI only, falls back to email
-  teamId           String? // NEW — only meaningful for role=DRIVER; groups drivers for organization/reporting
+  teamId           String? // only meaningful for role=DRIVER; a team has at most one driver (TeamsService.assignDriver) and that driver works the team's routes
   team             Team?          @relation(fields: [teamId], references: [id])
   mediaAssets      MediaAsset[]
   events           Event[]
@@ -246,7 +271,6 @@ model User {
   salesQuotations              SalesQuotation[]
   salesOrders                  SalesOrder[]
   deliveryOrders               DeliveryOrder[]
-  routesAsDriver               Route[]                       @relation("DriverRoutes")
   routesCreated                Route[]                       @relation("RouteCreatedBy")
   routeHistoryEvents           RouteHistoryEvent[]
   salesOrderActivityEvents     SalesOrderActivityEvent[]
@@ -1059,13 +1083,15 @@ model DeliveryOrderItem {
   invoiceItem   InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
 }
 
-// A driver's planned multi-stop delivery run for one day. Belongs to the
+// A team's planned multi-stop delivery run for one day. Belongs to the
 // DELIVERY_DMS module — separate from DeliveryOrder (a single-shipment
-// document, ungated) which Route wraps via RouteStop.
+// document, ungated) which Route can wrap via RouteStop.
 model Route {
   id              String      @id @default(cuid())
   organizationId  String
-  driverId        String // User.id, role must be DRIVER — enforced in DeliveryRoutesService, not the DB
+  // Routes belong to a team, not a driver: whoever is the team's driver
+  // (one per team) works it. One non-cancelled route per team per day.
+  teamId          String
   routeDate       DateTime
   name            String?
   status          RouteStatus @default(PLANNED)
@@ -1084,23 +1110,25 @@ model Route {
   version            Int       @default(1)
 
   organization  Organization        @relation(fields: [organizationId], references: [id])
-  driver        User                @relation("DriverRoutes", fields: [driverId], references: [id])
+  team          Team                @relation(fields: [teamId], references: [id])
   createdBy     User?               @relation("RouteCreatedBy", fields: [createdByUserId], references: [id])
   stops         RouteStop[]
   historyEvents RouteHistoryEvent[]
 
   @@index([organizationId])
-  @@index([organizationId, driverId, routeDate])
+  @@index([organizationId, teamId, routeDate])
 }
 
-// One stop per DeliveryOrder, in sequence. Deliberately has no status of
-// its own — a stop's state (pending/delivered/failed) is always derived
-// from its DeliveryOrder at read time, per the spec's "delivery status is
-// the source of truth, not a parallel tracking state" rule.
+// A stop is either a DeliveryOrder (required when the org has INVOICE_POS)
+// or a customer visit (orgs without INVOICE_POS). DO stops have no state
+// of their own — pending/delivered/failed is derived from the DO, which
+// stays the source of truth. Customer stops carry their own pin, proof and
+// failure fields below (the "customer stop" block); those are null on DO
+// stops. Exactly one of deliveryOrderId / customerId is set (CHECK in SQL).
 model RouteStop {
   id                    String    @id @default(cuid())
   routeId               String
-  deliveryOrderId       String // every stop, live or superseded
+  deliveryOrderId       String? // every DO stop, live or superseded
   // = deliveryOrderId while this stop is live, NULL once superseded. The
   // unique index on it (NULLs are distinct in Postgres) is what enforces
   // "a DO has at most one live stop" while still letting a rescheduled
@@ -1124,17 +1152,46 @@ model RouteStop {
   travelMetersFromPrevious  Decimal? @db.Decimal(10, 2)
   travelSecondsFromPrevious Int?
 
+  // ── Customer stop ──
+  // Name/address/pin are snapshotted from the Customer when the stop is
+  // added. The pin may be corrected on the stop while the route is open;
+  // that never writes back to the Customer, so the change lasts only for
+  // this route.
+  customerId           String?
+  customerName         String?
+  address              String?
+  destinationLatitude  Decimal?         @db.Decimal(9, 6)
+  destinationLongitude Decimal?         @db.Decimal(9, 6)
+  priority             DeliveryPriority @default(NORMAL)
+  deliveryWindowStart  DateTime?
+  deliveryWindowEnd    DateTime?
+  // Proof (receiver + photo required) — same meaning as the DO fields.
+  receivedBy           String?
+  signedAt             DateTime?
+  proofPhotoKey        String? // "stop-proofs/<orgId>/<stopId>/<uuid>.webp", private
+  completedByUserId    String?
+  completedLatitude    Decimal?         @db.Decimal(9, 6)
+  completedLongitude   Decimal?         @db.Decimal(9, 6)
+  failedAt             DateTime?
+  failureReason        String?
+  failureLatitude      Decimal?         @db.Decimal(9, 6)
+  failureLongitude     Decimal?         @db.Decimal(9, 6)
+
   route               Route          @relation(fields: [routeId], references: [id])
-  deliveryOrder       DeliveryOrder  @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id])
+  deliveryOrder       DeliveryOrder? @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id], onDelete: Restrict)
+  customer            Customer?      @relation(fields: [customerId], references: [id])
   activeDeliveryOrder DeliveryOrder? @relation("ActiveRouteStop", fields: [activeDeliveryOrderId], references: [id])
 
   @@unique([routeId, sequence])
   @@index([routeId])
   @@index([deliveryOrderId])
+  @@index([customerId])
 }
 
-// Groups driver accounts for organization/reporting purposes — no
-// scheduling or routing behavior hangs off this, it's purely a label.
+// The unit routes are planned for: one team = one driver = one route per
+// day. The driver joins the team (User.teamId); the team owns the routes,
+// so swapping the driver doesn't orphan planned work. The team's working
+// hours are its driver's DriverAccessSchedule.
 model Team {
   id             String   @id @default(cuid())
   organizationId String
@@ -1143,6 +1200,7 @@ model Team {
 
   organization Organization @relation(fields: [organizationId], references: [id])
   members      User[]
+  routes       Route[]
 
   @@unique([organizationId, name])
   @@index([organizationId])

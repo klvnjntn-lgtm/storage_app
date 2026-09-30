@@ -9,8 +9,12 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ModuleKey, RouteStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -27,6 +31,14 @@ import { ReorderRouteStopsDto } from './dto/reorder-route-stops.dto';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RoutePlannerService } from './route-planner.service';
+import { StopProofService } from './stop-proof.service';
+import {
+  RecordCustomerStopFailureDto,
+  RecordCustomerStopProofDto,
+  RescheduleCustomerStopDto,
+  UpdateCustomerStopDetailsDto,
+} from './dto/customer-stop-actions.dto';
+import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import {
   ApplyRoutePlanDto,
   PlanCandidatesQueryDto,
@@ -40,6 +52,7 @@ export class DeliveryRoutesController {
   constructor(
     private readonly deliveryRoutesService: DeliveryRoutesService,
     private readonly routePlanner: RoutePlannerService,
+    private readonly stopProof: StopProofService,
   ) {}
 
   @Post()
@@ -61,13 +74,13 @@ export class DeliveryRoutesController {
   list(
     @CurrentOrg() organizationId: string,
     @Req() req,
-    @Query('driverId') driverId?: string,
+    @Query('teamId') teamId?: string,
     @Query('date') date?: string,
     @Query('status') status?: RouteStatus,
   ) {
     return this.deliveryRoutesService.listRoutes(
       organizationId,
-      { driverId, date, status },
+      { teamId, date, status },
       req.user,
     );
   }
@@ -100,14 +113,14 @@ export class DeliveryRoutesController {
     return this.deliveryRoutesService.monitoringSummary(organizationId, date);
   }
 
-  @Get('monitoring/drivers')
+  @Get('monitoring/teams')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'USER')
-  monitoringByDriver(
+  monitoringByTeam(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
   ) {
-    return this.deliveryRoutesService.monitoringByDriver(organizationId, date);
+    return this.deliveryRoutesService.monitoringByTeam(organizationId, date);
   }
 
   @Get('monitoring/map')
@@ -129,7 +142,7 @@ export class DeliveryRoutesController {
     return this.deliveryRoutesService.listDrivers(organizationId);
   }
 
-  // ─── Optimize all drivers (VROOM) ──────────────────────────────────
+  // ─── Optimize all teams (VROOM) ────────────────────────────────────
   @Get('plan/candidates')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'USER')
@@ -284,6 +297,135 @@ export class DeliveryRoutesController {
       routeId,
       stopId,
       req.user.sub,
+    );
+  }
+
+  // Corrects a stop's pin for this route only — see setStopDestination.
+  @Patch(':id/stops/:stopId/destination')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  setStopDestination(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: SetRouteStartDto,
+  ) {
+    return this.deliveryRoutesService.setStopDestination(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+      req.user.sub,
+    );
+  }
+
+  // Customer stops only — a DO stop edits these on its delivery order.
+  @Patch(':id/stops/:stopId/details')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  updateCustomerStopDetails(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Body() dto: UpdateCustomerStopDetailsDto,
+  ) {
+    return this.deliveryRoutesService.updateCustomerStopDetails(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+    );
+  }
+
+  @Post(':id/stops/:stopId/reschedule')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  rescheduleCustomerStop(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: RescheduleCustomerStopDto,
+  ) {
+    return this.deliveryRoutesService.rescheduleCustomerStop(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+      req.user.sub,
+    );
+  }
+
+  // ─── Customer stop proof / failure ─────────────────────────────────
+  // Stops without a delivery order. DRIVER allowed — scoped to their own
+  // team's route in the service. DO stops keep using /delivery-orders.
+  @Post(':id/stops/:stopId/proof-photo')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_PHOTO_UPLOAD_BYTES },
+    }),
+  )
+  uploadStopProofPhoto(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.stopProof.uploadPhoto(organizationId, routeId, stopId, file, req.user);
+  }
+
+  @Get(':id/stops/:stopId/proof-photo-link')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  stopProofPhotoLink(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+  ) {
+    return this.stopProof.photoLink(organizationId, routeId, stopId, req.user);
+  }
+
+  @Patch(':id/stops/:stopId/proof')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  recordStopProof(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: RecordCustomerStopProofDto,
+  ) {
+    return this.deliveryRoutesService.recordCustomerStopProof(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+      req.user,
+    );
+  }
+
+  @Post(':id/stops/:stopId/failure')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  recordStopFailure(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: RecordCustomerStopFailureDto,
+  ) {
+    return this.deliveryRoutesService.recordCustomerStopFailure(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+      req.user,
     );
   }
 }

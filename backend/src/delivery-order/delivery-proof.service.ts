@@ -10,22 +10,14 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DeliveryOrderStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   FILE_STORAGE,
   type FileStorage,
 } from '../storage/file-storage.interface';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
+import { encodePrivatePhoto } from '../storage/private-photo';
 import { DeliveryOrderService } from './delivery-order.service';
-
-const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
-
-// One encode at upload, then never touched again — proof keeps its
-// quality (no gallery-style hard recompression).
-const MAX_DIMENSION = 2000;
-const QUALITY = 85;
 
 // Target retention for proof photos. Automatic deletion is OFF unless
 // DELIVERY_PROOF_AUTO_DELETE=true; until then the daily job only reports
@@ -82,13 +74,6 @@ export class DeliveryProofService {
     file: Express.Multer.File,
     requester?: Requester,
   ) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('Photo must be PNG, JPEG or WebP');
-    }
-    if (file.size > MAX_UPLOAD_SIZE_BYTES)
-      throw new BadRequestException('Photo exceeds 10MB');
-
     const order = await this.findOrder(organizationId, id, requester);
     if (order.status !== DeliveryOrderStatus.SHIPPED) {
       throw new BadRequestException(
@@ -101,21 +86,7 @@ export class DeliveryProofService {
       );
     }
 
-    let data: Buffer;
-    try {
-      data = await sharp(file.buffer)
-        .rotate() // apply the phone's EXIF orientation before it's stripped
-        .resize({
-          width: MAX_DIMENSION,
-          height: MAX_DIMENSION,
-          fit: 'inside',
-          withoutEnlargement: true,
-        })
-        .webp({ quality: QUALITY })
-        .toBuffer();
-    } catch {
-      throw new BadRequestException('Uploaded file is not a valid image');
-    }
+    const data = await encodePrivatePhoto(file);
 
     const key = `delivery-proofs/${organizationId}/${id}/${randomUUID()}.webp`;
     await this.storage.put(key, data, 'image/webp');
@@ -172,36 +143,55 @@ export class DeliveryProofService {
   }
 
   // Proof photos past the retention window (by delivery date, falling back
-  // to creation date for unsigned ones). Deletes only when `apply` is set
-  // — the scheduled job passes autoDeleteEnabled(), which is off by default.
+  // to creation date for unsigned ones) — delivery orders' and customer
+  // stops' ("stop-proofs/") alike. Deletes only when `apply` is set — the
+  // scheduled job passes autoDeleteEnabled(), which is off by default.
   async enforceRetention(apply: boolean) {
     const cutoff = new Date(
       Date.now() - this.retentionDays() * 24 * 60 * 60 * 1000,
     );
-    const expired = await this.prisma.deliveryOrder.findMany({
-      where: {
-        proofPhotoKey: { not: null },
-        OR: [
-          { signedAt: { lt: cutoff } },
-          { signedAt: null, createdAt: { lt: cutoff } },
-        ],
-      },
-      select: { id: true, proofPhotoKey: true },
-    });
+    const olderThanCutoff = {
+      proofPhotoKey: { not: null },
+      OR: [
+        { signedAt: { lt: cutoff } },
+        { signedAt: null, createdAt: { lt: cutoff } },
+      ],
+    };
+    const [orders, stops] = await Promise.all([
+      this.prisma.deliveryOrder.findMany({
+        where: olderThanCutoff,
+        select: { id: true, proofPhotoKey: true },
+      }),
+      this.prisma.routeStop.findMany({
+        where: olderThanCutoff,
+        select: { id: true, proofPhotoKey: true },
+      }),
+    ]);
+    const expired = [
+      ...orders.map((o) => ({ ...o, kind: 'deliveryOrder' as const })),
+      ...stops.map((o) => ({ ...o, kind: 'routeStop' as const })),
+    ];
     if (!apply) return { expired: expired.length, deleted: 0 };
 
     let deleted = 0;
-    for (const order of expired) {
+    for (const row of expired) {
       try {
-        await this.storage.delete(order.proofPhotoKey!);
-        await this.prisma.deliveryOrder.update({
-          where: { id: order.id },
-          data: { proofPhotoKey: null },
-        });
+        await this.storage.delete(row.proofPhotoKey!);
+        if (row.kind === 'deliveryOrder') {
+          await this.prisma.deliveryOrder.update({
+            where: { id: row.id },
+            data: { proofPhotoKey: null },
+          });
+        } else {
+          await this.prisma.routeStop.update({
+            where: { id: row.id },
+            data: { proofPhotoKey: null },
+          });
+        }
         deleted++;
       } catch (err) {
         this.logger.warn(
-          `Could not delete expired proof photo for ${order.id}: ${err instanceof Error ? err.message : String(err)}`,
+          `Could not delete expired proof photo for ${row.kind} ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

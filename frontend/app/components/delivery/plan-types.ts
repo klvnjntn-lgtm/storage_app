@@ -1,4 +1,4 @@
-// Shapes returned by the "optimize all drivers" endpoints
+// Shapes returned by the "optimize all teams" endpoints
 // (/delivery-routes/plan/*) and the per-route optimize's `unscheduled`.
 
 export type UnscheduledReason = 'NO_PIN' | 'UNREACHABLE' | 'OUTSIDE_WINDOW' | 'NO_TIME';
@@ -8,10 +8,10 @@ export type Priority = 'NORMAL' | 'HIGH';
 export type PlanCandidates = {
   routeDate: string;
   defaultDepot: { latitude: number; longitude: number } | null;
-  drivers: {
+  teams: {
     id: string;
-    email: string;
-    displayName: string | null;
+    name: string;
+    driver: { id: string; email: string; displayName: string | null } | null;
     hours: string | null;
     restricted: boolean;
     offDuty: boolean;
@@ -26,7 +26,7 @@ export type PlanCandidates = {
     deliveryWindowStart: string | null;
     deliveryWindowEnd: string | null;
     hasPin: boolean;
-    currentRoute: { id: string; driverId: string } | null;
+    currentRoute: { id: string; teamId: string } | null;
   }[];
 };
 
@@ -34,7 +34,7 @@ export type PlanPreview = {
   routeDate: string;
   depot: { latitude: number; longitude: number };
   routes: {
-    driver: { id: string; email: string; displayName: string | null };
+    team: { id: string; name: string; driver: { id: string; email: string; displayName: string | null } | null };
     hours: string | null;
     offDuty: boolean;
     departureAt: string;

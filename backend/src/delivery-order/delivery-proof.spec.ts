@@ -53,9 +53,19 @@ describe('Delivery proof photos', () => {
         data: { name: `Proof Org ${randomUUID()}` },
       })
     ).id;
-    const mkUser = (role: 'ADMIN' | 'DRIVER') =>
+    // Each driver in their own team — routes belong to teams.
+    const mkUser = async (role: 'ADMIN' | 'DRIVER') =>
       prisma.user.create({
         data: {
+          ...(role === 'DRIVER'
+            ? {
+                teamId: (
+                  await prisma.team.create({
+                    data: { organizationId: orgId, name: randomUUID() },
+                  })
+                ).id,
+              }
+            : {}),
           email: `${role}-${randomUUID()}@example.com`,
           password: 'x',
           role,
@@ -92,6 +102,7 @@ describe('Delivery proof photos', () => {
     await prisma.mediaAsset.deleteMany({ where: { organizationId: orgId } });
     await prisma.deliveryOrder.deleteMany({ where: { organizationId: orgId } });
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
+    await prisma.team.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
     rmSync(root, { recursive: true, force: true });
     delete process.env.UPLOADS_DIR;
@@ -106,10 +117,14 @@ describe('Delivery proof photos', () => {
       },
     });
     if (onRouteOf) {
+      const { teamId } = await prisma.user.findUniqueOrThrow({
+        where: { id: onRouteOf },
+        select: { teamId: true },
+      });
       const route = await prisma.route.create({
         data: {
           organizationId: orgId,
-          driverId: onRouteOf,
+          teamId: teamId!,
           routeDate: new Date('2030-02-01T00:00:00Z'),
         },
       });
@@ -285,4 +300,33 @@ describe('Delivery proof photos', () => {
       ).proofPhotoKey,
     ).toBeNull();
   });
+
+  it('retention also covers customer-stop proofs', async () => {
+    const { teamId } = await prisma.user.findUniqueOrThrow({
+      where: { id: driverId },
+      select: { teamId: true },
+    });
+    const route = await prisma.route.create({
+      data: { organizationId: orgId, teamId: teamId!, routeDate: new Date('2030-02-02T00:00:00Z') },
+    });
+    const key = `stop-proofs/${orgId}/old/${randomUUID()}.webp`;
+    await new LocalFileStorage().put(key, Buffer.from('x'), 'image/webp');
+    const stop = await prisma.routeStop.create({
+      data: {
+        routeId: route.id,
+        sequence: 1,
+        customerName: 'Old visit',
+        receivedBy: 'X',
+        proofPhotoKey: key,
+        signedAt: new Date(Date.now() - 800 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    await proofs.enforceRetention(true);
+    expect(await new LocalFileStorage().exists(key)).toBe(false);
+    expect(
+      (await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } })).proofPhotoKey,
+    ).toBeNull();
+  });
 });
+

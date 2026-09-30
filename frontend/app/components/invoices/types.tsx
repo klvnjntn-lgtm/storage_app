@@ -36,6 +36,11 @@ export type Customer = {
   phone: string | null;
   address: string | null;
   npwp?: string | null;
+  // DELIVERY_DMS — default delivery pin + directions for drivers.
+  // Prisma Decimal fields serialize as strings over JSON.
+  latitude?: string | null;
+  longitude?: string | null;
+  deliveryNotes?: string | null;
 };
 
 export type Vehicle = {

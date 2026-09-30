@@ -11,9 +11,10 @@ import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
+import { teamLabel } from '@/app/components/delivery/TeamPicker';
 import type { PlanCandidates, PlanPreview } from '@/app/components/delivery/plan-types';
 
-// One color per driver in the preview (list swatch + map dots).
+// One color per team in the preview (list swatch + map dots).
 const DRIVER_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#4b5563'];
 
 function todayIso() {
@@ -51,7 +52,7 @@ function RoutePlanInner() {
   const [depot, setDepot] = useState<{ lat: number; lng: number } | null>(null);
 
   const [candidates, setCandidates] = useState<PlanCandidates | null>(null);
-  const [driverIds, setDriverIds] = useState<Set<string>>(new Set());
+  const [teamIds, setTeamIds] = useState<Set<string>>(new Set());
   const [orderIds, setOrderIds] = useState<Set<string>>(new Set());
 
   // The preview plus the inputs it was computed from — shown only while
@@ -77,7 +78,8 @@ function RoutePlanInner() {
         }
         const c = body as PlanCandidates;
         setCandidates(c);
-        setDriverIds(new Set(c.drivers.filter((d) => !d.offDuty).map((d) => d.id)));
+        // Plannable by default: has a driver, on duty, route not started yet.
+        setTeamIds(new Set(c.teams.filter((x) => x.driver && !x.offDuty && !x.routes.some((r) => r.locked)).map((x) => x.id)));
         setOrderIds(new Set(c.deliveryOrders.filter((o) => o.hasPin).map((o) => o.id)));
         setDepot((prev) => prev ?? (c.defaultDepot ? { lat: c.defaultDepot.latitude, lng: c.defaultDepot.longitude } : null));
       } catch {
@@ -92,8 +94,8 @@ function RoutePlanInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  const driverName = useMemo(() => {
-    const map = new Map((candidates?.drivers ?? []).map((d) => [d.id, driverLabel(d)]));
+  const teamName = useMemo(() => {
+    const map = new Map((candidates?.teams ?? []).map((x) => [x.id, x.name]));
     return (id: string) => map.get(id) ?? '—';
   }, [candidates]);
 
@@ -109,7 +111,7 @@ function RoutePlanInner() {
       routeDate: date,
       departureAt: departureTime ? new Date(`${date}T${departureTime}`).toISOString() : undefined,
       depot: depot ? { latitude: depot.lat, longitude: depot.lng } : undefined,
-      driverIds: [...driverIds],
+      teamIds: [...teamIds],
       deliveryOrderIds: [...orderIds],
     };
   }
@@ -119,7 +121,7 @@ function RoutePlanInner() {
 
   async function handlePreview() {
     if (!depot) return setError(t('delivery.plan.needDepot'));
-    if (driverIds.size === 0) return setError(t('delivery.plan.needDriver'));
+    if (teamIds.size === 0) return setError(t('delivery.plan.needTeam'));
     if (orderIds.size === 0) return setError(t('delivery.plan.needDelivery'));
     setPreviewing(true);
     setError(null);
@@ -151,7 +153,7 @@ function RoutePlanInner() {
         body: JSON.stringify({
           ...planInput(),
           routes: preview.routes.map((r) => ({
-            driverId: r.driver.id,
+            teamId: r.team.id,
             deliveryOrderIds: r.stops.map((s) => s.deliveryOrderId),
           })),
           expectedVersions: preview.expectedVersions,
@@ -170,8 +172,8 @@ function RoutePlanInner() {
     }
   }
 
-  const colorOf = (driverId: string) => {
-    const i = preview?.routes.findIndex((r) => r.driver.id === driverId) ?? -1;
+  const colorOf = (teamId: string) => {
+    const i = preview?.routes.findIndex((r) => r.team.id === teamId) ?? -1;
     return DRIVER_COLORS[Math.max(0, i) % DRIVER_COLORS.length];
   };
 
@@ -182,7 +184,7 @@ function RoutePlanInner() {
       latitude: s.latitude,
       longitude: s.longitude,
       label: `${s.sequence}. ${s.customerName ?? s.doNumber ?? ''}`,
-      color: colorOf(r.driver.id),
+      color: colorOf(r.team.id),
     })),
   );
 
@@ -262,32 +264,39 @@ function RoutePlanInner() {
 
         {candidates && (
           <>
-            {/* Drivers */}
+            {/* Teams */}
             <div className={sectionClass}>
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold">{t('delivery.plan.driversLabel')}</h2>
+                <h2 className="text-sm font-semibold">{t('delivery.plan.teamsLabel')}</h2>
                 <span className="text-xs text-gray-500">
-                  {t('delivery.plan.selectedCount', { count: driverIds.size })}
+                  {t('delivery.plan.selectedCount', { count: teamIds.size })}
                 </span>
               </div>
-              {candidates.drivers.length === 0 && (
-                <p className="text-xs text-gray-400">{t('delivery.plan.noDrivers')}</p>
+              {candidates.teams.length === 0 && (
+                <p className="text-xs text-gray-400">{t('delivery.plan.noTeams')}</p>
               )}
               <div className="divide-y divide-gray-100">
-                {candidates.drivers.map((d) => {
+                {candidates.teams.map((d) => {
                   const locked = d.routes.filter((r) => r.locked).length;
                   const planned = d.routes.filter((r) => !r.locked).length;
+                  // No driver, or today's route already started (one route
+                  // per team per day) — can't be planned.
+                  const unavailable = !d.driver || locked > 0;
                   return (
-                    <label key={d.id} className="flex items-start gap-2.5 py-2 cursor-pointer">
+                    <label key={d.id} className={`flex items-start gap-2.5 py-2 ${unavailable ? 'opacity-60' : 'cursor-pointer'}`}>
                       <input
                         type="checkbox"
-                        checked={driverIds.has(d.id)}
-                        onChange={() => toggle(driverIds, d.id, setDriverIds)}
+                        checked={teamIds.has(d.id)}
+                        disabled={unavailable}
+                        onChange={() => toggle(teamIds, d.id, setTeamIds)}
                         className="mt-1"
                       />
-                      <DriverAvatar driver={d} size={24} />
+                      {d.driver && <DriverAvatar driver={d.driver} size={24} />}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{driverLabel(d)}</p>
+                        <p className="text-sm font-medium truncate">{d.name}</p>
+                        <p className={`text-xs truncate ${d.driver ? 'text-gray-500' : 'text-amber-700'}`}>
+                          {d.driver ? driverLabel(d.driver) : t('delivery.teams.noDriver')}
+                        </p>
                         <p className={`text-xs ${d.offDuty ? 'text-amber-700' : 'text-gray-500'}`}>
                           {d.offDuty ? t('delivery.plan.offDuty') : (d.hours ?? t('delivery.plan.hoursUnrestricted'))}
                         </p>
@@ -360,7 +369,7 @@ function RoutePlanInner() {
                       )}
                       {o.currentRoute && (
                         <p className="text-xs text-gray-500">
-                          {t('delivery.plan.onRoute', { driver: driverName(o.currentRoute.driverId) })}
+                          {t('delivery.plan.onRoute', { driver: teamName(o.currentRoute.teamId) })}
                         </p>
                       )}
                     </div>
@@ -391,14 +400,14 @@ function RoutePlanInner() {
             {previewMapStops.length > 0 && <DeliveryMap stops={previewMapStops} height={320} />}
 
             {preview.routes.map((r) => (
-              <div key={r.driver.id} className={sectionClass}>
+              <div key={r.team.id} className={sectionClass}>
                 <div className="flex items-start gap-2.5">
                   <span
                     className="mt-1 w-3 h-3 rounded-full shrink-0"
-                    style={{ background: colorOf(r.driver.id) }}
+                    style={{ background: colorOf(r.team.id) }}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{driverLabel(r.driver)}</p>
+                    <p className="text-sm font-semibold">{teamLabel(r.team, t('delivery.teams.noDriver'))}</p>
                     <p className="text-xs text-gray-500">
                       {r.existingRouteId ? t('delivery.plan.updatesRoute') : t('delivery.plan.newRoute')}
                       {r.stops.length > 0 && (
