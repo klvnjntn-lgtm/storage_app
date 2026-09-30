@@ -100,6 +100,22 @@ function tzOffsetMs(instant: Date, tz: string): number {
   return wallAsUtc - (instant.getTime() - instant.getUTCMilliseconds());
 }
 
+// A wall-clock "HH:mm" on a business calendar date, as a real UTC instant
+// — e.g. a driver's 08:00 shift start on 2026-10-01 in Asia/Jakarta is
+// 2026-10-01T01:00Z. Same two-pass approach as endOfBusinessDay below.
+export function wallTimeOnBusinessDay(dateOnly: Date, hhmm: string, tz: string): Date {
+  const [h, m] = hhmm.split(':').map(Number);
+  const wall = Date.UTC(
+    dateOnly.getUTCFullYear(),
+    dateOnly.getUTCMonth(),
+    dateOnly.getUTCDate(),
+    h, m, 0, 0,
+  );
+  let t = wall - tzOffsetMs(new Date(wall), tz);
+  t = wall - tzOffsetMs(new Date(t), tz);
+  return new Date(t);
+}
+
 // The last instant (23:59:59.999) of a business calendar date, as a real
 // UTC instant. Use for reports that compare against TIMESTAMP columns
 // (invoice.issuedAt, supplierPayment.paidAt), so "as of Sep 30" includes

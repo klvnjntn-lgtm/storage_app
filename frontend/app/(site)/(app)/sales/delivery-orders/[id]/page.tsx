@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Truck, Ban, Printer, Download, PackageCheck, FileText, MapPin, MapPinOff, X } from 'lucide-react';
+import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { apiFetch } from '@/lib/apifetch';
 import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/templates/DeliveryOrderA4Template';
 import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
@@ -356,6 +357,7 @@ export default function DeliveryOrderDetailPage() {
               <p className="text-xs text-gray-600 whitespace-pre-line">
                 {order.deliveryAddress || t('delivery.addresses.noAddressText')}
               </p>
+              <GoogleMapsLink lat={order.destinationLatitude} lng={order.destinationLongitude} />
             </div>
           </div>
           {order.customerId && (

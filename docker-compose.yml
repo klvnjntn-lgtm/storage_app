@@ -50,10 +50,23 @@ services:
     # fits comfortably. Swap this to indonesia-latest.osrm later on a
     # machine with enough RAM to run the same 4-command pipeline —
     # nothing else in the backend/frontend needs to change.
-    command: osrm-routed --algorithm MLD /data/sumatra-latest.osrm
+    # --max-table-size: /table (the VROOM travel matrix) is capped at 100
+    # points by default; raised so a full day of stops fits in one call.
+    command: osrm-routed --algorithm MLD --max-table-size 1000 /data/sumatra-latest.osrm
 
     ports:
       - "5001:5000"
+
+
+  vroom:
+    image: ghcr.io/vroom-project/vroom-docker:v1.14.0
+    container_name: waresys-vroom
+    restart: unless-stopped
+
+    # Vehicle-routing optimizer (driver assignment + stop order). The
+    # backend sends it the OSRM travel matrix with every request, so VROOM
+    # never calls OSRM itself and needs no routing config. Internal only —
+    # no published port.
 
 
   backend:
@@ -71,12 +84,15 @@ services:
         condition: service_started
       osrm:
         condition: service_started
+      vroom:
+        condition: service_started
 
     environment:
       NODE_ENV: production
 
       DATABASE_URL: ${DATABASE_URL}
       OSRM_URL: ${OSRM_URL}
+      VROOM_URL: ${VROOM_URL:-http://vroom:3000}
 
       SUPERADMIN_SECRET: ${SUPERADMIN_SECRET}
       JWT_SECRET: ${JWT_SECRET}

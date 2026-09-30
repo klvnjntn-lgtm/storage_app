@@ -12,6 +12,7 @@ import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format'
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 
@@ -267,6 +268,7 @@ export default function CustomerDetailPage() {
                     ? `${Number(customer.latitude).toFixed(5)}, ${Number(customer.longitude).toFixed(5)}`
                     : t('customers.detailPage.noLocationSet')}
                 </p>
+                <GoogleMapsLink lat={customer.latitude} lng={customer.longitude} />
               </div>
             </div>
             <button

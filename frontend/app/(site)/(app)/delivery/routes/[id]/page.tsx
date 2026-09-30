@@ -9,6 +9,8 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
 import DriverPicker, { driverLabel, type PickerDriver } from '@/app/components/delivery/DriverPicker';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
@@ -130,6 +132,8 @@ export default function DeliveryRouteDetailPage() {
 
   const [departureTime, setDepartureTime] = useState('');
   const [optimizing, setOptimizing] = useState(false);
+  // Stops the last optimize couldn't fit (kept at the end of the route).
+  const [unscheduled, setUnscheduled] = useState<{ stopId: string; label: string; reason: UnscheduledReason }[]>([]);
 
   const [editingStop, setEditingStop] = useState<Stop | null>(null);
   const [editPriority, setEditPriority] = useState<'NORMAL' | 'HIGH'>('NORMAL');
@@ -353,6 +357,7 @@ export default function DeliveryRouteDetailPage() {
   async function handleOptimize() {
     setOptimizing(true);
     setError(null);
+    setUnscheduled([]);
     try {
       const res = await apiFetch(`/delivery-routes/${id}/optimize`, {
         method: 'POST',
@@ -363,6 +368,7 @@ export default function DeliveryRouteDetailPage() {
         setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
+      setUnscheduled(body?.unscheduled ?? []);
       await load();
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
@@ -551,6 +557,18 @@ export default function DeliveryRouteDetailPage() {
       <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>
+        )}
+        {unscheduled.length > 0 && (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 text-sm rounded-md px-3 py-2">
+            <p className="font-semibold">{t('delivery.plan.unscheduledOnRoute')}</p>
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {unscheduled.map((u) => (
+                <li key={u.stopId}>
+                  {u.label} — {t(`delivery.plan.reason.${u.reason}`)}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {route.stops.some((s) => s.deliveryOrder.destinationLatitude && s.deliveryOrder.destinationLongitude) && (
@@ -792,6 +810,11 @@ export default function DeliveryRouteDetailPage() {
                       ? t('delivery.routeDetail.locationSet')
                       : t('delivery.routeDetail.noLocation')}
                   </button>
+                  <GoogleMapsLink
+                    lat={stop.deliveryOrder.destinationLatitude}
+                    lng={stop.deliveryOrder.destinationLongitude}
+                    className="px-1"
+                  />
                   {!isDriver && (
                     <>
                       <button

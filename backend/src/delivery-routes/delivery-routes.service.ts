@@ -14,10 +14,10 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  OsrmService,
-  type LatLng,
-  type TripLeg,
-} from '../routing/osrm.service';
+  RouteOptimizerService,
+  STOP_DWELL_SECONDS,
+  type UnscheduledReason,
+} from './route-optimizer.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateRouteDto } from './dto/update-route.dto';
@@ -27,11 +27,6 @@ import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 
 export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
-
-// A fixed dwell time added per stop when computing ETAs — how long the
-// driver is assumed to spend at each stop before departing for the next.
-// Not configurable in this pass; a flat estimate, not a promise.
-const STOP_DWELL_SECONDS = 5 * 60;
 
 // How far past its own ETA a still-PENDING stop has to be before it's
 // flagged "at risk" — a grace window so an ETA that's off by a couple of
@@ -85,7 +80,7 @@ type StopRow = Prisma.RouteStopGetPayload<{ select: typeof stopSelect }>;
 export class DeliveryRoutesService {
   constructor(
     private prisma: PrismaService,
-    private osrm: OsrmService,
+    private optimizer: RouteOptimizerService,
     private notifications: NotificationsService,
   ) {}
 
@@ -171,7 +166,7 @@ export class DeliveryRoutesService {
     };
   }
 
-  private dayRange(date: string): { gte: Date; lt: Date } {
+  dayRange(date: string): { gte: Date; lt: Date } {
     const start = new Date(`${date}T00:00:00.000Z`);
     if (Number.isNaN(start.getTime())) {
       throw new BadRequestException('date must be a valid YYYY-MM-DD value');
@@ -235,7 +230,7 @@ export class DeliveryRoutesService {
   // Events that change the stop list/order also bump Route.version and
   // snapshot the resulting stop order, so the history reads as numbered
   // route versions (v1, v2, …) with the exact sequence at each.
-  private async recordHistory(
+  async recordHistory(
     routeId: string,
     type: RouteHistoryEventType,
     createdByUserId: string | undefined,
@@ -455,59 +450,19 @@ export class DeliveryRoutesService {
     return updated;
   }
 
-  // Re-sequences and re-ETAs only the still-PENDING stops via OSRM's trip
-  // (TSP-heuristic) service — resolved (delivered/failed) stops keep their
-  // existing sequence untouched (spec: "only remaining deliveries should
-  // be re-optimized"). Caches each stop's travel leg so later ETA
-  // recalculation (recalculateEtasAfterResolution) is pure arithmetic.
-  private coordsOf(stop: {
-    deliveryOrder: {
-      destinationLatitude: Prisma.Decimal | null;
-      destinationLongitude: Prisma.Decimal | null;
-    };
-  }): LatLng {
-    return {
-      lat: Number(stop.deliveryOrder.destinationLatitude),
-      lng: Number(stop.deliveryOrder.destinationLongitude),
-    };
-  }
-
-  // One OSRM Trip call: `start` first, then `stops` re-sequenced for
-  // shortest total travel. Returns the stops in that visiting order,
-  // paired with the leg arriving at each one — a plain wrapper around
-  // OsrmService.trip() that resolves indices back to the actual stops.
-  private async optimizeGroup<
-    T extends {
-      deliveryOrder: {
-        destinationLatitude: Prisma.Decimal | null;
-        destinationLongitude: Prisma.Decimal | null;
-      };
-    },
-  >(
-    start: LatLng,
-    stops: T[],
-  ): Promise<{ orderedStops: T[]; legs: TripLeg[] }> {
-    const { order, legs } = await this.osrm.trip([
-      start,
-      ...stops.map((s) => this.coordsOf(s)),
-    ]);
-    return { orderedStops: order.map((i) => stops[i]), legs };
-  }
-
-  // Re-sequences and re-ETAs only the still-PENDING stops via OSRM's trip
-  // (TSP-heuristic) service — resolved (delivered/failed) stops keep their
-  // existing sequence untouched (spec: "only remaining deliveries should
-  // be re-optimized"). Caches each stop's travel leg so later ETA
-  // recalculation (recalculateEtasAfterResolution) is pure arithmetic.
+  // Re-sequences and re-ETAs only the still-PENDING stops — resolved
+  // (delivered/failed) stops keep their existing sequence untouched (spec:
+  // "only remaining deliveries should be re-optimized"). VROOM picks the
+  // order against the driver's working hours, each delivery's window and
+  // priority (see RouteOptimizerService); caches each stop's travel leg so
+  // later ETA recalculation (recalculateEtasAfterResolution) is pure
+  // arithmetic.
   //
-  // Priority-weighted: HIGH-priority stops are visited first as their own
-  // optimized sub-sequence, then NORMAL stops as a second sub-sequence
-  // chained from wherever the HIGH sub-sequence ends. This is a heuristic
-  // — optimal *within* each tier, not a true globally-optimal
-  // priority-constrained TSP solve — same honest framing as
-  // STOP_DWELL_SECONDS/AT_RISK_GRACE_MINUTES above. When every pending
-  // stop shares one priority tier (the common case), this costs exactly
-  // one OSRM call, identical to before priority existed.
+  // HIGH priority means "never left out while it fits", not "visited
+  // first" — a delivery window is what pins timing. A stop that can't fit
+  // (window already missed, driver's hours full) stays on the route,
+  // appended after the optimized ones, and is returned in `unscheduled`
+  // so the dispatcher can see it.
   async optimize(
     organizationId: string,
     routeId: string,
@@ -552,43 +507,51 @@ export class DeliveryRoutesService {
       );
     }
     if (pendingStops.length === 0) {
-      return this.getRoute(organizationId, routeId);
+      return { ...(await this.getRoute(organizationId, routeId)), unscheduled: [] };
     }
 
-    const start = {
-      lat: Number(route.startLatitude),
-      lng: Number(route.startLongitude),
+    const requestedDeparture = dto.departureAt
+      ? new Date(dto.departureAt)
+      : (route.plannedDepartureAt ?? new Date());
+    const availability = (
+      await this.optimizer.driverAvailability(
+        organizationId,
+        [route.driverId],
+        route.routeDate.toISOString().slice(0, 10),
+        requestedDeparture,
+      )
+    ).get(route.driverId)!;
+    // A driver with no hours on this day was still put on this route by a
+    // dispatcher — that's an override, so don't drop every stop over it.
+    const vehicle = {
+      key: route.driverId,
+      availableFrom: availability.availableFrom,
+      availableUntil: availability.offDuty ? null : availability.availableUntil,
     };
-    const highStops = pendingStops.filter(
-      (s) => s.deliveryOrder.priority === DeliveryPriority.HIGH,
-    );
-    const normalStops = pendingStops.filter(
-      (s) => s.deliveryOrder.priority !== DeliveryPriority.HIGH,
-    );
 
-    let orderedStops: typeof pendingStops;
-    let legs: TripLeg[];
-    if (highStops.length === 0 || normalStops.length === 0) {
-      // Single tier present — identical cost/behavior to no-priority optimize().
-      ({ orderedStops, legs } = await this.optimizeGroup(start, pendingStops));
-    } else {
-      const high = await this.optimizeGroup(start, highStops);
-      const chainStart = this.coordsOf(
-        high.orderedStops[high.orderedStops.length - 1],
-      );
-      const normal = await this.optimizeGroup(chainStart, normalStops);
-      orderedStops = [...high.orderedStops, ...normal.orderedStops];
-      legs = [...high.legs, ...normal.legs];
-    }
+    const { routes, unassigned } = await this.optimizer.optimize({
+      depot: {
+        lat: Number(route.startLatitude),
+        lng: Number(route.startLongitude),
+      },
+      vehicles: [vehicle],
+      jobs: pendingStops.map((s) => ({
+        key: s.id,
+        location: {
+          lat: Number(s.deliveryOrder.destinationLatitude),
+          lng: Number(s.deliveryOrder.destinationLongitude),
+        },
+        priority: s.deliveryOrder.priority,
+        windowStart: s.deliveryOrder.deliveryWindowStart,
+        windowEnd: s.deliveryOrder.deliveryWindowEnd,
+      })),
+      keepUnassigned: true,
+    });
+    const ordered = routes.get(route.driverId)!;
 
     const highestResolvedSequence = route.stops
       .filter((s) => this.stopStatus(s) !== 'PENDING')
       .reduce((max, s) => Math.max(max, s.sequence), 0);
-
-    const departureAt = dto.departureAt
-      ? new Date(dto.departureAt)
-      : (route.plannedDepartureAt ?? new Date());
-    let cumulativeMs = departureAt.getTime();
 
     // Two-phase sequence update, same reasoning as reorderStops(): avoids
     // transiently colliding with @@unique([routeId, sequence]).
@@ -598,36 +561,35 @@ export class DeliveryRoutesService {
         data: { sequence: -(i + 1) },
       }),
     );
-    const finalUpdates = orderedStops.map((stop, visitPosition) => {
-      const leg = legs[visitPosition];
-      cumulativeMs += leg.durationSeconds * 1000;
-      const plannedEta = new Date(cumulativeMs);
-      cumulativeMs += STOP_DWELL_SECONDS * 1000;
-
-      return this.prisma.routeStop.update({
-        where: { id: stop.id },
+    const finalUpdates = ordered.map((stop, visitPosition) =>
+      this.prisma.routeStop.update({
+        where: { id: stop.key },
         data: {
           sequence: highestResolvedSequence + visitPosition + 1,
-          travelMetersFromPrevious: leg.distanceMeters,
-          travelSecondsFromPrevious: Math.round(leg.durationSeconds),
-          plannedEta,
+          travelMetersFromPrevious: stop.leg?.distanceMeters ?? null,
+          travelSecondsFromPrevious:
+            stop.leg != null ? Math.round(stop.leg.durationSeconds) : null,
+          plannedEta: stop.eta,
           // New ETA — a later slip deserves a fresh alert.
           atRiskNotifiedAt: null,
         },
-      });
-    });
+      }),
+    );
 
     await this.prisma.$transaction([
       ...negativeUpdates,
       ...finalUpdates,
       this.prisma.route.update({
         where: { id: routeId },
-        data: { plannedDepartureAt: departureAt },
+        data: { plannedDepartureAt: vehicle.availableFrom },
       }),
     ]);
     await this.recordHistory(routeId, RouteHistoryEventType.OPTIMIZED, userId, {
       stopCount: pendingStops.length,
-      highPriorityCount: highStops.length,
+      highPriorityCount: pendingStops.filter(
+        (s) => s.deliveryOrder.priority === DeliveryPriority.HIGH,
+      ).length,
+      unscheduledCount: unassigned.length,
     });
     await this.notifications.create(
       organizationId,
@@ -640,7 +602,25 @@ export class DeliveryRoutesService {
       },
     );
 
-    return this.getRoute(organizationId, routeId);
+    const stopById = new Map(pendingStops.map((s) => [s.id, s]));
+    const unscheduled: {
+      stopId: string;
+      deliveryOrderId: string;
+      label: string;
+      reason: UnscheduledReason;
+    }[] = unassigned.map((u) => {
+      const s = stopById.get(u.key)!;
+      return {
+        stopId: s.id,
+        deliveryOrderId: s.deliveryOrder.id,
+        label:
+          s.deliveryOrder.customerName ??
+          s.deliveryOrder.doNumber ??
+          s.deliveryOrder.id,
+        reason: u.reason,
+      };
+    });
+    return { ...(await this.getRoute(organizationId, routeId)), unscheduled };
   }
 
   // Called after a delivery resolves (delivered/failed) — walks the

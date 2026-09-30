@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 
 type Draft = { id: string | null; label: string; address: string; position: { lat: number; lng: number } | null };
@@ -119,6 +120,7 @@ export default function CustomerAddressesSection({
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 line-clamp-2">{a.address || t('delivery.addresses.noAddressText')}</p>
+                <GoogleMapsLink lat={a.latitude} lng={a.longitude} />
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button

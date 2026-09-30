@@ -13,6 +13,8 @@ export type MapStop = {
   latitude: number;
   longitude: number;
   label: string;
+  // Overrides the status color (e.g. one color per driver in a plan preview).
+  color?: string;
 };
 
 // Jakarta — matches Organization.timezone's own "Asia/Jakarta" default,
@@ -103,7 +105,7 @@ export default function DeliveryMapInner({
         <FitBounds positions={pickedPosition ? [...positions, [pickedPosition.lat, pickedPosition.lng]] : positions} />
         {pickMode && onPick && <ClickToPick onPick={onPick} />}
         {stops.map((stop) => (
-          <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={dotIcon(STATUS_COLOR[stop.status])} />
+          <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={dotIcon(stop.color ?? STATUS_COLOR[stop.status])} />
         ))}
         {pickedPosition && <Marker position={[pickedPosition.lat, pickedPosition.lng]} icon={pickedIcon} />}
       </MapContainer>

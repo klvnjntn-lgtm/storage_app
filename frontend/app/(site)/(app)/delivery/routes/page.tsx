@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Truck, Plus, UserPlus, Users, UserCog, Trash2 } from 'lucide-react';
+import { Truck, Plus, UserPlus, Users, UserCog, Trash2, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -41,11 +41,25 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// useSearchParams() needs a Suspense boundary (same as sales/orders/new).
 export default function DeliveryRoutesPage() {
+  return (
+    <Suspense fallback={null}>
+      <DeliveryRoutesPageInner />
+    </Suspense>
+  );
+}
+
+function DeliveryRoutesPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useLanguage();
 
-  const [date, setDate] = useState(todayIso());
+  // Honors ?date= (e.g. coming back from "Optimize all drivers").
+  const [date, setDate] = useState(() => {
+    const fromUrl = searchParams.get('date');
+    return fromUrl && /^\d{4}-\d{2}-\d{2}$/.test(fromUrl) ? fromUrl : todayIso();
+  });
   const [driverFilter, setDriverFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
@@ -303,6 +317,13 @@ export default function DeliveryRoutesPage() {
             >
               <UserPlus size={14} />
               {t('delivery.routes.inviteDriver')}
+            </button>
+            <button
+              onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
+              className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-100"
+            >
+              <Sparkles size={14} />
+              {t('delivery.plan.openButton')}
             </button>
             <button
               onClick={() => setShowNewRoute((v) => !v)}

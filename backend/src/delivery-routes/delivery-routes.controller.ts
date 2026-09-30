@@ -26,12 +26,21 @@ import { AddRouteStopDto } from './dto/add-route-stop.dto';
 import { ReorderRouteStopsDto } from './dto/reorder-route-stops.dto';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
+import { RoutePlannerService } from './route-planner.service';
+import {
+  ApplyRoutePlanDto,
+  PlanCandidatesQueryDto,
+  PlanRoutesDto,
+} from './dto/plan-routes.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.DELIVERY_DMS)
 @Controller('delivery-routes')
 export class DeliveryRoutesController {
-  constructor(private readonly deliveryRoutesService: DeliveryRoutesService) {}
+  constructor(
+    private readonly deliveryRoutesService: DeliveryRoutesService,
+    private readonly routePlanner: RoutePlannerService,
+  ) {}
 
   @Post()
   @UseGuards(RolesGuard)
@@ -118,6 +127,38 @@ export class DeliveryRoutesController {
   @Roles('ADMIN', 'USER')
   listDrivers(@CurrentOrg() organizationId: string) {
     return this.deliveryRoutesService.listDrivers(organizationId);
+  }
+
+  // ─── Optimize all drivers (VROOM) ──────────────────────────────────
+  @Get('plan/candidates')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  planCandidates(
+    @CurrentOrg() organizationId: string,
+    @Query() query: PlanCandidatesQueryDto,
+  ) {
+    return this.routePlanner.candidates(organizationId, query.routeDate);
+  }
+
+  @Post('plan/preview')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  planPreview(
+    @CurrentOrg() organizationId: string,
+    @Body() dto: PlanRoutesDto,
+  ) {
+    return this.routePlanner.preview(organizationId, dto);
+  }
+
+  @Post('plan')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  planApply(
+    @CurrentOrg() organizationId: string,
+    @Req() req,
+    @Body() dto: ApplyRoutePlanDto,
+  ) {
+    return this.routePlanner.apply(organizationId, req.user.sub, dto);
   }
 
   @Get(':id')
