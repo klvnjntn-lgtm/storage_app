@@ -155,22 +155,6 @@ const invoiceDetailInclude = {
   payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } }, // FIX — lets the invoice detail page list/void individual payments (voided ones are kept but hidden)
 } satisfies Prisma.InvoiceInclude;
 
-// InvoiceItem.quantity is an integer column, while quotation and sales
-// order lines allow two decimals (e.g. 1.5 kg). Converting such a line used
-// to fail deep inside the insert with a raw 500; refuse it up front and say
-// which lines need changing instead.
-function assertWholeQuantities(items: { quantity: number; description?: string }[]) {
-  const fractional = items
-    .map((item, idx) => ({ item, line: idx + 1 }))
-    .filter(({ item }) => !Number.isInteger(item.quantity));
-  if (fractional.length > 0) {
-    const lines = fractional.map(({ item, line }) => `line ${line} (${item.quantity})`).join(', ');
-    throw new BadRequestException(
-      `Invoices only support whole-number quantities. Change these to whole numbers first: ${lines}`,
-    );
-  }
-}
-
 @Injectable()
 export class InvoiceService {
 constructor(
@@ -715,12 +699,13 @@ async issue(
 
       for (const item of inv.items) {
         lineItemCount++;
-        unitsSold += item.quantity;
+        const qty = Number(item.quantity);
+        unitsSold += qty;
 
         if (item.unitCost != null) {
           profitCoverage++;
-          const lineCost = Number(item.unitCost) * item.quantity;
-          const lineProfit = (Number(item.unitPrice) - Number(item.unitCost)) * item.quantity;
+          const lineCost = Number(item.unitCost) * qty;
+          const lineProfit = (Number(item.unitPrice) - Number(item.unitCost)) * qty;
           invCost += lineCost;
           invProfit += lineProfit;
         }
@@ -1098,7 +1083,7 @@ async issue(
         id: String(item.id),
         productName: item.productName ?? item.product?.name ?? item.description ?? '',
         sku: item.sku ?? item.product?.sku ?? null,
-        quantity: item.quantity,
+        quantity: Number(item.quantity),
         unit: item.unit,
 
         unitPrice: toNumber(item.unitPrice),
@@ -1644,7 +1629,11 @@ async editIssuedInvoice(
     }
 
     const productNames = new Map(products.map((p) => [p.id, p.name]));
-    const changes = this.buildEditDiff(invoice.items, lines, productNames);
+    const changes = this.buildEditDiff(
+      invoice.items.map((i) => ({ ...i, quantity: Number(i.quantity) })),
+      lines,
+      productNames,
+    );
 
     await tx.invoiceActivityEvent.create({
       data: {
@@ -2034,7 +2023,6 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
           taxRateIds: [] as string[],
         }));
-        assertWholeQuantities(items);
 
         // Carry each source line's price and level forward unchanged — a
         // quotation that said Rp100k must not become Rp110k on the order
@@ -2148,7 +2136,6 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
           taxRateIds: [] as string[],
         }));
-        assertWholeQuantities(items);
 
         // Carry each source line's price and level forward unchanged — a
         // quotation that said Rp100k must not become Rp110k on the order

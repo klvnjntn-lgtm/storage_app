@@ -389,7 +389,7 @@ function QuotationFormPageInner() {
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
-      const nextQty = Number(line.quantity) + delta;
+      const nextQty = Math.round((Number(line.quantity) + delta) * 100) / 100;
       if (nextQty <= 0) {
         const { [key]: _removed, ...rest } = prev;
         return rest;
@@ -624,7 +624,7 @@ function QuotationFormPageInner() {
   function buildPayload() {
     const productItems = cartLines.map((line) => ({
       productId: line.product.id,
-      quantity: Math.round(Number(line.quantity)),
+      quantity: Math.round(Number(line.quantity) * 100) / 100,
       locationId: line.locationId,
       unitPrice: line.unitPrice,
       // A typed (custom) price comes from no level.

@@ -291,7 +291,7 @@ export class PostingRulesService {
     });
 
     const receiptSubtotal = receipt.items.reduce(
-      (sum, item) => sum + item.quantity * Number(item.purchaseOrderItem.unitCost),
+      (sum, item) => sum + Number(item.quantity) * Number(item.purchaseOrderItem.unitCost),
       0,
     );
     if (receiptSubtotal <= 0) throw new BadRequestException('Goods receipt has no value to post');

@@ -9,6 +9,7 @@ import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import QtyInput from '@/app/components/shared/QtyInput';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -237,7 +238,7 @@ export function SalesOrderCartPanel({
                   >
                     <Minus size={14} strokeWidth={2} />
                   </button>
-                  <span className="w-5 text-center text-sm">{line.quantity}</span>
+                  <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
                   <button
                     onClick={() => changeQty(line.key, 1)}
                     disabled={line.quantity >= available}

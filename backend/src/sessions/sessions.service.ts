@@ -38,6 +38,12 @@ export type SummaryQuery = {
   dir?: 'asc' | 'desc';
 };
 
+
+// Quantities are Decimal(12,2); keep running totals on the same grid so
+// float drift (0.1 + 0.2) never leaves a 0.0000001 remainder behind.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
@@ -134,7 +140,7 @@ export class SessionsService {
     if (lines.length === 0) {
       throw new BadRequestException(`This product is not on invoice ${label}`);
     }
-    const returnable = lines.reduce((sum, l) => sum + l.fulfilledQuantity, 0);
+    const returnable = round2(lines.reduce((sum, l) => sum + Number(l.fulfilledQuantity), 0));
     if (qty > returnable) {
       throw new BadRequestException(
         returnable <= 0
@@ -147,7 +153,7 @@ export class SessionsService {
     let remaining = qty;
     for (const line of lines) {
       if (remaining <= 0) break;
-      const take = Math.min(line.fulfilledQuantity, remaining);
+      const take = round2(Math.min(Number(line.fulfilledQuantity), remaining));
       if (take <= 0) continue;
       const dec = await tx.invoiceItem.updateMany({
         where: { id: line.id, fulfilledQuantity: { gte: take } },
@@ -161,7 +167,7 @@ export class SessionsService {
         quantity: take,
         unitCost: line.unitCost != null ? Number(line.unitCost) : null,
       });
-      remaining -= take;
+      remaining = round2(remaining - take);
     }
 
     await this.postingRules.postCogsReturn(
@@ -214,14 +220,14 @@ export class SessionsService {
     let remaining = qty;
     for (const line of lines) {
       if (remaining <= 0) break;
-      const room = Number(line.quantity) - line.fulfilledQuantity;
-      const take = Math.min(room, remaining);
+      const room = Number(line.quantity) - Number(line.fulfilledQuantity);
+      const take = round2(Math.min(room, remaining));
       if (take <= 0) continue;
       await tx.invoiceItem.update({
         where: { id: line.id },
         data: { fulfilledQuantity: { increment: take } },
       });
-      remaining -= take;
+      remaining = round2(remaining - take);
     }
     await recomputeInvoiceFulfillmentStatus(tx, organizationId, invoiceId);
   }
@@ -625,7 +631,7 @@ async findAll(
         returnedHere: returned.get(i.productId!) ?? 0,
       };
       row.sold += Number(i.quantity);
-      row.returnable += i.fulfilledQuantity;
+      row.returnable += Number(i.fulfilledQuantity);
       byProduct.set(i.productId!, row);
     }
     return [...byProduct.values()];
@@ -862,9 +868,6 @@ async findAll(
     });
     if (!session) throw new BadRequestException('Session not found');
     this.assertOpenForScanning(session.status);
-    if ((session.invoiceId || session.returnInvoiceId) && !Number.isInteger(qty)) {
-      throw new BadRequestException('Quantity must be a whole number for a session linked to an invoice');
-    }
 
     const product = await this.prisma.product.findFirst({
       where: { id: productId, organizationId },
@@ -1003,7 +1006,7 @@ async findAll(
           where: { invoiceId: session.invoiceId, productId },
           select: { quantity: true },
         });
-        const orderedQty = invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+        const orderedQty = invoiceItems.reduce((sum, i) => sum + Number(i.quantity), 0);
 
         if (orderedQty > 0) {
           const pickedAgg = await tx.event.aggregate({

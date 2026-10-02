@@ -10,6 +10,7 @@ import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { resolveLinePrice, usePriceLevels } from '@/lib/price-levels';
+import QtyInput, { roundQty } from '@/app/components/shared/QtyInput';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -324,16 +325,23 @@ export function ProductSearch({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() =>
-                  setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, prev.quantity - 1) } : prev))
+                  setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, roundQty(prev.quantity - 1)) } : prev))
                 }
                 disabled={staged.quantity <= 1}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Minus size={14} strokeWidth={2} />
               </button>
-              <span className="w-5 text-center text-sm">{staged.quantity}</span>
+              <QtyInput
+                value={staged.quantity}
+                onCommit={(q) =>
+                  setStaged((prev) =>
+                    prev && (posModeEnabled || q <= stagedAvailable) ? { ...prev, quantity: q } : prev,
+                  )
+                }
+              />
               <button
-                onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: prev.quantity + 1 } : prev))}
+                onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: roundQty(prev.quantity + 1) } : prev))}
                 disabled={!posModeEnabled && staged.quantity >= stagedAvailable}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
               >

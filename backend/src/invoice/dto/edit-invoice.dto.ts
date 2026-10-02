@@ -9,6 +9,7 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   IsUUID,
   IsNotEmpty,
@@ -30,8 +31,8 @@ export class EditInvoiceItemDto {
   @IsNotEmpty()
   locationId?: string;
 
-  @IsInt()
-  @Min(1)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
   quantity: number;
 
   @IsOptional()

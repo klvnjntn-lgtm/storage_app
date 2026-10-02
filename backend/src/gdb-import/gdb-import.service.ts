@@ -1579,8 +1579,9 @@ private async importStock(
         .filter((line) => line.SKU && line.QUANTITY != null)
         .map((line) => {
           const rawQty = Number(line.QUANTITY);
-          const roundedQty = Math.round(rawQty);
-          if (Math.abs(rawQty - roundedQty) > 0.01) {
+          // Invoice quantities hold two decimals; only finer values get rounded.
+          const roundedQty = Math.round(rawQty * 100) / 100;
+          if (Math.abs(rawQty - roundedQty) > 0.0001) {
             fractionalQuantityWarnings.push(
               `Invoice ${invoiceNumber}, SKU ${line.SKU}: ${rawQty} rounded to ${roundedQty}`,
             );

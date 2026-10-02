@@ -76,9 +76,9 @@ export class IntegrationService {
         results.errors.push(`Skipped incomplete row: ${JSON.stringify(row)}`);
         continue;
       }
-      // ExternalOrderItem.quantity is an Int column — a fractional or
-      // negative quantity would otherwise fail the whole insert with a 500.
-      if (!Number.isInteger(row.quantity) || row.quantity <= 0) {
+      // ExternalOrderItem.quantity is Decimal(12,2) — finer fractions or a
+      // non-positive quantity would otherwise fail the whole insert with a 500.
+      if (!(row.quantity > 0) || Math.abs(Math.round(row.quantity * 100) - row.quantity * 100) > 1e-6) {
         results.errors.push(`Skipped row with invalid quantity: ${JSON.stringify(row)}`);
         continue;
       }

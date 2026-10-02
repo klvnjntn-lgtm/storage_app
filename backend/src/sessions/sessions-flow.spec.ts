@@ -470,7 +470,17 @@ describe('Warehouse sessions', () => {
     it('records warehouse picks as fulfilment on the invoice', async () => {
       const invoiceId = await soldAndPicked(2, 2);
       const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { items: true } });
-      expect(invoice.items[0].fulfilledQuantity).toBe(2);
+      expect(Number(invoice.items[0].fulfilledQuantity)).toBe(2);
+      expect(invoice.fulfillmentStatus).toBe(FulfillmentStatus.FULFILLED);
+    });
+
+    it('sells and picks fractional quantities (e.g. 2.5 kg) on an invoice', async () => {
+      const invoiceId = await soldAndPicked(2.5, 1.2);
+      const fulfil = await prisma.session.findFirstOrThrow({ where: { invoiceId } });
+      await sessions.addItem(invOrg, fulfil.id, invProduct, 1.3, invLoc, undefined, undefined, invUser);
+      const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { items: true } });
+      expect(Number(invoice.items[0].quantity)).toBe(2.5);
+      expect(Number(invoice.items[0].fulfilledQuantity)).toBe(2.5);
       expect(invoice.fulfillmentStatus).toBe(FulfillmentStatus.FULFILLED);
     });
 
@@ -493,7 +503,7 @@ describe('Warehouse sessions', () => {
       expect(await balance(SystemAccountKey.SALES_REVENUE)).toBeCloseTo(revenueBefore + PRICE);
 
       const item = await prisma.invoiceItem.findFirstOrThrow({ where: { invoiceId } });
-      expect(item.fulfilledQuantity).toBe(1);
+      expect(Number(item.fulfilledQuantity)).toBe(1);
 
       await expect(scanReturn(session.id, 2)).rejects.toThrow(/only 1 unit/);
 

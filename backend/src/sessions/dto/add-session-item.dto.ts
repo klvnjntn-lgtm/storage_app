@@ -18,7 +18,7 @@ export class AddSessionItemDto {
   @IsString()
   productId!: string;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   qty!: number;
 

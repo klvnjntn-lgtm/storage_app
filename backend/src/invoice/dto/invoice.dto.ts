@@ -55,7 +55,7 @@ export class InvoiceLineInput {
   @IsNotEmpty()
   locationId?: string;
 
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
 

@@ -75,6 +75,8 @@ function ScanPageInner() {
   const [fromLocationId, setFromLocationId] = useState('');
   const [toLocationId, setToLocationId] = useState('');
   const [returnReason, setReturnReason] = useState('');
+  // Quantity for the next scan; weighed goods (1.5 kg) can't be scanned one by one.
+  const [scanQty, setScanQty] = useState('1');
 
   const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -137,6 +139,16 @@ function ScanPageInner() {
       return;
     }
 
+    const qty = Number(scanQty.trim().replace(',', '.'));
+    if (!(qty > 0) || Math.abs(Math.round(qty * 100) - qty * 100) > 1e-6) {
+      const msg = t('scan.invalidQty');
+      setStatus('error');
+      setErrorMsg(msg);
+      errorFeedback();
+      pushLog({ barcode, productName: '', ok: false, message: msg });
+      return;
+    }
+
     setStatus('submitting');
     setErrorMsg('');
 
@@ -161,7 +173,7 @@ function ScanPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productId: product.id,
-          qty: 1,
+          qty,
           fromLocationId: fromLocationRef.current || undefined,
           toLocationId: toLocationRef.current || undefined,
           reason: requiresReason ? returnReason : undefined,
@@ -175,7 +187,8 @@ function ScanPageInner() {
 
       successFeedback();
       setStatus('idle');
-      pushLog({ barcode, productName: product.name, ok: true });
+      pushLog({ barcode, productName: qty === 1 ? product.name : `${product.name} × ${qty}`, ok: true });
+      setScanQty('1');
     } catch (e: any) {
       console.error(e);
       const msg = e.message || t('scan.scanFailed');
@@ -311,7 +324,7 @@ function ScanPageInner() {
 
     function refocusGunInput(e?: MouseEvent) {
       const target = e?.target as HTMLElement | undefined;
-      if (target && (target.closest('select') || target.closest('button'))) return;
+      if (target && (target.closest('select') || target.closest('button') || (target.closest('input') && target !== gunInputRef.current))) return;
       if (!readyToScan || cameraActive) return;
       gunInputRef.current?.focus();
     }
@@ -538,7 +551,27 @@ function ScanPageInner() {
               </div>
             )}
 
-            <div className="relative">
+            <div className="flex items-stretch gap-2">
+            <label className="flex flex-col justify-center shrink-0" title={t('scan.qtyPerScanHint')}>
+              <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{t('scan.qtyPerScan')}</span>
+              <input
+                value={scanQty}
+                onChange={(e) => setScanQty(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onKeyDown={(e) => {
+                  // Hand focus back so the scanner gun's keystrokes land in the barcode box.
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    gunInputRef.current?.focus();
+                  }
+                }}
+                inputMode="decimal"
+                disabled={!readyToScan}
+                aria-label={t('scan.qtyPerScanHint')}
+                className="w-16 text-lg text-center border-2 border-gray-300 rounded-lg py-1.5 outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+              />
+            </label>
+            <div className="relative flex-1">
               <ScanLine
                 size={18}
                 strokeWidth={2}
@@ -559,6 +592,7 @@ function ScanPageInner() {
                     : 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
                 }`}
               />
+            </div>
             </div>
 
             {!readyToScan && (

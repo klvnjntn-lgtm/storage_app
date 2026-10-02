@@ -547,7 +547,7 @@ function NewInvoicePage() {
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
-      const nextQty = line.quantity + delta;
+      const nextQty = Math.round((line.quantity + delta) * 100) / 100;
       if (nextQty <= 0) {
         const { [key]: _removed, ...rest } = prev;
         return rest;

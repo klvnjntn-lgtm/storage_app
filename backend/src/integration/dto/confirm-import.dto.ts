@@ -5,7 +5,7 @@ import { Type } from 'class-transformer';
 // runs with whitelist: true, which strips undecorated properties — before
 // these were added, every row arrived as {} and was skipped as incomplete.
 // Values are only type-checked here; blank refs/SKUs and non-positive or
-// fractional quantities are reported per row by IntegrationService, so one
+// over-precise quantities are reported per row by IntegrationService, so one
 // bad row doesn't reject the whole file.
 class ParsedRowDto {
   @IsString()

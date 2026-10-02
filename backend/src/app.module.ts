@@ -23,6 +23,7 @@ import { DriverScopeGuard } from './auth/guards/driver-scope.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { ModuleGuard } from './auth/guards/module.guard';
 import { RedactCostInterceptor } from './common/interceptors/redact-cost.interceptor';
+import { DecimalQuantityInterceptor } from './common/interceptors/decimal-quantity.interceptor';
 import { LicenseGuard } from './license/license.guard';
 import { LicenseModule } from './license/license.module';
 import { OrganizationModule } from './organization/organization.module';
@@ -144,6 +145,10 @@ import { AccessControlModule } from './access-control/access-control.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: RedactCostInterceptor, // cost data is admin-only in every response
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: DecimalQuantityInterceptor, // quantities go out as numbers, not Decimal strings
     },
   ],
 })

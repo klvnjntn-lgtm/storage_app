@@ -22,6 +22,7 @@ import {
 } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import QtyInput from '@/app/components/shared/QtyInput';
 
 type RawTaxRate = TaxRate & { archivedAt: string | null };
 
@@ -335,7 +336,7 @@ function addToCart(
     setCart((prev) => {
       const line = prev[key];
       if (!line) return prev;
-      const nextQty = line.quantity + delta;
+      const nextQty = Math.round((line.quantity + delta) * 100) / 100;
       const floor = line.fulfilledQuantity ?? 0;
       // CHANGED — can't shrink below what's already been fulfilled;
       // physical stock already left for that amount. Mirrors the
@@ -777,7 +778,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         >
                           <Minus size={14} strokeWidth={2} />
                         </button>
-                        <span className="w-5 text-center text-sm">{line.quantity}</span>
+                        <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
                         <button
                           onClick={() => changeQty(line.key, 1)}
                           disabled={!posPricingEnabled && line.quantity >= available}
