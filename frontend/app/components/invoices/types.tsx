@@ -7,6 +7,9 @@ export type ProductSearchResult = {
   barcode: string | null;
   image: string | null;
   sellingPrice: number | null;
+  // Prices for the non-default price levels (default = sellingPrice).
+  // Absent on lines restored from a saved document.
+  prices?: { priceLevelId: string; price: number }[];
   unit: string | null;
   stockByLocation: StockAtLocation[];
 };
@@ -25,6 +28,14 @@ export type CartLine = {
   taxRateIds: string[];
   discountType: DiscountType | null;
   discountValue: number | null;
+  // Price level picked for this line (null = default). The server
+  // resolves the actual price from it — see lib/price-levels.ts.
+  priceLevelId?: string | null;
+  // Set once the salesperson picks a level by hand; a customer change
+  // then leaves the line alone instead of re-levelling it.
+  priceLevelOverridden?: boolean;
+  // POS pricing: the price was typed by hand and comes from no level.
+  priceCustom?: boolean;
 };
 
 export type LocationOption = { id: string; name: string };
@@ -41,6 +52,8 @@ export type Customer = {
   latitude?: string | null;
   longitude?: string | null;
   deliveryNotes?: string | null;
+  // Price level this customer buys at; null = the org's default.
+  priceLevelId?: string | null;
 };
 
 export type Vehicle = {

@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { LogOut, Bell } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { display } from '@/lib/fonts';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { apiFetch } from '@/lib/apifetch';
+import { clearSession } from '@/lib/session';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 import { ensurePushSubscription } from '@/lib/push';
 
@@ -28,16 +31,34 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
     } catch {
       // ignore — still proceed to clear local state below
     }
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('user');
+    clearSession();
     window.location.href = '/login';
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-black">
-      <header className="sticky top-0 z-10 flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3">
-        <span className="text-sm font-semibold">{t('delivery.driver.title')}</span>
-        <div className="flex items-center gap-3">
+    <div
+      className="min-h-dvh text-black"
+      style={{
+        backgroundColor: 'var(--page-bg)',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 bg-white/80 backdrop-blur-md border-b border-blue-500/15 px-4 py-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Image
+            src="/waresys-logo.svg"
+            alt={t('appShell.brand')}
+            width={1600}
+            height={442}
+            priority
+            className="app-logo h-6 w-auto shrink-0"
+          />
+          <span className={`${display.className} text-lg font-bold truncate border-l border-blue-500/20 pl-2.5`}>
+            {t('delivery.driver.title')}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           <ThemeToggle />
           <div className="relative">
             <button
@@ -46,9 +67,9 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
                 if (!open) ensureListLoaded();
               }}
               aria-label={t('shared.notificationDrawer.notifications')}
-              className="relative p-1.5 text-gray-500 hover:text-blue-700"
+              className="relative w-11 h-11 flex items-center justify-center rounded-xl text-gray-600 hover:text-blue-700"
             >
-              <Bell size={18} />
+              <Bell size={22} />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-white">
                   {unreadCount}
@@ -83,14 +104,14 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700"
+            className="h-11 flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700"
           >
-            <LogOut size={14} />
+            <LogOut size={18} />
             {t('appShell.logOut')}
           </button>
         </div>
       </header>
-      <main className="p-4">{children}</main>
+      <main className="max-w-xl mx-auto p-4 pb-10">{children}</main>
     </div>
   );
 }

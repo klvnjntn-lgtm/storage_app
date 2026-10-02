@@ -10,6 +10,7 @@ import { Supplier } from '@/app/components/suppliers/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -19,6 +20,8 @@ type StatusFilter = 'active' | 'inactive' | 'all';
 export default function SuppliersListPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
 
   // Seeded from the URL so pressing the browser's Back button from a
   // supplier's edit page restores the same search/filter/page instead of
@@ -256,26 +259,31 @@ async function toggleActive(supplier: Supplier) {
                           >
                             <Pencil size={15} strokeWidth={2} />
                           </button>
-                          <button
-                            title={s.isActive ? t('purchasing.suppliersList.deactivate') : t('purchasing.suppliersList.reactivate')}
-                            disabled={actionId === s.id}
-                            onClick={() => toggleActive(s)}
-                            className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-                          >
-                            {s.isActive ? (
-                              <PowerOff size={15} strokeWidth={2} />
-                            ) : (
-                              <Power size={15} strokeWidth={2} />
-                            )}
-                          </button>
-                          <button
-                            title={t('purchasing.suppliersList.delete')}
-                            disabled={actionId === s.id}
-                            onClick={() => handleDelete(s)}
-                            className="p-1.5 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 disabled:opacity-50"
-                          >
-                            <Trash2 size={15} strokeWidth={2} />
-                          </button>
+                          {/* Activating, deactivating and deleting suppliers is admin-only (backend enforces it). */}
+                          {isAdmin && (
+                            <>
+                              <button
+                                title={s.isActive ? t('purchasing.suppliersList.deactivate') : t('purchasing.suppliersList.reactivate')}
+                                disabled={actionId === s.id}
+                                onClick={() => toggleActive(s)}
+                                className="p-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                              >
+                                {s.isActive ? (
+                                  <PowerOff size={15} strokeWidth={2} />
+                                ) : (
+                                  <Power size={15} strokeWidth={2} />
+                                )}
+                              </button>
+                              <button
+                                title={t('purchasing.suppliersList.delete')}
+                                disabled={actionId === s.id}
+                                onClick={() => handleDelete(s)}
+                                className="p-1.5 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                <Trash2 size={15} strokeWidth={2} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

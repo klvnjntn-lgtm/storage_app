@@ -204,14 +204,14 @@ export default function QuotationDetailPage() {
             <div className="flex flex-wrap gap-2">
               {quotation.status === 'DRAFT' && (
                 <>
-                  <button
+                  <button data-tour="qd-edit"
                     onClick={() => router.push(`/sales/quotations/new?draftId=${quotation.id}`)}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
                     {t('sales.quotationDetail.edit')}
                   </button>
-                  <button
+                  <button data-tour="qd-send"
                     disabled={actionLoading === 'send'}
                     onClick={handleSend}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
@@ -231,7 +231,7 @@ export default function QuotationDetailPage() {
 
               {quotation.status === 'SENT' && (
                 <>
-                  <button
+                  <button data-tour="qd-accept"
                     disabled={actionLoading === 'accept'}
                     onClick={handleAccept}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-green-600 text-white font-semibold hover:bg-green-700 disabled:opacity-50"
@@ -251,7 +251,7 @@ export default function QuotationDetailPage() {
               )}
 
 {(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') && (
-  <button
+  <button data-tour="qd-to-order"
     disabled={actionLoading === 'convert-order'}
     onClick={handleConvertToOrder}
     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
@@ -263,7 +263,7 @@ export default function QuotationDetailPage() {
 
 {['SENT', 'ACCEPTED', 'CONVERTED'].includes(quotation.status) &&
   quotation.invoices.length === 0 && (
-    <button
+    <button data-tour="qd-to-invoice"
       disabled={actionLoading === 'convert-invoice'}
       onClick={handleConvertToInvoice}
       className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
@@ -282,7 +282,7 @@ export default function QuotationDetailPage() {
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? t('sales.quotationDetail.generatingPdf') : t('sales.quotationDetail.downloadPdf')}
                   </button>
-                  <button
+                  <button data-tour="doc-print"
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >

@@ -13,6 +13,7 @@ import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import { teamLabel } from '@/app/components/delivery/TeamPicker';
 import type { PlanCandidates, PlanPreview } from '@/app/components/delivery/plan-types';
+import TimeInput from '@/app/components/shared/TimeInput';
 
 // One color per team in the preview (list swatch + map dots).
 const DRIVER_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#4b5563'];
@@ -226,7 +227,7 @@ function RoutePlanInner() {
         )}
 
         {/* Settings */}
-        <div className={`${sectionClass} space-y-3`}>
+        <div data-tour="dlv-plan-settings" className={`${sectionClass} space-y-3`}>
           <h2 className="text-sm font-semibold">{t('delivery.plan.settings')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -235,11 +236,10 @@ function RoutePlanInner() {
             </div>
             <div>
               <label className={labelClass}>{t('delivery.plan.departureLabel')}</label>
-              <input
-                type="time"
+              <TimeInput
                 value={departureTime}
-                onChange={(e) => setDepartureTime(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+                onChange={(v) => setDepartureTime(v)}
+                className="w-full"
               />
               <p className="text-xs text-gray-500 mt-1">{t('delivery.plan.departureHint')}</p>
             </div>
@@ -265,7 +265,7 @@ function RoutePlanInner() {
         {candidates && (
           <>
             {/* Teams */}
-            <div className={sectionClass}>
+            <div data-tour="dlv-plan-teams" className={sectionClass}>
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-sm font-semibold">{t('delivery.plan.teamsLabel')}</h2>
                 <span className="text-xs text-gray-500">
@@ -316,7 +316,7 @@ function RoutePlanInner() {
             </div>
 
             {/* Deliveries */}
-            <div className={sectionClass}>
+            <div data-tour="dlv-plan-deliveries" className={sectionClass}>
               <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                 <h2 className="text-sm font-semibold">{t('delivery.plan.deliveriesLabel')}</h2>
                 <div className="flex items-center gap-2 text-xs">
@@ -378,7 +378,7 @@ function RoutePlanInner() {
               </div>
             </div>
 
-            <button
+            <button data-tour="dlv-plan-preview"
               onClick={handlePreview}
               disabled={previewing}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-4 py-2.5 hover:bg-blue-700 disabled:opacity-50"

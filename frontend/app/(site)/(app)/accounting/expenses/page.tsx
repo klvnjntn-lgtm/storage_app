@@ -10,6 +10,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type ExpenseCategory = {
@@ -116,7 +117,7 @@ export default function ExpensesPage() {
 
   async function loadBankAccounts() {
     if (bankAccounts !== null) return; // fetch once, lazily
-    const res = await apiFetch('/organizations/bank-accounts');
+    const res = await apiFetch('/organization/bank-accounts');
     if (res.ok) {
       const data: BankAccount[] = await res.json();
       setBankAccounts(data.filter((b) => !b.archivedAt));
@@ -623,20 +624,19 @@ export default function ExpensesPage() {
                 <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
                   <Calendar size={11} strokeWidth={2} /> {t('accounting.expenses.expenseDate')}
                 </label>
-                <input
-                  type="date"
+                <DatePicker
+                  variant="field"
                   value={expenseForm.expenseDate}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, expenseDate: e.target.value }))}
-                  className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                  onChange={(v) => setExpenseForm((f) => ({ ...f, expenseDate: v }))}
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.expenses.dueDateOptional')}</label>
-                <input
-                  type="date"
+                <DatePicker
+                  variant="field"
+                  clearable
                   value={expenseForm.dueDate}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, dueDate: e.target.value }))}
-                  className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                  onChange={(v) => setExpenseForm((f) => ({ ...f, dueDate: v }))}
                 />
               </div>
             </div>
@@ -738,11 +738,12 @@ export default function ExpensesPage() {
                         </div>
                         <div className="flex flex-col gap-1 w-full sm:w-1/2">
                           <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.dueDate')}</label>
-                          <input
-                            type="date"
+                          <DatePicker
+                            variant="field"
+                            size="sm"
+                            clearable
                             value={editExpenseForm.dueDate}
-                            onChange={(e) => setEditExpenseForm((f) => ({ ...f, dueDate: e.target.value }))}
-                            className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                            onChange={(v) => setEditExpenseForm((f) => ({ ...f, dueDate: v }))}
                           />
                         </div>
                         <p className="text-[10px] text-gray-400">
@@ -795,11 +796,11 @@ export default function ExpensesPage() {
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
-                            <input
-                              type="date"
+                            <DatePicker
+                              variant="field"
+                              size="sm"
                               value={payForm.paidAt}
-                              onChange={(e) => setPayForm((f) => ({ ...f, paidAt: e.target.value }))}
-                              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                              onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}
                             />
                           </div>
                         </div>

@@ -10,7 +10,12 @@ import {
   Undo2,
   Boxes,
   PlugZap,
+  ChevronRight,
+  Package,
+  MapPin,
+  History,
 } from 'lucide-react';
+import { display } from '@/lib/fonts';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
@@ -65,28 +70,30 @@ export default function Warehouse() {
     label: string;
     subtitle: string;
     icon: typeof Inbox;
-    gradient: string;
+    // Icon tile tint — keeps each mode recognizable at a glance without
+    // a full-bleed gradient button.
+    tint: string;
   }[] = [
     {
       mode: 'RECEIVE',
       label: t('inventory.warehousePage.modeReceiveLabel'),
       subtitle: t('inventory.warehousePage.modeReceiveSubtitle'),
       icon: Inbox,
-      gradient: 'bg-gradient-to-br from-emerald-500 to-emerald-700',
+      tint: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     },
     {
       mode: 'RETURNS',
       label: t('inventory.warehousePage.modeReturnsLabel'),
       subtitle: t('inventory.warehousePage.modeReturnsSubtitle'),
       icon: Undo2,
-      gradient: 'bg-gradient-to-br from-amber-500 to-orange-600',
+      tint: 'bg-amber-50 text-amber-700 border-amber-200',
     },
     {
       mode: 'MOVE',
       label: t('inventory.warehousePage.modeMoveLabel'),
       subtitle: t('inventory.warehousePage.modeMoveSubtitle'),
       icon: ArrowLeftRight,
-      gradient: 'bg-gradient-to-br from-blue-500 to-indigo-700',
+      tint: 'bg-blue-50 text-blue-700 border-blue-200',
     },
     {
       mode: 'FULFILLMENT',
@@ -96,7 +103,7 @@ export default function Warehouse() {
           ? t('inventory.warehousePage.modeFulfillSubtitlePickShip')
           : t('inventory.warehousePage.modeFulfillSubtitlePickPackShip'),
       icon: PackageCheck,
-      gradient: 'bg-gradient-to-br from-violet-500 to-purple-700',
+      tint: 'bg-violet-50 text-violet-700 border-violet-200',
     },
   ];
 
@@ -199,6 +206,44 @@ export default function Warehouse() {
     loadSessions();
   }, []);
 
+  const modeLabel = (type: string) => MODES.find((m) => m.mode === type)?.label ?? type;
+
+  const actions = (
+    <div className="pt-6 w-full">
+      <h2 className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wider mb-2 text-left">
+        {t('inventory.warehousePage.startSession')}
+      </h2>
+
+      <div data-tour="ops-modes" className="grid grid-cols-2 gap-3">
+        {MODES.map(({ mode, label, subtitle, icon: Icon, tint }) => (
+          <button
+            key={mode}
+            data-tour={mode === 'RECEIVE' ? 'ops-mode-receive' : undefined}
+            onClick={() => start(mode)}
+            aria-expanded={mode === 'RECEIVE' || mode === 'RETURNS' ? picker === mode : undefined}
+            className={`group ${mode === 'RECEIVE' || mode === 'FULFILLMENT' ? 'col-span-2' : ''} ${
+              picker === mode ? 'border-blue-600 ring-2 ring-blue-100' : 'border-blue-500/15 hover:border-blue-500/40'
+            } bg-white border rounded-xl p-4 text-left shadow-sm hover:shadow-md active:scale-[0.99] transition-[box-shadow,border-color,transform] duration-200 min-h-[84px] flex items-center gap-3 sm:gap-4 cursor-pointer`}
+          >
+            <span className={`shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-lg border ${tint}`}>
+              <Icon size={22} strokeWidth={2} aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className={`${display.className} text-base sm:text-lg font-semibold leading-tight`}>{label}</p>
+              <p className="text-xs sm:text-sm text-gray-500 mt-0.5">{subtitle}</p>
+            </div>
+            <ChevronRight size={18} className="shrink-0 text-gray-300 group-hover:text-blue-600 transition-colors" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+
+      {picker === 'RECEIVE' && (
+        <ReceiveBatchPicker isAdmin={profile?.role === 'ADMIN'} onClose={() => setPicker(null)} />
+      )}
+      {picker === 'RETURNS' && <ReturnInvoicePicker onClose={() => setPicker(null)} />}
+    </div>
+  );
+
   return (
     <main
       className="min-h-screen text-black"
@@ -213,12 +258,12 @@ export default function Warehouse() {
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center shrink-0 shadow-sm">
-              <Boxes size={18} strokeWidth={2} className="text-white" />
-            </div>
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Boxes size={18} strokeWidth={2} className="text-blue-700" aria-hidden="true" />
+            </span>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-bold tracking-tight leading-none truncate">{t('appShell.brand')}</h1>
-              <p className="text-xs text-gray-500 mt-0.5 truncate">{t('inventory.warehousePage.scannerHub')}</p>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('appShell.brand')}</h1>
+              <p className="text-xs text-gray-500 truncate">{t('inventory.warehousePage.scannerHub')}</p>
             </div>
           </div>
         </div>
@@ -228,7 +273,7 @@ export default function Warehouse() {
       <div className="max-w-5xl mx-auto w-full px-4 sm:px-5 flex flex-col items-center text-center">
         {/* SEARCH BAR */}
         <div className="pt-8 w-full">
-          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+          <div data-tour="ops-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={18} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
               value={query}
@@ -239,7 +284,7 @@ export default function Warehouse() {
           </div>
 
           {query && (
-            <div className="mt-2 bg-white border border-blue-500/20 rounded-md overflow-hidden shadow-md text-left">
+            <div className="mt-2 bg-white border border-blue-500/20 rounded-xl overflow-hidden shadow-lg text-left">
               {loading && <div className="p-3 text-sm text-gray-500">{t('inventory.warehousePage.searching')}</div>}
 
               {!loading && searchError && (
@@ -250,7 +295,7 @@ export default function Warehouse() {
                 <div className="max-h-72 overflow-auto text-sm">
                   {data.products?.length > 0 && (
                     <div className="p-2">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsProducts')}</p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><Package size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsProducts')}</p>
                       {data.products.map((p: any) => (
                         <div
                           key={p.id}
@@ -258,7 +303,7 @@ export default function Warehouse() {
                           onClick={() => router.push(`/inventory/stock/${p.id}`)}
                         >
                           <p className="font-medium">{p.name}</p>
-                          <p className="text-xs text-gray-500">{p.sku}</p>
+                          <p className="text-xs text-gray-500 font-mono">{p.sku}</p>
                         </div>
                       ))}
                     </div>
@@ -266,7 +311,7 @@ export default function Warehouse() {
 
                   {data.stocks?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsStock')}</p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><Boxes size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsStock')}</p>
                       {data.stocks.map((s: any) => (
                         <div
                           key={s.id}
@@ -274,7 +319,7 @@ export default function Warehouse() {
                           onClick={() => router.push(`/inventory/stock/${s.productId}`)}
                         >
                           <p>{s.product?.name}</p>
-                          <p className="text-xs text-gray-500">{s.location?.name} • qty {s.quantity}</p>
+                          <p className="text-xs text-gray-500">{s.location?.name} · <span className="font-mono tabular-nums">qty {s.quantity}</span></p>
                         </div>
                       ))}
                     </div>
@@ -282,7 +327,7 @@ export default function Warehouse() {
 
                   {data.locations?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsLocations')}</p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><MapPin size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsLocations')}</p>
                       {data.locations.map((l: any) => (
                         // Opens the stock page filtered to what's at this location.
                         <div
@@ -298,7 +343,7 @@ export default function Warehouse() {
 
                   {data.events?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 font-semibold mb-1 px-1 uppercase tracking-wide">{t('inventory.warehousePage.resultsEvents')}</p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><History size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsEvents')}</p>
                       {data.events.map((e: any) => (
                         <div
                           key={e.id}
@@ -333,8 +378,9 @@ export default function Warehouse() {
         {!!pendingOrderCount && (
           <div className="pt-6 w-full">
             <div
+              data-tour="ops-pending-orders"
               onClick={() => router.push('/upload-order')}
-              className="flex items-center justify-between gap-2 bg-violet-50 border-2 border-violet-200 rounded-md p-3 cursor-pointer hover:border-violet-300 transition-colors text-left"
+              className="flex items-center justify-between gap-2 bg-violet-50 border border-violet-200 rounded-xl p-3 cursor-pointer hover:border-violet-300 transition-colors text-left"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="shrink-0 rounded-md bg-violet-100 p-2">
@@ -352,10 +398,12 @@ export default function Warehouse() {
           </div>
         )}
 
+        {actions}
+
         {/* RECENT SESSIONS */}
-        <div className="pt-6 w-full">
+        <div data-tour="ops-recent-sessions" className="pt-7 pb-10 w-full">
           <div className="flex justify-between items-center mb-2">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('inventory.warehousePage.recentSessions')}</h2>
+            <h2 className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wider">{t('inventory.warehousePage.recentSessions')}</h2>
             <button
               onClick={() => router.push('/inventory/sessions')}
               className="text-xs text-gray-500 hover:text-blue-700 font-semibold transition-colors"
@@ -369,16 +417,16 @@ export default function Warehouse() {
               <div
                 key={s.id}
                 onClick={() => router.push(`/inventory/sessions/${s.id}`)}
-                className="bg-white border border-gray-300 rounded-md p-3 cursor-pointer hover:border-blue-500/40 hover:shadow-sm transition-all flex items-center justify-between gap-2"
+                className="bg-white border border-blue-500/15 rounded-xl p-3 cursor-pointer hover:border-blue-500/40 hover:shadow-sm transition-[box-shadow,border-color] flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
-                  <span className="font-semibold">{s.type}</span>
+                  <span className="font-semibold">{modeLabel(s.type)}</span>
                   {(s.type === 'FULFILLMENT' || s.type === 'MOVE') && s.stage && (
                     <span className="ml-1.5 text-xs text-gray-500">· {s.stage}</span>
                   )}
-                  <p className="text-xs text-gray-500 mt-0.5">{s.totalItems} items</p>
+                  <p className="text-xs text-gray-500 mt-0.5 font-mono tabular-nums">{s.totalItems} items</p>
                 </div>
-                <span className={`text-xs px-2 py-1 rounded-md border font-medium shrink-0 ${statusStyle(s.status)}`}>
+                <span className={`text-[11px] px-2 py-0.5 rounded-md border font-semibold uppercase tracking-wide shrink-0 ${statusStyle(s.status)}`}>
                   {s.status}
                 </span>
               </div>
@@ -388,43 +436,6 @@ export default function Warehouse() {
           </div>
         </div>
 
-        {/* MAIN ACTIONS */}
-        <div className="pt-7 pb-10 w-full">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 text-left">
-            {t('inventory.warehousePage.startSession')}
-          </h2>
-
-          <div className="grid grid-cols-2 gap-3">
-            {MODES.map(({ mode, label, subtitle, icon: Icon, gradient }) => (
-              <button
-                key={mode}
-                onClick={() => start(mode)}
-                className={`
-                  ${mode === 'RECEIVE' || mode === 'FULFILLMENT' ? 'col-span-2' : ''}
-                  ${gradient} text-white
-                  rounded-lg p-4 sm:p-5 text-left
-                  shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]
-                  transition-all duration-200
-                  min-h-[92px] flex items-center gap-3 sm:gap-4
-                `}
-              >
-                <span className="shrink-0 rounded-lg bg-white/15 p-2 sm:p-2.5">
-                  <Icon size={22} strokeWidth={2} className="sm:hidden" />
-                  <Icon size={24} strokeWidth={2} className="hidden sm:block" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-lg sm:text-xl font-bold leading-tight">{label}</p>
-                  <p className="text-xs sm:text-sm text-white/85">{subtitle}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {picker === 'RECEIVE' && (
-            <ReceiveBatchPicker isAdmin={profile?.role === 'ADMIN'} onClose={() => setPicker(null)} />
-          )}
-          {picker === 'RETURNS' && <ReturnInvoicePicker onClose={() => setPicker(null)} />}
-        </div>
       </div>
 
       {/* FOOTER */}

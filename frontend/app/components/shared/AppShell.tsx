@@ -1,11 +1,10 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { display } from '@/lib/fonts';
 import {
-  Boxes,
   LayoutDashboard,
   Settings,
   Tag,
@@ -51,11 +50,14 @@ import {
   Menu,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { CSRF_HEADERS, clearSession } from '@/lib/session';
 import { ensurePushSubscription } from '@/lib/push';
 import NotificationDrawer from '@/app/components/shared/NotificationDrawer';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
+import { TourProvider } from '@/app/components/tour/TourProvider';
+import TourHelpMenu from '@/app/components/tour/TourHelpMenu';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -77,6 +79,8 @@ type NavItem = {
   label: string;
   icon: typeof Inbox;
   children?: NavItem[];
+  /** data-tour target for guided tours (app/components/tour/tours.ts). */
+  tourId?: string;
 };
 
 /* Shared modal plumbing for the account dialog and the mobile "More"
@@ -180,12 +184,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     // from the backend, and apiFetch treats every 401 as "session
     // expired" — it would wipe the token and bounce to /login before
     // this form ever got to show the error.
-    const token = localStorage.getItem('accessToken');
     const res = await fetch('/api/auth/change-password', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: token ? `Bearer ${token}` : '',
+        ...CSRF_HEADERS,
       },
       body: JSON.stringify({ currentPassword, newPassword }),
     });
@@ -236,12 +240,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setChangePasswordError('');
     setConfirmingOtp(true);
     try {
-      const token = localStorage.getItem('accessToken');
       const res = await fetch('/api/auth/change-password/confirm', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
+          ...CSRF_HEADERS,
         },
         body: JSON.stringify({ code: otpCode }),
       });
@@ -254,8 +258,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
       // Backend invalidates the session on a successful change, so finish
       // the same way the log out button does.
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('user');
+      clearSession();
       window.location.href = '/login';
     } catch {
       setChangePasswordError(t('appShell.changePasswordVerifyFailed'));
@@ -398,6 +401,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     label: t('nav.items.purchasing'),
     icon: Package,
     children: purchasingChildren,
+    tourId: 'nav-purchasing',
   };
 
   const accountingChildren: NavItem[] = [
@@ -441,7 +445,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ? [
           { href: '/inventory/warehouse', label: t('nav.items.warehouse'), icon: Warehouse },
           { href: '/inventory/sessions', label: t('nav.items.sessions'), icon: ClipboardList },
-          { href: '/inventory/labels', label: t('nav.items.labels'), icon: Tag },
+          { href: '/inventory/labels', label: t('nav.items.labels'), icon: Tag, tourId: 'nav-labels' },
         ]
       : []),
     { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
@@ -454,7 +458,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ? [
             salesItem,
             { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
-            { href: '/customers', label: t('nav.items.customers'), icon: Users },
+            { href: '/customers', label: t('nav.items.customers'), icon: Users, tourId: 'nav-customers' },
           ]
         : [],
     },
@@ -464,7 +468,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     },
     {
       label: t('nav.groups.accounting'),
-      items: hasInvoicePos ? [accountingItem] : [],
+      // The books are admin-only (backend enforces it too); staff keep
+      // Sales Insights, which reads invoice reports, not the ledger.
+      items: !hasInvoicePos
+        ? []
+        : profile?.role === 'ADMIN'
+          ? [accountingItem]
+          : [{ href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 }],
     },
     {
       label: t('nav.groups.workshop'),
@@ -484,6 +494,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Truck },
             { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
             { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
+            { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
             // Stops are picked from customers; with INVOICE_POS the link
             // already lives under Sales.
             ...(!hasInvoicePos ? [{ href: '/customers', label: t('nav.items.customers'), icon: Contact }] : []),
@@ -528,7 +539,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // AppShell gives it a new identity every render, which remounts every
   // nav item and drops keyboard focus when a group is toggled.
   const renderNavLink = (item: NavItem) => {
-    const { href, label, icon: Icon, children } = item;
+    const { href, label, icon: Icon, children, tourId } = item;
     const active = children
       ? pathname.startsWith(href)
       : pathname === href;
@@ -552,6 +563,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={() => setOpenGroups((prev) => ({ ...prev, [href]: !isOpen }))}
             aria-expanded={isOpen}
+            data-tour={tourId}
             aria-controls={groupId}
             className={rowClass}
           >
@@ -577,6 +589,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         key={href}
         href={href}
         aria-current={active ? 'page' : undefined}
+        data-tour={tourId}
         className={rowClass}
       >
         <Icon size={18} strokeWidth={2} aria-hidden="true" className={active ? 'text-white' : 'text-gray-500'} />
@@ -607,6 +620,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const label = t(key);
     return label === key ? status : label;
   };
+  const enabledModules = [
+    hasWarehouseOps && 'WAREHOUSE_OPS',
+    hasInvoicePos && 'INVOICE_POS',
+    hasWorkshopRms && 'WORKSHOP_RMS',
+    hasDelivery && 'DELIVERY_DMS',
+  ].filter((m): m is string => !!m);
+
   const roleLabel = (role: string) => {
     const key = `appShell.roles.${role}`;
     const label = t(key);
@@ -623,20 +643,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         backgroundSize: '24px 24px',
       }}
     >
+      <TourProvider enabledModules={enabledModules}>
       <NotificationDrawer enabled={hasWorkshopRms || hasDelivery} remindersEnabled={hasWorkshopRms} />
 
       <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-blue-500/15">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0 ring-1 ring-white/10 shadow-sm shadow-blue-600/30">
-            <Boxes size={18} strokeWidth={2} aria-hidden="true" className="text-white" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className={`${display.className} text-lg font-bold tracking-tight leading-none`}>
-              {t('appShell.brand')}
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">{t('appShell.tagline')}</p>
-          </div>
+          <h1 className="min-w-0 flex-1">
+            <Image
+              src="/waresys-logo.svg"
+              alt={t('appShell.brand')}
+              width={1600}
+              height={442}
+              priority
+              className="app-logo h-8 w-auto max-w-full"
+            />
+          </h1>
           <div className="flex items-center gap-1.5 shrink-0">
             <ThemeToggle />
             <LanguageSwitcher />
@@ -647,7 +669,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {renderNavGroups()}
         </nav>
 
-        <div className="px-3 py-4 border-t border-blue-500/15">
+        <div className="px-3 py-4 border-t border-blue-500/15 space-y-2">
+          <TourHelpMenu variant="sidebar" />
           <button
             type="button"
             onClick={() => setShowProfile(true)}
@@ -688,19 +711,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* TOP BAR — mobile only, sticky so nav stays reachable while scrolling */}
         <div className="md:hidden sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] pt-[env(safe-area-inset-top)]">
           <div className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0 ring-1 ring-white/10">
-                <Boxes size={16} strokeWidth={2} aria-hidden="true" className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <h1 className={`${display.className} text-base font-bold tracking-tight leading-none truncate`}>
-                  {t('appShell.brand')}
-                </h1>
-                <p className="text-[11px] text-gray-500 mt-0.5">{t('appShell.tagline')}</p>
-              </div>
-            </div>
+            <h1 className="min-w-0">
+              <Image
+                src="/waresys-logo.svg"
+                alt={t('appShell.brand')}
+                width={1600}
+                height={442}
+                priority
+                className="app-logo h-8 w-auto max-w-full"
+              />
+            </h1>
 
             <div className="flex items-center gap-2 shrink-0">
+              <TourHelpMenu variant="icon" />
               <ThemeToggle />
               <LanguageSwitcher />
               <button
@@ -781,8 +804,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               className="absolute inset-x-0 bottom-0 max-h-[85dvh] flex flex-col rounded-t-2xl bg-white border-t border-blue-500/15 shadow-xl animate-sheet-in motion-reduce:animate-none"
             >
               <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-blue-500/10">
-                <h2 id="more-sheet-title" className={`${display.className} text-base font-bold tracking-tight`}>
-                  {t('appShell.brand')}
+                <h2 id="more-sheet-title">
+                  <Image
+                    src="/waresys-logo.svg"
+                    alt={t('appShell.brand')}
+                    width={1600}
+                    height={442}
+                    className="app-logo h-7 w-auto"
+                  />
                 </h2>
                 <button
                   ref={moreCloseRef}
@@ -1055,8 +1084,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   } catch {
                     // ignore — still proceed to clear local state below
                   }
-                  localStorage.removeItem('accessToken');
-                  localStorage.removeItem('user');
+                  clearSession();
                   window.location.href = '/login';
                 }}
               >
@@ -1078,6 +1106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      </TourProvider>
     </div>
   );
 }

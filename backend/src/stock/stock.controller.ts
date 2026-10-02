@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Req, BadRequestException } from '@nestjs/common';
-import { StockService, ImportMode } from './stock.service';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { StockService } from './stock.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { ImportStockDto } from './dto/import-stock.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentOrg } from 'src/auth/decorators/current-org.decorator';
 import { OrgGuard } from 'src/auth/guards/org.guard';
@@ -16,14 +17,15 @@ export class StockController {
   // other single-segment-before-:id route in this codebase — otherwise
   // Nest matches "reports" as the :productId param.
   @Get('reports/oversold')
-  getOversoldSales(
+  async getOversoldSales(
     @CurrentOrg() orgId: string,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-    return this.stockService.getOversoldSales(orgId, fromDate, toDate);
+    // Whole business days in the org's timezone — new Date('YYYY-MM-DD')
+    // as the upper bound used to drop most of the last day.
+    const bounds = await this.stockService.businessDayBounds(orgId, from || undefined, to || undefined);
+    return this.stockService.getOversoldSales(orgId, bounds.gte ?? new Date(0), bounds.lte ?? new Date());
   }
 
   // Also before :productId — see note above.
@@ -51,29 +53,9 @@ export class StockController {
   importStock(
     @Req() req,
     @CurrentOrg() orgId: string,
-    @Body()
-    body: {
-      mode: ImportMode;
-      rows: {
-        sku: string;
-        name: string;
-        category: string;
-        brand?: string;
-        location: string;
-        qty: number;
-        sellingPrice?: number;
-        costPrice?: number;
-      }[];
-    },
+    @Body() body: ImportStockDto,
   ) {
     const { sub: userId } = req.user;
-
-    if (!Object.values(ImportMode).includes(body.mode)) {
-      throw new BadRequestException(
-        `mode must be one of: ${Object.values(ImportMode).join(', ')}`,
-      );
-    }
-
     return this.stockService.import(orgId, userId, body.mode, body.rows);
   }
 

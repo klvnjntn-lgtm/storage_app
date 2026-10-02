@@ -29,12 +29,10 @@ const ENTITY_PATHS: Record<EntityType, { listPath: string; mergePath: string }> 
   brand: { listPath: 'brands', mergePath: 'brands/merge' },
 };
 
-function authHeaders(json = true) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-  return {
-    ...(json ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+// The session cookie and CSRF header are added by apiFetch; only the
+// content type varies here.
+function authHeaders(json = true): Record<string, string> {
+  return json ? { 'Content-Type': 'application/json' } : {};
 }
 
 export default function ReferenceDataPage() {

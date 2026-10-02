@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 // Gated on WORKSHOP_RMS only, same pattern as CustomersController's
 // INVOICE_POS gate — an org can have INVOICE_POS without WORKSHOP_RMS
@@ -81,6 +82,8 @@ export class VehiclesController {
     return this.vehiclesService.update(orgId, id, dto);
   }
 
+  // Deleting vehicles is admin-only.
+  @Roles('ADMIN')
   @Delete('vehicles/:id')
   remove(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.vehiclesService.remove(orgId, id);

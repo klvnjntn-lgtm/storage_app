@@ -31,6 +31,7 @@ import { AddRouteStopDto } from './dto/add-route-stop.dto';
 import { ReorderRouteStopsDto } from './dto/reorder-route-stops.dto';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
+import { backfillCustomerPin } from '../customers/customer-pin-backfill';
 import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
@@ -41,9 +42,13 @@ export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 type Requester = { sub: string; role: string };
 
 // How far past its own ETA a still-PENDING stop has to be before it's
-// flagged "at risk" — a grace window so an ETA that's off by a couple of
-// minutes doesn't immediately read as a delay.
-const AT_RISK_GRACE_MINUTES = 15;
+// flagged "late" — a grace window so an ETA that's off by a few minutes
+// doesn't immediately read as a delay.
+const LATE_AFTER_MINUTES = 20;
+
+// LATE: already behind (past ETA + grace, or past the customer's window).
+// AT_RISK: still on time, but the ETA lands after the customer's window.
+export type Lateness = 'LATE' | 'AT_RISK' | null;
 
 // History events that change the stop list/order — each produces a new
 // route version (see recordHistory).
@@ -56,7 +61,7 @@ const VERSIONED_EVENTS = new Set<RouteHistoryEventType>([
   RouteHistoryEventType.STOP_RESCHEDULED,
 ]);
 
-const stopSelect = {
+export const stopSelect = {
   id: true,
   sequence: true,
   plannedEta: true,
@@ -76,6 +81,7 @@ const stopSelect = {
   proofPhotoKey: true,
   completedLatitude: true,
   completedLongitude: true,
+  completedAccuracy: true,
   failedAt: true,
   failureReason: true,
   failureLatitude: true,
@@ -91,6 +97,7 @@ const stopSelect = {
       deliveryAddress: true,
       completedLatitude: true,
       completedLongitude: true,
+      completedAccuracy: true,
       failedAt: true,
       failureReason: true,
       failureLatitude: true,
@@ -110,7 +117,7 @@ const stopSelect = {
 type StopRow = Prisma.RouteStopGetPayload<{ select: typeof stopSelect }>;
 
 // The team with its driver (one per team — TeamsService.assignDriver).
-const teamSelect = {
+export const teamSelect = {
   id: true,
   name: true,
   members: {
@@ -121,7 +128,7 @@ const teamSelect = {
 
 type TeamRow = Prisma.TeamGetPayload<{ select: typeof teamSelect }>;
 
-const presentTeam = (team: TeamRow) => ({
+export const presentTeam = (team: TeamRow) => ({
   id: team.id,
   name: team.name,
   driver: team.members[0] ?? null,
@@ -246,31 +253,24 @@ export class DeliveryRoutesService {
     return stop.signedAt ? 'DELIVERED' : 'PENDING';
   }
 
-  // Never a physical-position check — purely "is it past the time we
-  // expected to be there" (or past the customer's own requested window),
-  // recomputed at read time. Matches the module's "status/event-based,
-  // not live-tracking" rule. Two independent triggers, either is enough:
-  // - plannedEta blown past its grace window (schedule slipping)
-  // - the ETA itself now lands after the customer's requested window end
+  // Never a physical-position check — purely time-based, recomputed at
+  // read time. Matches the module's "status/event-based, not
+  // live-tracking" rule.
+  // - LATE: plannedEta blown past its grace window, or the customer's
+  //   requested window has already closed
+  // - AT_RISK: not late yet, but the ETA itself lands after the window end
   //   (even a "perfectly on schedule" ETA can already be a broken promise)
-  private isAtRisk(
+  private lateness(
     status: StopStatus,
     plannedEta: Date | null,
     deliveryWindowEnd: Date | null,
-  ): boolean {
-    if (status !== 'PENDING') return false;
-    if (
-      plannedEta &&
-      Date.now() > plannedEta.getTime() + AT_RISK_GRACE_MINUTES * 60 * 1000
-    )
-      return true;
-    if (
-      plannedEta &&
-      deliveryWindowEnd &&
-      plannedEta.getTime() > deliveryWindowEnd.getTime()
-    )
-      return true;
-    return false;
+  ): Lateness {
+    if (status !== 'PENDING') return null;
+    const now = Date.now();
+    if (deliveryWindowEnd && now > deliveryWindowEnd.getTime()) return 'LATE';
+    if (plannedEta && now > plannedEta.getTime() + LATE_AFTER_MINUTES * 60 * 1000) return 'LATE';
+    if (plannedEta && deliveryWindowEnd && plannedEta.getTime() > deliveryWindowEnd.getTime()) return 'AT_RISK';
+    return null;
   }
 
   // One shape for both stop kinds, so screens read the top-level fields
@@ -288,7 +288,10 @@ export class DeliveryRoutesService {
       status,
       // Failed attempt whose DO was rescheduled elsewhere — history only.
       superseded: stop.supersededAt != null,
-      atRisk: this.isAtRisk(status, stop.plannedEta, target.deliveryWindowEnd),
+      ...(() => {
+        const l = this.lateness(status, stop.plannedEta, target.deliveryWindowEnd);
+        return { late: l === 'LATE', atRisk: l === 'AT_RISK' };
+      })(),
       kind: d ? ('DELIVERY_ORDER' as const) : ('CUSTOMER' as const),
       label: stopLabel(stop),
       ...target,
@@ -299,6 +302,7 @@ export class DeliveryRoutesService {
         : stop.proofPhotoKey != null,
       completedLatitude: d ? d.completedLatitude : stop.completedLatitude,
       completedLongitude: d ? d.completedLongitude : stop.completedLongitude,
+      completedAccuracy: d ? d.completedAccuracy : stop.completedAccuracy,
       failedAt: d ? d.failedAt : stop.failedAt,
       failureReason: d ? d.failureReason : stop.failureReason,
       failureLatitude: d ? d.failureLatitude : stop.failureLatitude,
@@ -846,6 +850,7 @@ export class DeliveryRoutesService {
           plannedEta: stop.eta,
           // New ETA — a later slip deserves a fresh alert.
           atRiskNotifiedAt: null,
+          lateNotifiedAt: null,
         },
       }),
     );
@@ -930,7 +935,7 @@ export class DeliveryRoutesService {
       cumulativeMs += stop.travelSecondsFromPrevious * 1000;
       await this.prisma.routeStop.update({
         where: { id: stop.id },
-        data: { plannedEta: new Date(cumulativeMs), atRiskNotifiedAt: null },
+        data: { plannedEta: new Date(cumulativeMs), atRiskNotifiedAt: null, lateNotifiedAt: null },
       });
       cumulativeMs += STOP_DWELL_SECONDS * 1000;
     }
@@ -1142,6 +1147,8 @@ export class DeliveryRoutesService {
         routeId: true,
         sequence: true,
         customerName: true,
+        customerId: true,
+        address: true,
         deliveryOrderId: true,
         signedAt: true,
         failedAt: true,
@@ -1162,7 +1169,12 @@ export class DeliveryRoutesService {
     organizationId: string,
     routeId: string,
     stopId: string,
-    params: { receivedBy: string; latitude?: number; longitude?: number },
+    params: {
+      receivedBy: string;
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+    },
     requester: Requester,
   ) {
     const stop = await this.findCustomerStopForAction(
@@ -1186,10 +1198,24 @@ export class DeliveryRoutesService {
         completedByUserId: requester.sub,
         completedLatitude: params.latitude ?? null,
         completedLongitude: params.longitude ?? null,
+        completedAccuracy:
+          params.latitude != null ? (params.accuracy ?? null) : null,
       },
     });
     if (claim.count === 0) {
       throw new BadRequestException('This stop is already resolved');
+    }
+    try {
+      await backfillCustomerPin(this.prisma, {
+        organizationId,
+        customerId: stop.customerId,
+        deliveryAddress: stop.address,
+        latitude: params.latitude,
+        longitude: params.longitude,
+        accuracy: params.accuracy,
+      });
+    } catch {
+      // best-effort, same as the DO path
     }
     try {
       await this.recalculateEtasAfter(stop, signedAt);
@@ -1279,8 +1305,9 @@ export class DeliveryRoutesService {
         priority: dto.priority,
         deliveryWindowStart: start,
         deliveryWindowEnd: end,
-        // The at-risk check depends on the window — re-arm its alert.
+        // Both checks depend on the window — re-arm their alerts.
         atRiskNotifiedAt: null,
+        lateNotifiedAt: null,
       },
     });
     return this.getRoute(organizationId, routeId);
@@ -1565,20 +1592,20 @@ export class DeliveryRoutesService {
     }
   }
 
-  // ─── At-risk alerts ─────────────────────────────────────────────────
-  // isAtRisk() is derived at read time; this sweep turns a stop *becoming*
-  // at risk into a DELIVERY_AT_RISK notification — once per stop
-  // (atRiskNotifiedAt), reset whenever its ETA is recomputed. Dispatch
-  // staff and the stop's driver are both told. Only today's/yesterday's
-  // open routes are scanned, so the query stays small.
+  // ─── Late / at-risk alerts ──────────────────────────────────────────
+  // lateness() is derived at read time; this sweep turns a stop *becoming*
+  // late or at risk into a notification — once each per stop
+  // (lateNotifiedAt / atRiskNotifiedAt), reset whenever its ETA or window
+  // is recomputed. Dispatch staff and the stop's driver are both told.
+  // A stop that goes straight to late never also gets the at-risk alert.
+  // Only today's/yesterday's open routes are scanned, so the query stays small.
   @Cron(CronExpression.EVERY_5_MINUTES)
-  async notifyAtRiskStops() {
+  async notifyLateStops() {
     const since = new Date(Date.now() - 36 * 60 * 60 * 1000);
     const candidates = await this.prisma.routeStop.findMany({
       where: {
-        atRiskNotifiedAt: null,
+        OR: [{ atRiskNotifiedAt: null }, { lateNotifiedAt: null }],
         supersededAt: null,
-        plannedEta: { not: null },
         route: {
           status: { in: [RouteStatus.PLANNED, RouteStatus.ACTIVE] },
           routeDate: { gte: since },
@@ -1586,6 +1613,8 @@ export class DeliveryRoutesService {
       },
       select: {
         ...stopSelect,
+        atRiskNotifiedAt: true,
+        lateNotifiedAt: true,
         route: {
           select: { id: true, organizationId: true, teamId: true },
         },
@@ -1594,17 +1623,21 @@ export class DeliveryRoutesService {
     });
 
     for (const stop of candidates) {
-      const status = this.stopStatus(stop);
-      if (!this.isAtRisk(status, stop.plannedEta, stopTarget(stop).deliveryWindowEnd))
-        continue;
+      const l = this.lateness(this.stopStatus(stop), stop.plannedEta, stopTarget(stop).deliveryWindowEnd);
+      const late = l === 'LATE' && stop.lateNotifiedAt == null;
+      const atRisk = l === 'AT_RISK' && stop.atRiskNotifiedAt == null;
+      if (!late && !atRisk) continue;
+
       // Claim first so an overlapping run can't double-notify.
+      const now = new Date();
       const claim = await this.prisma.routeStop.updateMany({
-        where: { id: stop.id, atRiskNotifiedAt: null },
-        data: { atRiskNotifiedAt: new Date() },
+        where: late ? { id: stop.id, lateNotifiedAt: null } : { id: stop.id, atRiskNotifiedAt: null },
+        data: late ? { lateNotifiedAt: now, atRiskNotifiedAt: stop.atRiskNotifiedAt ?? now } : { atRiskNotifiedAt: now },
       });
       if (claim.count === 0) continue;
 
       const who = stopLabel(stop);
+      const type = late ? 'DELIVERY_LATE' : 'DELIVERY_AT_RISK';
       const payload = {
         routeId: stop.route.id,
         stopId: stop.id,
@@ -1613,8 +1646,8 @@ export class DeliveryRoutesService {
       try {
         await this.notifications.notifyOrgStaff(
           stop.route.organizationId,
-          'DELIVERY_AT_RISK',
-          `Delivery at risk of being late: ${who}`,
+          type,
+          late ? `Delivery is late: ${who}` : `Delivery at risk of being late: ${who}`,
           { link: `/delivery/routes/${stop.route.id}`, payload },
         );
         const driverId = (
@@ -1624,8 +1657,8 @@ export class DeliveryRoutesService {
           await this.notifications.create(
             stop.route.organizationId,
             driverId,
-            'DELIVERY_AT_RISK',
-            `You may be late for ${who}`,
+            type,
+            late ? `You are late for ${who}` : `You may be late for ${who}`,
             { link: '/driver', payload },
           );
         }
@@ -1680,14 +1713,16 @@ export class DeliveryRoutesService {
       pending: 0,
       failed: 0,
       atRisk: 0,
+      late: 0,
     };
     for (const stop of stops) {
       const status = this.stopStatus(stop);
       if (status === 'DELIVERED') counts.delivered++;
       else if (status === 'FAILED') counts.failed++;
       else counts.pending++;
-      if (this.isAtRisk(status, stop.plannedEta, stopTarget(stop).deliveryWindowEnd))
-        counts.atRisk++;
+      const l = this.lateness(status, stop.plannedEta, stopTarget(stop).deliveryWindowEnd);
+      if (l === 'LATE') counts.late++;
+      else if (l === 'AT_RISK') counts.atRisk++;
     }
     return counts;
   }
@@ -1709,14 +1744,16 @@ export class DeliveryRoutesService {
         pending: 0,
         failed: 0,
         atRisk: 0,
+        late: 0,
       };
       for (const stop of route.stops) {
         const status = this.stopStatus(stop);
         if (status === 'DELIVERED') counts.delivered++;
         else if (status === 'FAILED') counts.failed++;
         else counts.pending++;
-        if (this.isAtRisk(status, stop.plannedEta, stopTarget(stop).deliveryWindowEnd))
-          counts.atRisk++;
+        const l = this.lateness(status, stop.plannedEta, stopTarget(stop).deliveryWindowEnd);
+        if (l === 'LATE') counts.late++;
+        else if (l === 'AT_RISK') counts.atRisk++;
       }
       return { routeId: route.id, team: presentTeam(route.team), ...counts };
     });
@@ -1731,7 +1768,8 @@ export class DeliveryRoutesService {
     const routeDate = date ?? new Date().toISOString().slice(0, 10);
     const stops = await this.prisma.routeStop.findMany({
       where: { route: { organizationId, routeDate: this.dayRange(routeDate) } },
-      select: stopSelect,
+      // The route's team lets the map filter by team and name it in a popup.
+      select: { ...stopSelect, route: { select: { id: true, team: { select: teamSelect } } } },
     });
 
     return stops
@@ -1739,6 +1777,8 @@ export class DeliveryRoutesService {
         const view = this.presentStop(stop);
         return {
           id: stop.id,
+          routeId: stop.route.id,
+          team: presentTeam(stop.route.team),
           status: view.status,
           latitude:
             view.destinationLatitude ?? view.completedLatitude ?? view.failureLatitude,

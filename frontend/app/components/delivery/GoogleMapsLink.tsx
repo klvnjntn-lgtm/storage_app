@@ -1,6 +1,6 @@
 'use client';
 
-import { ExternalLink } from 'lucide-react';
+import { MapPinned } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 type Coord = number | string | null | undefined;
@@ -33,9 +33,9 @@ export default function GoogleMapsLink({
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      className={`inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline ${className}`}
+      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm px-3 py-1.5 hover:bg-blue-700 ${className}`}
     >
-      <ExternalLink size={12} />
+      <MapPinned size={14} />
       {t('delivery.coordinates.openInMaps')}
     </a>
   );

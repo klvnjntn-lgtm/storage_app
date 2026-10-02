@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Camera, Check, StickyNote, Trash2 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
+import { CSRF_HEADERS } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 // Must match CustomerLocationService.MAX_LOCATION_PHOTOS.
@@ -68,10 +69,10 @@ export default function CustomerDriverInfoSection({
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const token = localStorage.getItem('accessToken');
       const res = await fetch(`/api/customers/${customerId}/location-photos`, {
         method: 'POST',
-        headers: { Authorization: token ? `Bearer ${token}` : '', 'X-Device-Id': getDeviceId() },
+        credentials: 'same-origin',
+        headers: { ...CSRF_HEADERS, 'X-Device-Id': getDeviceId() },
         body: formData,
       });
       const body = await res.json().catch(() => null);

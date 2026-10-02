@@ -10,14 +10,23 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer/mailer.service';
-import { randomUUID, randomBytes, createHash } from 'crypto';
+import { randomUUID, randomBytes, randomInt, createHash } from 'crypto';
 import { DevicesService } from './devices.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
+import { LoginLockout } from './login-lockout';
+
+// Compared against when the account doesn't exist, so a login for an
+// unknown email costs the same bcrypt work as one for a real account.
+const TIMING_DUMMY_HASH = bcrypt.hashSync('waresys-timing-dummy', 10);
+
+// Shared registration/reset/change minimum.
+export const MIN_PASSWORD_LENGTH = 8;
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly loginLockout = new LoginLockout();
 
   constructor(
     private prisma: PrismaService,
@@ -33,6 +42,8 @@ export class AuthService {
     userAgent?: string,
   ) {
     const normalizedEmail = email.trim().toLowerCase();
+    this.loginLockout.assertNotLocked(normalizedEmail);
+
     const user = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
       include: {
@@ -42,14 +53,16 @@ export class AuthService {
         organization: { select: { timezone: true } },
       },
     });
-    if (!user || !user.active) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
+    // Always run one bcrypt comparison, even for an unknown or inactive
+    // account — returning early made "no such email" measurably faster
+    // than "wrong password", which let response timing enumerate accounts.
+    const valid = await bcrypt.compare(password, user?.password ?? TIMING_DUMMY_HASH);
+    if (!user || !user.active || !valid) {
+      this.loginLockout.recordFailure(normalizedEmail);
       throw new UnauthorizedException('Invalid credentials');
     }
+    this.loginLockout.recordSuccess(normalizedEmail);
 
     // DRIVER-only restrictions — see devices.service.ts / access-schedule.util.ts.
     if (user.role === 'DRIVER') {
@@ -214,7 +227,7 @@ export class AuthService {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
-    if (!newPassword || newPassword.length < 8) {
+    if (!newPassword || newPassword.length < MIN_PASSWORD_LENGTH) {
       throw new ForbiddenException('Password must be at least 8 characters');
     }
 
@@ -225,9 +238,8 @@ export class AuthService {
       );
     }
 
-    const code = Math.floor(Math.random() * 1_000_000)
-      .toString()
-      .padStart(6, '0');
+    // crypto.randomInt, not Math.random — the code is a credential.
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const [otpHash, pendingPasswordHash] = await Promise.all([
       bcrypt.hash(code, 10),
       bcrypt.hash(newPassword, 10),
@@ -285,10 +297,19 @@ export class AuthService {
       );
     }
 
-    if (
-      user.changePasswordOtpAttempts >=
-      AuthService.CHANGE_PASSWORD_OTP_MAX_ATTEMPTS
-    ) {
+    // Claim an attempt atomically BEFORE comparing. Reading the counter and
+    // incrementing it afterwards let parallel requests all pass the check
+    // against the same stale count, so the 5-try cap could be exceeded by
+    // firing guesses concurrently. The successful try also uses up an
+    // attempt, which doesn't matter since success clears the counter.
+    const claimed = await this.prisma.user.updateMany({
+      where: {
+        id: user.id,
+        changePasswordOtpAttempts: { lt: AuthService.CHANGE_PASSWORD_OTP_MAX_ATTEMPTS },
+      },
+      data: { changePasswordOtpAttempts: { increment: 1 } },
+    });
+    if (claimed.count === 0) {
       await this.clearPendingPasswordChange(user.id);
       throw new UnauthorizedException(
         'Too many incorrect attempts. Please request a new code.',
@@ -297,10 +318,6 @@ export class AuthService {
 
     const valid = await bcrypt.compare(code ?? '', user.changePasswordOtpHash);
     if (!valid) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { changePasswordOtpAttempts: { increment: 1 } },
-      });
       throw new UnauthorizedException('Incorrect code');
     }
 
@@ -381,7 +398,7 @@ export class AuthService {
     if (!rawToken) {
       throw new UnauthorizedException('Reset link is invalid or expired');
     }
-    if (!newPassword || newPassword.length < 8) {
+    if (!newPassword || newPassword.length < MIN_PASSWORD_LENGTH) {
       throw new ForbiddenException('Password must be at least 8 characters');
     }
 
@@ -414,12 +431,24 @@ export class AuthService {
   // a leaked token previously stayed valid for up to 7 days with no
   // user-triggered revocation. Nulling currentSessionId makes
   // jwt.strategy.ts's session check reject the token on its very next use.
-  async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
+  //
+  // Logout by presented token. Ends the session only if the token is still
+  // the user's current one, so signing out a stale tab never kills the
+  // session the same user has since opened somewhere else. An invalid or
+  // expired token is simply ignored — the caller clears the cookie anyway.
+  async logoutToken(token: string | null) {
+    if (!token) return;
+    let payload: { sub?: string; sessionId?: string };
+    try {
+      payload = this.jwt.verify(token);
+    } catch {
+      return;
+    }
+    if (!payload.sub || !payload.sessionId) return;
+    await this.prisma.user.updateMany({
+      where: { id: payload.sub, currentSessionId: payload.sessionId },
       data: { currentSessionId: null },
     });
-    return { message: 'Logged out' };
   }
 
   private async issueToken(

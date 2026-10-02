@@ -26,26 +26,32 @@ export class TeamsController {
     return this.teamsService.list(organizationId);
   }
 
+  // Team and driver assignment is admin-only; staff can still list teams.
+  @Roles('ADMIN')
   @Post()
   create(@CurrentOrg() organizationId: string, @Body() dto: CreateTeamDto) {
     return this.teamsService.create(organizationId, dto);
   }
 
+  @Roles('ADMIN')
   @Patch(':id')
   rename(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: CreateTeamDto) {
     return this.teamsService.rename(organizationId, id, dto.name);
   }
 
+  @Roles('ADMIN')
   @Delete(':id')
   remove(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.teamsService.remove(organizationId, id);
   }
 
+  @Roles('ADMIN')
   @Post(':id/drivers')
   assignDriver(@CurrentOrg() organizationId: string, @Param('id') teamId: string, @Body() dto: AssignDriverDto) {
     return this.teamsService.assignDriver(organizationId, teamId, dto.driverId);
   }
 
+  @Roles('ADMIN')
   @Delete('drivers/:driverId')
   unassignDriver(@CurrentOrg() organizationId: string, @Param('driverId') driverId: string) {
     return this.teamsService.unassignDriver(organizationId, driverId);

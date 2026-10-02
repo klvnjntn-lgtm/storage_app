@@ -1,9 +1,13 @@
 import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/common';
 import { SalesQuotationService } from './sales-quotation.service';
+import { Public } from '../auth/decorators/public.decorator';
+import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decorator';
 
 // Deliberately NOT behind JwtAuthGuard/OrgGuard/ModuleGuard — same
 // reasoning as InvoicePrintController. See verifyDocumentToken's doc
 // comment in PrintTokenService for the trust model.
+@Public()
+@SkipLicenseCheck()
 @Controller('print/quotations')
 export class SalesQuotationPrintController {
   constructor(private quotationService: SalesQuotationService) {}

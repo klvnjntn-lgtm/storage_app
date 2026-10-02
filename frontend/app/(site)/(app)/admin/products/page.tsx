@@ -1,6 +1,7 @@
 // app/admin/products/page.tsx
 'use client';
 
+import ProductLevelPricesDialog from '@/app/components/admin/ProductLevelPricesDialog';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -23,6 +24,8 @@ type Product = {
   active: boolean;
   sellingPrice: number | null;
   costPrice: number | null;
+  // Non-default price level prices (see ProductLevelPricesDialog).
+  prices?: { priceLevelId: string; price: number }[];
 };
 
 // Stock lives per-location (see the Stock page), not as a scalar on the
@@ -45,12 +48,10 @@ const PAGE_SIZE_DEFAULT = 20;
 const LOW_STOCK_THRESHOLD = 5;
 const DEFAULT_ADJUST_REASON = 'ADMIN ADJUSTMENT';
 
-function authHeaders(json = true) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-  return {
-    ...(json ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+// The session cookie and CSRF header are added by apiFetch; only the
+// content type varies here.
+function authHeaders(json = true): Record<string, string> {
+  return json ? { 'Content-Type': 'application/json' } : {};
 }
 
 function formatIDR(amount: number): string {
@@ -301,6 +302,8 @@ export default function ProductsPage() {
   const [editStockReason, setEditStockReason] = useState(DEFAULT_ADJUST_REASON);
 
   const [savingEdit, setSavingEdit] = useState(false);
+
+  const [levelPricesFor, setLevelPricesFor] = useState<Product | null>(null);
 
   async function loadProducts() {
     const res = await apiFetch('/products', { headers: authHeaders(false) });
@@ -1194,10 +1197,21 @@ export default function ProductsPage() {
                                   <p className="text-xs text-red-600 mt-1">{editFieldErrors.sellingPrice}</p>
                                 )}
                               </div>
-                            ) : product.sellingPrice != null ? (
-                              <CellText value={formatIDR(product.sellingPrice)} />
                             ) : (
-                              <span className="text-gray-400">{t('admin.products.noPrice')}</span>
+                              <>
+                                {product.sellingPrice != null ? (
+                                  <CellText value={formatIDR(product.sellingPrice)} />
+                                ) : (
+                                  <span className="text-gray-400">{t('admin.products.noPrice')}</span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setLevelPricesFor(product)}
+                                  className="mt-1 block text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  {t('admin.products.levelPrices.open', { count: product.prices?.length ?? 0 })}
+                                </button>
+                              </>
                             )}
                           </td>
 
@@ -1390,6 +1404,13 @@ export default function ProductsPage() {
         </div>
 
       </div>
+      {levelPricesFor && (
+        <ProductLevelPricesDialog
+          product={levelPricesFor}
+          onClose={() => setLevelPricesFor(null)}
+          onSaved={loadProducts}
+        />
+      )}
     </main>
   );
 }

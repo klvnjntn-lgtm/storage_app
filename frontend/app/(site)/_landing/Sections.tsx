@@ -38,8 +38,9 @@ import {
 } from './primitives';
 import styles from './Sections.module.css';
 
-export const CONTACT_EMAIL = 'klvnjntn@gmail.com';
-export const WHATSAPP_URL = 'https://wa.me/6281372127181';
+import { CONTACT_EMAIL, WHATSAPP_URL } from '@/lib/support';
+
+export { CONTACT_EMAIL, WHATSAPP_URL };
 
 /* ─── Capability marquee ────────────────────────────────────────── */
 export function TechMarquee() {

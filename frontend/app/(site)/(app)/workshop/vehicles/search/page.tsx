@@ -414,9 +414,9 @@ function VehicleLookupPageInner() {
       {/* Header — blue-outline + backdrop-blur treatment matching /labels,
           /inventory/stock, and /customers. Widened to max-w-5xl to match
           those pages instead of the old max-w-3xl. */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2.5 mb-4">
+          <div className="flex items-center gap-2.5 min-w-0 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Search size={18} strokeWidth={2} className="text-blue-700" />
             </span>
@@ -452,7 +452,7 @@ function VehicleLookupPageInner() {
               ) : (
                 <button
                   onClick={confirmSelection}
-                  className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
+                  className="-my-1 flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-600/10 border border-blue-600/20 rounded-md px-2 py-1 shrink-0 hover:bg-blue-600/15 transition-colors"
                 >
                   {t('workshop.vehicleSearch.enter')}
                   <CornerDownLeft size={11} strokeWidth={2} />
@@ -471,7 +471,7 @@ function VehicleLookupPageInner() {
                       idx === highlightIndex ? 'bg-blue-50' : 'bg-white'
                     } ${idx !== results.length - 1 ? 'border-b border-gray-100' : ''}`}
                   >
-                    <span className="font-semibold">{r.plateNumber}</span>
+                    <span className="font-semibold font-mono tracking-wide">{r.plateNumber}</span>
                     <span className="text-gray-500 truncate">
                       {r.vehicleModel} · {r.customerName}
                     </span>
@@ -485,27 +485,38 @@ function VehicleLookupPageInner() {
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {notFound && !vehicleLoading && !vehicle && (
-          <p className="text-sm text-gray-500 bg-white border-2 border-gray-200 rounded-md p-4 text-center">
-            {t('workshop.vehicleSearch.notFound', { query: notFound })}
-          </p>
+          <div className="flex flex-col items-center text-center gap-2 bg-white border border-dashed border-blue-500/30 rounded-xl p-6">
+            <Car size={26} strokeWidth={1.5} className="text-gray-300" aria-hidden="true" />
+            <p className="text-sm text-gray-600">{t('workshop.vehicleSearch.notFound', { query: notFound })}</p>
+          </div>
         )}
 
         {vehicleError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{vehicleError}</p>
+          <p className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+            <AlertCircle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+            {vehicleError}
+          </p>
         )}
 
-        {vehicleLoading && <p className="text-sm text-gray-500">{t('workshop.vehicleSearch.loadingVehicle')}</p>}
+        {vehicleLoading && (
+          <div className="h-[132px] rounded-xl border border-blue-500/15 bg-white animate-pulse motion-reduce:animate-none mb-4" aria-label={t('workshop.vehicleSearch.loadingVehicle')} />
+        )}
 
         {vehicle && (
           <>
             {/* Vehicle summary card */}
-            <div className="border-2 border-gray-300 rounded-md p-4 mb-4 bg-white">
+            <div className="border border-blue-500/15 rounded-xl p-4 sm:p-5 mb-5 bg-white shadow-sm">
               <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Car size={20} strokeWidth={2} className="text-gray-700 shrink-0" />
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                    <Car size={20} strokeWidth={2} className="text-blue-700" aria-hidden="true" />
+                  </span>
                   <div className="min-w-0">
-                    <h2 className="text-lg font-bold truncate">{vehicle.plateNumber}</h2>
-                    <p className="text-sm text-gray-500 truncate">{vehicle.vehicleModel}</p>
+                    {/* Plate as a plate: mono, boxed — the thing staff read off the car. */}
+                    <h2 className="inline-block font-mono text-lg sm:text-xl font-bold tracking-wider border-2 border-gray-800 rounded-md px-2.5 py-0.5 leading-tight">
+                      {vehicle.plateNumber}
+                    </h2>
+                    <p className="text-sm text-gray-500 truncate mt-1">{vehicle.vehicleModel}</p>
                   </div>
                 </div>
                 <button
@@ -514,28 +525,28 @@ function VehicleLookupPageInner() {
                   // `/workshop/vehicles/[id]`, same as workshop/page.tsx
                   // and reminders/page.tsx already use.
                   onClick={() => router.push(`/workshop/vehicles/${vehicle.id}`)}
-                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 hover:bg-blue-50 shrink-0 transition-colors"
+                  className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-md border border-blue-200 text-blue-700 bg-white hover:bg-blue-50 shrink-0 transition-colors cursor-pointer"
                 >
                   <ExternalLink size={13} strokeWidth={2} />
                   {t('workshop.vehicleSearch.viewFullProfile')}
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100 text-sm">
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.customer')}</p>
-                  <p className="font-semibold truncate">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-900/50">{t('workshop.vehicleSearch.customer')}</p>
+                  <p className="font-semibold truncate mt-0.5">
                     {vehicle.customer.name}
                     {vehicle.customer.companyName ? ` · ${vehicle.customer.companyName}` : ''}
                   </p>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.vin')}</p>
-                  <p className="font-semibold truncate">{vehicle.vin ?? '—'}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-900/50">{t('workshop.vehicleSearch.vin')}</p>
+                  <p className="font-mono font-semibold truncate mt-0.5">{vehicle.vin ?? '—'}</p>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">{t('workshop.vehicleSearch.odometer')}</p>
-                  <p className="font-semibold truncate">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-900/50">{t('workshop.vehicleSearch.odometer')}</p>
+                  <p className="font-mono tabular-nums font-semibold truncate mt-0.5">
                     {vehicle.odometer != null ? t('workshop.vehicleSearch.km', { value: vehicle.odometer.toLocaleString(dateLocale) }) : '—'}
                   </p>
                 </div>
@@ -544,14 +555,14 @@ function VehicleLookupPageInner() {
 
             {/* History */}
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-gray-600">{t('workshop.vehicleSearch.serviceHistory')}</h3>
+              <h3 className={`${display.className} text-base font-semibold`}>{t('workshop.vehicleSearch.serviceHistory')}</h3>
               <div className="relative w-full sm:w-56">
                 <Search size={13} strokeWidth={2} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
                   placeholder={t('workshop.vehicleSearch.findItemPlaceholder')}
-                  className="w-full border-2 border-gray-300 rounded-md pl-8 pr-3 py-1.5 text-xs outline-none focus:border-blue-500"
+                  className="w-full border border-blue-500/20 bg-white rounded-md pl-8 pr-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
                 />
               </div>
             </div>
@@ -572,22 +583,27 @@ function VehicleLookupPageInner() {
                     onClick={() =>
                       router.push(h.status === 'DRAFT' ? `/sales/invoices/new?draftId=${h.id}` : `/sales/invoices/${h.id}`)
                     }
-                    className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer bg-white transition-colors ${
+                    className={`flex flex-col gap-1.5 border rounded-xl p-3 sm:p-4 cursor-pointer bg-white shadow-sm transition-colors ${
                       overdue
                         ? 'border-red-300 bg-red-50/40 hover:border-red-400 hover:bg-red-50 active:bg-red-100'
-                        : 'border-gray-300 hover:border-blue-500/40 hover:bg-blue-50/40 active:bg-blue-100/60'
+                        : 'border-blue-500/15 hover:border-blue-500/40 hover:bg-blue-50/40 active:bg-blue-100/60'
                     }`}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500">{displayDateFor(h).toLocaleDateString(dateLocale)}</span>
-                      <span className="font-semibold">{h.invoiceNumber ?? t('workshop.vehicleSearch.unissuedDraft')}</span>
+                      <span className="text-xs text-gray-500 font-mono tabular-nums">{displayDateFor(h).toLocaleDateString(dateLocale)}</span>
+                      <span className="font-semibold font-mono">{h.invoiceNumber ?? t('workshop.vehicleSearch.unissuedDraft')}</span>
+                      {h.status === 'DRAFT' && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded-md border bg-amber-50 text-amber-800 border-amber-200 font-semibold uppercase tracking-wide">
+                          {t('workshop.vehicleSearch.draft')}
+                        </span>
+                      )}
                       {h.status === 'VOID' && (
-                        <span className="text-xs px-2 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300 font-semibold uppercase tracking-wide">
                           {t('workshop.vehicleSearch.void')}
                         </span>
                       )}
                       {overdue && (
-                        <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-400">
+                        <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md border font-semibold uppercase tracking-wide bg-red-100 text-red-800 border-red-300">
                           <AlertCircle size={11} strokeWidth={2} />
                           {t('workshop.vehicleSearch.overdue')}
                         </span>
@@ -602,7 +618,7 @@ function VehicleLookupPageInner() {
                       {overflow > 0 && <p className="text-xs text-gray-400">{t('workshop.vehicleSearch.more', { count: overflow })}</p>}
                     </div>
                     <div className="flex items-center justify-between gap-2 pt-0.5">
-                      <span className="flex items-center gap-1 text-xs text-gray-500">
+                      <span className="flex items-center gap-1 text-xs text-gray-500 font-mono tabular-nums">
                         {h.odometer != null && (
                           <>
                             <Gauge size={11} strokeWidth={2} />
@@ -612,7 +628,7 @@ function VehicleLookupPageInner() {
                       </span>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-semibold text-sm">{formatIDR(Number(h.total))}</span>
+                        <span className="font-semibold text-sm font-mono tabular-nums">{formatIDR(Number(h.total))}</span>
 
                         {h.status === 'DRAFT' ? (
                           <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -662,9 +678,11 @@ function VehicleLookupPageInner() {
         )}
 
         {!vehicle && !vehicleLoading && !notFound && (
-          <div className="flex flex-col items-center justify-center text-center py-16 text-gray-400">
-            <Search size={32} strokeWidth={1.5} className="mb-3" />
-            <p className="text-sm">{t('workshop.vehicleSearch.startTyping')}</p>
+          <div className="flex flex-col items-center justify-center text-center py-16">
+            <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600/10 border border-blue-600/20 mb-3">
+              <Car size={26} strokeWidth={1.75} className="text-blue-700" aria-hidden="true" />
+            </span>
+            <p className="text-sm text-gray-500">{t('workshop.vehicleSearch.startTyping')}</p>
           </div>
         )}
       </div>

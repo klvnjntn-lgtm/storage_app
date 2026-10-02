@@ -6,7 +6,9 @@ import {
   IsLatitude,
   IsLongitude,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
+  Min,
   IsString,
   MaxLength,
 } from 'class-validator';
@@ -26,6 +28,12 @@ export class RecordCustomerStopProofDto {
   @IsOptional()
   @IsLongitude()
   longitude?: number;
+
+  // GeolocationCoordinates.accuracy, in metres.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  accuracy?: number;
 }
 
 export class RecordCustomerStopFailureDto {

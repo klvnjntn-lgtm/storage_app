@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, CalendarClock, Store, Truck } from 'lucide-react';
@@ -17,6 +17,7 @@ import CustomerStopPicker, { type StopCustomer } from '@/app/components/delivery
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useHasModule } from '@/lib/hooks/useHasModule';
+import DateTimePicker from '@/app/components/shared/DateTimePicker';
 
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -30,6 +31,7 @@ type Stop = {
   status: StopStatus;
   plannedEta: string | null;
   atRisk: boolean;
+  late: boolean;
   superseded: boolean;
   kind: 'DELIVERY_ORDER' | 'CUSTOMER';
   label: string;
@@ -150,6 +152,15 @@ export default function DeliveryRouteDetailPage() {
   const [optimizing, setOptimizing] = useState(false);
   // Stops the last optimize couldn't fit (kept at the end of the route).
   const [unscheduled, setUnscheduled] = useState<{ stopId: string; label: string; reason: UnscheduledReason }[]>([]);
+  // Stop shown on the route map (from clicking its card); nonce re-triggers
+  // the fly-to when the same card is clicked again.
+  const [mapFocus, setMapFocus] = useState<{ stopId: string; nonce: number } | null>(null);
+  const mapBoxRef = useRef<HTMLDivElement>(null);
+
+  function focusStopOnMap(stopId: string) {
+    setMapFocus((prev) => ({ stopId, nonce: (prev?.nonce ?? 0) + 1 }));
+    mapBoxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const [editingStop, setEditingStop] = useState<Stop | null>(null);
   const [editPriority, setEditPriority] = useState<'NORMAL' | 'HIGH'>('NORMAL');
@@ -568,6 +579,7 @@ export default function DeliveryRouteDetailPage() {
       latitude: Number(s.destinationLatitude),
       longitude: Number(s.destinationLongitude),
       label: s.label,
+      detail: s.address,
     }));
 
   const statusLabels: Record<StopStatus, string> = {
@@ -634,11 +646,15 @@ export default function DeliveryRouteDetailPage() {
           </div>
         )}
 
-        {mapStops.length > 0 && <DeliveryMap stops={mapStops} />}
+        {mapStops.length > 0 && (
+          <div data-tour="dlv-route-map" ref={mapBoxRef} className="scroll-mt-28">
+            <DeliveryMap stops={mapStops} focus={mapFocus} />
+          </div>
+        )}
 
         {!isDriver && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
-            <button
+            <button data-tour="dlv-route-start"
               onClick={openStartPicker}
               className={`flex items-center justify-center gap-1.5 text-sm font-medium border rounded-md px-3 py-2.5 sm:py-1.5 ${
                 route.startLatitude
@@ -649,18 +665,18 @@ export default function DeliveryRouteDetailPage() {
               {route.startLatitude ? <Check size={14} /> : <MapPinOff size={14} />}
               {route.startLatitude ? t('delivery.routeDetail.startSet') : t('delivery.routeDetail.setStart')}
             </button>
-            <div>
+            <div data-tour="dlv-route-departure">
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
                 {t('delivery.routeDetail.departureTimeLabel')}
               </label>
-              <input
-                type="datetime-local"
+              <DateTimePicker
+                clearable={false}
                 value={departureTime}
-                onChange={(e) => setDepartureTime(e.target.value)}
-                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+                onChange={(v) => setDepartureTime(v)}
+                className="w-full sm:w-auto"
               />
             </div>
-            <button
+            <button data-tour="dlv-route-optimize"
               disabled={optimizing || !route.startLatitude || route.stops.every((s) => s.status !== 'PENDING')}
               onClick={handleOptimize}
               title={!route.startLatitude ? t('delivery.routeDetail.setStart') : undefined}
@@ -675,7 +691,7 @@ export default function DeliveryRouteDetailPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t('delivery.routeDetail.stopsTitle')}</h2>
           {!isDriver && routeOpen && (
-            <button
+            <button data-tour="dlv-route-add-stop"
               onClick={async () => {
                 setShowAddStop((v) => !v);
                 if (!showAddStop) await loadAvailableOrders();
@@ -722,22 +738,20 @@ export default function DeliveryRouteDetailPage() {
                   <span className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                     {t('delivery.routeDetail.windowStartLabel')}
                   </span>
-                  <input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={newStopWindowStart}
-                    onChange={(e) => setNewStopWindowStart(e.target.value)}
-                    className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                    onChange={(v) => setNewStopWindowStart(v)}
+                    className="w-full sm:w-auto"
                   />
                 </label>
                 <label className="block">
                   <span className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                     {t('delivery.routeDetail.windowEndLabel')}
                   </span>
-                  <input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={newStopWindowEnd}
-                    onChange={(e) => setNewStopWindowEnd(e.target.value)}
-                    className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                    onChange={(v) => setNewStopWindowEnd(v)}
+                    className="w-full sm:w-auto"
                   />
                 </label>
               </>
@@ -770,15 +784,24 @@ export default function DeliveryRouteDetailPage() {
           </div>
         )}
 
-        <div className="space-y-2">
+        <div data-tour="dlv-route-stops" className="space-y-2">
           {route.stops.length === 0 && <p className="text-sm text-gray-500">{t('delivery.routeDetail.noStops')}</p>}
           {route.stops.map((stop, idx) => {
             const isCurrent = route.currentStop?.id === stop.id;
             const rowBusy = busy === stop.id;
+            const onMap = !!(stop.destinationLatitude && stop.destinationLongitude);
+            const focused = mapFocus?.stopId === stop.id;
             return (
               <div
                 key={stop.id}
-                className={`bg-white rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 ${isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'}`}
+                // Clicking the card (not its buttons/inputs) shows the stop on the map.
+                onClick={(e) => {
+                  if (!onMap || (e.target as HTMLElement).closest('button, a, input, select, textarea, label, [data-no-map-focus]')) return;
+                  focusStopOnMap(stop.id);
+                }}
+                className={`bg-white rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 ${
+                  focused ? 'border-blue-600 ring-2 ring-blue-200' : isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'
+                } ${onMap ? 'cursor-pointer hover:border-blue-300' : ''}`}
               >
                 <div className="flex items-start sm:items-center gap-3 min-w-0">
                   <div className="text-xs text-gray-400 font-medium w-6 shrink-0">#{stop.sequence}</div>
@@ -828,8 +851,14 @@ export default function DeliveryRouteDetailPage() {
                           {t('delivery.routeDetail.windowEndLabel')} {formatEta(stop.deliveryWindowEnd)}
                         </span>
                       )}
+                      {stop.late && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-white bg-red-600 rounded-full px-1.5 font-semibold">
+                          <AlertTriangle size={10} />
+                          {t('delivery.routeDetail.late')}
+                        </span>
+                      )}
                       {stop.atRisk && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] text-red-600 font-medium">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 font-medium">
                           <AlertTriangle size={10} />
                           {t('delivery.routeDetail.atRisk')}
                         </span>
@@ -837,7 +866,7 @@ export default function DeliveryRouteDetailPage() {
                     </div>
 
                     {editingStop?.id === stop.id && (
-                      <div className="mt-2 p-2 border border-gray-200 rounded-md bg-gray-50 grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-2">
+                      <div data-no-map-focus className="mt-2 p-2 border border-gray-200 rounded-md bg-gray-50 grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-2">
                         <div className="col-span-2">
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.priorityLabel')}
@@ -855,22 +884,22 @@ export default function DeliveryRouteDetailPage() {
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.windowStartLabel')}
                           </label>
-                          <input
-                            type="datetime-local"
+                          <DateTimePicker
+                            size="sm"
                             value={editWindowStart}
-                            onChange={(e) => setEditWindowStart(e.target.value)}
-                            className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
+                            onChange={(v) => setEditWindowStart(v)}
+                            className="w-full sm:w-auto"
                           />
                         </div>
                         <div className="col-span-2">
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
                             {t('delivery.routeDetail.windowEndLabel')}
                           </label>
-                          <input
-                            type="datetime-local"
+                          <DateTimePicker
+                            size="sm"
                             value={editWindowEnd}
-                            onChange={(e) => setEditWindowEnd(e.target.value)}
-                            className="w-full sm:w-auto border border-gray-300 rounded-md px-2 py-2 sm:py-1 text-base sm:text-xs"
+                            onChange={(v) => setEditWindowEnd(v)}
+                            className="w-full sm:w-auto"
                           />
                         </div>
                         <button
@@ -930,7 +959,7 @@ export default function DeliveryRouteDetailPage() {
                       ? t('delivery.routeDetail.locationSet')
                       : t('delivery.routeDetail.noLocation')}
                   </button>
-                  <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} className="px-1" />
+                  <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} />
                   {!isDriver && routeOpen && (
                     <>
                       <button
@@ -966,7 +995,7 @@ export default function DeliveryRouteDetailPage() {
         </div>
 
         <div>
-          <button
+          <button data-tour="dlv-route-history"
             onClick={async () => {
               setShowHistory((v) => !v);
               if (!showHistory) await loadHistory();
@@ -1079,20 +1108,18 @@ export default function DeliveryRouteDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label className="block">
                 <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowStartLabel')}</span>
-                <input
-                  type="datetime-local"
+                <DateTimePicker
                   value={rescheduleWindowStart}
-                  onChange={(e) => setRescheduleWindowStart(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                  onChange={(v) => setRescheduleWindowStart(v)}
+                  className="w-full"
                 />
               </label>
               <label className="block">
                 <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowEndLabel')}</span>
-                <input
-                  type="datetime-local"
+                <DateTimePicker
                   value={rescheduleWindowEnd}
-                  onChange={(e) => setRescheduleWindowEnd(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-2 py-2 sm:py-1.5 text-base sm:text-sm"
+                  onChange={(v) => setRescheduleWindowEnd(v)}
+                  className="w-full"
                 />
               </label>
             </div>

@@ -1,9 +1,11 @@
 // src/customers/customers.service.ts
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerLocationService } from './customer-location.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { ImportCustomerRowDto } from './dto/import-customers.dto';
 import {
   CreateCustomerAddressDto,
   UpdateCustomerAddressDto,
@@ -68,15 +70,113 @@ export class CustomersService {
 
 // src/customers/customers.service.ts — only create() and update() changed from last version
 async create(organizationId: string, dto: CreateCustomerDto) {
+  await this.assertPriceLevel(organizationId, dto.priceLevelId);
   return this.prisma.customer.create({ data: { ...dto, organizationId } });
+}
+
+// Bulk create from a spreadsheet. Never updates an existing customer: a
+// row that matches one (same NPWP, or same name + phone + address) is
+// skipped and reported, as is a repeat of an earlier row in the file.
+// A batch's accepted rows are written in one transaction. Because matches
+// are skipped, re-running a file after a failed batch is safe: rows that
+// already went in come back as DUPLICATE_EXISTING. `row` in skipped is
+// the index into `rows`.
+async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
+  const clean = (s?: string) => s?.trim().replace(/\s+/g, ' ') || undefined;
+  const npwpKey = (s?: string) => s?.replace(/\D/g, '') || null;
+  const identityKey = (c: { name: string; phone?: string | null; address?: string | null }) =>
+    [c.name.trim().toLowerCase(), c.phone?.replace(/\D/g, '') ?? '', c.address?.trim().replace(/\s+/g, ' ').toLowerCase() ?? ''].join('|');
+
+  const [existing, levels] = await Promise.all([
+    this.prisma.customer.findMany({
+      where: { organizationId },
+      select: { name: true, phone: true, address: true, npwp: true },
+    }),
+    this.prisma.priceLevel.findMany({
+      where: { organizationId, archivedAt: null },
+      select: { id: true, name: true },
+    }),
+  ]);
+  const seenNpwp = new Set(existing.map((c) => npwpKey(c.npwp ?? undefined)).filter(Boolean));
+  const seenIdentity = new Set(existing.map(identityKey));
+  const fileNpwp = new Set<string>();
+  const fileIdentity = new Set<string>();
+  const levelByName = new Map(levels.map((l) => [l.name.trim().toLowerCase(), l.id]));
+
+  type Reason = 'DUPLICATE_NPWP' | 'DUPLICATE_EXISTING' | 'DUPLICATE_IN_FILE' | 'UNKNOWN_PRICE_LEVEL' | 'INCOMPLETE_LOCATION';
+  const skipped: { row: number; name: string; reason: Reason }[] = [];
+  const data: Prisma.CustomerCreateManyInput[] = [];
+
+  rows.forEach((r, row) => {
+    const name = clean(r.name)!;
+    const phone = clean(r.phone);
+    const address = clean(r.address);
+    const npwp = clean(r.npwp);
+    const skip = (reason: Reason) => skipped.push({ row, name, reason });
+
+    const nKey = npwpKey(npwp);
+    const iKey = identityKey({ name, phone, address });
+    if (nKey && fileNpwp.has(nKey)) return skip('DUPLICATE_IN_FILE');
+    if (fileIdentity.has(iKey)) return skip('DUPLICATE_IN_FILE');
+    if (nKey && seenNpwp.has(nKey)) return skip('DUPLICATE_NPWP');
+    if (seenIdentity.has(iKey)) return skip('DUPLICATE_EXISTING');
+    if ((r.latitude == null) !== (r.longitude == null)) return skip('INCOMPLETE_LOCATION');
+
+    let priceLevelId: string | undefined;
+    const levelName = clean(r.priceLevel);
+    if (levelName) {
+      priceLevelId = levelByName.get(levelName.toLowerCase());
+      if (!priceLevelId) return skip('UNKNOWN_PRICE_LEVEL');
+    }
+
+    if (nKey) fileNpwp.add(nKey);
+    fileIdentity.add(iKey);
+    data.push({
+      organizationId,
+      name,
+      companyName: clean(r.companyName),
+      phone,
+      address,
+      npwp,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      deliveryNotes: r.deliveryNotes?.trim() || undefined,
+      priceLevelId,
+    });
+  });
+
+  if (data.length > 0) {
+    try {
+      await this.prisma.$transaction([this.prisma.customer.createMany({ data })]);
+    } catch (err) {
+      // Someone saved a customer with one of these NPWPs mid-import.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('A customer with one of these NPWPs was just added — run the import again');
+      }
+      throw err;
+    }
+  }
+
+  return { created: data.length, skipped };
 }
 
 async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
   await this.get(organizationId, id);
+  await this.assertPriceLevel(organizationId, dto.priceLevelId);
   return this.prisma.customer.update({
     where: { id, organizationId },
     data: dto,
   });
+}
+
+// The FK alone would accept another org's level id.
+private async assertPriceLevel(organizationId: string, priceLevelId?: string | null) {
+  if (!priceLevelId) return;
+  const level = await this.prisma.priceLevel.findFirst({
+    where: { id: priceLevelId, organizationId, archivedAt: null },
+    select: { id: true },
+  });
+  if (!level) throw new BadRequestException('Price level not found');
 }
 
 async remove(organizationId: string, id: string) {

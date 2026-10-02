@@ -45,11 +45,15 @@ export class DevicesService {
       return 'REJECTED'; // REJECTED or REVOKED
     }
 
-    const approvedCount = await this.prisma.device.count({
-      where: { userId, status: 'APPROVED' },
+    // "Very first" means no device row of any status — not "no APPROVED
+    // device right now". Counting only APPROVED let a driver whose phone
+    // an admin had revoked or rejected clear site storage, present a fresh
+    // device id, and be auto-approved again, undoing the revoke.
+    const knownDevices = await this.prisma.device.count({
+      where: { userId },
     });
 
-    if (approvedCount === 0) {
+    if (knownDevices === 0) {
       await this.prisma.device.create({
         data: {
           userId,
@@ -98,7 +102,7 @@ export class DevicesService {
         ...(filters.userId ? { userId: filters.userId } : {}),
         ...(filters.status ? { status: filters.status as DeviceStatus } : {}),
       },
-      include: { user: { select: { id: true, email: true } } },
+      include: { user: { select: { id: true, email: true, displayName: true } } },
       orderBy: { lastSeenAt: 'desc' },
     });
   }
@@ -111,16 +115,31 @@ export class DevicesService {
     return device;
   }
 
+  // One phone per driver: approving a new device retires the driver's
+  // other approved ones (REVOKED) and ends whatever session is live, so
+  // the old phone is signed out and can't come back without approval.
   async approve(organizationId: string, deviceId: string, adminId: string) {
     const device = await this.getOrgScopedDevice(organizationId, deviceId);
-    const updated = await this.prisma.device.update({
-      where: { id: device.id },
-      data: {
-        status: 'APPROVED',
-        approvedAt: new Date(),
-        approvedByUserId: adminId,
-      },
-    });
+    const [updated, replaced] = await this.prisma.$transaction([
+      this.prisma.device.update({
+        where: { id: device.id },
+        data: {
+          status: 'APPROVED',
+          approvedAt: new Date(),
+          approvedByUserId: adminId,
+        },
+      }),
+      this.prisma.device.updateMany({
+        where: { userId: device.userId, status: 'APPROVED', id: { not: device.id } },
+        data: { status: 'REVOKED' },
+      }),
+    ]);
+    if (replaced.count > 0) {
+      await this.prisma.user.update({
+        where: { id: device.userId },
+        data: { currentSessionId: null },
+      });
+    }
     await this.notifications.create(
       organizationId,
       device.userId,

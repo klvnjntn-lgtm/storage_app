@@ -127,8 +127,10 @@ services:
     # points by default; raised so a full day of stops fits in one call.
     command: osrm-routed --algorithm MLD --max-table-size 1000 /data/sumatra-latest.osrm
 
+    # Loopback only — the backend reaches OSRM over the compose network;
+    # this mapping is just for a backend run outside Docker.
     ports:
-      - "5001:5000"
+      - "127.0.0.1:5001:5000"
 
 
   vroom:
@@ -138,8 +140,11 @@ services:
 
     # Vehicle-routing optimizer (driver assignment + stop order). The
     # backend sends it the OSRM travel matrix with every request, so VROOM
-    # never calls OSRM itself and needs no routing config. Internal only —
-    # no published port.
+    # never calls OSRM itself and needs no routing config. Published on
+    # loopback only, for a backend run outside Docker (VROOM_URL=
+    # http://localhost:3002) — never reachable from the network.
+    ports:
+      - "127.0.0.1:3002:3000"
 
 
   backend:
@@ -212,8 +217,11 @@ services:
       - backend_uploads:/app/uploads
       - ./gdb-imports:/tmp/gdb-imports
 
+    # Loopback only. Browsers reach the API through the frontend's /api
+    # rewrite (port 3001); publishing the backend on every interface let
+    # clients skip the frontend and talk to it directly.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
 
   frontend:

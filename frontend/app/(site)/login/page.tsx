@@ -8,7 +8,8 @@ import { LogIn, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
-import { getDeviceId } from '@/lib/apifetch';
+import { authReason, getDeviceId } from '@/lib/apifetch';
+import { CSRF_HEADERS, markSignedIn } from '@/lib/session';
 
 
 // FIX — useSearchParams() (below, in LoginForm) requires a Suspense
@@ -42,6 +43,9 @@ function LoginForm() {
     }
   }, [searchParams]);
 
+  // Why the previous session ended (set by apifetch on a 401).
+  const signedOutReason = searchParams.get('reason');
+
   async function handleLogin() {
     setError('');
 
@@ -59,7 +63,7 @@ function LoginForm() {
       // only acts on it for role === 'DRIVER'.
       const loginRes = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId(), ...CSRF_HEADERS },
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
@@ -69,14 +73,17 @@ function LoginForm() {
         // Device/access-hours rejections come back as specific, already
         // human-readable messages (see AuthService.login) — surfaced as-is
         // rather than folded into the generic "invalid credentials" copy.
-        throw new Error(loginData?.message || t('auth.login.loginFailed'));
+        // Known driver restrictions get a translated, plain-language
+        // message; anything else is shown as the server sent it.
+        const reason = authReason(String(loginData?.message ?? ''));
+        throw new Error(reason ? t(`auth.login.reason.${reason}`) : loginData?.message || t('auth.login.loginFailed'));
       }
 
-      localStorage.setItem('accessToken', loginData.accessToken);
+      // The backend set the session as an httpOnly cookie on this response;
+      // only a "signed in" marker is kept client-side (lib/session.ts).
+      markSignedIn();
 
-      const meRes = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${loginData.accessToken}` },
-      });
+      const meRes = await fetch('/api/auth/me', { credentials: 'same-origin' });
 
       if (!meRes.ok) {
         throw new Error(t('auth.login.profileLoadFailed'));
@@ -133,6 +140,13 @@ function LoginForm() {
           <div className="flex items-start gap-2 bg-green-50 border-2 border-green-300 text-green-800 rounded-md p-3 text-sm">
             <CheckCircle2 size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
             {t('auth.login.resetSuccess')}
+          </div>
+        )}
+
+        {signedOutReason && !error && (
+          <div className="flex items-start gap-2 bg-amber-50 border-2 border-amber-300 text-amber-900 rounded-md p-3 text-sm">
+            <AlertTriangle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
+            {t(`auth.login.reason.${signedOutReason}`)}
           </div>
         )}
 

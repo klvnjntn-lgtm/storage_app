@@ -1,6 +1,6 @@
 // src/auth/jwt.strategy.ts
 
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
@@ -8,6 +8,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { DevicesService } from './devices.service';
+import { CSRF_HEADER, CSRF_HEADER_VALUE, readSessionCookie } from './session-cookie';
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 interface JwtPayload {
   sub: string;
@@ -41,7 +44,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private devices: DevicesService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Session cookie first (the web app), then a bearer header (scripts
+      // and other API clients). See session-cookie.ts.
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        readSessionCookie,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: getJwtSecret(),
       passReqToCallback: true,
@@ -49,6 +57,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(req: Request, payload: JwtPayload) {
+    // CSRF check for cookie-authenticated writes — see session-cookie.ts.
+    // Bearer-token requests are exempt: a browser never attaches those on
+    // its own, so they can't be forged cross-site.
+    const viaCookie = !req.headers.authorization && !!readSessionCookie(req);
+    if (
+      viaCookie &&
+      !SAFE_METHODS.has(req.method) &&
+      req.headers[CSRF_HEADER] !== CSRF_HEADER_VALUE
+    ) {
+      throw new ForbiddenException('Missing request header');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: {
         id: payload.sub,

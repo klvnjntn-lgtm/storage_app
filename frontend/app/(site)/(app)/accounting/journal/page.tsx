@@ -12,6 +12,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -318,7 +319,7 @@ export default function JournalPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('common.date')}</label>
-                <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white" />
+                <DatePicker variant="field" value={manualDate} onChange={(v) => setManualDate(v)} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.journal.memoOptional')}</label>

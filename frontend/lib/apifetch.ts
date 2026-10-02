@@ -1,3 +1,5 @@
+import { CSRF_HEADERS, clearSession } from "./session";
+
 let redirectingToLogin = false;
 
 // Client-generated, persisted per-browser identity — how the backend
@@ -18,33 +20,54 @@ export function getDeviceId(): string {
   }
 }
 
+// Maps the backend's 401/login messages (AuthService.login, jwt.strategy)
+// to a stable code the login page translates. Unknown → null.
+export function authReason(message: string): string | null {
+  const m = message.toLowerCase();
+  if (m.includes("access hours")) return "hours";
+  if (m.includes("pending admin approval")) return "devicePending";
+  if (m.includes("denied access")) return "deviceRejected";
+  if (m.includes("device id is required")) return "deviceMissing";
+  if (m.includes("another device")) return "elsewhere";
+  if (m.includes("inactive")) return "locked";
+  return null;
+}
+
 export async function apiFetch(
   path: string,
   init?: RequestInit,
 ) {
-  const token = localStorage.getItem("accessToken");
-
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
 
+  // No Authorization header: the session is an httpOnly cookie the browser
+  // attaches by itself (same-origin /api). See lib/session.ts.
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(init?.headers as Record<string, string> | undefined),
-    Authorization: token ? `Bearer ${token}` : "",
+    ...CSRF_HEADERS,
     "X-Device-Id": getDeviceId(),
   };
 
   const res = await fetch(`/api${path}`, {
     ...init,
     headers,
+    credentials: "same-origin",
   });
 
   if (res.status === 401) {
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("user");
+    clearSession();
 
     if (typeof window !== "undefined" && !redirectingToLogin) {
       redirectingToLogin = true;
-      window.location.href = "/login";
+      // Tell the login page why, so a driver signed out mid-shift sees
+      // "outside your working hours" instead of a bare login form.
+      const message: string = await res
+        .clone()
+        .json()
+        .then((b) => String(b?.message ?? ""))
+        .catch(() => "");
+      const reason = authReason(message);
+      window.location.href = reason ? `/login?reason=${reason}` : "/login";
     }
 
     throw new Error("Session expired");

@@ -10,6 +10,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type InvoiceReportRow = {
@@ -216,21 +217,21 @@ export default function ReportsPage() {
                 <Calendar size={12} strokeWidth={2} />
                 {t('sales.reports.from')}
               </label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
+                onChange={(v) => setFrom(v)}
+                className="w-full min-w-0 sm:w-auto"
               />
             </div>
 
             <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
               <label className="text-xs font-semibold text-gray-600">{t('sales.reports.to')}</label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500"
+                onChange={(v) => setTo(v)}
+                className="w-full min-w-0 sm:w-auto"
               />
             </div>
           </div>

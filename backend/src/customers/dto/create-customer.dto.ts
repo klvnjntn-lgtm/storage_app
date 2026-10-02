@@ -41,4 +41,10 @@ export class CreateCustomerDto {
   @IsString()
   @MaxLength(1000)
   deliveryNotes?: string;
+
+  // Price level this customer buys at; null clears it (back to the org's
+  // default level). See Customer.priceLevelId.
+  @IsOptional()
+  @IsString()
+  priceLevelId?: string | null;
 }

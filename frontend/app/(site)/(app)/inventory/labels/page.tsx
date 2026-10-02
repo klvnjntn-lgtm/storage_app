@@ -110,7 +110,7 @@ const LabelCard = memo(function LabelCard({
             aria-label={t('inventory.labelsPage.quantityFor', { sku: item.sku })}
             className="w-12 sm:w-11 h-9 sm:h-7 text-sm sm:text-xs text-center font-medium border-x border-gray-300 focus:outline-none focus:bg-gray-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
-          <button
+          <button data-tour="lbl-qty"
             type="button"
             onClick={() => onBump(item.sku, 1)}
             aria-label={t('inventory.labelsPage.increaseQty', { sku: item.sku })}
@@ -121,7 +121,7 @@ const LabelCard = memo(function LabelCard({
           </button>
         </div>
 
-        <button
+        <button data-tour="lbl-item-print"
           onClick={() => onPrint(item)}
           className="w-full flex items-center justify-center gap-1.5 bg-blue-600 text-white px-2 py-2 sm:py-1.5 rounded-md text-xs font-semibold hover:bg-blue-700 active:scale-[0.98] transition-transform"
         >
@@ -328,7 +328,7 @@ function LabelsPageInner() {
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <div className="flex items-center border border-gray-300 rounded-md overflow-hidden shrink-0">
-                <button
+                <button data-tour="lbl-format"
                   type="button"
                   onClick={() => setFormat('barcode')}
                   aria-pressed={format === 'barcode'}
@@ -352,7 +352,7 @@ function LabelsPageInner() {
                 </button>
               </div>
 
-              <button
+              <button data-tour="lbl-print-all"
                 onClick={() => print(filteredItems)}
                 disabled={filteredItems.length === 0}
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 sm:py-2 rounded-md font-semibold hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
@@ -365,7 +365,7 @@ function LabelsPageInner() {
 
           {/* Printer setup — per device */}
           <div className="mt-3 border border-blue-500/15 rounded-xl bg-white">
-            <button
+            <button data-tour="lbl-settings"
               onClick={() => setSettingsOpen((v) => !v)}
               className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm"
             >

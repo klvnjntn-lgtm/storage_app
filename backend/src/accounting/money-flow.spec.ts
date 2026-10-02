@@ -291,6 +291,13 @@ describe('Money flow — invoice, payment, journal', () => {
       r = await payments.voidPayment(orgId, inv.id, last.id, userId, 'duplicate');
       expect(r.paymentStatus).toBe(PaymentStatus.PARTIAL);
       expect(r.amountPaid).toBe(100_000);
+      // Soft void: hidden from the invoice, but the row and who voided it stay.
+      expect(r.payments.map((p) => p.id)).not.toContain(last.id);
+      const voided = await prisma.payment.findUniqueOrThrow({ where: { id: last.id } });
+      expect(voided.voidedAt).not.toBeNull();
+      expect(voided.voidedById).toBe(userId);
+      expect(voided.voidReason).toBe('duplicate');
+      await expect(payments.voidPayment(orgId, inv.id, last.id, userId, 'again')).rejects.toThrow(/not found/i);
       expect((await accountBalance(SystemAccountKey.ACCOUNTS_RECEIVABLE)) - arBefore).toBe(-100_000);
       expect(await ledgerIsBalanced()).toBe(true);
     });

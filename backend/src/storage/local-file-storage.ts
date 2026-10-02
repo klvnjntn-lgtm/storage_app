@@ -28,7 +28,10 @@ export class LocalFileStorage implements FileStorage {
 
   // contentType isn't needed on disk (it's inferred from the extension
   // when serving); an object-storage implementation would store it.
-  async put(key: string, data: Buffer): Promise<void> {
+  // contentType is part of the FileStorage contract (object stores need it);
+  // local disk infers it from the extension when serving, so it is unused.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async put(key: string, data: Buffer, _contentType?: string): Promise<void> {
     const path = this.pathFor(key);
     await fs.mkdir(dirname(path), { recursive: true });
     // Write-then-rename so a reader (or a crash) never sees a half-written file.

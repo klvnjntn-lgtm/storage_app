@@ -272,8 +272,9 @@ export class VehiclesService {
   async getHistory(organizationId: string, vehicleId: string, page = 1, limit = HISTORY_DEFAULT_LIMIT) {
     await this.getVehicleOrThrow(organizationId, vehicleId);
 
-    const safeLimit = Math.min(Math.max(1, limit), HISTORY_MAX_LIMIT);
-    const safePage = Math.max(1, page);
+    // `|| default` so a NaN from a malformed query value falls back too.
+    const safeLimit = Math.min(Math.max(1, limit || HISTORY_DEFAULT_LIMIT), HISTORY_MAX_LIMIT);
+    const safePage = Math.max(1, page || 1);
 
     const [total, invoices] = await this.prisma.$transaction([
       this.prisma.invoice.count({ where: { vehicleId, organizationId } }),

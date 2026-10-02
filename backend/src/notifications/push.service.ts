@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
+import { isPushServiceEndpoint } from './dto/push-subscription.dto';
 
 // Self-hosted Web Push (VAPID) — no external push provider/account needed.
 // Best-effort throughout: a dead subscription or a misconfigured VAPID key
@@ -54,6 +55,14 @@ export class PushService {
     });
     await Promise.all(
       subscriptions.map(async (sub) => {
+        // Rows saved before endpoint validation existed may point anywhere;
+        // never send to those (see isPushServiceEndpoint).
+        if (!isPushServiceEndpoint(sub.endpoint)) {
+          await this.prisma.pushSubscription
+            .delete({ where: { id: sub.id } })
+            .catch(() => undefined);
+          return;
+        }
         try {
           await webpush.sendNotification(
             {

@@ -7,6 +7,8 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { SupplierService } from './supplier.service';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
@@ -41,15 +43,23 @@ export class SupplierController {
   }
 
   @Patch(':id')
-  update(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: UpdateSupplierDto) {
-    return this.supplierService.update(organizationId, id, dto);
+  update(
+    @CurrentOrg() organizationId: string,
+    @CurrentUser() user: { role: string },
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierDto,
+  ) {
+    return this.supplierService.update(organizationId, id, dto, user.role);
   }
 
+  // Deleting/deactivating suppliers is admin-only.
+  @Roles('ADMIN')
   @Patch(':id/deactivate')
   deactivate(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.supplierService.deactivate(organizationId, id);
   }
 
+  @Roles('ADMIN')
   @Delete(':id')
   delete(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.supplierService.delete(organizationId, id);

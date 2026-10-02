@@ -16,13 +16,14 @@ export type UpdateOrganizationSettingsInput = {
   timezone?: string;
   stockPolicy?: StockPolicy;
   stockOverrideRequiresAdmin?: boolean;
+  priceLevelOverrideRequiresAdmin?: boolean;
 };
 
 // Settings changes worth a durable "who changed what, when" record. Every
 // field in UpdateOrganizationSettingsInput could go here in principle;
 // starting with just the stock policy fields since that's what currently
 // needs auditing.
-const AUDITED_FIELDS = ['stockPolicy', 'stockOverrideRequiresAdmin'] as const;
+const AUDITED_FIELDS = ['stockPolicy', 'stockOverrideRequiresAdmin', 'priceLevelOverrideRequiresAdmin'] as const;
 
 const STRING_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone'] as const;
 
@@ -39,6 +40,15 @@ function isValidTimezone(tz: string): boolean {
   } catch {
     return false;
   }
+}
+
+// The logo is rendered on every printed document. Only an uploaded file
+// (/uploads/...) or a plain http(s) URL is accepted — never javascript:,
+// data: or any other scheme. Empty string clears it.
+function isSafeImageUrl(url: string): boolean {
+  if (url === '') return true;
+  if (url.startsWith('/uploads/')) return !url.split('/').includes('..');
+  return /^https?:\/\/[^\s]+$/i.test(url);
 }
 
 @Injectable()
@@ -64,6 +74,7 @@ export class OrganizationService {
           timezone: true,
           stockPolicy: true,
           stockOverrideRequiresAdmin: true,
+          priceLevelOverrideRequiresAdmin: true,
         },
       }),
       this.modules.isModuleEnabled(orgId, ModuleKey.WAREHOUSE_OPS),
@@ -85,11 +96,21 @@ export class OrganizationService {
       // that silently does nothing.
       stockPolicy: hasWarehouseOps ? StockPolicy.BLOCK : (org?.stockPolicy ?? StockPolicy.BLOCK),
       stockOverrideRequiresAdmin: hasWarehouseOps ? false : (org?.stockOverrideRequiresAdmin ?? false),
+      priceLevelOverrideRequiresAdmin: org?.priceLevelOverrideRequiresAdmin ?? false,
     };
   }
 
   async updateSettings(orgId: string, input: UpdateOrganizationSettingsInput, userId?: string) {
-    const { fulfillmentMode, posPricingEnabled, taxEnabled, timezone, stockPolicy, stockOverrideRequiresAdmin, ...rest } = input;
+    const {
+      fulfillmentMode,
+      posPricingEnabled,
+      taxEnabled,
+      timezone,
+      stockPolicy,
+      stockOverrideRequiresAdmin,
+      priceLevelOverrideRequiresAdmin,
+      ...rest
+    } = input;
 
     const providedKeys = Object.keys(input) as (keyof UpdateOrganizationSettingsInput)[];
     if (providedKeys.length === 0) {
@@ -127,6 +148,10 @@ export class OrganizationService {
       throw new BadRequestException('stockOverrideRequiresAdmin must be a boolean');
     }
 
+    if (priceLevelOverrideRequiresAdmin !== undefined && typeof priceLevelOverrideRequiresAdmin !== 'boolean') {
+      throw new BadRequestException('priceLevelOverrideRequiresAdmin must be a boolean');
+    }
+
     // Pick/pack/ship's stock deduction (StockService.decrease(), session
     // PICK stage) is always strict and never reads this field — configuring
     // it for a warehouse-ops org would be a setting that silently does
@@ -151,11 +176,15 @@ export class OrganizationService {
       }
     }
 
+    if (rest.logoUrl !== undefined && !isSafeImageUrl(rest.logoUrl.trim())) {
+      throw new BadRequestException('logoUrl must be an uploaded image path or an http(s) URL');
+    }
+
     const touchedAuditedFields = AUDITED_FIELDS.filter((f) => input[f] !== undefined);
     const before = touchedAuditedFields.length
       ? await this.prisma.organization.findUnique({
           where: { id: orgId },
-          select: { stockPolicy: true, stockOverrideRequiresAdmin: true },
+          select: { stockPolicy: true, stockOverrideRequiresAdmin: true, priceLevelOverrideRequiresAdmin: true },
         })
       : null;
 
@@ -168,6 +197,7 @@ export class OrganizationService {
         ...(timezone !== undefined && { timezone }),
         ...(stockPolicy !== undefined && { stockPolicy }),
         ...(stockOverrideRequiresAdmin !== undefined && { stockOverrideRequiresAdmin }),
+        ...(priceLevelOverrideRequiresAdmin !== undefined && { priceLevelOverrideRequiresAdmin }),
         ...(rest.legalName !== undefined && { legalName: rest.legalName.trim() }),
         ...(rest.npwp !== undefined && { npwp: rest.npwp.trim() }),
         ...(rest.logoUrl !== undefined && { logoUrl: rest.logoUrl.trim() }),
@@ -186,6 +216,7 @@ export class OrganizationService {
         timezone: true,
         stockPolicy: true,
         stockOverrideRequiresAdmin: true,
+        priceLevelOverrideRequiresAdmin: true,
       },
     });
 

@@ -19,6 +19,8 @@ import {
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+// Money going out — admin-only, reads included.
+@Roles('ADMIN')
 @Controller('fixed-assets')
 export class FixedAssetsController {
   constructor(

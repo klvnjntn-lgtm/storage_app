@@ -6,11 +6,20 @@ import {
   Patch,
   Param,
   Req,
+  Res,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import {
+  CSRF_HEADER,
+  CSRF_HEADER_VALUE,
+  clearSessionCookie,
+  readSessionCookie,
+  setSessionCookie,
+} from './session-cookie';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { InviteDto } from './dto/invite.dto';
@@ -40,12 +49,20 @@ export class AuthController {
   @Public()
   @SkipLicenseCheck()
   @Post('register')
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(
+  async register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken } = await this.authService.register(
       dto.email,
       dto.password,
       dto.organizationName,
     );
+    // The token goes into an httpOnly cookie only — never into the
+    // response body, where page script could read it (session-cookie.ts).
+    setSessionCookie(req, res, accessToken);
+    return { ok: true };
   }
 
   // FIX — classic brute-force/credential-stuffing target, previously
@@ -54,7 +71,11 @@ export class AuthController {
   @Public()
   @SkipLicenseCheck()
   @Post('login')
-  login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     // Header takes precedence over the DTO field so every authenticated
     // and unauthenticated call sends the device id the same way (see
     // frontend/lib/apifetch.ts).
@@ -62,14 +83,18 @@ export class AuthController {
     const deviceId =
       (typeof headerDeviceId === 'string' ? headerDeviceId : undefined) ??
       dto.deviceId;
-    return this.authService.login(
+    const { accessToken } = await this.authService.login(
       dto.email,
       dto.password,
       deviceId,
       req.headers['user-agent'],
     );
+    setSessionCookie(req, res, accessToken);
+    return { ok: true };
   }
 
+  // Every role, DRIVER included — see DriverScopeGuard.
+  @Roles('ADMIN', 'USER', 'DRIVER')
   @Get('me')
   async me(@CurrentUser() user: any) {
     return this.authService.me(user.sub);
@@ -144,10 +169,23 @@ export class AuthController {
   // FIX — no logout/session-revocation endpoint existed. See
   // AuthService.logout for how this invalidates the current token
   // immediately rather than waiting for its 7-day expiry.
-  @UseGuards(AuthGuard('jwt'))
+  //
+  // Public so it also clears the cookie when the session has already
+  // expired or been replaced — a guarded route would 401 and leave the dead
+  // cookie behind. AuthService.logoutToken only ends the session the
+  // presented token belongs to. The CSRF header is still required so
+  // another site can't sign people out.
+  @Public()
+  @SkipLicenseCheck()
   @Post('logout')
-  logout(@CurrentUser() user: { sub: string }) {
-    return this.authService.logout(user.sub);
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    if (req.headers[CSRF_HEADER] !== CSRF_HEADER_VALUE) {
+      throw new ForbiddenException('Missing request header');
+    }
+    const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    await this.authService.logoutToken(readSessionCookie(req) ?? bearer ?? null);
+    clearSessionCookie(req, res);
+    return { message: 'Logged out' };
   }
 
   // Step 1 of 2 — validates current/new password and emails a one-time
@@ -177,10 +215,15 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(AuthGuard('jwt'))
   @Post('change-password/confirm')
-  confirmPasswordChange(
+  async confirmPasswordChange(
     @CurrentUser() user: { sub: string },
     @Body('code') code: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.confirmPasswordChange(user.sub, code);
+    const result = await this.authService.confirmPasswordChange(user.sub, code);
+    // The change ends every session (AuthService), this one included.
+    clearSessionCookie(req, res);
+    return result;
   }
 }

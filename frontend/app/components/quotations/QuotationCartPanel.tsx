@@ -1,12 +1,14 @@
 'use client';
 
 import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, CalendarClock, FileSignature, Landmark } from 'lucide-react';
+import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -33,6 +35,7 @@ export function QuotationCartPanel({
   setEditingPriceKey,
   changeQty,
   changeUnitPrice,
+  onChangePriceLevel,
   removeFromCart,
   stockAtLineLocation,
   subtotal,
@@ -73,6 +76,8 @@ export function QuotationCartPanel({
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
   changeUnitPrice: (key: string, rawValue: string) => void;
+  // Re-levels one line (Retail → Wholesale …); the price follows.
+  onChangePriceLevel?: (key: string, levelId: string) => void;
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
   subtotal: number;
@@ -142,11 +147,12 @@ export function QuotationCartPanel({
           <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
           {t('sales.quotationCart.validUntilLabel')}
         </label>
-        <input
-          type="date"
+        <DatePicker
+          variant="field"
+          clearable
           value={validUntil}
-          onChange={(e) => onChangeValidUntil(e.target.value)}
-          className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          onChange={(v) => onChangeValidUntil(v)}
+          className="w-full"
         />
       </div>
 
@@ -201,7 +207,7 @@ export function QuotationCartPanel({
         />
       )}
 
-      <div className="flex flex-col divide-y divide-blue-500/10">
+      <div data-tour="sales-lines" className="flex flex-col divide-y divide-blue-500/10">
         {cartLines.map((line) => {
           const editing = editingPriceKey === line.key;
           const available = stockAtLineLocation(line);
@@ -217,6 +223,16 @@ export function QuotationCartPanel({
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
+                  {onChangePriceLevel && (
+                    <div className="mt-1">
+                      <PriceLevelSelect
+                        product={line.product}
+                        value={line.priceLevelId ?? null}
+                        custom={!!line.priceCustom}
+                        onChange={(levelId) => onChangePriceLevel(line.key, levelId)}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {!posPricingEnabled ? (
@@ -461,7 +477,7 @@ export function QuotationCartPanel({
         </div>
       </div>
 
-      <button
+      <button data-tour="sales-submit"
         onClick={onSubmit}
         disabled={
           nothingToQuote ||

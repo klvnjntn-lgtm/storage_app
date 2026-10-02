@@ -9,6 +9,7 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 // Entry point for building a statement: pick a customer, optionally
 // scope to one or more of their vehicles (WORKSHOP_RMS orgs only), pick
@@ -309,20 +310,20 @@ const params = new URLSearchParams({ q: query.trim() });
           <div className="flex gap-2">
             <div className="flex flex-col gap-1 flex-1">
               <label className="text-xs text-gray-500">{t('sales.statementNew.from')}</label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2 text-sm w-full"
+                onChange={(v) => setFrom(v)}
+                className="w-full"
               />
             </div>
             <div className="flex flex-col gap-1 flex-1">
               <label className="text-xs text-gray-500">{t('sales.statementNew.to')}</label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2 text-sm w-full"
+                onChange={(v) => setTo(v)}
+                className="w-full"
               />
             </div>
           </div>

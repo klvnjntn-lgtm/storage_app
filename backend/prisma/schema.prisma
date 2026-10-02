@@ -1169,6 +1169,7 @@ model RouteStop {
   // Set once the at-risk cron has alerted dispatch about this stop, so a
   // slipping stop produces one notification, not one per cron tick.
   atRiskNotifiedAt      DateTime?
+  lateNotifiedAt        DateTime? // DELIVERY_LATE sent — separate from at-risk, a stop can get both
   sequence              Int // 1-based order within the route
   plannedEta            DateTime? // computed by DeliveryRoutesService.optimize()/recalculateEtasAfterResolution()
   createdAt             DateTime  @default(now())
@@ -1663,6 +1664,14 @@ model Payment {
   bankAccountId String?
   bankAccount   OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
+  // Voiding keeps the row (it used to be deleted) so the payment history
+  // stays complete; voided payments are excluded everywhere amounts are
+  // read. voidedById is a plain id, not a relation, to avoid a second
+  // named Payment↔User relation alongside recordedBy.
+  voidedAt   DateTime?
+  voidedById String?
+  voidReason String?
+
   @@index([invoiceId])
 }
 
@@ -1728,6 +1737,7 @@ enum NotificationType {
   ROUTE_REOPTIMIZED
   DELIVERY_FAILED
   DELIVERY_AT_RISK
+  DELIVERY_LATE
   ROUTE_STOPS_CHANGED
   DEVICE_PENDING_APPROVAL
   DEVICE_APPROVED

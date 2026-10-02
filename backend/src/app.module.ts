@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -16,6 +16,13 @@ import { CategoryModule } from './category/category.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { OrgGuard } from './auth/guards/org.guard';
+import { DriverScopeGuard } from './auth/guards/driver-scope.guard';
+// Global since @Roles/@RequireModule were silently ignored on any controller
+// that forgot @UseGuards(RolesGuard/ModuleGuard). Explicit per-controller
+// @UseGuards of either is now redundant but harmless.
+import { RolesGuard } from './auth/guards/roles.guard';
+import { ModuleGuard } from './auth/guards/module.guard';
+import { RedactCostInterceptor } from './common/interceptors/redact-cost.interceptor';
 import { LicenseGuard } from './license/license.guard';
 import { LicenseModule } from './license/license.module';
 import { OrganizationModule } from './organization/organization.module';
@@ -26,6 +33,7 @@ import { InvoiceModule } from './invoice/invoice.module';
 import { OrganizationModulesModule } from './organization-module/organization-modules.module';
 import { CustomersModule } from './customers/customers.module';
 import { TaxRateModule } from './tax-rate/tax-rate.module';
+import { PriceLevelModule } from './price-level/price-level.module';
 import { PaymentsModule } from './payments/payment.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { VehicleRemindersModule } from './vehicles/vehicle-reminders.module';
@@ -93,6 +101,7 @@ import { AccessControlModule } from './access-control/access-control.module';
     CustomersModule,
     VehicleRemindersModule,
     TaxRateModule,
+    PriceLevelModule,
     OrganizationModulesModule,
     IntegrationModule,
     MediaModule,
@@ -118,7 +127,23 @@ import { AccessControlModule } from './access-control/access-control.module';
     },
     {
       provide: APP_GUARD,
+      useClass: DriverScopeGuard, // 2b. DRIVER may only reach @Roles(..., 'DRIVER') routes
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard, // 2c. enforces @Roles wherever it appears
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ModuleGuard, // 2d. enforces @RequireModule wherever it appears
+    },
+    {
+      provide: APP_GUARD,
       useClass: LicenseGuard, // 3. confirms the license is valid
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RedactCostInterceptor, // cost data is admin-only in every response
     },
   ],
 })

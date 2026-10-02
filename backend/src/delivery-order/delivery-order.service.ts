@@ -23,8 +23,10 @@ import {
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { backfillCustomerPin } from '../customers/customer-pin-backfill';
 
 import puppeteer from 'puppeteer';
+import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 
 export type DeliveryOrderPrintView = {
   id: string;
@@ -447,6 +449,7 @@ export class DeliveryOrderService {
       signedAt?: Date;
       completedLatitude?: number;
       completedLongitude?: number;
+      completedAccuracy?: number;
     },
     requester?: { sub: string; role: string },
   ) {
@@ -472,8 +475,29 @@ export class DeliveryOrderService {
           params.completedLatitude ?? deliveryOrder.completedLatitude,
         completedLongitude:
           params.completedLongitude ?? deliveryOrder.completedLongitude,
+        // Accuracy belongs to the fix it came with — a new fix replaces it,
+        // no fix keeps the old one.
+        completedAccuracy:
+          params.completedLatitude != null
+            ? (params.completedAccuracy ?? null)
+            : deliveryOrder.completedAccuracy,
       },
     });
+
+    // Best-effort, like the ETA recalc below — a first pin for an unmapped
+    // customer address is a bonus, never a reason to fail the delivery.
+    try {
+      await backfillCustomerPin(this.prisma, {
+        organizationId,
+        customerId: deliveryOrder.customerId,
+        deliveryAddress: deliveryOrder.deliveryAddress,
+        latitude: params.completedLatitude,
+        longitude: params.completedLongitude,
+        accuracy: params.completedAccuracy,
+      });
+    } catch {
+      // ignore
+    }
 
     // Best-effort — an ETA-recalc hiccup must never block the delivery
     // action itself, which has already succeeded by this point.
@@ -1263,27 +1287,30 @@ export class DeliveryOrderService {
       documentId: id,
       organizationId,
     });
-    const printUrl = `${process.env.FRONTEND_URL}/print/delivery-orders/${id}?token=${printToken}`;
+    const printUrl = `${process.env.FRONTEND_URL}/print/delivery-orders/${encodeURIComponent(id)}?token=${printToken}`;
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    try {
-      const page = await browser.newPage();
-      await page.emulateMediaType('print');
-      await page.emulateMediaFeatures([
-        { name: 'prefers-color-scheme', value: 'light' },
-      ]);
-      await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-      const pdfBuffer = await page.pdf({
-        printBackground: true,
-        preferCSSPageSize: true,
+    // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
+    return withPdfRenderSlot(async () => {
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
-      return Buffer.from(pdfBuffer);
-    } finally {
-      await browser.close();
-    }
+      try {
+        const page = await browser.newPage();
+        await page.emulateMediaType('print');
+        await page.emulateMediaFeatures([
+          { name: 'prefers-color-scheme', value: 'light' },
+        ]);
+        await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+        const pdfBuffer = await page.pdf({
+          printBackground: true,
+          preferCSSPageSize: true,
+        });
+        return Buffer.from(pdfBuffer);
+      } finally {
+        await browser.close();
+      }
+    });
   }
 
   verifyPrintToken(token: string, deliveryOrderId: string) {

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import {
   CurrentUser,
   type JwtPayload,
@@ -25,8 +26,10 @@ import {
 
 // Deliberately no ModuleGuard/@RequireModule here — notifications span every
 // module (delivery, workshop reminders, account/device alerts), not just one
-// paid feature.
+// paid feature. Open to every role, DRIVER included (DriverScopeGuard) —
+// the driver page has its own bell.
 @UseGuards(JwtAuthGuard, OrgGuard)
+@Roles('ADMIN', 'USER', 'DRIVER')
 @Controller('notifications')
 export class NotificationsController {
   constructor(

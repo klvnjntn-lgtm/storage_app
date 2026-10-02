@@ -176,7 +176,12 @@ export default function ImportOrdersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: newProviderName.trim() }),
       });
-      const created = await res.json();
+      const created = await res.json().catch(() => null);
+      // Was appending the error body as if it were a connection on failure.
+      if (!res.ok || !created?.id) {
+        console.error(created?.message ?? `Create connection failed (${res.status})`);
+        return;
+      }
       setConnections((prev) => [...prev, created]);
       setConnectionId(created.id);
       setNewProviderName('');
@@ -494,24 +499,29 @@ export default function ImportOrdersPage() {
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-blue-500/10">
-                <input
-                  value={newProviderName}
-                  onChange={(e) => setNewProviderName(e.target.value)}
-                  placeholder={t('upload.uploadOrderPage.csv.newProviderPlaceholder')}
-                  className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
-                />
-                <button
-                  onClick={handleCreateConnection}
-                  disabled={!newProviderName.trim() || creatingConnection}
-                  className="px-4 py-2 border border-blue-500/20 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {creatingConnection ? t('upload.uploadOrderPage.csv.addingConnection') : t('upload.uploadOrderPage.csv.newConnectionButton')}
-                </button>
-              </div>
-              <p className="text-xs text-gray-500">
-                {t('upload.uploadOrderPage.csv.connectionHint')}
-              </p>
+              {/* Creating connections is admin-only configuration (backend enforces it). */}
+              {isAdmin && (
+                <>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-blue-500/10">
+                    <input
+                      value={newProviderName}
+                      onChange={(e) => setNewProviderName(e.target.value)}
+                      placeholder={t('upload.uploadOrderPage.csv.newProviderPlaceholder')}
+                      className="flex-1 border border-blue-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
+                    />
+                    <button
+                      onClick={handleCreateConnection}
+                      disabled={!newProviderName.trim() || creatingConnection}
+                      className="px-4 py-2 border border-blue-500/20 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {creatingConnection ? t('upload.uploadOrderPage.csv.addingConnection') : t('upload.uploadOrderPage.csv.newConnectionButton')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {t('upload.uploadOrderPage.csv.connectionHint')}
+                  </p>
+                </>
+              )}
             </section>
 
             <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-4">

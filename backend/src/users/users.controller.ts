@@ -8,6 +8,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 import { SetActiveDto } from './dto/set-active.dto';
 import { SetDisplayNameDto } from './dto/set-display-name.dto';
+import { SetRoleDto } from './dto/set-role.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
 @Roles('ADMIN')
@@ -37,10 +38,21 @@ export class UsersController {
   @Patch(':id/active')
   setActive(
     @CurrentOrg() organizationId: string,
+    @CurrentUser() user: { sub: string },
     @Param('id') id: string,
     @Body() dto: SetActiveDto,
   ) {
-    return this.usersService.setActive(organizationId, id, dto.active);
+    return this.usersService.setActive(organizationId, user.sub, id, dto.active);
+  }
+
+  @Patch(':id/role')
+  setRole(
+    @CurrentOrg() organizationId: string,
+    @CurrentUser() user: { sub: string },
+    @Param('id') id: string,
+    @Body() dto: SetRoleDto,
+  ) {
+    return this.usersService.setRole(organizationId, user.sub, id, dto.role);
   }
 
   @Patch(':id/display-name')

@@ -3,7 +3,9 @@ import {
   IsDateString,
   IsLatitude,
   IsLongitude,
+  IsNumber,
   IsOptional,
+  Min,
   IsString,
 } from 'class-validator';
 
@@ -34,6 +36,12 @@ export class RecordDeliveryOrderProofDto {
   @IsOptional()
   @IsLongitude()
   completedLongitude?: number;
+
+  // GeolocationCoordinates.accuracy, in metres.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  completedAccuracy?: number;
 
   // The proof photo is uploaded separately via
   // POST /delivery-orders/:id/proof-photo (private storage), not here.

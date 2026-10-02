@@ -9,6 +9,7 @@ import { DiscountType, LocationOption, ProductSearchResult, TaxRate } from './ty
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+import { resolveLinePrice, usePriceLevels } from '@/lib/price-levels';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -40,6 +41,7 @@ export function ProductSearch({
   onAddToCart,
   posModeEnabled,
   taxRates,
+  basePriceLevelId = null,
 }: {
   query: string;
   setQuery: (q: string) => void;
@@ -64,8 +66,14 @@ export function ProductSearch({
   ) => boolean;
   posModeEnabled: boolean;
   taxRates: TaxRate[];
+  /** The document's starting price level (customer's, else default). */
+  basePriceLevelId?: string | null;
 }) {
   const { t } = useLanguage();
+  const { defaultLevelId, nameOf } = usePriceLevels();
+  // Price a product at the document's level — what the line will start at.
+  const priceAtBase = (product: ProductSearchResult) =>
+    resolveLinePrice(product, basePriceLevelId ?? defaultLevelId, defaultLevelId);
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
   // Grid view is the only place a product's photo shows up here — the list
@@ -103,7 +111,7 @@ export function ProductSearch({
     setStaged({
       product,
       quantity: 1,
-      unitPrice: product.sellingPrice ?? 0,
+      unitPrice: priceAtBase(product).unitPrice ?? 0,
       unit: product.unit ?? null,
       taxRateIds: defaultRate ? [defaultRate.id] : [],
       discountType: null,
@@ -179,7 +187,7 @@ export function ProductSearch({
         </div>
 
         <div className="relative" ref={locationDropdownRef}>
-          <button
+          <button data-tour="sales-location-filter"
             onClick={() => setLocationDropdownOpen((v) => !v)}
             className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 sm:py-1.5 rounded-lg border transition-colors ${
               locationFilter
@@ -239,7 +247,7 @@ export function ProductSearch({
         </div>
       </div>
 
-      <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+      <div data-tour="sales-product-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
         <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
         <input
           value={query}
@@ -306,6 +314,11 @@ export function ProductSearch({
               )
             ) : (
               <span className="text-xs text-gray-500">{formatIDR(staged.unitPrice)}</span>
+            )}
+            {nameOf(priceAtBase(staged.product).sourceLevelId) && (
+              <span className={`text-[11px] font-medium ${priceAtBase(staged.product).fallback ? 'text-amber-700' : 'text-gray-500'}`}>
+                {nameOf(priceAtBase(staged.product).sourceLevelId)}
+              </span>
             )}
 
             <div className="flex items-center gap-1.5">
@@ -396,7 +409,7 @@ export function ProductSearch({
         </div>
       )}
 
-      <div className={viewMode === 'grid' ? 'mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2' : 'mt-3 flex flex-col gap-2'}>
+      <div data-tour="sales-results" className={viewMode === 'grid' ? 'mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2' : 'mt-3 flex flex-col gap-2'}>
         {searching && <p className="text-sm text-gray-500">{t('sales.productSearch.searching')}</p>}
         {!searching && query && results.length === 0 && <p className="text-sm text-gray-500">{t('sales.productSearch.noMatchingItems')}</p>}
         {!searching && !query && locationFilter && results.length === 0 && (
@@ -446,7 +459,7 @@ export function ProductSearch({
                   <p className="text-[11px] text-gray-500 mt-0.5">{product.sku ?? '—'}</p>
                   {!posModeEnabled && (
                     <p className="text-xs font-semibold mt-1">
-                      {product.sellingPrice != null ? formatIDR(product.sellingPrice) : t('sales.productSearch.noPrice')}
+                      {priceAtBase(product).unitPrice != null ? formatIDR(priceAtBase(product).unitPrice!) : t('sales.productSearch.noPrice')}
                     </p>
                   )}
                 </div>
@@ -479,7 +492,7 @@ export function ProductSearch({
                 </div>
                 {!posModeEnabled && (
                   <span className="text-sm font-semibold shrink-0 text-right whitespace-nowrap">
-                    {product.sellingPrice != null ? formatIDR(product.sellingPrice) : t('sales.productSearch.noPrice')}
+                    {priceAtBase(product).unitPrice != null ? formatIDR(priceAtBase(product).unitPrice!) : t('sales.productSearch.noPrice')}
                   </span>
                 )}
               </div>

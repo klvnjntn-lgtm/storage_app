@@ -17,6 +17,7 @@ import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024; // 5MB — mirrors organization logo upload's limit
 
@@ -57,6 +58,8 @@ export class MediaController {
     return this.mediaService.upload(orgId, userId, file);
   }
 
+  // Deleting media is admin-only (uploads stay open for avatars and product images).
+  @Roles('ADMIN')
   @Delete(':id')
   remove(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.mediaService.remove(orgId, id);

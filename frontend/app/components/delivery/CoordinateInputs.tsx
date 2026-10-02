@@ -27,9 +27,11 @@ const isValidLng = (n: number) => Number.isFinite(n) && n >= -180 && n <= 180;
 export default function CoordinateInputs({
   value,
   onChange,
+  showMapsLink = true,
 }: {
   value: Position | null;
   onChange: (pos: Position | null) => void;
+  showMapsLink?: boolean;
 }) {
   const { t } = useLanguage();
   const [latText, setLatText] = useState(value ? fmt(value.lat) : '');
@@ -99,7 +101,7 @@ export default function CoordinateInputs({
       ) : (
         <p className="text-xs text-gray-500">{t('delivery.coordinates.hint')}</p>
       )}
-      {value && <GoogleMapsLink lat={value.lat} lng={value.lng} />}
+      {showMapsLink && value && <GoogleMapsLink lat={value.lat} lng={value.lng} />}
     </div>
   );
 }

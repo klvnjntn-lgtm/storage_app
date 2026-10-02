@@ -13,17 +13,17 @@ export class ProductService {
   async findOne(organizationId: string, id: string) {
     const product = await this.prisma.product.findFirst({
       where: { id, organizationId },
-      include: { category: true, brand: true },
+      include: { category: true, brand: true, prices: true },
     });
 
     if (!product) throw new BadRequestException('Product not found');
-    return product;
+    return { ...product, prices: this.mapPrices(product.prices) };
   }
 
-  async findAll(organizationId: string) {
+  async findAll(organizationId: string, includeCost = false) {
     const products = await this.prisma.product.findMany({
       where: { organizationId },
-      include: { category: true, brand: true, stocks: true },
+      include: { category: true, brand: true, stocks: true, prices: true },
     });
 
     return products.map((product) => ({
@@ -36,7 +36,47 @@ export class ProductService {
       totalStock: product.stocks.reduce((sum, s) => sum + Number(s.quantity), 0),
       active: product.active,
       image: product.image,
+      sellingPrice: product.sellingPrice != null ? Number(product.sellingPrice) : null,
+      ...(includeCost && { costPrice: product.costPrice != null ? Number(product.costPrice) : null }),
+      prices: this.mapPrices(product.prices),
     }));
+  }
+
+  private mapPrices(prices: { priceLevelId: string; price: Prisma.Decimal }[]) {
+    return prices.map((p) => ({ priceLevelId: p.priceLevelId, price: Number(p.price) }));
+  }
+
+  // Sets/clears this product's prices for non-default levels. A price for
+  // the default level is written to sellingPrice instead, so callers can
+  // treat every level the same way.
+  private async applyLevelPrices(
+    organizationId: string,
+    productId: string,
+    prices: { priceLevelId: string; price: number | null }[] | undefined,
+    tx: Tx,
+  ) {
+    if (!prices?.length) return;
+    const ids = Array.from(new Set(prices.map((p) => p.priceLevelId)));
+    const levels = await tx.priceLevel.findMany({
+      where: { id: { in: ids }, organizationId },
+      select: { id: true, isDefault: true },
+    });
+    if (levels.length !== ids.length) throw new BadRequestException('Price level not found');
+    const isDefault = new Map(levels.map((l) => [l.id, l.isDefault]));
+    for (const { priceLevelId, price } of prices) {
+      if (price != null && price < 0) throw new BadRequestException('Price cannot be negative');
+      if (isDefault.get(priceLevelId)) {
+        await tx.product.update({ where: { id: productId }, data: { sellingPrice: price } });
+      } else if (price == null) {
+        await tx.productPrice.deleteMany({ where: { productId, priceLevelId } });
+      } else {
+        await tx.productPrice.upsert({
+          where: { productId_priceLevelId: { productId, priceLevelId } },
+          create: { productId, priceLevelId, price },
+          update: { price },
+        });
+      }
+    }
   }
 
   async getEvents(organizationId: string, productId: string) {
@@ -115,6 +155,7 @@ async create(
     barcode?: string;
     sellingPrice?: number;
     costPrice?: number;
+    prices?: { priceLevelId: string; price: number | null }[];
   },
   tx: Tx = this.prisma,
 ) {
@@ -142,7 +183,7 @@ async create(
   const brand = brandName ? await this.findOrCreateBrand(organizationId, brandName, tx) : null;
 
   try {
-    return await tx.product.create({
+    const product = await tx.product.create({
       data: {
         name,
         sku,
@@ -155,6 +196,8 @@ async create(
         organizationId,
       },
     });
+    await this.applyLevelPrices(organizationId, product.id, data.prices, tx);
+    return product;
   } catch (err: any) {
     if (err.code === 'P2002') {
       throw new ConflictException(
@@ -299,6 +342,7 @@ async create(
           where: { organizationId },
           include: { location: true },
         },
+        prices: true,
       },
       take: 20,
     });
@@ -310,6 +354,8 @@ async create(
       barcode: p.barcode,
       image: p.image,
       sellingPrice: p.sellingPrice != null ? Number(p.sellingPrice) : null,
+      // Non-default levels only; the default level's price is sellingPrice.
+      prices: this.mapPrices(p.prices),
       stockByLocation: p.stocks.map((s) => ({
         locationId: s.locationId,
         locationName: s.location.name,
@@ -331,6 +377,7 @@ async update(
     sellingPrice?: number;
     costPrice?: number;
     image?: string | null;
+    prices?: { priceLevelId: string; price: number | null }[];
   },
   tx: Tx = this.prisma,
 ) {
@@ -402,10 +449,12 @@ async update(
   }
 
   try {
-    return await tx.product.update({
+    const product = await tx.product.update({
       where: { id },
       data: updateData,
     });
+    await this.applyLevelPrices(organizationId, id, data.prices, tx);
+    return data.prices?.length ? tx.product.findUniqueOrThrow({ where: { id } }) : product;
   } catch (err: any) {
     if (err.code === 'P2002') {
       throw new ConflictException(

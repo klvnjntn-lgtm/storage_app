@@ -3,12 +3,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/apifetch';
+import { getSessionMarker } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const PUBLIC_PATHS = ['/', '/login', '/register', '/forgot-password', '/reset-password'];
 
 const checkIsPublic = (pathname: string) =>
   PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/print/');
+
+// A DRIVER account only ever sees its own route page — no landing page,
+// home, or other modules (the backend refuses them anyway, see
+// DriverScopeGuard). Password reset stays reachable.
+const DRIVER_PATHS = ['/driver', '/forgot-password', '/reset-password'];
+const driverMayView = (pathname: string) =>
+  DRIVER_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+// Where a freshly verified session lands from an auth page or a page its
+// role may not view; null = stay.
+function redirectFor(role: string | null, pathname: string, isAuthPage: boolean): string | null {
+  if (role === 'DRIVER') return driverMayView(pathname) ? null : '/driver';
+  return isAuthPage ? '/home' : null;
+}
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -20,11 +35,15 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   // don't re-hit /auth/me on every path change — only when the token
   // itself changes (login/logout), or once per app load.
   const verifiedTokenRef = useRef<string | null>(null);
+  // Role of the verified token — drives the DRIVER-only routing above.
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const isPublic = checkIsPublic(pathname);
-    const token = localStorage.getItem('accessToken');
+    // The session itself is an httpOnly cookie; this marker only says the
+    // browser signed in (lib/session.ts). /auth/me below is the real check.
+    const token = getSessionMarker();
     const isAuthPage = pathname === '/login' || pathname === '/register';
 
     // FIX — was calling setChecked(false) unconditionally at the top of
@@ -38,8 +57,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     // triggers the loading flash — only a genuinely new/unverified token
     // does (the branch below that still calls setChecked(false)).
     if (token && verifiedTokenRef.current === token) {
-      if (isAuthPage) {
-        router.replace('/home');
+      const target = redirectFor(role, pathname, isAuthPage);
+      if (target) {
+        router.replace(target);
       } else {
         setChecked(true);
       }
@@ -48,6 +68,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
     if (!token) {
       verifiedTokenRef.current = null;
+      setRole(null);
       if (!isPublic) {
         router.replace('/login');
         return;
@@ -74,13 +95,17 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const me = await res.json().catch(() => null);
+        if (cancelled) return;
         verifiedTokenRef.current = token;
+        setRole(me?.role ?? null);
 
-        if (isAuthPage) {
-          router.replace('/home');
+        const target = redirectFor(me?.role ?? null, pathname, isAuthPage);
+        if (target) {
+          router.replace(target);
           return;
         }
-        if (!cancelled) setChecked(true);
+        setChecked(true);
       } catch {
         // apiFetch already cleared storage + redirected on 401.
         // Nothing further to do here.
@@ -92,11 +117,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, [pathname, router, role]);
 
   const isPublic = checkIsPublic(pathname);
+  // Don't flash a page (landing, AppShell) a driver is being sent away from.
+  const leavingAsDriver = role === 'DRIVER' && !driverMayView(pathname);
 
-  if (!checked && !isPublic) {
+  if ((!checked && !isPublic) || leavingAsDriver) {
     return (
       <main className="min-h-screen bg-white flex items-center justify-center">
         <p className="text-sm text-gray-500">{t('common.loading')}</p>

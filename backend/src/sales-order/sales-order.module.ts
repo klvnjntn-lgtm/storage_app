@@ -6,6 +6,7 @@ import { OrganizationModulesModule } from '../organization-module/organization-m
 import { SalesQuotationModule } from '../sales-quotation/sales-quotation.module';
 import { SalesOrderService } from './sales-order.service';
 import { SalesOrderController } from './sales-order.controller';
+import { SalesOrderPrintController } from './sales-order-print.controller';
 import { PrintModule } from 'src/common/print/print.module';
 
 @Module({
@@ -17,7 +18,9 @@ import { PrintModule } from 'src/common/print/print.module';
     SalesQuotationModule,
     PrintModule, // ← import the module instead of listing the service
   ],
-  controllers: [SalesOrderController],
+  // The print controller was never registered here, so Puppeteer's
+  // GET /print/sales-orders/:id 404'd and every sales-order PDF was blank.
+  controllers: [SalesOrderController, SalesOrderPrintController],
   providers: [SalesOrderService], // ← remove PrintTokenService from here
   exports: [SalesOrderService],
 })

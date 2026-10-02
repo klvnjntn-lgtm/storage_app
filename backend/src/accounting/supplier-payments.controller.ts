@@ -13,6 +13,8 @@ import { CreateSupplierPaymentDto } from './dto/supplier-payment.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+// Money going out — admin-only, reads included.
+@Roles('ADMIN')
 @Controller('supplier-payments')
 export class SupplierPaymentsController {
   constructor(private supplierPaymentsService: SupplierPaymentsService) {}

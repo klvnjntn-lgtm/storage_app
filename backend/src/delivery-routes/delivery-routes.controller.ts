@@ -1,5 +1,6 @@
 // src/delivery-routes/delivery-routes.controller.ts
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -32,6 +33,7 @@ import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RoutePlannerService } from './route-planner.service';
 import { StopProofService } from './stop-proof.service';
+import { DeliveryReportService } from './delivery-report.service';
 import {
   RecordCustomerStopFailureDto,
   RecordCustomerStopProofDto,
@@ -53,6 +55,7 @@ export class DeliveryRoutesController {
     private readonly deliveryRoutesService: DeliveryRoutesService,
     private readonly routePlanner: RoutePlannerService,
     private readonly stopProof: StopProofService,
+    private readonly report: DeliveryReportService,
   ) {}
 
   @Post()
@@ -101,6 +104,20 @@ export class DeliveryRoutesController {
       req.user.sub,
       date,
     );
+  }
+
+  // Performance over a date range (YYYY-MM-DD, inclusive) — see
+  // DeliveryReportService.
+  @Get('reports')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  deliveryReport(
+    @CurrentOrg() organizationId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    if (!from || !to) throw new BadRequestException('"from" and "to" are required');
+    return this.report.report(organizationId, from, to);
   }
 
   @Get('monitoring/summary')

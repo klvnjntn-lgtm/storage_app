@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { SupplierForm } from '@/app/components/suppliers/SupplierForm';
 import { emptySupplierFormValues, SupplierFormValues } from '@/app/components/suppliers/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 
 
 export default function EditSupplierPage() {
@@ -19,6 +20,8 @@ export default function EditSupplierPage() {
 
   const [values, setValues] = useState<SupplierFormValues>(emptySupplierFormValues);
   const [isActive, setIsActive] = useState(true);
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -127,7 +130,9 @@ export default function EditSupplierPage() {
             type="checkbox"
             checked={isActive}
             onChange={(e) => setIsActive(e.target.checked)}
-            className="w-4 h-4 accent-blue-600"
+            // Activating/deactivating a supplier is admin-only (backend enforces it).
+            disabled={!isAdmin}
+            className="w-4 h-4 accent-blue-600 disabled:opacity-50"
           />
           {t('purchasing.supplierEdit.active')}
         </label>

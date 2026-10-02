@@ -389,7 +389,7 @@ export default function SessionPage() {
 
         {/* Stage progress — works for any staged session type */}
         {hasStages && (
-          <div className="max-w-5xl mx-auto flex items-center gap-2 mt-4">
+          <div data-tour="ses-stages" className="max-w-5xl mx-auto flex items-center gap-2 mt-4">
             {stages.map((stage, i) => {
               const reached = i <= stageIndex;
               return (
@@ -521,7 +521,7 @@ export default function SessionPage() {
 
         {/* Receiving check (RECEIVE) — counted against the import */}
         {session.receiveCheck && (
-          <div className="border border-emerald-300/60 rounded-xl p-4 bg-emerald-50/40 space-y-3">
+          <div data-tour="ses-receive-check" className="border border-emerald-300/60 rounded-xl p-4 bg-emerald-50/40 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-semibold text-emerald-900">
                 {session.importBatch
@@ -627,7 +627,7 @@ export default function SessionPage() {
         {/* Actions */}
         {session.status === 'OPEN' && (
           <div className="flex flex-wrap gap-3">
-            <button
+            <button data-tour="ses-scan"
               onClick={() => router.push(`/scan?sessionId=${session.id}`)}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
             >
@@ -648,7 +648,7 @@ export default function SessionPage() {
             )}
 
             {hasStages && nextStage && (
-              <button
+              <button data-tour="ses-next"
                 onClick={advanceStage}
                 disabled={advancing}
                 className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
@@ -658,7 +658,7 @@ export default function SessionPage() {
               </button>
             )}
 
-            <button
+            <button data-tour="ses-complete"
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors"
               onClick={completeSession}
               disabled={!canComplete || completing}
@@ -675,7 +675,7 @@ export default function SessionPage() {
             </button>
 
             {isAdmin && !cancelOpen && (
-              <button
+              <button data-tour="ses-cancel"
                 onClick={() => setCancelOpen(true)}
                 className="flex items-center gap-2 border border-red-300 text-red-700 hover:bg-red-50 px-4 py-2 rounded-lg font-semibold transition-colors"
               >
@@ -794,7 +794,7 @@ export default function SessionPage() {
         )}
 
         {/* Notes */}
-        <div>
+        <div data-tour="ses-notes">
           <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3 flex items-center gap-2">
             <StickyNote size={16} strokeWidth={2} />
             {t('inventory.sessionDetail.notes')}

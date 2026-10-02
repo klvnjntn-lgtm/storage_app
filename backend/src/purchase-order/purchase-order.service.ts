@@ -7,6 +7,8 @@ import { ProductService } from '../product/product.service';
 import { Prisma, PurchaseOrderStatus, PurchaseOrderActivityEventType } from '@prisma/client';
 import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, NewProductDto } from './dto/purchase-order.dto';
 import puppeteer from 'puppeteer';
+import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
+import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 
 export type PurchaseOrderPrintView = {
   id: string;
@@ -414,10 +416,8 @@ export class PurchaseOrderService {
     const where: Prisma.PurchaseOrderWhereInput = { organizationId, status: filters.status };
 
     if (filters.from && filters.to) {
-      const gte = new Date(filters.from);
-      const lte = new Date(filters.to);
-      lte.setHours(23, 59, 59, 999);
-      where.createdAt = { gte, lte };
+      const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+      where.createdAt = businessDayBounds(filters.from, filters.to, resolveTimezone(org));
     }
 
     if (filters.search?.trim()) {
@@ -464,22 +464,25 @@ export class PurchaseOrderService {
       documentId: id,
       organizationId,
     });
-    const printUrl = `${process.env.FRONTEND_URL}/print/purchase-orders/${id}?token=${printToken}`;
+    const printUrl = `${process.env.FRONTEND_URL}/print/purchase-orders/${encodeURIComponent(id)}?token=${printToken}`;
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
+    return withPdfRenderSlot(async () => {
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      try {
+        const page = await browser.newPage();
+        await page.emulateMediaType('print');
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+        await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+        const pdfBuffer = await page.pdf({ printBackground: true, preferCSSPageSize: true });
+        return Buffer.from(pdfBuffer);
+      } finally {
+        await browser.close();
+      }
     });
-    try {
-      const page = await browser.newPage();
-      await page.emulateMediaType('print');
-      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
-      await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-      const pdfBuffer = await page.pdf({ printBackground: true, preferCSSPageSize: true });
-      return Buffer.from(pdfBuffer);
-    } finally {
-      await browser.close();
-    }
   }
 
   verifyPrintToken(token: string, purchaseOrderId: string) {

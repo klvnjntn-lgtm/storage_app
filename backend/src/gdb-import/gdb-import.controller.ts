@@ -8,11 +8,13 @@ import {
   UploadedFile,
   BadRequestException,
   UseGuards,
+  HttpException,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { randomUUID } from 'crypto';
-import { mkdirSync } from 'fs';
+import { chmodSync, mkdirSync } from 'fs';
 import { chmod, unlink } from 'fs/promises';
 import { Request } from 'express';
 import { GdbImportService } from './gdb-import.service';
@@ -31,9 +33,19 @@ const UPLOAD_DIR = '/tmp/gdb-imports';
 
 // diskStorage's `destination` does not create the directory for you — make
 // sure it exists once, at module load, rather than on every request.
-// Mode 0o777 so Firebird 2.5 (running as the `firebird` system user via
-// xinetd) can traverse into it, not just this Node process's own user.
-mkdirSync(UPLOAD_DIR, { recursive: true, mode: 0o777 });
+// Firebird 2.5 (running as the `firebird` system user via xinetd) needs to
+// traverse into it, which only takes the execute bit. 0o711 rather than
+// 0o777: other users can still open a file whose name they know, but can't
+// list the directory — and every file is a whole company's accounting
+// database under a random UUID name. chmod is explicit because mkdirSync's
+// mode is masked by the umask; it can fail on a bind mount owned by another
+// user, which is fine — the directory then keeps whatever mode it had.
+mkdirSync(UPLOAD_DIR, { recursive: true });
+try {
+  chmodSync(UPLOAD_DIR, 0o711);
+} catch {
+  // see above
+}
 
 // NEW — was 'products_only' | 'full_invoices'. Adding a target here is the
 // only wiring step the PO importer needs on this side; the service already
@@ -51,6 +63,8 @@ const VALID_TARGETS: GdbImportTarget[] = [
 @Roles('ADMIN')
 @Controller('integrations/accurate-gdb')
 export class GdbImportController {
+  private readonly logger = new Logger(GdbImportController.name);
+
   constructor(private readonly gdbImportService: GdbImportService) {}
 
   @Post('upload')
@@ -73,9 +87,13 @@ export class GdbImportController {
       },
     }),
   )
-  async upload(@UploadedFile() file: Express.Multer.File) {
+  async upload(@UploadedFile() file: Express.Multer.File, @Req() req: AuthedRequest) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
+    }
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      throw new BadRequestException('No organization found on the authenticated request');
     }
 
     // Firebird 2.5 Classic (the legacy-ODS fallback engine) runs as the
@@ -85,9 +103,21 @@ export class GdbImportController {
     // Fine for /tmp scratch data that's deleted within 30 minutes anyway.
     await chmod(file.path, 0o666);
 
-    const token = this.gdbImportService.registerUploadedFile(file.path);
+    const token = this.gdbImportService.registerUploadedFile(file.path, organizationId);
 
-return await this.gdbImportService.preview(token);
+    try {
+      return await this.gdbImportService.preview(token, organizationId);
+    } catch (err) {
+      // A file Firebird can't open (wrong format, corrupt, not an Accurate
+      // database) used to surface as a bare 500 and leave the upload on disk
+      // for the full 30-minute TTL. Delete it now and say what went wrong.
+      await this.gdbImportService.cleanupToken(token);
+      if (err instanceof HttpException) throw err;
+      this.logger.warn(`GDB preview failed: ${err instanceof Error ? err.message : err}`);
+      throw new BadRequestException(
+        'Could not open this file as an Accurate database. Check that it is a valid, uncorrupted .gdb file.',
+      );
+    }
   }
 
   @Post('confirm/:token')

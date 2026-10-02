@@ -12,6 +12,7 @@ import {
   Delete,
   Query,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as XLSX from 'xlsx';
@@ -22,9 +23,13 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ImportProductDto } from './dto/import-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+// Writes (create, import, edit, archive, restore) are admin-only, via
+// RolesGuard per method; reads stay open to every signed-in user.
 // Class-level guards deliberately stop at JwtAuthGuard/OrgGuard — most
 // of this controller (listing, search, barcode lookup) is core
 // infrastructure available regardless of module status, same reasoning
@@ -36,21 +41,28 @@ import { UpdateProductDto } from './dto/update-product.dto';
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Post()
   create(@CurrentOrg() organizationId: string, @Body() body: CreateProductDto) {
     return this.productService.create(organizationId, body);
   }
 
+  // Cost price is admin-only data; everyone else gets the list without it.
   @Get()
-  findAll(@CurrentOrg() organizationId: string) {
-    return this.productService.findAll(organizationId);
+  findAll(@CurrentOrg() organizationId: string, @Req() req) {
+    return this.productService.findAll(organizationId, req.user?.role === 'ADMIN');
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Post('import')
   import(@CurrentOrg() organizationId: string, @Body() body: ImportProductDto) {
     return this.productService.bulkImport(organizationId, body.rows);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Post('import-excel')
   // Same 10MB cap as the CSV order import (integration.controller.ts): the
   // whole workbook is buffered in memory and parsed synchronously.
@@ -95,11 +107,15 @@ export class ProductController {
     return this.productService.findOne(organizationId, id);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Delete(':id')
   archive(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.productService.archive(organizationId, id);
   }
-@Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id')
 update(
   @CurrentOrg() organizationId: string,
   @Param('id') id: string,
@@ -107,6 +123,8 @@ update(
 ) {
   return this.productService.update(organizationId, id, body);
 }
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   @Patch(':id/restore')
   restore(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.productService.restore(organizationId, id);

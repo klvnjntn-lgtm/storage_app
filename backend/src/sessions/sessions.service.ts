@@ -7,6 +7,7 @@ import { OrganizationModulesService } from '../organization-module/organization-
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status.util';
+import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 
 const RETURN_REASONS = [
   'DAMAGED',
@@ -475,10 +476,8 @@ async findAll(
 
     const where: Prisma.SessionWhereInput = { organizationId };
     if (filters.from && filters.to) {
-      const gte = new Date(filters.from);
-      const lte = new Date(filters.to);
-      lte.setHours(23, 59, 59, 999);
-      where.createdAt = { gte, lte };
+      const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+      where.createdAt = businessDayBounds(filters.from, filters.to, resolveTimezone(org));
     }
 
     const [sessions, total] = await this.prisma.$transaction([

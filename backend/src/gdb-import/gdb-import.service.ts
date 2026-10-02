@@ -331,6 +331,9 @@ const TEMP_FILE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 interface TempFileEntry {
   path: string;
+  // The org whose admin uploaded the file. A token only works for that
+  // org, so one org can never preview or import another org's GDB.
+  organizationId: string;
   timeout: NodeJS.Timeout;
   // Which Firebird port + credentials actually opened this file, set once
   // preview() succeeds — so confirmImport() reconnects directly instead of
@@ -379,14 +382,14 @@ export class GdbImportService {
 
   private readonly tempFiles = new Map<string, TempFileEntry>();
 
-  registerUploadedFile(diskPath: string): string {
+  registerUploadedFile(diskPath: string, organizationId: string): string {
     const token = randomUUID();
     const timeout = setTimeout(() => this.cleanupToken(token), TEMP_FILE_TTL_MS);
-    this.tempFiles.set(token, { path: diskPath, timeout });
+    this.tempFiles.set(token, { path: diskPath, organizationId, timeout });
     return token;
   }
 
-  private async cleanupToken(token: string) {
+  async cleanupToken(token: string) {
     const entry = this.tempFiles.get(token);
     if (!entry) return;
     this.tempFiles.delete(token);
@@ -398,9 +401,9 @@ export class GdbImportService {
     }
   }
 
-  private getPathOrThrow(token: string): string {
+  private getPathOrThrow(token: string, organizationId: string): string {
     const entry = this.tempFiles.get(token);
-    if (!entry) {
+    if (!entry || entry.organizationId !== organizationId) {
       throw new NotFoundException('Upload expired or not found — please re-upload the file');
     }
     return entry.path;
@@ -415,8 +418,8 @@ export class GdbImportService {
   // found" before committing to anything.
   // -------------------------------------------------------------------------
 
-  async preview(token: string) {
-    const dbPath = this.getPathOrThrow(token);
+  async preview(token: string, organizationId: string) {
+    const dbPath = this.getPathOrThrow(token, organizationId);
 
     const { db: fbDb, port, user, password } = await attachAnyVersion(dbPath, this.firebirdHost());
 
@@ -505,7 +508,7 @@ export class GdbImportService {
 // Called before confirmImport, so the UI can show "map these warehouses"
 // with real counts before committing anything.
 async previewWarehouses(token: string, organizationId: string) {
-  const dbPath = this.getPathOrThrow(token);
+  const dbPath = this.getPathOrThrow(token, organizationId);
   const entry = this.tempFiles.get(token);
   const fbDb =
     entry?.firebirdPort && entry.firebirdUser
@@ -580,7 +583,7 @@ async saveWarehouseMapping(
     target: 'products_only' | 'full_invoices' | 'full_invoices_and_purchase_orders',
     invoiceFormat: InvoiceFormat = InvoiceFormat.A4,
   ) {
-    const dbPath = this.getPathOrThrow(token);
+    const dbPath = this.getPathOrThrow(token, organizationId);
     const entry = this.tempFiles.get(token);
 
     // Reuse the port + credentials preview() already confirmed work for this

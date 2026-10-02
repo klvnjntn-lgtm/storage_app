@@ -3,8 +3,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { display } from '@/lib/fonts';
-import { Car, Bell, ArrowUpRight, Wrench, Search, CornerDownLeft, Loader2 } from 'lucide-react';
+import { Car, Bell, Search, CornerDownLeft, Loader2 } from 'lucide-react';
+import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -124,40 +124,14 @@ export default function WorkshopHome() {
   }
 
   return (
-    <main
-      className="min-h-screen text-black"
-      style={{
-        backgroundColor: 'var(--page-bg)',
-        backgroundImage:
-          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
-        backgroundSize: '24px 24px',
-      }}
-    >
-      {/* Header — subtle blue outline + backdrop blur instead of the flat
-          white/gray-300 border, to read as "techy" rather than plain */}
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
-              <Wrench size={18} strokeWidth={2} className="text-blue-700" />
-            </span>
-            <div className="min-w-0">
-              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-                {t('workshop.overview.title')}
-              </h1>
-              <p className="text-xs text-gray-500 truncate">{t('workshop.overview.subtitle')}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-6 sm:pt-8 pb-16">
-        {/* Quick vehicle lookup — command-palette style trigger. Typing
-            shows a live matches dropdown (plate/model/VIN/customer, same
-            as the lookup page), but doesn't navigate on its own — only
-            pressing Enter or clicking a row sends you to
-            /vehicles/search?q=... where that vehicle gets auto-selected. */}
-        <div className="mb-8 relative">
+    <HubPage path="~/workshop" title={t('workshop.overview.title')} subtitle={t('workshop.overview.subtitle')}>
+      {/* Quick vehicle lookup — command-palette style trigger. Typing
+          shows a live matches dropdown (plate/model/VIN/customer, same
+          as the lookup page), but doesn't navigate on its own — only
+          pressing Enter or clicking a row sends you to
+          /vehicles/search?q=... where that vehicle gets auto-selected. */}
+      <HubSection index="01" label={t('common.hubSearch')}>
+        <div data-tour="rms-search" className="relative">
           <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
@@ -167,7 +141,7 @@ export default function WorkshopHome() {
               onFocus={() => results.length > 0 && setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
               placeholder={t('workshop.overview.quickLookupPlaceholder')}
-              className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
+              className="flex-1 min-w-0 text-base sm:text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
             {searching ? (
               <Loader2 size={15} strokeWidth={2} className="text-blue-600/60 animate-spin shrink-0" />
@@ -206,32 +180,20 @@ export default function WorkshopHome() {
             </div>
           )}
         </div>
+      </HubSection>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {WORKSHOP_ITEMS.map(({ title, description, href, icon: Icon, gradient }) => (
-            <button
+      <HubSection index="02" label={t('common.hubMenu')}>
+        <HubGrid>
+          {WORKSHOP_ITEMS.map(({ href, ...item }) => (
+            <HubCard
               key={href}
+              {...item}
+              dataTour={`rms-card-${href.split('/').pop()}`}
               onClick={() => router.push(href)}
-              className={`group relative text-left rounded-xl p-5 sm:p-6 bg-gradient-to-br ${gradient} text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 min-h-[130px] sm:min-h-[150px] flex flex-col justify-between`}
-            >
-              <div className="flex items-start justify-between">
-                <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-                  <Icon size={22} strokeWidth={2} />
-                </span>
-                <ArrowUpRight
-                  size={18}
-                  strokeWidth={2}
-                  className="opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-                />
-              </div>
-              <div>
-                <p className={`${display.className} text-lg sm:text-xl font-bold leading-tight`}>{title}</p>
-                <p className="text-sm text-white/85 mt-0.5">{description}</p>
-              </div>
-            </button>
+            />
           ))}
-        </div>
-      </div>
-    </main>
+        </HubGrid>
+      </HubSection>
+    </HubPage>
   );
 }

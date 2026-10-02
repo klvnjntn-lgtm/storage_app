@@ -8,6 +8,7 @@ import { Building2, AlertTriangle } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
+import { markSignedIn } from '@/lib/session';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -41,7 +42,7 @@ export default function RegisterPage() {
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.message || t('auth.register.registrationFailed'));
 
-      localStorage.setItem('accessToken', data.accessToken);
+      markSignedIn(); // session cookie was set by the response — see lib/session.ts
       // FIX — was router.push('/'), the public marketing page. '/' is in
       // AuthGuard's PUBLIC_PATHS, so a freshly-registered user landed
       // there instead of being routed into the app and had to click

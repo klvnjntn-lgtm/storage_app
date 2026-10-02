@@ -132,3 +132,26 @@ export function endOfBusinessDay(dateOnly: Date, tz: string): Date {
   t = wall - tzOffsetMs(new Date(t), tz);
   return new Date(t);
 }
+
+// A from/to filter over a TIMESTAMP column (createdAt, sentAt, ...), as real
+// instants covering whole business days. new Date('2026-10-02') is midnight
+// UTC, so using it directly as an upper bound dropped everything after
+// 07:00 on that day in Jakarta, and setHours(23, 59, 59) used the server's
+// timezone (UTC in Docker) instead of the organization's. A value that
+// isn't a plain YYYY-MM-DD date is taken as an exact instant.
+export function businessDayBounds(
+  from: string | undefined,
+  to: string | undefined,
+  tz: string,
+): { gte?: Date; lte?: Date } {
+  const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const instant = (v: string, name: string) => {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) throw new BadRequestException(`${name} is not a valid date`);
+    return d;
+  };
+  const bounds: { gte?: Date; lte?: Date } = {};
+  if (from) bounds.gte = isDay(from) ? wallTimeOnBusinessDay(parseDateOnly(from, 'from'), '00:00', tz) : instant(from, 'from');
+  if (to) bounds.lte = isDay(to) ? endOfBusinessDay(parseDateOnly(to, 'to'), tz) : instant(to, 'to');
+  return bounds;
+}

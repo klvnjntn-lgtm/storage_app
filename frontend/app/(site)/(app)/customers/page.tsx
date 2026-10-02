@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, Search, Pencil, Trash2, X, Check, MapPin, MapPinOff } from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check, MapPin, MapPinOff, FileSpreadsheet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -12,7 +12,9 @@ import Pagination from '@/app/components/shared/Pagination';
 import { useSortableData } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 import { useHasModule } from '@/lib/hooks/useHasModule';
+import { usePriceLevels } from '@/lib/price-levels';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 
@@ -31,6 +33,8 @@ type EditState = {
   // DELIVERY_DMS only — see Customer.latitude / deliveryNotes.
   position: { lat: number; lng: number } | null;
   deliveryNotes: string;
+  // '' = the org's default price level.
+  priceLevelId: string;
 };
 
 const EMPTY_EDIT: EditState = {
@@ -41,13 +45,17 @@ const EMPTY_EDIT: EditState = {
   address: '',
   position: null,
   deliveryNotes: '',
+  priceLevelId: '',
 };
 
 export default function CustomersPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   // Location pin + driver directions only matter with the delivery module.
   const hasDelivery = useHasModule('DELIVERY_DMS');
+  const { levels: priceLevels, defaultLevelId } = usePriceLevels();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -151,6 +159,7 @@ export default function CustomersPage() {
       address: c.address ?? '',
       position: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
       deliveryNotes: c.deliveryNotes ?? '',
+      priceLevelId: c.priceLevelId ?? '',
     });
   }
 
@@ -168,6 +177,8 @@ export default function CustomersPage() {
         companyName: editing.companyName.trim() || undefined,
         phone: editing.phone.trim() || undefined,
         address: editing.address.trim() || undefined,
+        // Only orgs that sell (INVOICE_POS) have price levels to pick from.
+        ...(priceLevels.length > 1 ? { priceLevelId: editing.priceLevelId || null } : {}),
         ...(hasDelivery
           ? {
               latitude: editing.position?.lat,
@@ -234,14 +245,26 @@ export default function CustomersPage() {
               </div>
             </div>
 
-            <button
-              onClick={openCreate}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 shrink-0 transition-colors"
-            >
-              <Plus size={16} strokeWidth={2} />
-              <span className="hidden xs:inline">{t('customers.listPage.newCustomer')}</span>
-              <span className="xs:hidden">{t('customers.listPage.newShort')}</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Deleting and bulk-importing customers is admin-only (backend enforces it). */}
+              {isAdmin && (
+                <button
+                  onClick={() => router.push('/customers/import')}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-blue-200 text-blue-700 bg-white font-semibold hover:bg-blue-50 transition-colors"
+                >
+                  <FileSpreadsheet size={16} strokeWidth={2} />
+                  <span className="hidden xs:inline">{t('customers.importPage.button')}</span>
+                </button>
+              )}
+              <button
+                onClick={openCreate}
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+              >
+                <Plus size={16} strokeWidth={2} />
+                <span className="hidden xs:inline">{t('customers.listPage.newCustomer')}</span>
+                <span className="xs:hidden">{t('customers.listPage.newShort')}</span>
+              </button>
+            </div>
           </div>
 
           {/* Search — command-palette style matching /vehicles/search, /labels, /inventory/stock */}
@@ -288,12 +311,14 @@ export default function CustomersPage() {
                   >
                     <Pencil size={14} strokeWidth={2} />
                   </button>
-                  <button
-                    onClick={() => remove(c)}
-                    className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
-                  >
-                    <Trash2 size={14} strokeWidth={2} />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => remove(c)}
+                      className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
+                    >
+                      <Trash2 size={14} strokeWidth={2} />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -373,12 +398,14 @@ export default function CustomersPage() {
                       >
                         <Pencil size={13} strokeWidth={2} />
                       </button>
-                      <button
-                        onClick={() => remove(c)}
-                        className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
-                      >
-                        <Trash2 size={13} strokeWidth={2} />
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => remove(c)}
+                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
+                        >
+                          <Trash2 size={13} strokeWidth={2} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -432,6 +459,25 @@ export default function CustomersPage() {
                 placeholder={t('customers.listPage.companyNamePlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
+              {priceLevels.length > 1 && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-gray-600">{t('customers.listPage.priceLevelLabel')}</span>
+                  <select
+                    value={editing.priceLevelId || defaultLevelId || ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, priceLevelId: e.target.value === defaultLevelId ? '' : e.target.value })
+                    }
+                    className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                  >
+                    {priceLevels.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[11px] text-gray-500">{t('customers.listPage.priceLevelHint')}</span>
+                </label>
+              )}
               <input
                 value={editing.phone}
                 onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
@@ -454,7 +500,11 @@ export default function CustomersPage() {
                     pickedPosition={editing.position}
                     onPick={(lat, lng) => setEditing({ ...editing, position: { lat, lng } })}
                   />
-                  <CoordinateInputs value={editing.position} onChange={(position) => setEditing({ ...editing, position })} />
+                  <CoordinateInputs
+                    value={editing.position}
+                    onChange={(position) => setEditing({ ...editing, position })}
+                    showMapsLink={!!editing.id}
+                  />
                   <textarea
                     value={editing.deliveryNotes}
                     onChange={(e) => setEditing({ ...editing, deliveryNotes: e.target.value })}

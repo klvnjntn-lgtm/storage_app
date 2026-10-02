@@ -5,6 +5,7 @@ import { ProductService } from '../product/product.service'; // adjust path if d
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
+import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 
 function slugify(value: string): string {
   return value
@@ -286,9 +287,13 @@ export class StockService {
       const oversold = balanceAfter < 0;
 
       if (fulfilledQuantity > 0) {
-        await client.stock.update({
+        // Upsert, not update: under WARN/ALLOW a product can be sold at a
+        // location it has never been stocked at (available 0, no Stock row
+        // yet), and a plain update threw "record not found" there.
+        await client.stock.upsert({
           where: { productId_locationId: { productId, locationId } },
-          data: { quantity: { decrement: fulfilledQuantity } },
+          update: { quantity: { decrement: fulfilledQuantity } },
+          create: { productId, locationId, organizationId: orgId, quantity: -fulfilledQuantity },
         });
 
         await client.event.create({
@@ -656,6 +661,11 @@ export class StockService {
   // in a date range — who, when, quantity. The "products currently below
   // zero" half of the report is served client-side off the Stock list
   // (totalStock < 0), no query needed for that part.
+  async businessDayBounds(orgId: string, from?: string, to?: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { timezone: true } });
+    return businessDayBounds(from, to, resolveTimezone(org));
+  }
+
   async getOversoldSales(orgId: string, from: Date, to: Date) {
     const events = await this.prisma.event.findMany({
       where: {

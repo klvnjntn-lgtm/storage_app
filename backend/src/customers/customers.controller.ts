@@ -5,6 +5,7 @@ import {
 import { ModuleKey } from '@prisma/client';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
+import { ImportCustomersDto } from './dto/import-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import {
   CreateCustomerAddressDto,
@@ -54,6 +55,14 @@ export class CustomersController {
     return this.customersService.create(organizationId, dto);
   }
 
+  // Spreadsheet import — rows parsed client-side, see ImportCustomersDto.
+  // Deleting and bulk-importing customers is admin-only.
+  @Roles('ADMIN')
+  @Post('import')
+  importMany(@CurrentOrg() organizationId: string, @Body() dto: ImportCustomersDto) {
+    return this.customersService.importMany(organizationId, dto.rows);
+  }
+
   @Patch(':id')
   update(
     @CurrentOrg() organizationId: string,
@@ -63,6 +72,7 @@ export class CustomersController {
     return this.customersService.update(organizationId, id, dto);
   }
 
+  @Roles('ADMIN')
   @Delete(':id')
   remove(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.customersService.remove(organizationId, id);

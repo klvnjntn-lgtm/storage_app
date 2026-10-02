@@ -10,6 +10,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type APLine = {
@@ -151,11 +152,10 @@ export default function APAgingPage() {
               <Calendar size={12} strokeWidth={2} />
               {t('accounting.balanceSheet.asOf')}
             </label>
-            <input
-              type="date"
+            <DatePicker
+              variant="field"
               value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500"
+              onChange={(v) => setAsOf(v)}
             />
           </div>
         </div>

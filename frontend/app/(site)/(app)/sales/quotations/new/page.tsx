@@ -7,6 +7,7 @@ import { FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
+import { applyPriceLevel, resolveLinePrice, restoredLevelFields, toLevelPrices, usePriceLevels } from '@/lib/price-levels';
 import { QuotationCartPanel } from '@/app/components/quotations/QuotationCartPanel';
 import {
   BankAccount,
@@ -80,6 +81,9 @@ function QuotationFormPageInner() {
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean>(false);
 
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const { defaultLevelId, activeLevelIds } = usePriceLevels();
+  // The document's price level: the customer's, else the org default.
+  const basePriceLevelId = customer?.priceLevelId ?? defaultLevelId;
   const [validUntil, setValidUntil] = useState('');
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
@@ -214,7 +218,8 @@ function QuotationFormPageInner() {
               sku: item.product?.sku ?? null,
               barcode: item.product?.barcode ?? null,
               image: null,
-              sellingPrice: Number(item.unitPrice),
+              sellingPrice: item.product?.sellingPrice != null ? Number(item.product.sellingPrice) : null,
+              prices: toLevelPrices(item.product?.prices),
               unit: item.product?.unit ?? item.unit ?? null,
               stockByLocation: [],
             },
@@ -228,6 +233,7 @@ function QuotationFormPageInner() {
               .filter((tid: string | null): tid is string => !!tid),
             discountType: item.discountType ?? null,
             discountValue: item.discountValue != null ? Number(item.discountValue) : null,
+            ...restoredLevelFields(item.priceLevelId),
           };
         } else {
           serviceCounterRef.current += 1;
@@ -367,6 +373,13 @@ function QuotationFormPageInner() {
         taxRateIds: details.taxRateIds,
         discountType: details.discountType,
         discountValue: details.discountValue,
+        // A re-add keeps the line's level; a new line starts at the
+        // document's level, unless its price was typed (POS pricing).
+        priceLevelId: existing?.priceLevelId ?? null,
+        priceLevelOverridden: existing?.priceLevelOverridden ?? false,
+        priceCustom:
+          existing?.priceCustom ??
+          (false && details.unitPrice !== resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice),
       },
     }));
     return true;
@@ -393,7 +406,16 @@ function QuotationFormPageInner() {
       if (!line) return prev;
       const parsed = Number(rawValue);
       const nextPrice = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-      return { ...prev, [key]: { ...line, unitPrice: nextPrice } };
+      return { ...prev, [key]: { ...line, unitPrice: nextPrice, priceCustom: true } };
+    });
+  }
+
+  // Picking a level by hand pins the line to it and drops any typed price.
+  function changePriceLevel(key: string, levelId: string) {
+    setCart((prev) => {
+      const line = prev[key];
+      if (!line) return prev;
+      return { ...prev, [key]: { ...line, priceLevelId: levelId, priceLevelOverridden: true, priceCustom: false } };
     });
   }
 
@@ -535,7 +557,8 @@ function QuotationFormPageInner() {
     );
   }
 
-  const cartLines = Object.entries(cart).map(([key, line]) => {
+  const cartLines = Object.entries(cart).map(([key, rawLine]) => {
+    const line = applyPriceLevel(rawLine, basePriceLevelId, defaultLevelId, activeLevelIds);
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
@@ -604,6 +627,8 @@ function QuotationFormPageInner() {
       quantity: Math.round(Number(line.quantity)),
       locationId: line.locationId,
       unitPrice: line.unitPrice,
+      // A typed (custom) price comes from no level.
+      priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
       unit: line.unit ?? undefined,
       taxRateIds: line.taxRateIds,
       discountType: line.discountType ?? undefined,
@@ -801,7 +826,7 @@ function QuotationFormPageInner() {
             </div>
 
             <div className="flex items-center gap-2 justify-between sm:justify-end">
-              <button
+              <button data-tour="sales-history"
                 onClick={() => router.push('/sales/quotations')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
@@ -828,6 +853,7 @@ function QuotationFormPageInner() {
           onAddToCart={addToCart}
           posModeEnabled={false}
           taxRates={taxRates}
+          basePriceLevelId={basePriceLevelId}
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
@@ -840,6 +866,7 @@ function QuotationFormPageInner() {
             changeQty={changeQty}
             onChangeServiceUnit={changeServiceUnit}
             changeUnitPrice={changeUnitPrice}
+            onChangePriceLevel={changePriceLevel}
             removeFromCart={removeFromCart}
             stockAtLineLocation={stockAtLineLocation}
             subtotal={subtotal}

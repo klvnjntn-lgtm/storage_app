@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -13,6 +13,8 @@ export type MapStop = {
   latitude: number;
   longitude: number;
   label: string;
+  // Second line of the marker popup (e.g. the address).
+  detail?: string | null;
   // Overrides the status color (e.g. one color per driver in a plan preview).
   color?: string;
 };
@@ -70,6 +72,33 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
+// Flies to the focused stop and opens its popup. `nonce` changes on every
+// request so focusing the same stop twice still re-centers the map.
+function FocusStop({
+  focus,
+  stops,
+  markers,
+}: {
+  focus: { stopId: string; nonce: number } | null;
+  stops: MapStop[];
+  markers: React.RefObject<Record<string, L.Marker>>;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!focus) return;
+    const stop = stops.find((s) => s.id === focus.stopId);
+    if (!stop) return;
+    try {
+      map.flyTo([stop.latitude, stop.longitude], Math.max(map.getZoom(), 16), { duration: 0.6 });
+      markers.current[stop.id]?.openPopup();
+    } catch {
+      // ignore — same teardown race as FitBounds
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.nonce]);
+  return null;
+}
+
 function ClickToPick({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   useMapEvents({
     click(e) {
@@ -85,27 +114,47 @@ export default function DeliveryMapInner({
   pickMode = false,
   pickedPosition = null,
   onPick,
+  focus = null,
 }: {
   stops: MapStop[];
   height?: number;
   pickMode?: boolean;
   pickedPosition?: { lat: number; lng: number } | null;
   onPick?: (lat: number, lng: number) => void;
+  focus?: { stopId: string; nonce: number } | null;
 }) {
+  const markers = useRef<Record<string, L.Marker>>({});
   const positions: [number, number][] = stops.map((s) => [s.latitude, s.longitude]);
   const center = positions[0] ?? FALLBACK_CENTER;
 
   return (
-    <div style={{ height }} className="rounded-lg overflow-hidden border border-gray-200">
+    // `isolate` gives the map its own stacking context: Leaflet's panes and
+    // controls use z-index 400–1000, which would otherwise paint over the
+    // app's drawers, sticky headers and dropdowns (z-10…z-50).
+    <div style={{ height }} className="isolate rounded-lg overflow-hidden border border-gray-200">
       <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <FitBounds positions={pickedPosition ? [...positions, [pickedPosition.lat, pickedPosition.lng]] : positions} />
+        <FocusStop focus={focus} stops={stops} markers={markers} />
         {pickMode && onPick && <ClickToPick onPick={onPick} />}
         {stops.map((stop) => (
-          <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={dotIcon(stop.color ?? STATUS_COLOR[stop.status])} />
+          <Marker
+            key={stop.id}
+            position={[stop.latitude, stop.longitude]}
+            icon={dotIcon(stop.color ?? STATUS_COLOR[stop.status])}
+            ref={(m) => {
+              if (m) markers.current[stop.id] = m;
+              else delete markers.current[stop.id];
+            }}
+          >
+            <Popup>
+              <div className="text-sm font-semibold">{stop.label}</div>
+              {stop.detail && <div className="text-xs text-gray-500 mt-0.5">{stop.detail}</div>}
+            </Popup>
+          </Marker>
         ))}
         {pickedPosition && <Marker position={[pickedPosition.lat, pickedPosition.lng]} icon={pickedIcon} />}
       </MapContainer>

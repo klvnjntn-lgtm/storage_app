@@ -118,8 +118,9 @@ export class NotificationsService {
     userId: string,
     opts: { page?: number; pageSize?: number; unreadOnly?: boolean } = {},
   ) {
-    const page = Math.max(1, opts.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 20));
+    // `||`, not `??`: a malformed query value arrives as NaN (see media.service).
+    const page = Math.max(1, opts.page || 1);
+    const pageSize = Math.min(100, Math.max(1, opts.pageSize || 20));
     const where: Prisma.NotificationWhereInput = {
       organizationId,
       userId,

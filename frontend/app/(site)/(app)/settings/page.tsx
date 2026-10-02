@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
+import PriceLevelsSettings from '@/app/components/settings/PriceLevelsSettings';
 
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -855,6 +856,8 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
+
+        {hasInvoicePos && <PriceLevelsSettings />}
 
         {/* POS Pricing */}
         {hasInvoicePos && (

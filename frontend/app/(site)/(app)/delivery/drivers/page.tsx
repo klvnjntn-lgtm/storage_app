@@ -10,12 +10,25 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
+import TimeInput from '@/app/components/shared/TimeInput';
 
 
 type Driver = { id: string; email: string; displayName: string | null; active: boolean; teamId: string | null; createdAt: string };
 
 type DeviceStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVOKED';
 type Device = { id: string; deviceId: string; label: string | null; userAgent: string | null; status: DeviceStatus; lastSeenAt: string };
+type PendingDevice = Device & { firstSeenAt: string; user: { id: string; email: string; displayName: string | null } };
+
+// "Mozilla/5.0 (Linux; Android 14; SM-A155F) …" → "Android 14 · SM-A155F"-ish,
+// enough for an admin to tell two phones apart.
+function shortDevice(ua: string | null): string {
+  if (!ua) return '';
+  const android = ua.match(/Android [\d.]+(?:; ([^;)]+))?/);
+  if (android) return android[1] ? `${android[0].split(';')[0]} · ${android[1].trim()}` : android[0];
+  const ios = ua.match(/(iPhone|iPad).*?OS ([\d_]+)/);
+  if (ios) return `${ios[1]} · iOS ${ios[2].replace(/_/g, '.')}`;
+  return ua.slice(0, 60);
+}
 
 type DayOfWeek = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
 type AccessWindow = { dayOfWeek: DayOfWeek; startTime: string; endTime: string };
@@ -69,6 +82,33 @@ export default function DriversAdminPage() {
     }
   }, [userLoading, user, router]);
 
+  // New phones waiting for approval, across all drivers — shown on top so
+  // the admin doesn't have to open each driver to find them.
+  const [pending, setPending] = useState<PendingDevice[]>([]);
+  async function loadPending() {
+    const res = await apiFetch('/devices?status=PENDING');
+    if (res.ok) setPending(await res.json());
+  }
+
+  async function handlePendingAction(device: PendingDevice, action: 'approve' | 'reject') {
+    setDeviceBusyId(device.id);
+    setError(null);
+    try {
+      const res = await apiFetch(`/devices/${device.id}/${action}`, { method: 'PATCH' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('delivery.driversAdmin.requestFailed', { status: res.status }));
+        return;
+      }
+      await loadPending();
+      if (expandedId === device.user.id) await loadDevices(device.user.id);
+    } catch {
+      setError(t('delivery.driversAdmin.couldNotReachServer'));
+    } finally {
+      setDeviceBusyId(null);
+    }
+  }
+
   async function loadDrivers() {
     setLoading(true);
     setError(null);
@@ -88,7 +128,10 @@ export default function DriversAdminPage() {
   }
 
   useEffect(() => {
-    if (user?.role === 'ADMIN') loadDrivers();
+    if (user?.role === 'ADMIN') {
+      loadDrivers();
+      loadPending();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -196,6 +239,7 @@ export default function DriversAdminPage() {
         return;
       }
       await loadDevices(driverId);
+      await loadPending();
     } catch {
       setError(t('delivery.driversAdmin.couldNotReachServer'));
     } finally {
@@ -269,8 +313,48 @@ export default function DriversAdminPage() {
       <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-3">
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>}
 
+        {pending.length > 0 && (
+          <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 sm:p-4 space-y-2.5">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                <Smartphone size={15} aria-hidden="true" />
+                {t('delivery.driversAdmin.pendingTitle', { count: pending.length })}
+              </p>
+              <p className="text-xs text-amber-800 mt-0.5">{t('delivery.driversAdmin.pendingHint')}</p>
+            </div>
+            {pending.map((d) => (
+              <div key={d.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 bg-white border border-amber-200 rounded-lg p-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold truncate">{d.user.displayName || d.user.email}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {shortDevice(d.userAgent)} · {t('delivery.driversAdmin.requestedAt')} {new Date(d.firstSeenAt).toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    disabled={deviceBusyId === d.id}
+                    onClick={() => handlePendingAction(d, 'approve')}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 text-sm font-semibold bg-green-600 text-white rounded-md px-3 py-2 disabled:opacity-50"
+                  >
+                    <Check size={14} aria-hidden="true" />
+                    {t('delivery.driversAdmin.approveReplace')}
+                  </button>
+                  <button
+                    disabled={deviceBusyId === d.id}
+                    onClick={() => handlePendingAction(d, 'reject')}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 text-sm font-medium border border-red-200 text-red-700 bg-white rounded-md px-3 py-2 disabled:opacity-50"
+                  >
+                    <X size={14} aria-hidden="true" />
+                    {t('delivery.driversAdmin.reject')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {paginatedDrivers.map((driver) => (
-          <div key={driver.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div data-tour="dlv-drivers-card" key={driver.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <div className="p-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <DriverAvatar driver={driver} size={34} />
@@ -342,13 +426,13 @@ export default function DriversAdminPage() {
               </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button
+                <button data-tour="dlv-drivers-manage"
                   onClick={() => toggleExpanded(driver)}
                   className="flex items-center gap-1 text-xs font-medium border border-blue-200 text-blue-700 rounded px-2.5 py-2 sm:px-2 sm:py-1"
                 >
                   {expandedId === driver.id ? t('delivery.driversAdmin.close') : t('delivery.driversAdmin.manage')}
                 </button>
-                <button
+                <button data-tour="dlv-drivers-lock"
                   disabled={busyId === driver.id}
                   onClick={() => toggleActive(driver)}
                   className={`flex items-center gap-1 text-xs font-medium rounded px-2.5 py-2 sm:px-2 sm:py-1 border disabled:opacity-50 ${
@@ -378,7 +462,9 @@ export default function DriversAdminPage() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {deviceStatusBadge(d.status, t(`delivery.driversAdmin.deviceStatus.${d.status}`))}
-                            <span className="text-[11px] text-gray-400 truncate">{d.userAgent ?? d.deviceId}</span>
+                            <span className="text-[11px] text-gray-400 truncate" title={d.userAgent ?? undefined}>
+                              {shortDevice(d.userAgent) || d.deviceId}
+                            </span>
                           </div>
                           <div className="text-[10px] text-gray-400 mt-0.5">
                             {t('delivery.driversAdmin.lastSeen')}: {new Date(d.lastSeenAt).toLocaleString()}
@@ -442,18 +528,18 @@ export default function DriversAdminPage() {
                             </option>
                           ))}
                         </select>
-                        <input
-                          type="time"
+                        <TimeInput
+                          size="sm"
                           value={w.startTime}
-                          onChange={(e) => updateWindow(idx, { startTime: e.target.value })}
-                          className="flex-1 sm:flex-none min-w-0 border border-gray-300 rounded px-1.5 py-2 sm:py-1 text-base sm:text-xs"
+                          onChange={(v) => updateWindow(idx, { startTime: v })}
+                          className="flex-1 sm:flex-none min-w-0"
                         />
                         <span className="text-xs text-gray-400">–</span>
-                        <input
-                          type="time"
+                        <TimeInput
+                          size="sm"
                           value={w.endTime}
-                          onChange={(e) => updateWindow(idx, { endTime: e.target.value })}
-                          className="flex-1 sm:flex-none min-w-0 border border-gray-300 rounded px-1.5 py-2 sm:py-1 text-base sm:text-xs"
+                          onChange={(v) => updateWindow(idx, { endTime: v })}
+                          className="flex-1 sm:flex-none min-w-0"
                         />
                         <button
                           onClick={() => removeWindow(idx)}

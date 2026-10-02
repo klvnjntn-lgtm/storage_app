@@ -8,6 +8,7 @@ import { PrintTokenService } from '../common/print/print-token.service';
 import { Prisma, SalesOrderStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
+import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesOrderDto, UpdateSalesOrderDto } from './dto/sales-order.dto';
 
 // eventType is a plain String column on SalesOrderActivityEvent (not a
@@ -154,7 +155,7 @@ export class SalesOrderService {
   async create(organizationId: string, userId: string, dto: CreateSalesOrderDto) {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-      await this.pricing.priceLines(organizationId, dto.items);
+      await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
     const orderDate = dto.orderDate ? new Date(dto.orderDate) : new Date(); // NEW
 
     try {
@@ -181,7 +182,7 @@ export class SalesOrderService {
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit, // NEW
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
@@ -273,8 +274,22 @@ await this.logActivity(tx, {
           taxRateIds: [] as string[],
         }));
 
+        // Carry each source line's price and level forward unchanged — a
+        // quotation that said Rp100k must not become Rp110k on the order
+        // or invoice because a price level changed in between.
+        const forcedUnitPriceByIndex = new Map<number, number>();
+        const forcedPriceLevelIdByIndex = new Map<number, string | null>();
+        quotation.items.forEach((i, idx) => {
+          if (!i.productId) return;
+          forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
+          forcedPriceLevelIdByIndex.set(idx, i.priceLevelId ?? null);
+        });
+
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, items, tx);
+          await this.pricing.priceLines(organizationId, items, tx, {
+            forcedUnitPriceByIndex,
+            forcedPriceLevelIdByIndex,
+          });
 
         const order = await tx.salesOrder.create({
           data: {
@@ -298,7 +313,7 @@ await this.logActivity(tx, {
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
@@ -455,7 +470,10 @@ await this.logActivity(tx, {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, dto.items!, tx);
+          await this.pricing.priceLines(organizationId, dto.items!, tx, {
+            customerId: dto.customerId ?? order.customerId,
+            userId,
+          });
 
         const existingItemIds = (
           await tx.salesOrderItem.findMany({ where: { salesOrderId: order.id }, select: { id: true } })
@@ -486,7 +504,7 @@ await this.logActivity(tx, {
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
@@ -670,7 +688,7 @@ async confirm(organizationId: string, id: string, userId: string) {
     const order = await this.prisma.salesOrder.findFirst({
       where: { id, organizationId },
       include: {
-        items: { include: { product: true, taxes: true } },
+        items: { include: { product: { include: { prices: { select: { priceLevelId: true, price: true } } } }, taxes: true } },
         taxes: true,
         customer: true,
         quotation: { select: { id: true, quotationNumber: true, status: true } },
@@ -805,27 +823,30 @@ async confirm(organizationId: string, id: string, userId: string) {
         organizationId,
       });
       const printUrl =
-        `${process.env.FRONTEND_URL}/print/sales-orders/${id}?format=${format}&token=${printToken}`;
+        `${process.env.FRONTEND_URL}/print/sales-orders/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}`;
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-      try {
-        const page = await browser.newPage();
-        await page.emulateMediaType('print');
-        await page.emulateMediaFeatures([
-          { name: 'prefers-color-scheme', value: 'light' },
-        ]);
-        await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-        const pdfBuffer = await page.pdf({
-          printBackground: true,
-          preferCSSPageSize: true,
+      // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
+      return await withPdfRenderSlot(async () => {
+        const browser = await puppeteer.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
         });
-        return Buffer.from(pdfBuffer);
-      } finally {
-        await browser.close();
-      }
+        try {
+          const page = await browser.newPage();
+          await page.emulateMediaType('print');
+          await page.emulateMediaFeatures([
+            { name: 'prefers-color-scheme', value: 'light' },
+          ]);
+          await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+          const pdfBuffer = await page.pdf({
+            printBackground: true,
+            preferCSSPageSize: true,
+          });
+          return Buffer.from(pdfBuffer);
+        } finally {
+          await browser.close();
+        }
+      });
     } catch (e) {
       console.error('Sales order PDF render failed:', e);
       throw e;

@@ -8,13 +8,15 @@ import { BankAccountResolverService } from '../bank-accounts/bank-account-resolv
 import { Prisma, SalesQuotationStatus, SalesQuotationActivityEventType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
+import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
+import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 
 // bank* fields removed from organization.select — SalesQuotation now
 // carries its own snapshot columns (bankAccountId/bankName/
 // bankAccountNumber/bankAccountName), same as Invoice.
 const quotationDetailInclude = {
-  items: { include: { product: true, taxes: true } },
+  items: { include: { product: { include: { prices: { select: { priceLevelId: true, price: true } } } }, taxes: true } },
   taxes: true,
   customer: true,
   location: { select: { name: true, address: true, phone: true } },
@@ -150,7 +152,7 @@ export class SalesQuotationService {
   async create(organizationId: string, userId: string, dto: CreateSalesQuotationDto) {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-      await this.pricing.priceLines(organizationId, dto.items);
+      await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
     const quotationDate = dto.quotationDate ? new Date(dto.quotationDate) : new Date();
 
     try {
@@ -185,7 +187,7 @@ export class SalesQuotationService {
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 lineTotal: l.lineTotal,
                 discountType: l.discountType,
@@ -302,7 +304,10 @@ export class SalesQuotationService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, dto.items!, tx);
+          await this.pricing.priceLines(organizationId, dto.items!, tx, {
+            customerId: dto.customerId ?? quotation.customerId,
+            userId,
+          });
 
         const bank = dto.bankAccountId !== undefined
           ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
@@ -350,7 +355,7 @@ export class SalesQuotationService {
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 lineTotal: l.lineTotal,
                 discountType: l.discountType,
@@ -681,15 +686,20 @@ export class SalesQuotationService {
     organizationId: string,
     filters: {
       status?: SalesQuotationStatus;
-      from?: Date;
-      to?: Date;
+      // YYYY-MM-DD business days (or exact instants) — see businessDayBounds.
+      from?: string;
+      to?: string;
       dateField?: 'sent' | 'created';
       search?: string;
       page?: number;
       pageSize?: number;
     },
   ): Promise<{ data: any[]; total: number; page: number; pageSize: number }> {
-    const dateFilter = filters.from || filters.to ? { gte: filters.from, lte: filters.to } : undefined;
+    let dateFilter: { gte?: Date; lte?: Date } | undefined;
+    if (filters.from || filters.to) {
+      const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+      dateFilter = businessDayBounds(filters.from, filters.to, resolveTimezone(org));
+    }
 
     const dateCondition: Prisma.SalesQuotationWhereInput | undefined = dateFilter
       ? filters.dateField === 'sent'
@@ -840,27 +850,30 @@ export class SalesQuotationService {
         organizationId,
       });
       const printUrl =
-        `${process.env.FRONTEND_URL}/print/quotations/${id}?format=${format}&token=${printToken}`;
+        `${process.env.FRONTEND_URL}/print/quotations/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}`;
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-      try {
-        const page = await browser.newPage();
-        await page.emulateMediaType('print');
-        await page.emulateMediaFeatures([
-          { name: 'prefers-color-scheme', value: 'light' },
-        ]);
-        await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-        const pdfBuffer = await page.pdf({
-          printBackground: true,
-          preferCSSPageSize: true,
+      // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
+      return await withPdfRenderSlot(async () => {
+        const browser = await puppeteer.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
         });
-        return Buffer.from(pdfBuffer);
-      } finally {
-        await browser.close();
-      }
+        try {
+          const page = await browser.newPage();
+          await page.emulateMediaType('print');
+          await page.emulateMediaFeatures([
+            { name: 'prefers-color-scheme', value: 'light' },
+          ]);
+          await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+          const pdfBuffer = await page.pdf({
+            printBackground: true,
+            preferCSSPageSize: true,
+          });
+          return Buffer.from(pdfBuffer);
+        } finally {
+          await browser.close();
+        }
+      });
     } catch (e) {
       console.error('Quotation PDF render failed:', e);
       throw e;

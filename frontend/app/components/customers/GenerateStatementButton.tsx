@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { FileText, X } from 'lucide-react';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 // A statement is a per-customer running account (opening balance, period
 // activity, closing balance) — there's no meaningful "all customers"
@@ -89,20 +90,20 @@ export function GenerateStatementButton({ customerId, customerName }: Props) {
             <div className="flex gap-2 mb-4">
               <div className="flex flex-col gap-1 flex-1">
                 <label className="text-xs font-semibold text-gray-600">{t('sales.statementNew.from')}</label>
-                <input
-                  type="date"
+                <DatePicker
+                  variant="field"
                   value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  className="border-2 border-gray-300 rounded-md p-2 text-sm w-full"
+                  onChange={(v) => setFrom(v)}
+                  className="w-full"
                 />
               </div>
               <div className="flex flex-col gap-1 flex-1">
                 <label className="text-xs font-semibold text-gray-600">{t('sales.statementNew.to')}</label>
-                <input
-                  type="date"
+                <DatePicker
+                  variant="field"
                   value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="border-2 border-gray-300 rounded-md p-2 text-sm w-full"
+                  onChange={(v) => setTo(v)}
+                  className="w-full"
                 />
               </div>
             </div>

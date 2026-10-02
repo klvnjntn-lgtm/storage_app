@@ -6,7 +6,7 @@ import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
 
 async function getPrintData(id: string, token: string): Promise<InvoicePrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-  const res = await fetch(`${base}/print/invoices/${id}?token=${token}`, { cache: 'no-store' });
+  const res = await fetch(`${base}/print/invoices/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();
 }

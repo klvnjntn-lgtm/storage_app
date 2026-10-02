@@ -251,6 +251,7 @@ export const purchasingWorkshop = {
         view: 'View',
       },
       vehicleSearch: {
+        draft: 'Draft',
         title: 'Vehicle History Lookup',
         subtitle: 'Search by plate, model, VIN, or customer to jump straight to history',
         searchPlaceholder: 'Enter plate, model, VIN, or customer name...',
@@ -556,6 +557,7 @@ export const purchasingWorkshop = {
         view: 'Lihat',
       },
       vehicleSearch: {
+        draft: 'Draf',
         title: 'Pencarian Riwayat Kendaraan',
         subtitle: 'Cari berdasarkan plat nomor, model, nomor rangka, atau pelanggan untuk langsung menuju riwayat',
         searchPlaceholder: 'Masukkan plat nomor, model, nomor rangka, atau nama pelanggan...',

@@ -15,6 +15,7 @@ import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
 import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { PAGE_CSS, MARGIN_MM } from '@/lib/mappers/invoice-format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
@@ -213,7 +214,7 @@ export default function InvoiceDetailPage() {
     try {
       const [invRes, historyRes, periodsRes] = await Promise.all([
         apiFetch(`/invoices/${params.id}`),
-        apiFetch(`/sales/invoices/${params.id}/edit-history`),
+        apiFetch(`/invoices/${params.id}/edit-history`),
         apiFetch('/accounting/fiscal-periods'),
       ]);
       if (!invRes.ok) {
@@ -436,7 +437,7 @@ export default function InvoiceDetailPage() {
               {invoice.status === 'ISSUED' &&
                 invoice.paymentStatus === 'UNPAID' &&
                  (
-                  <button
+                  <button data-tour="id-edit"
                     onClick={() => router.push(`/sales/invoices/${invoice.id}/edit`)}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
                   >
@@ -446,7 +447,7 @@ export default function InvoiceDetailPage() {
                 )}
 
               {invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
-                <button
+                <button data-tour="id-void"
                   onClick={() => setVoidDialogOpen(true)}
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
                 >
@@ -461,7 +462,7 @@ export default function InvoiceDetailPage() {
                   needs to key off whether there's still outstanding demand, not
                   whether a delivery order has ever been created before. */}
               {invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
-                <button
+                <button data-tour="id-to-do"
                   disabled={actionLoading === 'convert-do'}
                   onClick={handleConvertToDeliveryOrder}
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit disabled:opacity-50 transition-colors"
@@ -472,7 +473,7 @@ export default function InvoiceDetailPage() {
               )}
 
               {balanceDue > 0 && invoice.status !== 'VOID' && (
-                <button
+                <button data-tour="id-pay"
                   onClick={() => setPaymentDialogOpen(true)}
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
                 >
@@ -488,7 +489,7 @@ export default function InvoiceDetailPage() {
                 <Download size={16} strokeWidth={2} />
                 {pdfGenerating ? t('sales.invoiceDetail.generatingPdf') : t('sales.invoiceDetail.downloadPdf')}
               </button>
-              <button
+              <button data-tour="doc-print"
                 onClick={handlePrint}
                 className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 h-fit transition-colors"
               >
@@ -535,7 +536,7 @@ export default function InvoiceDetailPage() {
                   {invoice.vehicleOdometer != null && <span> · {t('sales.invoiceDetail.odometerKm', { odometer: invoice.vehicleOdometer })}</span>}
                 </p>
                 {!reminderOpen ? (
-                  <button
+                  <button data-tour="id-reminder"
                     onClick={() => setReminderOpen(true)}
                     className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-blue-700 transition-colors"
                   >
@@ -579,11 +580,12 @@ export default function InvoiceDetailPage() {
                       ))}
                     </div>
 
-                    <input
-                      type="date"
+                    <DatePicker
+                      variant="field"
+                      clearable
                       value={reminderDueDate}
-                      onChange={(e) => setReminderDueDate(e.target.value)}
-                      className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-2"
+                      onChange={(v) => setReminderDueDate(v)}
+                      className="w-full mb-2"
                     />
 
                     {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}

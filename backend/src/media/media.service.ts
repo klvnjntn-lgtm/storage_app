@@ -113,8 +113,10 @@ export class MediaService {
     orgId: string,
     params: { q?: string; mimeType?: string; page?: number; pageSize?: number },
   ) {
-    const page = Math.max(1, params.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 24));
+    // `||`, not `??`: a malformed ?page=abc arrives as NaN, and
+    // Math.max(1, NaN) is NaN, which Prisma rejects with a 500.
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.min(100, Math.max(1, params.pageSize || 24));
 
     const where = {
       organizationId: orgId,

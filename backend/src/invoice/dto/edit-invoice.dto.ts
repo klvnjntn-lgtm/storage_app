@@ -43,6 +43,13 @@ export class EditInvoiceItemDto {
   @Min(0)
   unitPrice?: number;
 
+  // Requested price level. Only a request — the server looks up the
+  // product's price for it (LineItemPricingService), never trusting a
+  // client-sent price unless POS pricing is on.
+  @IsOptional()
+  @IsString()
+  priceLevelId?: string;
+
   @IsOptional()
   @IsArray()
   @IsUUID(undefined, { each: true })

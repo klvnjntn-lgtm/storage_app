@@ -37,4 +37,4 @@ export type TopReport = {
 // never reorder or pick from the middle. "Other" always uses the muted
 // gray, never a 6th hue.
 export const CHART_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'];
-export const CHART_OTHER_COLOR = '#898781';
+export const CHART_OTHER_COLOR = '#94a3b8';

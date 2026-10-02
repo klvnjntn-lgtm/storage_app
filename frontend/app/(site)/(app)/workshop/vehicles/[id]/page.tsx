@@ -307,7 +307,7 @@ export default function VehicleDetailPage() {
             </div>
 
             {vehicle && (
-              <button
+              <button data-tour="veh-new-invoice"
                 onClick={() =>
                   router.push(
                     `/sales/invoices/new?customerId=${vehicle.customer.id}&vehicleId=${vehicle.id}`,
@@ -332,7 +332,7 @@ export default function VehicleDetailPage() {
         {vehicle && (
           <>
             {/* Service stats — lifetime, unaffected by filters below */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
+            <div data-tour="veh-stats" className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
                 <p className="flex items-center gap-1 text-[11px] sm:text-xs text-gray-500">
                   <Wrench size={11} strokeWidth={2} />
@@ -366,7 +366,7 @@ export default function VehicleDetailPage() {
                 payment/date-range filtering and financial totals live on
                 the invoice itself, not here. Search covers both invoice
                 number and parts/services text. */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
+            <div data-tour="veh-filters" className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
               <div className="relative flex-1 sm:max-w-sm">
                 <Search size={14} strokeWidth={2} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -420,7 +420,7 @@ export default function VehicleDetailPage() {
                 const overdue = isOverdue(inv);
                 const { lines, overflow } = itemsToShow(inv.items, itemSearch, t);
                 return (
-                  <div
+                  <div data-tour="veh-visit"
                     key={inv.id}
                     onClick={() => openInvoice(inv)}
                     className={`flex flex-col gap-1.5 border-2 rounded-md p-3 cursor-pointer bg-white transition-colors ${

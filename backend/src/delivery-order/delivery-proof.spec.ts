@@ -16,6 +16,7 @@ import { StorageModule } from '../storage/storage.module';
 import { LocalFileStorage } from '../storage/local-file-storage';
 import { DeliveryOrderModule } from './delivery-order.module';
 import { DeliveryProofService } from './delivery-proof.service';
+import { DeliveryOrderService } from './delivery-order.service';
 import { MediaModule } from '../media/media.module';
 import { MediaService } from '../media/media.service';
 
@@ -24,6 +25,7 @@ import { MediaService } from '../media/media.service';
 describe('Delivery proof photos', () => {
   let prisma: PrismaService;
   let proofs: DeliveryProofService;
+  let orders: DeliveryOrderService;
   let media: MediaService;
   let root: string;
   let orgId: string;
@@ -46,6 +48,7 @@ describe('Delivery proof photos', () => {
     }).compile();
     prisma = module.get(PrismaService);
     proofs = module.get(DeliveryProofService);
+    orders = module.get(DeliveryOrderService);
     media = module.get(MediaService);
 
     orgId = (
@@ -101,6 +104,8 @@ describe('Delivery proof photos', () => {
     await prisma.route.deleteMany({ where: { organizationId: orgId } });
     await prisma.mediaAsset.deleteMany({ where: { organizationId: orgId } });
     await prisma.deliveryOrder.deleteMany({ where: { organizationId: orgId } });
+    await prisma.customerAddress.deleteMany({ where: { organizationId: orgId } });
+    await prisma.customer.deleteMany({ where: { organizationId: orgId } });
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
     await prisma.team.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
@@ -328,5 +333,44 @@ describe('Delivery proof photos', () => {
       (await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } })).proofPhotoKey,
     ).toBeNull();
   });
-});
 
+  it("gives an unpinned customer address its first pin from the driver's GPS, never overwriting one", async () => {
+    const customer = await prisma.customer.create({
+      data: { organizationId: orgId, name: 'ABC', address: 'Komplek XYZ Blok B No. 6' },
+    });
+    const pinned = await prisma.customer.create({
+      data: { organizationId: orgId, name: 'Pinned', address: 'Jl. A', latitude: -6.1, longitude: 106.1 },
+    });
+    const deliverTo = async (customerId: string, deliveryAddress: string, gps: object) => {
+      const order = await shippedDo(driverId);
+      await prisma.deliveryOrder.update({
+        where: { id: order.id },
+        data: { customerId, deliveryAddress },
+      });
+      return orders.recordProofOfDelivery(orgId, order.id, gps, driver());
+    };
+
+    // Vague fix: kept on the delivery, address stays unpinned.
+    const vague = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+      completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 500,
+    });
+    expect(Number(vague.completedLatitude)).toBeCloseTo(-6.3);
+    expect(vague.completedAccuracy).toBe(500);
+    expect((await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).latitude).toBeNull();
+
+    // Good fix: becomes the customer's pin.
+    await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+      completedLatitude: -6.2, completedLongitude: 106.8, completedAccuracy: 12,
+    });
+    const after = await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } });
+    expect(Number(after.latitude)).toBeCloseTo(-6.2);
+    expect(Number(after.longitude)).toBeCloseTo(106.8);
+
+    // A later delivery never moves an existing pin.
+    const later = await deliverTo(pinned.id, 'Jl. A', {
+      completedLatitude: -6.9, completedLongitude: 106.9, completedAccuracy: 5,
+    });
+    expect(Number(later.completedLatitude)).toBeCloseTo(-6.9);
+    expect(Number((await prisma.customer.findUniqueOrThrow({ where: { id: pinned.id } })).latitude)).toBeCloseTo(-6.1);
+  });
+});

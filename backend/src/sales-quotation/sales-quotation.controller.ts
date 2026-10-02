@@ -51,8 +51,8 @@ export class SalesQuotationController {
       pageSize: pageSize ? Number(pageSize) : undefined,
       search,
       dateField,
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
+      from: from || undefined,
+      to: to || undefined,
     });
   }
 

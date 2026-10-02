@@ -10,6 +10,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type FixedAsset = {
@@ -101,7 +102,7 @@ export default function FixedAssetsPage() {
 
   async function loadBankAccounts() {
     if (bankAccounts !== null) return; // fetch once, lazily
-    const res = await apiFetch('/organizations/bank-accounts');
+    const res = await apiFetch('/organization/bank-accounts');
     if (res.ok) {
       const data: BankAccount[] = await res.json();
       setBankAccounts(data.filter((b) => !b.archivedAt));
@@ -469,11 +470,10 @@ export default function FixedAssetsPage() {
                 <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
                   <Calendar size={11} strokeWidth={2} /> {t('accounting.fixedAssets.acquisitionDate')}
                 </label>
-                <input
-                  type="date"
+                <DatePicker
+                  variant="field"
                   value={form.acquisitionDate}
-                  onChange={(e) => setForm((f) => ({ ...f, acquisitionDate: e.target.value }))}
-                  className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                  onChange={(v) => setForm((f) => ({ ...f, acquisitionDate: v }))}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -637,11 +637,11 @@ export default function FixedAssetsPage() {
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
-                            <input
-                              type="date"
+                            <DatePicker
+                              variant="field"
+                              size="sm"
                               value={payForm.paidAt}
-                              onChange={(e) => setPayForm((f) => ({ ...f, paidAt: e.target.value }))}
-                              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                              onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}
                             />
                           </div>
                         </div>
@@ -713,11 +713,11 @@ export default function FixedAssetsPage() {
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.fixedAssets.disposedOnLabel')}</label>
-                            <input
-                              type="date"
+                            <DatePicker
+                              variant="field"
+                              size="sm"
                               value={disposeForm.disposedAt}
-                              onChange={(e) => setDisposeForm((f) => ({ ...f, disposedAt: e.target.value }))}
-                              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                              onChange={(v) => setDisposeForm((f) => ({ ...f, disposedAt: v }))}
                             />
                           </div>
                         </div>

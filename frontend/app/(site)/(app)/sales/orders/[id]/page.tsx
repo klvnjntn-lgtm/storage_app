@@ -83,11 +83,10 @@ export default function SalesOrderDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
-  // ASSUMPTION: GET /organization/modules returns a plain string[] of
-  // enabled ModuleKey values, mirroring
-  // OrganizationModulesService.getEnabledModules()'s shape. Adjust the
-  // fetch below if your actual endpoint differs (e.g. lives under
-  // /organization/settings instead).
+  // GET /organizations/modules returns a plain string[] of enabled
+  // ModuleKey values (OrganizationModulesService.getEnabledModules()). It
+  // used to call /organization/modules, which doesn't exist, so warehouse
+  // ops was never detected on this page.
   const [hasWarehouseOps, setHasWarehouseOps] = useState(false);
 
   const CAN_DELIVER: SalesOrderStatus[] = ['CONFIRMED', 'PARTIALLY_DELIVERED'];
@@ -127,7 +126,7 @@ export default function SalesOrderDetailPage() {
 
   useEffect(() => {
     (async () => {
-      const res = await apiFetch('/organization/modules');
+      const res = await apiFetch('/organizations/modules');
       if (res.ok) {
         const modules: string[] = await res.json();
         setHasWarehouseOps(modules.includes('WAREHOUSE_OPS'));
@@ -275,14 +274,14 @@ export default function SalesOrderDetailPage() {
             <div className="flex flex-wrap gap-2">
               {order.status === 'DRAFT' && (
                 <>
-                  <button
+                  <button data-tour="od-edit"
                     onClick={() => router.push(`/sales/orders/new?draftId=${order.id}`)}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
                     {t('common.edit')}
                   </button>
-                  <button
+                  <button data-tour="od-confirm"
                     disabled={actionLoading === 'confirm'}
                     onClick={handleConfirm}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
@@ -302,7 +301,7 @@ export default function SalesOrderDetailPage() {
               )}
 
               {canInvoiceDirectly && (
-                <button
+                <button data-tour="od-to-invoice"
                   disabled={actionLoading === 'convert-invoice'}
                   onClick={handleConvertToInvoice}
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
@@ -322,7 +321,7 @@ export default function SalesOrderDetailPage() {
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? t('sales.orderDetail.generating') : t('sales.orderDetail.downloadPdf')}
                   </button>
-                  <button
+                  <button data-tour="doc-print"
                     onClick={handlePrint}
                     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
                   >

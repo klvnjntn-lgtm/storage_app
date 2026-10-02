@@ -7,6 +7,7 @@ import { FileText, ShoppingCart } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
+import { applyPriceLevel, resolveLinePrice, restoredLevelFields, toLevelPrices, usePriceLevels } from '@/lib/price-levels';
 import { SalesOrderCartPanel } from '@/app/components/sales-orders/SalesOrderCartPanel';
 import { useLanguage } from '@/app/context/LanguageContext';
 import {
@@ -73,6 +74,9 @@ function SalesOrderFormPageInner() {
   // Format is A4-only, same as quotations — no toggle, just a constant
   // baked into buildPayload().
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const { defaultLevelId, activeLevelIds } = usePriceLevels();
+  // The document's price level: the customer's, else the org default.
+  const basePriceLevelId = customer?.priceLevelId ?? defaultLevelId;
   const [customerPoNumber, setCustomerPoNumber] = useState('');
   const [orderDate, setOrderDate] = useState('');
 
@@ -123,7 +127,7 @@ function SalesOrderFormPageInner() {
     (async () => {
       const [locRes, taxRes] = await Promise.all([
         apiFetch('/locations'),
-        apiFetch('/tax-rates'),
+        apiFetch('/organization/tax-rates'),
       ]);
       if (locRes.ok) {
         const data: LocationOption[] = await locRes.json();
@@ -187,7 +191,8 @@ function SalesOrderFormPageInner() {
               unit: item.product?.unit ?? item.unit ?? null,
               barcode: item.product?.barcode ?? null,
               image: null,
-              sellingPrice: Number(item.unitPrice),
+              sellingPrice: item.product?.sellingPrice != null ? Number(item.product.sellingPrice) : null,
+              prices: toLevelPrices(item.product?.prices),
               stockByLocation: [],
             },
             quantity: item.quantity,
@@ -200,6 +205,7 @@ function SalesOrderFormPageInner() {
               .filter((tid: string | null): tid is string => !!tid),
             discountType: item.discountType ?? null,
             discountValue: item.discountValue != null ? Number(item.discountValue) : null,
+            ...restoredLevelFields(item.priceLevelId),
           };
         } else {
           serviceCounterRef.current += 1;
@@ -335,6 +341,13 @@ function SalesOrderFormPageInner() {
         taxRateIds: details.taxRateIds,
         discountType: details.discountType,
         discountValue: details.discountValue,
+        // A re-add keeps the line's level; a new line starts at the
+        // document's level, unless its price was typed (POS pricing).
+        priceLevelId: existing?.priceLevelId ?? null,
+        priceLevelOverridden: existing?.priceLevelOverridden ?? false,
+        priceCustom:
+          existing?.priceCustom ??
+          (false && details.unitPrice !== resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice),
       },
     }));
     return true;
@@ -361,7 +374,16 @@ function SalesOrderFormPageInner() {
       if (!line) return prev;
       const parsed = Number(rawValue);
       const nextPrice = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-      return { ...prev, [key]: { ...line, unitPrice: nextPrice } };
+      return { ...prev, [key]: { ...line, unitPrice: nextPrice, priceCustom: true } };
+    });
+  }
+
+  // Picking a level by hand pins the line to it and drops any typed price.
+  function changePriceLevel(key: string, levelId: string) {
+    setCart((prev) => {
+      const line = prev[key];
+      if (!line) return prev;
+      return { ...prev, [key]: { ...line, priceLevelId: levelId, priceLevelOverridden: true, priceCustom: false } };
     });
   }
 
@@ -512,7 +534,8 @@ function SalesOrderFormPageInner() {
 
   // Tax is computed on the post-discount (net) amount, not the raw
   // subtotal — otherwise a 100% discounted line would still carry tax.
-  const cartLines = Object.entries(cart).map(([key, line]) => {
+  const cartLines = Object.entries(cart).map(([key, rawLine]) => {
+    const line = applyPriceLevel(rawLine, basePriceLevelId, defaultLevelId, activeLevelIds);
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
@@ -573,6 +596,8 @@ function SalesOrderFormPageInner() {
       quantity: line.quantity,
       locationId: line.locationId,
       unitPrice: line.unitPrice,
+      // A typed (custom) price comes from no level.
+      priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
       unit: line.unit ?? undefined,
       taxRateIds: line.taxRateIds,
       discountType: line.discountType ?? undefined,
@@ -772,7 +797,7 @@ function SalesOrderFormPageInner() {
             </div>
 
             <div className="flex items-center gap-2 justify-between sm:justify-end">
-              <button
+              <button data-tour="sales-history"
                 onClick={() => router.push('/sales/orders')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
@@ -799,6 +824,7 @@ function SalesOrderFormPageInner() {
           onAddToCart={addToCart}
           posModeEnabled={false}
           taxRates={taxRates}
+          basePriceLevelId={basePriceLevelId}
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
@@ -814,6 +840,7 @@ function SalesOrderFormPageInner() {
             setEditingPriceKey={setEditingPriceKey}
             changeQty={changeQty}
             changeUnitPrice={changeUnitPrice}
+            onChangePriceLevel={changePriceLevel}
             removeFromCart={removeFromCart}
             stockAtLineLocation={stockAtLineLocation}
             subtotal={subtotal}

@@ -20,6 +20,15 @@ export class MailerService implements OnModuleInit {
       });
       this.fromAddress = MAIL_FROM || SMTP_USER;
       this.logger.log(`Mailer configured with SMTP host ${SMTP_HOST}`);
+    } else if (process.env.NODE_ENV === 'production') {
+      // Never fall back to Ethereal in production: reset links and
+      // password-change codes are live credentials, and the fallback would
+      // hand them to a third-party inbox and print a link to each one in
+      // the server log, where anyone with log access could use it.
+      this.logger.error(
+        'No SMTP_HOST/SMTP_USER/SMTP_PASS set — email sending is disabled. ' +
+          'Password reset and password change will not work until SMTP is configured.',
+      );
     } else {
       // No SMTP configured — fall back to Ethereal, a throwaway test
       // inbox. Emails aren't really delivered; Nodemailer gives back a

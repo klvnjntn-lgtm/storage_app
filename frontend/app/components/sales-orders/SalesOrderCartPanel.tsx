@@ -1,12 +1,14 @@
 'use client';
 
 import { Minus, Plus, Trash2, Send, AlertCircle, MapPin, Pencil, Percent, Wrench, X } from 'lucide-react';
+import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { CartLine, Customer, DiscountType, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -37,6 +39,7 @@ export function SalesOrderCartPanel({
   setEditingPriceKey,
   changeQty,
   changeUnitPrice,
+  onChangePriceLevel,
   removeFromCart,
   stockAtLineLocation,
   subtotal,
@@ -72,6 +75,8 @@ export function SalesOrderCartPanel({
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
   changeUnitPrice: (key: string, rawValue: string) => void;
+  // Re-levels one line (Retail → Wholesale …); the price follows.
+  onChangePriceLevel?: (key: string, levelId: string) => void;
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
   subtotal: number;
@@ -137,11 +142,12 @@ export function SalesOrderCartPanel({
         </div>
         <div>
           <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
-          <input
-            type="date"
+          <DatePicker
+            variant="field"
+            clearable
             value={orderDate}
-            onChange={(e) => setOrderDate(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            onChange={(v) => setOrderDate(v)}
+            className="w-full"
           />
         </div>
       </div>
@@ -160,7 +166,7 @@ export function SalesOrderCartPanel({
         </div>
       )}
 
-      <div className="flex flex-col divide-y divide-blue-500/10 mt-3">
+      <div data-tour="sales-lines" className="flex flex-col divide-y divide-blue-500/10 mt-3">
         {cartLines.map((line) => {
           const editing = editingPriceKey === line.key;
           const available = stockAtLineLocation(line);
@@ -176,6 +182,16 @@ export function SalesOrderCartPanel({
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
+                  {onChangePriceLevel && (
+                    <div className="mt-1">
+                      <PriceLevelSelect
+                        product={line.product}
+                        value={line.priceLevelId ?? null}
+                        custom={!!line.priceCustom}
+                        onChange={(levelId) => onChangePriceLevel(line.key, levelId)}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {editing ? (
@@ -413,7 +429,7 @@ export function SalesOrderCartPanel({
         </div>
       </div>
 
-      <button
+      <button data-tour="sales-submit"
         onClick={onSubmit}
         disabled={nothingToOrder || saving || !customer || hasEmptyServicePrice || hasEmptyServiceDescription}
         className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"

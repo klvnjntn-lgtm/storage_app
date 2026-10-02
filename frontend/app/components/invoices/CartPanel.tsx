@@ -1,12 +1,14 @@
 'use client';
 
 import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound } from 'lucide-react';
+import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -45,6 +47,7 @@ export function CartPanel({
   setEditingPriceKey,
   changeQty,
   changeUnitPrice,
+  onChangePriceLevel,
   removeFromCart,
   stockAtLineLocation,
   posModeEnabled,
@@ -117,6 +120,8 @@ export function CartPanel({
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
   changeUnitPrice: (key: string, rawValue: string) => void;
+  // Re-levels one line (Retail → Wholesale …); the price follows.
+  onChangePriceLevel?: (key: string, levelId: string) => void;
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
   posModeEnabled: boolean;
@@ -226,12 +231,13 @@ export function CartPanel({
           <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
           {t('sales.invoiceCart.invoiceDateLabel')}
         </label>
-        <input
-          type="date"
+        <DatePicker
+          variant="field"
+          clearable
           value={invoiceDate ?? ''}
-          onChange={(e) => onChangeInvoiceDate?.(e.target.value)}
+          onChange={(v) => onChangeInvoiceDate?.(v)}
           placeholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
-          className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          className="w-full"
         />
       </div>
 
@@ -288,11 +294,12 @@ export function CartPanel({
             <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
             {t('sales.invoiceCart.dueDateLabel')}
           </label>
-          <input
-            type="date"
+          <DatePicker
+            variant="field"
+            clearable
             value={dueDate ?? ''}
-            onChange={(e) => onChangeDueDate?.(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            onChange={(v) => onChangeDueDate?.(v)}
+            className="w-full"
           />
           {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
@@ -450,11 +457,12 @@ export function CartPanel({
                     ))}
                   </div>
 
-                  <input
-                    type="date"
+                  <DatePicker
+                    variant="field"
+                    clearable
                     value={reminderDueDate ?? ''}
-                    onChange={(e) => onChangeReminderDueDate?.(e.target.value)}
-                    className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 mb-2"
+                    onChange={(v) => onChangeReminderDueDate?.(v)}
+                    className="w-full mb-2"
                   />
 
                   {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
@@ -489,7 +497,7 @@ export function CartPanel({
         />
       )}
 
-      <div className="flex flex-col divide-y divide-blue-500/10">
+      <div data-tour="sales-lines" className="flex flex-col divide-y divide-blue-500/10">
         {cartLines.map((line) => {
           const available = stockAtLineLocation(line);
           const editing = editingPriceKey === line.key;
@@ -506,6 +514,16 @@ export function CartPanel({
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
+                  {onChangePriceLevel && (
+                    <div className="mt-1">
+                      <PriceLevelSelect
+                        product={line.product}
+                        value={line.priceLevelId ?? null}
+                        custom={!!line.priceCustom}
+                        onChange={(levelId) => onChangePriceLevel(line.key, levelId)}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     {priceEditable ? (
@@ -749,7 +767,7 @@ export function CartPanel({
         </div>
       </div>
 
-      <button
+      <button data-tour="sales-submit"
         onClick={onSubmit}
         disabled={
           nothingToInvoice ||

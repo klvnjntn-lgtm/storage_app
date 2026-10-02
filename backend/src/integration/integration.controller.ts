@@ -6,15 +6,20 @@ import {
   Query,
   UploadedFile,
   UseInterceptors,
-  UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IntegrationService } from './integration.service';
 import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateConnectionDto } from './dto/create-connection.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 
-@UseGuards() // relies on the global JwtAuthGuard/OrgGuard already applied at APP_GUARD level
+// Auth, org and role checks all come from the global guards (app.module.ts).
+// Staff only — drivers are already kept out by DriverScopeGuard; stated
+// here so the intent is visible. Deliberately not module-gated: the order
+// upload page is shown to every org regardless of modules.
+@Roles('ADMIN', 'USER')
 @Controller('integrations')
 export class IntegrationController {
   constructor(private readonly integrationService: IntegrationService) {}
@@ -24,6 +29,8 @@ export class IntegrationController {
     return this.integrationService.listConnections(user.organizationId);
   }
 
+  // Creating integration connections is admin-only configuration.
+  @Roles('ADMIN')
   @Post('connections')
   createConnection(
     @Body() dto: CreateConnectionDto,
@@ -45,6 +52,7 @@ export class IntegrationController {
     @Query('connectionId') connectionId: string | undefined,
     @CurrentUser() user: { organizationId: string },
   ) {
+    if (!file) throw new BadRequestException('No file uploaded');
     return this.integrationService.previewFile(file.buffer, connectionId, user.organizationId);
   }
 

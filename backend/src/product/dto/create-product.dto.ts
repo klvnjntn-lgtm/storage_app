@@ -1,5 +1,7 @@
 // src/product/dto/create-product.dto.ts
-import { IsString, IsOptional, IsNumber, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ProductLevelPriceDto } from './product-level-price.dto';
+import { IsArray, ValidateNested, IsString, IsOptional, IsNumber, Min, MinLength } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -37,4 +39,12 @@ export class CreateProductDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   costPrice?: number;
+
+  // Prices for the non-default price levels (the default level's price is
+  // sellingPrice). Only the levels listed are touched.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductLevelPriceDto)
+  prices?: ProductLevelPriceDto[];
 }

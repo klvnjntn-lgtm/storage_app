@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { CustomerStatement } from '@/app/components/invoices/types';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -140,20 +141,18 @@ function InvoiceStatementPageInner() {
                 <Calendar size={12} strokeWidth={2} />
                 {t('sales.statement.from')}
               </label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2 text-sm"
+                onChange={(v) => setFrom(v)}
               />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">{t('sales.statement.to')}</label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="border-2 border-gray-300 rounded-md p-2 text-sm"
+                onChange={(v) => setTo(v)}
               />
             </div>
           </div>

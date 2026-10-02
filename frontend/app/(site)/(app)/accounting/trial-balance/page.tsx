@@ -8,6 +8,7 @@ import { Rows3, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 type TrialBalanceLine = { accountId: string; code: string; name: string; type: string; debit: number; credit: number };
@@ -120,11 +121,10 @@ export default function TrialBalancePage() {
               <Calendar size={12} strokeWidth={2} />
               {t('accounting.balanceSheet.asOf')}
             </label>
-            <input
-              type="date"
+            <DatePicker
+              variant="field"
               value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500"
+              onChange={(v) => setAsOf(v)}
             />
           </div>
           <div className="flex gap-1.5">

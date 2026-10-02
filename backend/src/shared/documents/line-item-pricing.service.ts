@@ -1,7 +1,9 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DiscountType, ModuleKey } from '@prisma/client';
+import { ForbiddenException } from '@nestjs/common';
 import { OrganizationModulesService } from 'src/organization-module/organization-modules.service';
+import { ensureDefaultPriceLevel } from 'src/price-level/default-price-level';
 
 export type PriceableLine = {
   productId?: string;
@@ -14,6 +16,9 @@ export type PriceableLine = {
   // NEW — per-item discount, replaces the old document-level discount.
   discountType?: DiscountType;
   discountValue?: number;
+  // Price level the client picked for this line. Only a *request*: the
+  // server looks the price up itself (see resolveProductPrice below).
+  priceLevelId?: string;
 };
 
 export type PricedLine = {
@@ -24,6 +29,12 @@ export type PricedLine = {
   unitPrice: number;
   unitCost: number | null;
   unit: string | null;
+  // Where unitPrice came from; null = custom (POS pricing) or service line.
+  priceLevelId: string | null;
+  // True when the requested level had no price for this product and the
+  // default level's price was used instead (priceLevelId is then the
+  // default level's id, i.e. the true source of the price).
+  priceLevelFallback: boolean;
   lineTotal: number; // gross: quantity × unitPrice
   // NEW
   discountType: DiscountType | null;
@@ -83,7 +94,10 @@ export class LineItemPricingService {
   async priceLines(
     organizationId: string,
     items: PriceableLine[],
-    client: Pick<PrismaService, 'product' | 'organizationTaxRate' | 'organization' | 'location'> = this.prisma,
+    client: Pick<
+      PrismaService,
+      'product' | 'organizationTaxRate' | 'organization' | 'location' | 'priceLevel' | 'productPrice' | 'customer' | 'user'
+    > = this.prisma,
     options: {
       serviceLineModuleKey?: ModuleKey | null;
       // NEW — when false, a product line is allowed to have no
@@ -102,6 +116,16 @@ export class LineItemPricingService {
       // without it, editing any line silently re-priced every product
       // line on the invoice to today's selling price.
       forcedUnitPriceByIndex?: Map<number, number>;
+      // Price level to record alongside a forced unit price — conversions
+      // and issued-invoice edits carry the source line's level forward.
+      forcedPriceLevelIdByIndex?: Map<number, string | null>;
+      // Document's customer: their price level is the default for lines
+      // that don't name one.
+      customerId?: string | null;
+      // Acting user — checked against the org's
+      // priceLevelOverrideRequiresAdmin setting when a line picks a level
+      // other than the customer's.
+      userId?: string;
     } = {},
   ): Promise<{
     items: PricedLine[];
@@ -167,8 +191,81 @@ export class LineItemPricingService {
 
     const org = await client.organization.findUniqueOrThrow({
       where: { id: organizationId },
-      select: { posPricingEnabled: true },
+      select: { posPricingEnabled: true, priceLevelOverrideRequiresAdmin: true },
     });
+
+    // ── Price levels ────────────────────────────────────────────────────
+    // Created outside any caller transaction: a lazily-made default level
+    // is harmless to keep even if the document save later rolls back.
+    const defaultLevel = productItems.length > 0 ? await ensureDefaultPriceLevel(this.prisma, organizationId) : null;
+    const customer = options.customerId
+      ? await client.customer.findFirst({
+          where: { id: options.customerId, organizationId },
+          select: { priceLevel: { select: { id: true, archivedAt: true } } },
+        })
+      : null;
+    const customerLevelId =
+      customer?.priceLevel && !customer.priceLevel.archivedAt ? customer.priceLevel.id : null;
+    const baseLevelId = customerLevelId ?? defaultLevel?.id ?? null;
+
+    // Lines carrying a forced (historical) price keep their saved level
+    // as-is — it may since be archived, or differ from the customer's
+    // current level — so they're neither validated nor permission-checked.
+    const requestedLevelIds = Array.from(
+      new Set(
+        items
+          .filter((i, idx) => !!i.productId && options.forcedUnitPriceByIndex?.get(idx) == null)
+          .map((i) => i.priceLevelId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+    const levels = requestedLevelIds.length
+      ? await client.priceLevel.findMany({
+          where: { id: { in: requestedLevelIds }, organizationId, archivedAt: null },
+          select: { id: true },
+        })
+      : [];
+    if (levels.length !== requestedLevelIds.length) {
+      throw new BadRequestException('One or more price levels were not found');
+    }
+
+    // Looked up once, only when the org restricts price overrides to admins.
+    const actorIsAdmin = org.priceLevelOverrideRequiresAdmin
+      ? (options.userId
+          ? await client.user.findFirst({ where: { id: options.userId, organizationId }, select: { role: true } })
+          : null
+        )?.role === 'ADMIN'
+      : true;
+
+    // A line picking a level other than the customer's is an override.
+    if (!actorIsAdmin && requestedLevelIds.some((id) => id !== baseLevelId)) {
+      throw new ForbiddenException("Only an admin can change a line's price level");
+    }
+
+    const nonDefaultLevelIds = Array.from(
+      new Set([...requestedLevelIds, ...(baseLevelId ? [baseLevelId] : [])].filter((id) => id !== defaultLevel?.id)),
+    );
+    const levelPrices = nonDefaultLevelIds.length
+      ? await client.productPrice.findMany({
+          where: { productId: { in: productIds }, priceLevelId: { in: nonDefaultLevelIds } },
+        })
+      : [];
+    const levelPrice = new Map(levelPrices.map((lp) => [`${lp.productId}:${lp.priceLevelId}`, Number(lp.price)]));
+
+    // Product + level → stored price. Never trusts a client-sent price.
+    const resolveProductPrice = (
+      product: (typeof products)[number],
+      levelId: string,
+    ): { unitPrice: number; priceLevelId: string; fallback: boolean } => {
+      if (levelId !== defaultLevel!.id) {
+        const p = levelPrice.get(`${product.id}:${levelId}`);
+        if (p != null) return { unitPrice: p, priceLevelId: levelId, fallback: false };
+      }
+      if (product.sellingPrice == null) {
+        throw new BadRequestException(`${product.name} has no selling price set`);
+      }
+      return { unitPrice: Number(product.sellingPrice), priceLevelId: defaultLevel!.id, fallback: levelId !== defaultLevel!.id };
+    };
 
     const allTaxRateIds = Array.from(new Set(items.flatMap((i) => i.taxRateIds ?? [])));
     const rates = allTaxRateIds.length
@@ -194,6 +291,8 @@ export class LineItemPricingService {
       const itemTaxRateIds = Array.from(new Set(item.taxRateIds ?? []));
 
       let unitPrice: number;
+      let priceLevelId: string | null = null;
+      let priceLevelFallback = false;
       let unitCost: number | null = null;
       let productId: string | null = null;
       let description: string | null = null;
@@ -214,14 +313,39 @@ export class LineItemPricingService {
         }
         const forcedUnitPrice = options.forcedUnitPriceByIndex?.get(index);
         if (forcedUnitPrice != null) {
+          // Historical price carried over as-is (conversion / issued edit).
           unitPrice = forcedUnitPrice;
+          priceLevelId = options.forcedPriceLevelIdByIndex?.get(index) ?? null;
         } else if (org.posPricingEnabled && item.unitPrice != null) {
-          unitPrice = item.unitPrice;
-        } else {
-          if (product.sellingPrice == null) {
-            throw new BadRequestException(`${product.name} has no selling price set`);
+          // POS pricing: a typed price is allowed. It counts as coming from
+          // a level only when it equals that level's price; otherwise it's
+          // custom. A product with no stored price at all can still be
+          // sold at a typed price, as before price levels.
+          if (item.unitPrice < 0) {
+            throw new BadRequestException(`${product.name}: price cannot be negative`);
           }
-          unitPrice = Number(product.sellingPrice);
+          let resolved: ReturnType<typeof resolveProductPrice> | null = null;
+          try {
+            resolved = resolveProductPrice(product, item.priceLevelId ?? baseLevelId!);
+          } catch {
+            resolved = null; // no selling price set — the typed price stands
+          }
+          unitPrice = item.unitPrice;
+          if (resolved && resolved.unitPrice === item.unitPrice) {
+            priceLevelId = resolved.priceLevelId;
+            priceLevelFallback = resolved.fallback;
+          } else if (!actorIsAdmin && resolved) {
+            // A typed price that matches no level is a bigger override than
+            // picking another level, so the same admin-only rule applies —
+            // otherwise typing a price sidestepped the setting entirely. A
+            // product with no stored price at all can still be priced by hand.
+            throw new ForbiddenException(`Only an admin can set a custom price for ${product.name}`);
+          }
+        } else {
+          const resolved = resolveProductPrice(product, item.priceLevelId ?? baseLevelId!);
+          unitPrice = resolved.unitPrice;
+          priceLevelId = resolved.priceLevelId;
+          priceLevelFallback = resolved.fallback;
         }
         unitCost = product.costPrice ? Number(product.costPrice) : null;
         productId = product.id;
@@ -281,6 +405,8 @@ export class LineItemPricingService {
         unitPrice,
         unitCost,
         unit,
+        priceLevelId,
+        priceLevelFallback,
         lineTotal,
         discountType: item.discountType ?? null,
         discountValue: item.discountValue ?? null,

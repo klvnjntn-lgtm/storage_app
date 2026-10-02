@@ -231,7 +231,7 @@ export function DeliveryOrdersPanel({
   if (orders.length === 0 && deliverable.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <div data-tour="od-deliveries" className="space-y-3">
       {error && (
         <div className="flex items-start gap-2 bg-red-50 border-2 border-red-300 text-red-800 rounded-md p-2 text-xs">
           <AlertCircle size={13} strokeWidth={2} className="shrink-0 mt-0.5" />

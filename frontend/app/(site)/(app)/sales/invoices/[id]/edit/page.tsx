@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
+import { usePriceLevels } from '@/lib/price-levels';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import {
   CartLine,
@@ -20,6 +21,7 @@ import {
   TaxRate,
 } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type RawTaxRate = TaxRate & { archivedAt: string | null };
 
@@ -55,6 +57,11 @@ export default function EditIssuedInvoicePage() {
   const [format, setFormat] = useState<InvoiceFormat>('RECEIPT');
   const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
+  // Issued invoice: the customer is fixed. Saved lines keep the price they
+  // were issued at (enforced server-side); new lines start at this level.
+  const [customerPriceLevelId, setCustomerPriceLevelId] = useState<string | null>(null);
+  const { defaultLevelId, nameOf } = usePriceLevels();
+  const basePriceLevelId = customerPriceLevelId ?? defaultLevelId;
   const [vehicleLabel, setVehicleLabel] = useState<string | null>(null);
 
   const [dueDate, setDueDate] = useState('');
@@ -138,6 +145,7 @@ export default function EditIssuedInvoicePage() {
         setFormat(invoice.format);
         setInvoiceNumber(invoice.invoiceNumber ?? null);
         setCustomerName(invoice.customer?.name ?? invoice.customerName ?? null);
+        setCustomerPriceLevelId(invoice.customer?.priceLevelId ?? null);
         setVehicleLabel(
           invoice.vehicle ? `${invoice.vehicle.plateNumber} · ${invoice.vehicle.vehicleModel}` : null,
         );
@@ -177,6 +185,7 @@ if (item.productId) {
     // matching how addToCart()/new-invoice's restore both treat it.
     discountType: item.discountType ?? null,
     discountValue: item.discountValue != null ? Number(item.discountValue) : null,
+    priceLevelId: item.priceLevelId ?? null,
     taxRateIds,
     // NEW — floor for changeQty()'s decrement below. The backend now
     // refuses to save a line below its fulfilledQuantity (physical stock
@@ -310,6 +319,7 @@ function addToCart(
         discountType: details.discountType,
         discountValue: details.discountValue,
         taxRateIds: details.taxRateIds,
+        priceLevelId: existing?.priceLevelId ?? basePriceLevelId,
         // A newly added line has nothing fulfilled yet, whether or not
         // one already existed with a floor from the restored invoice —
         // if `existing` came from the restored cart it already carries
@@ -544,6 +554,7 @@ function changeServiceUnit(key: string, value: string) {
         quantity: line.quantity,
         locationId: line.locationId,
         unitPrice: line.unitPrice,
+        priceLevelId: line.priceLevelId ?? undefined,
         unit: line.unit ?? undefined,
         taxRateIds: line.taxRateIds,
         discountType: line.discountType ?? undefined,
@@ -632,6 +643,7 @@ function changeServiceUnit(key: string, value: string) {
             onAddToCart={addToCart}
             posModeEnabled={posPricingEnabled}
             taxRates={taxRates}
+            basePriceLevelId={basePriceLevelId}
           />
 
           <div className="border-2 border-gray-300 rounded-md p-3 sm:p-4 h-fit">
@@ -640,11 +652,12 @@ function changeServiceUnit(key: string, value: string) {
                 <CalendarClock size={12} strokeWidth={2} />
                 {t('sales.invoiceEdit.dueDateLabel')}
               </label>
-              <input
-                type="date"
+              <DatePicker
+                variant="field"
+                clearable
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
+                onChange={(v) => setDueDate(v)}
+                className="w-full"
               />
             </div>
 
@@ -672,7 +685,7 @@ function changeServiceUnit(key: string, value: string) {
 
             {/* Reason for edit — required, sent as dto.reason and shown
                 later in the invoice detail page's Edit History list. */}
-            <div className="mb-3">
+            <div data-tour="ie-reason" className="mb-3">
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
                 <MessageSquareText size={12} strokeWidth={2} />
                 {t('sales.invoiceEdit.reasonLabel')}
@@ -692,7 +705,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
               <p className="text-sm text-gray-400">{t('sales.invoiceEdit.noItems')}</p>
             )}
 
-            <div className="flex flex-col divide-y divide-gray-200">
+            <div data-tour="sales-lines" className="flex flex-col divide-y divide-gray-200">
               {cartLines.map((line) => {
                 const available = stockAtLineLocation(line);
                 const editing = editingPriceKey === line.key;
@@ -706,6 +719,9 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                     <div className="flex items-start justify-between gap-2 flex-wrap sm:flex-nowrap">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm truncate">{line.product.name}</p>
+                        {nameOf(line.priceLevelId) && (
+                          <p className="text-[11px] font-medium text-gray-500">{nameOf(line.priceLevelId)}</p>
+                        )}
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           {/* FIX — was unconditionally editable regardless
                               of POS pricing mode, unlike CartPanel.tsx's
@@ -893,7 +909,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
               </div>
             </div>
 
-            <button
+            <button data-tour="sales-submit"
               onClick={handleSave}
               disabled={saving || nothingLeft || !reason.trim()}
               className="w-full mt-4 flex items-center justify-center gap-2 bg-black text-white rounded-md p-3 text-sm font-semibold disabled:bg-gray-300"

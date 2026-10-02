@@ -224,8 +224,8 @@ export class InvoiceController {
   }
 
   @Patch(':id')
-  updateDraft(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: UpdateDraftInvoiceDto) {
-    return this.invoiceService.updateDraft(organizationId, id, dto);
+  updateDraft(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: UpdateDraftInvoiceDto, @Req() req) {
+    return this.invoiceService.updateDraft(organizationId, id, dto, req.user.sub);
   }
 
   // NOTE: discardDraft's signature grew a userId param (needed so

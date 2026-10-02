@@ -110,6 +110,12 @@ export default function MembersPage() {
     run(m.id, `/users/${m.id}/active`, { method: 'PATCH', body: JSON.stringify({ active: !m.active }) });
   }
 
+  function changeRole(m: Member, role: Role) {
+    if (role === m.role) return;
+    if (!confirm(t('admin.members.confirmRoleChange', { name: userLabel(m), role: t(`admin.members.role.${role}`) }))) return;
+    run(m.id, `/users/${m.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
+  }
+
   async function confirmRemove() {
     if (!removing) return;
     const ok = await run(removing.id, `/users/${removing.id}`, { method: 'DELETE' });
@@ -334,6 +340,19 @@ export default function MembersPage() {
                 </div>
                 {!isMe && (
                   <div className="grid grid-cols-2 sm:flex items-center gap-2 pl-[42px] sm:pl-0 shrink-0">
+                    <select
+                      aria-label={t('admin.members.changeRole')}
+                      value={m.role}
+                      disabled={busyId === m.id}
+                      onChange={(e) => changeRole(m, e.target.value as Role)}
+                      className="col-span-2 sm:col-span-1 text-sm sm:text-xs font-medium rounded-md border border-gray-300 text-gray-700 bg-white px-2 min-h-10 sm:min-h-0 sm:py-1 disabled:opacity-50"
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {t(`admin.members.role.${r}`)}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       disabled={busyId === m.id || (!m.active && seatsFull)}
                       onClick={() => toggleActive(m)}

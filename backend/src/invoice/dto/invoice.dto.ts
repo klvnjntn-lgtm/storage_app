@@ -73,6 +73,13 @@ export class InvoiceLineInput {
   @Min(0)
   unitPrice?: number;
 
+  // Requested price level. Only a request — the server looks up the
+  // product's price for it (LineItemPricingService), never trusting a
+  // client-sent price unless POS pricing is on.
+  @IsOptional()
+  @IsString()
+  priceLevelId?: string;
+
   // Tax rate(s) applied to this line — snapshotted into InvoiceItemTax
   // on save. See InvoiceService.priceLines(). Applies equally to product
   // and service lines.
@@ -131,15 +138,15 @@ export class CreateDraftInvoiceDto {
 
   @IsOptional()
   @IsString()
-  vehicleId?: string;
+  vehicleId?: string | null;
 
   @IsOptional()
   @IsString()
-  customerId?: string;
+  customerId?: string | null;
 
   @IsOptional()
   @IsString()
-  customerName?: string;
+  customerName?: string | null;
 
   @IsOptional()
   @IsDateString()
@@ -185,17 +192,19 @@ export class UpdateDraftInvoiceDto {
   @IsDateString()
   dueDate?: string;
 
+  // For these three, an omitted field keeps the draft's current value and
+  // null clears it (e.g. switching to receipt format drops the customer).
   @IsOptional()
   @IsString()
-  customerName?: string;
+  customerName?: string | null;
 
   @IsOptional()
   @IsString()
-  vehicleId?: string;
+  vehicleId?: string | null;
 
   @IsOptional()
   @IsString()
-  customerId?: string;
+  customerId?: string | null;
 @IsOptional()
 @IsString()
 bankAccountId?: string | null;

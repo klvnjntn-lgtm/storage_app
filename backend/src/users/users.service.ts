@@ -33,7 +33,12 @@ export class UsersService {
   // "invalidate on state change" pattern as AuthService.resetPassword/
   // confirmPasswordChange) — otherwise a locked driver would stay logged
   // in on an already-issued token for up to its full 7-day life.
-  async setActive(organizationId: string, userId: string, active: boolean) {
+  async setActive(
+    organizationId: string,
+    actorId: string,
+    userId: string,
+    active: boolean,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, organizationId, removedAt: null },
     });
@@ -41,6 +46,16 @@ export class UsersService {
     // Locked users don't hold a seat, so unlocking takes one — same check
     // as AuthService.invite, otherwise lock/unlock would bypass the limit.
     if (active && !user.active) await this.assertSeatAvailable(organizationId);
+    // Same guards as removeMember(): locking yourself, or the last active
+    // admin, would leave the organization with nobody able to manage it.
+    if (!active) {
+      if (userId === actorId) {
+        throw new BadRequestException("You can't lock your own account");
+      }
+      if (user.role === 'ADMIN' && user.active) {
+        await this.assertAnotherActiveAdmin(organizationId, userId);
+      }
+    }
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -121,20 +136,7 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
 
     if (user.role === 'ADMIN') {
-      const otherAdmins = await this.prisma.user.count({
-        where: {
-          organizationId,
-          role: 'ADMIN',
-          active: true,
-          removedAt: null,
-          id: { not: userId },
-        },
-      });
-      if (otherAdmins === 0) {
-        throw new BadRequestException(
-          "Can't remove the last active admin of the organization",
-        );
-      }
+      await this.assertAnotherActiveAdmin(organizationId, userId);
     }
 
     // Routes belong to the driver's team, not the driver — removing the
@@ -174,5 +176,58 @@ export class UsersService {
       data: { displayName: displayName?.trim() || null },
       select: { id: true, email: true, displayName: true },
     });
+  }
+
+  // Changes a member's role. The role is re-read from the database on every
+  // request (jwt.strategy.ts), but the member's session is still ended so
+  // the app reloads with the right menus — and so a member becoming a DRIVER
+  // goes through device approval on their next sign-in. Leaving DRIVER also
+  // drops the team, which only ever holds drivers.
+  async setRole(
+    organizationId: string,
+    actorId: string,
+    userId: string,
+    role: 'ADMIN' | 'USER' | 'DRIVER',
+  ) {
+    if (userId === actorId) {
+      throw new BadRequestException("You can't change your own role");
+    }
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, organizationId, removedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === role) {
+      return { id: user.id, email: user.email, role: user.role };
+    }
+    if (user.role === 'ADMIN' && user.active) {
+      await this.assertAnotherActiveAdmin(organizationId, userId);
+    }
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        role,
+        currentSessionId: null,
+        ...(role !== 'DRIVER' ? { teamId: null } : {}),
+      },
+      select: { id: true, email: true, role: true },
+    });
+  }
+
+  private async assertAnotherActiveAdmin(organizationId: string, userId: string) {
+    const otherAdmins = await this.prisma.user.count({
+      where: {
+        organizationId,
+        role: 'ADMIN',
+        active: true,
+        removedAt: null,
+        id: { not: userId },
+      },
+    });
+    if (otherAdmins === 0) {
+      throw new BadRequestException(
+        "This is the organization's last active admin",
+      );
+    }
   }
 }

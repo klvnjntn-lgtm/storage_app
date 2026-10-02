@@ -69,7 +69,13 @@ export class LicenseService implements OnModuleInit {
         const raw = fs.readFileSync(this.stateFilePath, 'utf-8');
         const parsed = JSON.parse(raw) as PersistedState;
         if (parsed.lastSuccessfulCheckIn) {
-          this.state.lastSuccessfulCheckIn = new Date(parsed.lastSuccessfulCheckIn);
+          const checkIn = new Date(parsed.lastSuccessfulCheckIn);
+          // A check-in dated in the future (an edited state file) would make
+          // the grace period never run out — treat it as no check-in at all.
+          // A day of slack covers ordinary clock drift.
+          const valid = !Number.isNaN(checkIn.getTime()) && checkIn.getTime() <= Date.now() + 24 * 60 * 60 * 1000;
+          this.state.lastSuccessfulCheckIn = valid ? checkIn : null;
+          if (!valid) this.logger.warn('Ignoring persisted license check-in with an invalid or future date');
         }
         this.lastKnownValid = parsed.lastKnownValid !== false;
       }
@@ -187,7 +193,9 @@ export class LicenseService implements OnModuleInit {
     if (!this.state.lastSuccessfulCheckIn) return true;
 
     const elapsedMs = Date.now() - this.state.lastSuccessfulCheckIn.getTime();
-    return elapsedMs > this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+    // Negative elapsed time means the clock was wound back past the last
+    // check-in; don't let that extend the grace period either.
+    return elapsedMs < -24 * 60 * 60 * 1000 || elapsedMs > this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
   }
 
   // WARESYS_EDITION wins when set; otherwise a LICENSE_KEY means this is a

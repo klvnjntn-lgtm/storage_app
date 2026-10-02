@@ -6,6 +6,7 @@ import { display } from '@/lib/fonts';
 import { Truck, Plus, UserPlus, Users, UserCog, Trash2, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
@@ -55,6 +56,8 @@ function DeliveryRoutesPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLanguage();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
 
   // Honors ?date= (e.g. coming back from "Optimize all teams").
   const [date, setDate] = useState(() => {
@@ -106,6 +109,7 @@ function DeliveryRoutesPageInner() {
         setError(body?.message ?? t('delivery.routes.requestFailed', { status: res.status }));
         return;
       }
+      setShowTeams(false);
       setNewTeamName('');
       await loadTeams();
     } catch {
@@ -263,7 +267,7 @@ function DeliveryRoutesPageInner() {
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>
         )}
 
-        <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-3">
+        <div data-tour="dlv-routes-filters" className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-3">
           <div className="col-span-2 sm:col-span-1">
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.routes.dateLabel')}
@@ -300,35 +304,40 @@ function DeliveryRoutesPageInner() {
           </div>
 
           <div className="col-span-2 grid grid-cols-2 sm:flex sm:ml-auto gap-2">
-            <button
-              onClick={() => router.push('/delivery/drivers')}
-              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-            >
-              <UserCog size={14} />
-              {t('delivery.driversAdmin.title')}
-            </button>
-            <button
-              onClick={() => setShowTeams((v) => !v)}
-              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-            >
-              <Users size={14} />
-              {t('delivery.routes.teamsTitle')}
-            </button>
-            <button
-              onClick={() => setShowInvite((v) => !v)}
-              className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-            >
-              <UserPlus size={14} />
-              {t('delivery.routes.inviteDriver')}
-            </button>
-            <button
+            {/* Drivers, teams and invites are admin-only (the backend refuses staff). */}
+            {isAdmin && (
+              <>
+                <button data-tour="dlv-routes-drivers"
+                  onClick={() => router.push('/delivery/drivers')}
+                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
+                >
+                  <UserCog size={14} />
+                  {t('delivery.driversAdmin.title')}
+                </button>
+                <button data-tour="dlv-routes-teams"
+                  onClick={() => setShowTeams((v) => !v)}
+                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
+                >
+                  <Users size={14} />
+                  {t('delivery.routes.teamsTitle')}
+                </button>
+                <button data-tour="dlv-routes-invite"
+                  onClick={() => setShowInvite((v) => !v)}
+                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
+                >
+                  <UserPlus size={14} />
+                  {t('delivery.routes.inviteDriver')}
+                </button>
+              </>
+            )}
+            <button data-tour="dlv-routes-plan"
               onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
               className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-100"
             >
               <Sparkles size={14} />
               {t('delivery.plan.openButton')}
             </button>
-            <button
+            <button data-tour="dlv-routes-new"
               onClick={() => setShowNewRoute((v) => !v)}
               className="order-first sm:order-none flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700"
             >
@@ -338,7 +347,7 @@ function DeliveryRoutesPageInner() {
           </div>
         </div>
 
-        {showTeams && (
+        {isAdmin && showTeams && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm space-y-3">
             <div className="flex items-end gap-2">
               <input
@@ -410,7 +419,7 @@ function DeliveryRoutesPageInner() {
           </div>
         )}
 
-        {showInvite && (
+        {isAdmin && showInvite && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -474,7 +483,7 @@ function DeliveryRoutesPageInner() {
           </div>
         )}
 
-        <div className="space-y-2">
+        <div data-tour="dlv-routes-list" className="space-y-2">
           {!loading && routes.length === 0 && <p className="text-sm text-gray-500">{t('delivery.routes.noRoutes')}</p>}
           {routes.map((route) => (
             <button

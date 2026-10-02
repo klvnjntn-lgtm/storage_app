@@ -6,7 +6,7 @@ import { SalesOrderPrintView, toSalesOrderView } from '@/lib/mappers/sales-order
 
 async function getPrintData(id: string, token: string): Promise<SalesOrderPrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-  const res = await fetch(`${base}/print/sales-orders/${id}?token=${token}`, { cache: 'no-store' });
+  const res = await fetch(`${base}/print/sales-orders/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();
 }

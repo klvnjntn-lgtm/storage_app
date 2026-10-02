@@ -7,6 +7,7 @@ import { accounting } from './modules/accounting';
 import { adminSettingsShared } from './modules/admin-settings-shared';
 import { landing } from './modules/landing';
 import { delivery } from './modules/delivery';
+import { tour } from './modules/tour';
 
 export type Locale = 'en' | 'id';
 
@@ -22,6 +23,8 @@ export const locales: { code: Locale; label: string }[] = [
 const base = {
   en: {
     common: {
+      hubMenu: 'Menu',
+      hubSearch: 'Search',
       save: 'Save',
       saving: 'Saving...',
       cancel: 'Cancel',
@@ -139,6 +142,7 @@ const base = {
         deliveryHome: 'Delivery Home',
         deliveryRoutes: 'Routes',
         deliveryMonitoring: 'Monitoring',
+        deliveryReports: 'Reports',
         deliveryDrivers: 'Drivers',
         admin: 'Admin',
         settings: 'Settings',
@@ -221,6 +225,14 @@ const base = {
       login: {
         emailPasswordRequired: 'Email and password are required',
         loginFailed: 'Login failed',
+        reason: {
+          hours: 'You can only use the app during your working hours. Try again when your shift starts.',
+          devicePending: 'This is a new phone. The office must approve it first — ask your admin, then sign in again.',
+          deviceRejected: 'This phone is not allowed for your account. Ask your admin for help.',
+          deviceMissing: 'This browser cannot be identified. Turn off private/incognito mode and try again.',
+          elsewhere: 'You were signed out because your account was used on another phone.',
+          locked: 'Your account is locked. Ask your admin for help.',
+        },
         profileLoadFailed: 'Failed to load profile',
         title: 'Sign in',
         subtitle: 'Warehouse Management System',
@@ -286,6 +298,8 @@ const base = {
   },
   id: {
     common: {
+      hubMenu: 'Menu',
+      hubSearch: 'Cari',
       save: 'Simpan',
       saving: 'Menyimpan...',
       cancel: 'Batal',
@@ -403,6 +417,7 @@ const base = {
         deliveryHome: 'Beranda Pengiriman',
         deliveryRoutes: 'Rute',
         deliveryMonitoring: 'Pemantauan',
+        deliveryReports: 'Laporan',
         deliveryDrivers: 'Driver',
         admin: 'Admin',
         settings: 'Pengaturan',
@@ -485,6 +500,14 @@ const base = {
       login: {
         emailPasswordRequired: 'Email dan kata sandi wajib diisi',
         loginFailed: 'Gagal masuk',
+        reason: {
+          hours: 'Aplikasi hanya bisa dipakai saat jam kerja Anda. Coba lagi saat shift dimulai.',
+          devicePending: 'Ini HP baru. Kantor harus menyetujuinya dulu — minta admin Anda, lalu masuk lagi.',
+          deviceRejected: 'HP ini tidak diizinkan untuk akun Anda. Minta bantuan admin.',
+          deviceMissing: 'Browser ini tidak bisa dikenali. Matikan mode privat/incognito lalu coba lagi.',
+          elsewhere: 'Anda dikeluarkan karena akun Anda dipakai di HP lain.',
+          locked: 'Akun Anda dikunci. Minta bantuan admin.',
+        },
         profileLoadFailed: 'Gagal memuat profil',
         title: 'Masuk',
         subtitle: 'Sistem Manajemen Gudang',
@@ -563,6 +586,7 @@ export const translations = {
     ...adminSettingsShared.en,
     ...landing.en,
     ...delivery.en,
+    ...tour.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -577,6 +601,7 @@ export const translations = {
     ...adminSettingsShared.id,
     ...landing.id,
     ...delivery.id,
+    ...tour.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

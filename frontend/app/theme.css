@@ -17,9 +17,9 @@
 :root {
   --page-bg: #f8fafc;
   --page-dots: rgba(37, 99, 235, 0.08);
-  --chart-ink: #52514e;
-  --chart-grid: #e1e0d9;
-  --chart-surface: #fcfcfb;
+  --chart-ink: #475569; /* slate — matches the app's cool grays */
+  --chart-grid: #e2e8f0;
+  --chart-surface: #ffffff;
 }
 
 /* the toggle renders both icons; show the one for the theme you'd switch to */
@@ -234,6 +234,14 @@ html[data-theme='light'] .landing .dark-island {
   --color-violet-300: #c4b5fd;
   --color-red-300: #fca5a5;
   --color-amber-300: #fcd34d;
+}
+
+/* app shell logo: its own navy on light, white on dark (same treatment
+   as the landing logo below). Screen only, so printouts keep the colors. */
+@media screen {
+  html[data-theme='dark'] .app-logo {
+    filter: brightness(0) invert(1);
+  }
 }
 
 /* logo: white on the dark page, its own navy on the light one */

@@ -1,12 +1,16 @@
 // src/purchase-order/purchase-order-print.controller.ts
 import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/common';
 import { PurchaseOrderService } from './purchase-order.service';
+import { Public } from '../auth/decorators/public.decorator';
+import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decorator';
 
 // Deliberately NOT behind JwtAuthGuard/OrgGuard/ModuleGuard — the caller
 // here is Puppeteer loading the print page, not an authenticated user.
 // verifyPrintToken() is the auth for this route, not the guard stack.
 // organizationId is read from the token payload, not supplied by the
 // caller — mirrors InvoicePrintController exactly.
+@Public()
+@SkipLicenseCheck()
 @Controller('print/purchase-orders')
 export class PurchaseOrderPrintController {
   constructor(private purchaseOrderService: PurchaseOrderService) {}

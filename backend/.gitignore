@@ -56,3 +56,8 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+# Runtime data — never commit (database dumps, uploaded files, license state)
+/*.sql
+/uploads/
+/data/

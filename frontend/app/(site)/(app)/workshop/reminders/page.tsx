@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 const DUE_SOON_DAYS = 7;
@@ -159,7 +160,7 @@ export default function RemindersPage() {
     const isSnoozing = snoozingId === r.id;
 
     return (
-      <div className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm">
+      <div data-tour="rem-card" className="border border-blue-500/15 rounded-xl p-3 bg-white shadow-sm">
         <div
           onClick={() => router.push(`/workshop/vehicles/${r.vehicle.id}`)}
           className="flex items-start justify-between gap-3 cursor-pointer"
@@ -178,7 +179,7 @@ export default function RemindersPage() {
 
           {r.status === 'PENDING' && (
             <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
+              <button data-tour="rem-complete"
                 onClick={() => complete(r.id)}
                 disabled={busyId === r.id}
                 title={t('workshop.reminders.markComplete')}
@@ -186,7 +187,7 @@ export default function RemindersPage() {
               >
                 <Check size={14} strokeWidth={2} />
               </button>
-              <button
+              <button data-tour="rem-snooze"
                 onClick={() => {
                   setSnoozingId(isSnoozing ? null : r.id);
                   setSnoozeDate('');
@@ -227,11 +228,12 @@ export default function RemindersPage() {
                 {p.label}
               </button>
             ))}
-            <input
-              type="date"
+            <DatePicker
+              variant="field"
+              size="sm"
+              clearable
               value={snoozeDate}
-              onChange={(e) => setSnoozeDate(e.target.value)}
-              className="border border-blue-500/20 rounded-md p-1.5 text-xs outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
+              onChange={(v) => setSnoozeDate(v)}
             />
             <button
               onClick={() => snooze(r.id, snoozeDate)}

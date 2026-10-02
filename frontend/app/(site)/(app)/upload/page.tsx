@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { display } from '@/lib/fonts';
 import { UploadCloud, Download, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useAuth } from '@/app/context/AuthContext';
 import React from 'react'
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -89,27 +90,8 @@ function isRowValid(r: Row) {
   return getValidationErrorCode(r) === null;
 }
 
-// Reads the current user's email straight out of the JWT payload for
-// display purposes only — this is NOT auth/verification, just a label.
-// The backend is the real source of truth for who performed the import
-// (via userId on the created events).
-function getCurrentUserEmail(): string | null {
-  if (typeof window === 'undefined') return null;
-  const token = localStorage.getItem('accessToken');
-  if (!token) return null;
-
-  try {
-    const payloadPart = token.split('.')[1];
-    if (!payloadPart) return null;
-    const json = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(json);
-    return payload?.email ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export default function ImportPage() {
+  const { profile } = useAuth();
     const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useLanguage();
   const router = useRouter();
@@ -292,7 +274,7 @@ export default function ImportPage() {
       setImportResult({
         accepted: data?.accepted?.length ?? 0,
         rejected: Array.isArray(data?.rejected) ? data.rejected : [],
-        importedBy: getCurrentUserEmail(),
+        importedBy: profile?.email ?? null, // display label only; the backend records the real user
         deliveryBatchId: data?.mode === 'INCREMENT' ? data?.batchId ?? null : null,
       });
 

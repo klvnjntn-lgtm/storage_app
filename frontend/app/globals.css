@@ -30,6 +30,24 @@
       transform: translateY(100%);
     }
   }
+
+  --animate-tour-prompt-in: tour-prompt-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @keyframes tour-prompt-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.98);
+    }
+  }
+
+  --animate-tour-menu-in: tour-menu-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes tour-menu-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
 }
 
 /* Fallback: force hex colors instead of Tailwind's default oklch,
@@ -265,5 +283,223 @@ body {
 @keyframes spotlight-in {
   from {
     opacity: 0;
+  }
+}
+
+/* ─── Guided tour popover (driver.js, see app/components/tour) ───────
+   Built from the palette variables so it follows light/dark like the
+   rest of the app. TourProvider adds the progress bar, chip, counter,
+   intro badge and Skip link to driver's DOM. */
+.driver-popover.waresys-tour {
+  background: var(--color-white);
+  color: var(--color-gray-700);
+  border: 1px solid rgb(59 130 246 / 0.22);
+  border-radius: 16px;
+  padding: 18px 20px 16px;
+  min-width: 280px;
+  max-width: min(360px, calc(100vw - 24px));
+  box-shadow:
+    0 24px 48px -16px rgb(2 6 23 / 0.45),
+    0 0 0 1px rgb(255 255 255 / 0.04);
+  font-family: inherit;
+  animation: tour-pop-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes tour-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* progress: one segment per step, filled up to the current one */
+.waresys-tour-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.waresys-tour-bar span {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-blue-100);
+  transition: background-color 0.3s ease;
+}
+.waresys-tour-bar span.is-done {
+  background: linear-gradient(90deg, var(--color-blue-600), var(--color-indigo-600, #4f46e5));
+}
+.waresys-tour-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.waresys-tour-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgb(59 130 246 / 0.22);
+  background: var(--color-blue-50);
+  color: var(--color-blue-700);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.waresys-tour-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-gray-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.driver-popover.waresys-tour .driver-popover-title {
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--color-gray-900);
+  margin: 0;
+}
+.driver-popover.waresys-tour .driver-popover-description {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-gray-600);
+  margin-top: 6px;
+}
+
+/* steps with no target: a centred welcome card */
+.driver-popover.waresys-tour.is-intro {
+  max-width: min(400px, calc(100vw - 24px));
+  padding: 20px 24px 18px;
+  text-align: center;
+}
+.driver-popover.waresys-tour.is-intro .driver-popover-title {
+  font-size: 20px;
+}
+.waresys-tour-badge {
+  width: 56px;
+  height: 56px;
+  margin: 4px auto 14px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-blue-600), var(--color-indigo-700, #4338ca));
+  box-shadow: 0 12px 24px -10px rgb(37 99 235 / 0.7);
+}
+
+.driver-popover.waresys-tour .driver-popover-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.waresys-tour-skip {
+  margin-right: auto;
+  min-height: 40px;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-gray-600);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.waresys-tour-skip:hover {
+  color: var(--color-blue-700);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns {
+  flex-grow: 0;
+  gap: 8px;
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  margin: 0;
+  border-radius: 10px;
+  border: 1px solid rgb(59 130 246 / 0.28);
+  background: var(--color-white);
+  color: var(--color-gray-700);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    transform 0.1s ease;
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-prev-btn:hover {
+  background: var(--color-blue-50);
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-next-btn {
+  padding: 0 16px;
+  background: var(--color-blue-600);
+  border-color: var(--color-blue-600);
+  color: #fff;
+  box-shadow: 0 6px 14px -6px rgb(37 99 235 / 0.7);
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-next-btn:hover {
+  background: var(--color-blue-700);
+}
+.driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-footer-btn:active,
+.waresys-tour-skip:active {
+  transform: scale(0.97);
+}
+.driver-popover.waresys-tour .driver-popover-footer-btn:focus-visible,
+.waresys-tour-skip:focus-visible {
+  outline: 2px solid var(--color-blue-600);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .driver-popover.waresys-tour .driver-popover-navigation-btns .driver-popover-footer-btn,
+  .waresys-tour-skip {
+    min-height: 44px;
+  }
+}
+
+.driver-popover.waresys-tour .driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: var(--color-white); }
+.driver-popover.waresys-tour .driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: var(--color-white); }
+.driver-popover.waresys-tour .driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: var(--color-white); }
+.driver-popover.waresys-tour .driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: var(--color-white); }
+
+/* the spotlit element gets a soft breathing ring, kept inside the
+   overlay's cut-out (stagePadding 8 > offset 3 + width 2) */
+.driver-active .driver-active-element {
+  outline: 2px solid rgb(96 165 250 / 0.95);
+  outline-offset: 3px;
+  animation: tour-ring 1.8s ease-in-out infinite;
+}
+@keyframes tour-ring {
+  50% {
+    outline-color: rgb(96 165 250 / 0.3);
+  }
+}
+
+/* On phones the popover often has to overlap its target; the spotlight
+   already shows what it's about, and a clamped arrow just points at the
+   wrong thing. */
+@media (max-width: 640px) {
+  .driver-popover.waresys-tour .driver-popover-arrow {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover.waresys-tour,
+  .driver-active .driver-active-element,
+  .waresys-tour-bar span,
+  .driver-overlay path {
+    transition: none !important;
+    animation: none !important;
   }
 }

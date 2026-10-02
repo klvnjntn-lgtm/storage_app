@@ -26,6 +26,7 @@ import {
 import { PaymentStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
+import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
@@ -151,8 +152,24 @@ const invoiceDetailInclude = {
   },
   taxes: { select: { name: true, percentage: true, amount: true } },
   deliveryOrders: { select: { id: true, doNumber: true, status: true } },
-  payments: { orderBy: { createdAt: 'desc' } }, // FIX — lets the invoice detail page list/void individual payments
+  payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } }, // FIX — lets the invoice detail page list/void individual payments (voided ones are kept but hidden)
 } satisfies Prisma.InvoiceInclude;
+
+// InvoiceItem.quantity is an integer column, while quotation and sales
+// order lines allow two decimals (e.g. 1.5 kg). Converting such a line used
+// to fail deep inside the insert with a raw 500; refuse it up front and say
+// which lines need changing instead.
+function assertWholeQuantities(items: { quantity: number; description?: string }[]) {
+  const fractional = items
+    .map((item, idx) => ({ item, line: idx + 1 }))
+    .filter(({ item }) => !Number.isInteger(item.quantity));
+  if (fractional.length > 0) {
+    const lines = fractional.map(({ item, line }) => `line ${line} (${item.quantity})`).join(', ');
+    throw new BadRequestException(
+      `Invoices only support whole-number quantities. Change these to whole numbers first: ${lines}`,
+    );
+  }
+}
 
 @Injectable()
 export class InvoiceService {
@@ -180,7 +197,7 @@ constructor(
   ) {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-      await this.pricing.priceLines(organizationId, dto.items);
+      await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
     const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
 
     try {
@@ -222,7 +239,7 @@ constructor(
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
                 unit: l.unit,
@@ -265,6 +282,7 @@ constructor(
     organizationId: string,
     invoiceId: string,
     dto: UpdateDraftInvoiceDto,
+    userId?: string,
   ) {
     await this.getDraftOrThrow(organizationId, invoiceId);
     await this.tenantOwnership.validate(organizationId, dto);
@@ -273,7 +291,7 @@ constructor(
       try {
         return await this.prisma.$transaction(async (tx) => {
           const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
-          const resolvedVehicleId = dto.vehicleId ?? invoice.vehicleId;
+          const resolvedVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId;
           if (resolvedVehicleId && dto.odometer != null) {
             await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
           }
@@ -285,9 +303,9 @@ constructor(
           return tx.invoice.update({
             where: { id: invoice.id },
             data: {
-              customerName: dto.customerName ?? invoice.customerName,
-              customerId: dto.customerId ?? invoice.customerId,
-              vehicleId: dto.vehicleId ?? invoice.vehicleId,
+              customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
+              customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
+              vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
               employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
               customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
               paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
@@ -323,9 +341,12 @@ constructor(
       return await this.prisma.$transaction(async (tx) => {
         const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, dto.items!, tx);
+          await this.pricing.priceLines(organizationId, dto.items!, tx, {
+            customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
+            userId,
+          });
 
-        const resolvedVehicleId = dto.vehicleId ?? invoice.vehicleId;
+        const resolvedVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId;
         if (resolvedVehicleId && dto.odometer != null) {
           await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
         }
@@ -351,9 +372,9 @@ constructor(
         return tx.invoice.update({
           where: { id: invoice.id },
           data: {
-            customerName: dto.customerName ?? invoice.customerName,
-            customerId: dto.customerId ?? invoice.customerId,
-            vehicleId: dto.vehicleId ?? invoice.vehicleId,
+            customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
+            customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
+            vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
             employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
             customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
             paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
@@ -381,7 +402,7 @@ constructor(
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
-                unitPrice: l.unitPrice,
+                unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
@@ -951,31 +972,34 @@ async issue(
         organizationId,
       });
       const printUrl =
-        `${process.env.FRONTEND_URL}/print/invoices/${id}?format=${format}&token=${printToken}`;
+        `${process.env.FRONTEND_URL}/print/invoices/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}`;
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-      try {
-        const page = await browser.newPage();
-
-        const viewport = PDF_VIEWPORT_PX[format] ?? PDF_VIEWPORT_PX.A4;
-        await page.setViewport(viewport);
-
-        await page.emulateMediaType('print');
-        await page.emulateMediaFeatures([
-          { name: 'prefers-color-scheme', value: 'light' },
-        ]);
-        await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
-        const pdfBuffer = await page.pdf({
-          printBackground: true,
-          preferCSSPageSize: true,
+      // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
+      return await withPdfRenderSlot(async () => {
+        const browser = await puppeteer.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
         });
-        return Buffer.from(pdfBuffer);
-      } finally {
-        await browser.close();
-      }
+        try {
+          const page = await browser.newPage();
+
+          const viewport = PDF_VIEWPORT_PX[format] ?? PDF_VIEWPORT_PX.A4;
+          await page.setViewport(viewport);
+
+          await page.emulateMediaType('print');
+          await page.emulateMediaFeatures([
+            { name: 'prefers-color-scheme', value: 'light' },
+          ]);
+          await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+          const pdfBuffer = await page.pdf({
+            printBackground: true,
+            preferCSSPageSize: true,
+          });
+          return Buffer.from(pdfBuffer);
+        } finally {
+          await browser.close();
+        }
+      });
     } catch (e) {
       console.error('PDF render failed:', e);
       throw e;
@@ -1175,7 +1199,9 @@ async issue(
       include: {
         items: {
           include: {
-            product: { select: { name: true, sku: true, barcode: true } },
+            // sellingPrice + level prices let a reloaded draft re-level
+            // its lines when the customer or a line's level changes.
+            product: { select: { name: true, sku: true, barcode: true, unit: true, sellingPrice: true, prices: { select: { priceLevelId: true, price: true } } } },
             location: { select: { name: true } },
             taxes: true,
           },
@@ -1381,11 +1407,13 @@ async editIssuedInvoice(
   // — silently re-priced every product line to today's selling price,
   // computed off dto.items directly so it's ready before priceLines runs.
   const forcedUnitPriceByIndex = new Map<number, number>();
+  const forcedPriceLevelIdByIndex = new Map<number, string | null>();
   dto.items.forEach((item, idx) => {
     if (!item.productId) return;
     const oldItem = oldItemByKey.get(`p:${item.productId}`);
     if (oldItem?.unitPrice != null) {
       forcedUnitPriceByIndex.set(idx, Number(oldItem.unitPrice));
+      forcedPriceLevelIdByIndex.set(idx, oldItem.priceLevelId ?? null);
     }
   });
 
@@ -1394,6 +1422,9 @@ async editIssuedInvoice(
       await this.pricing.priceLines(organizationId, dto.items, tx, {
         requireLocationForProducts: !hasWarehouseOps,
         forcedUnitPriceByIndex,
+        forcedPriceLevelIdByIndex,
+        customerId: invoice.customerId,
+        userId,
       });
     const newTotal = this.round2(subtotal - discountAmount + taxAmount);
 
@@ -1543,7 +1574,7 @@ async editIssuedInvoice(
             description: l.description,
             locationId: l.locationId,
             quantity: l.quantity,
-            unitPrice: l.unitPrice,
+            unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
             unitCost: unitCostByLineIndex.get(idx) ?? l.unitCost,
             productName: productNameByLineIndex.get(idx) ?? null,
             sku: skuByLineIndex.get(idx) ?? null,
@@ -2003,9 +2034,24 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
           taxRateIds: [] as string[],
         }));
+        assertWholeQuantities(items);
+
+        // Carry each source line's price and level forward unchanged — a
+        // quotation that said Rp100k must not become Rp110k on the order
+        // or invoice because a price level changed in between.
+        const forcedUnitPriceByIndex = new Map<number, number>();
+        const forcedPriceLevelIdByIndex = new Map<number, string | null>();
+        quotation.items.forEach((i, idx) => {
+          if (!i.productId) return;
+          forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
+          forcedPriceLevelIdByIndex.set(idx, i.priceLevelId ?? null);
+        });
 
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, items, tx);
+          await this.pricing.priceLines(organizationId, items, tx, {
+            forcedUnitPriceByIndex,
+            forcedPriceLevelIdByIndex,
+          });
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -2027,7 +2073,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             total: this.round2(subtotal - discountAmount + taxAmount),
             items: { create: lines.map((l) => ({
               productId: l.productId, description: l.description, locationId: l.locationId,
-              quantity: l.quantity, unitPrice: l.unitPrice, unitCost: l.unitCost,
+              quantity: l.quantity, unitPrice: l.unitPrice, priceLevelId: l.priceLevelId, unitCost: l.unitCost,
               lineTotal: l.lineTotal,
               discountType: l.discountType, discountValue: l.discountValue,
               discountAmount: l.discountAmount, netAmount: l.netAmount,
@@ -2102,9 +2148,24 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
           taxRateIds: [] as string[],
         }));
+        assertWholeQuantities(items);
+
+        // Carry each source line's price and level forward unchanged — a
+        // quotation that said Rp100k must not become Rp110k on the order
+        // or invoice because a price level changed in between.
+        const forcedUnitPriceByIndex = new Map<number, number>();
+        const forcedPriceLevelIdByIndex = new Map<number, string | null>();
+        order.items.forEach((i, idx) => {
+          if (!i.productId) return;
+          forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
+          forcedPriceLevelIdByIndex.set(idx, i.priceLevelId ?? null);
+        });
 
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-          await this.pricing.priceLines(organizationId, items, tx);
+          await this.pricing.priceLines(organizationId, items, tx, {
+            forcedUnitPriceByIndex,
+            forcedPriceLevelIdByIndex,
+          });
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
         const invoice = await tx.invoice.create({
           data: {
@@ -2134,7 +2195,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             // allowing a void.
             items: { create: lines.map((l, idx) => ({
               productId: l.productId, description: l.description, locationId: l.locationId,
-              quantity: l.quantity, unitPrice: l.unitPrice, unitCost: l.unitCost,
+              quantity: l.quantity, unitPrice: l.unitPrice, priceLevelId: l.priceLevelId, unitCost: l.unitCost,
               lineTotal: l.lineTotal,
               discountType: l.discountType, discountValue: l.discountValue,
               discountAmount: l.discountAmount, netAmount: l.netAmount,

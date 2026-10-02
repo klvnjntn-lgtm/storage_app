@@ -97,7 +97,7 @@ export class PaymentService {
           const result = await tx.invoice.update({
             where: { id: invoiceId },
             data: { amountPaid: newAmountPaid, paymentStatus: newStatus },
-            include: { payments: { orderBy: { createdAt: 'desc' } } },
+            include: { payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } } },
           });
 
           await tx.invoiceActivityEvent.create({
@@ -166,7 +166,7 @@ export class PaymentService {
       const updated = await runSerializable(this.prisma, 
         async (tx) => {
           const payment = await tx.payment.findFirst({
-            where: { id: paymentId, invoiceId, invoice: { organizationId } },
+            where: { id: paymentId, invoiceId, invoice: { organizationId }, voidedAt: null },
             select: { id: true, amount: true },
           });
           if (!payment) throw new NotFoundException('Payment not found');
@@ -187,7 +187,12 @@ export class PaymentService {
             await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
           }
 
-          await tx.payment.delete({ where: { id: paymentId } });
+          // Kept, not deleted, so the invoice's payment history stays
+          // complete; every read filters voidedAt: null.
+          await tx.payment.update({
+            where: { id: paymentId },
+            data: { voidedAt: new Date(), voidedById: userId ?? null, voidReason: reason?.trim() || null },
+          });
 
           const total = round2(invoice.total.toNumber() - invoice.creditedAmount.toNumber());
           const alreadyPaid = invoice.amountPaid.toNumber();
@@ -197,7 +202,7 @@ export class PaymentService {
           const result = await tx.invoice.update({
             where: { id: invoiceId },
             data: { amountPaid: newAmountPaid, paymentStatus: newStatus },
-            include: { payments: { orderBy: { createdAt: 'desc' } } },
+            include: { payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } } },
           });
 
           await tx.invoiceActivityEvent.create({

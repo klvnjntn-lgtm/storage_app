@@ -7,7 +7,7 @@ import { RawPurchaseOrderPrintView, toPurchaseOrderView } from '@/lib/mappers/pu
 
 async function getPrintData(id: string, token: string): Promise<RawPurchaseOrderPrintView | null> {
   const base = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-  const res = await fetch(`${base}/print/purchase-orders/${id}?token=${token}`, { cache: 'no-store' });
+  const res = await fetch(`${base}/print/purchase-orders/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
   if (!res.ok) return null;
   return res.json();
 }

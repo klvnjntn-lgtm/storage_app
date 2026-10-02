@@ -130,7 +130,7 @@ export default function VehiclesPage() {
           </div>
 
           {/* Search — command-palette style matching /vehicles/search, /customers, /inventory/stock */}
-          <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
+          <div data-tour="veh-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
               value={query}
@@ -167,7 +167,7 @@ export default function VehiclesPage() {
               </thead>
               <tbody>
                 {paginatedVehicles.map((v, idx) => (
-                  <tr
+                  <tr data-tour="veh-row"
                     key={v.id}
                     onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
                     className={`border-t border-gray-300 cursor-pointer hover:bg-blue-50 ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}

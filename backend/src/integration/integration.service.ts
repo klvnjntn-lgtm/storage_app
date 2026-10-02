@@ -72,8 +72,14 @@ export class IntegrationService {
     // become one ExternalOrder with several ExternalOrderItems
     const grouped = new Map<string, typeof dto.rows>();
     for (const row of dto.rows) {
-      if (!row.externalRef || !row.sku || !row.quantity) {
+      if (!row.externalRef?.trim() || !row.sku?.trim() || !row.quantity) {
         results.errors.push(`Skipped incomplete row: ${JSON.stringify(row)}`);
+        continue;
+      }
+      // ExternalOrderItem.quantity is an Int column — a fractional or
+      // negative quantity would otherwise fail the whole insert with a 500.
+      if (!Number.isInteger(row.quantity) || row.quantity <= 0) {
+        results.errors.push(`Skipped row with invalid quantity: ${JSON.stringify(row)}`);
         continue;
       }
       const existing = grouped.get(row.externalRef) ?? [];

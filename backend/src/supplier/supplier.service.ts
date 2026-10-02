@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
 
@@ -12,8 +12,14 @@ export class SupplierService {
     });
   }
 
-  async update(organizationId: string, id: string, dto: UpdateSupplierDto) {
-    await this.getOneOrThrow(organizationId, id);
+  async update(organizationId: string, id: string, dto: UpdateSupplierDto, actorRole?: string) {
+    const current = await this.getOneOrThrow(organizationId, id);
+    // Activating/deactivating is admin-only, same as PATCH :id/deactivate —
+    // otherwise this general update would sidestep that gate. The edit form
+    // always sends isActive, so only an actual change is refused.
+    if (dto.isActive !== undefined && dto.isActive !== current.isActive && actorRole !== 'ADMIN') {
+      throw new ForbiddenException('Only an admin can activate or deactivate a supplier');
+    }
     return this.prisma.supplier.update({
       where: { id },
       data: dto,

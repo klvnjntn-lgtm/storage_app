@@ -105,6 +105,7 @@ export class DeliveryOrderController {
         signedAt: dto.signedAt ? new Date(dto.signedAt) : undefined,
         completedLatitude: dto.completedLatitude,
         completedLongitude: dto.completedLongitude,
+        completedAccuracy: dto.completedAccuracy,
       },
       req.user,
     );

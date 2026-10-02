@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
+import { applyPriceLevel, resolveLinePrice, restoredLevelFields, toLevelPrices, usePriceLevels } from '@/lib/price-levels';
 import { CartPanel } from '@/app/components/invoices/CartPanel';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import {
@@ -124,6 +125,9 @@ function NewInvoicePage() {
   const [format, setFormat] = useState<InvoiceFormat>('RECEIPT');
   const [customerName, setCustomerName] = useState('');
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const { defaultLevelId, activeLevelIds } = usePriceLevels();
+  // The document's price level: the customer's, else the org default.
+  const basePriceLevelId = ((format === 'A5' || format === 'A4') ? customer?.priceLevelId : null) ?? defaultLevelId;
   const customerNameRequired = format === 'A5' || format === 'A4';
 
   const [query, setQuery] = useState('');
@@ -282,6 +286,7 @@ function NewInvoicePage() {
           companyName: data.companyName ?? null,
           phone: data.phone,
           address: data.address,
+          priceLevelId: data.priceLevelId ?? null,
         });
         setFormat('A5');
       }
@@ -396,7 +401,8 @@ function NewInvoicePage() {
           sku: item.product?.sku ?? null,
           barcode: item.product?.barcode ?? null,
           image: null,
-          sellingPrice: Number(item.unitPrice),
+          sellingPrice: item.product?.sellingPrice != null ? Number(item.product.sellingPrice) : null,
+          prices: toLevelPrices(item.product?.prices),
           unit: item.product?.unit ?? null,
           stockByLocation: [],
         },
@@ -410,6 +416,7 @@ function NewInvoicePage() {
           .filter((id: string | null): id is string => !!id),
         discountType: item.discountType ?? null,
         discountValue: item.discountValue != null ? Number(item.discountValue) : null,
+        ...restoredLevelFields(item.priceLevelId),
       };
     }
     skipAutosaveRef.current = true;
@@ -524,6 +531,13 @@ function NewInvoicePage() {
         taxRateIds: details.taxRateIds,
         discountType: details.discountType,
         discountValue: details.discountValue,
+        // A re-add keeps the line's level; a new line starts at the
+        // document's level, unless its price was typed (POS pricing).
+        priceLevelId: existing?.priceLevelId ?? null,
+        priceLevelOverridden: existing?.priceLevelOverridden ?? false,
+        priceCustom:
+          existing?.priceCustom ??
+          (posModeEnabled && details.unitPrice !== resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice),
       },
     }));
     return true;
@@ -557,7 +571,16 @@ function NewInvoicePage() {
       if (!line) return prev;
       const parsed = Number(rawValue);
       const nextPrice = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-      return { ...prev, [key]: { ...line, unitPrice: nextPrice } };
+      return { ...prev, [key]: { ...line, unitPrice: nextPrice, priceCustom: true } };
+    });
+  }
+
+  // Picking a level by hand pins the line to it and drops any typed price.
+  function changePriceLevel(key: string, levelId: string) {
+    setCart((prev) => {
+      const line = prev[key];
+      if (!line) return prev;
+      return { ...prev, [key]: { ...line, priceLevelId: levelId, priceLevelOverridden: true, priceCustom: false } };
     });
   }
 
@@ -740,7 +763,8 @@ function NewInvoicePage() {
     }
   }
 
-  const cartLines = Object.entries(cart).map(([key, line]) => {
+  const cartLines = Object.entries(cart).map(([key, rawLine]) => {
+    const line = applyPriceLevel(rawLine, basePriceLevelId, defaultLevelId, activeLevelIds);
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
@@ -799,6 +823,8 @@ function NewInvoicePage() {
       unit: line.unit ?? undefined,
       locationId: line.locationId,
       unitPrice: line.unitPrice,
+      // A typed (custom) price comes from no level.
+      priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
       taxRateIds: line.taxRateIds,
       discountType: line.discountType ?? undefined,
       discountValue: line.discountValue ?? undefined,
@@ -819,10 +845,13 @@ function NewInvoicePage() {
     return [...productItems, ...serviceItems];
   }
 
+  // Explicit nulls, not undefined: undefined is dropped from the JSON and
+  // the backend keeps the draft's old value, so switching to receipt format
+  // (or removing the customer/vehicle) never actually cleared them.
   function buildCustomerFields() {
     return format === 'A5' || format === 'A4'
-      ? { customerId: customer?.id, customerName: undefined, vehicleId: vehicleId ?? undefined }
-      : { customerId: undefined, customerName: customerName.trim() || undefined, vehicleId: undefined };
+      ? { customerId: customer?.id ?? null, customerName: null, vehicleId: vehicleId ?? null }
+      : { customerId: null, customerName: customerName.trim() || null, vehicleId: null };
   }
 
   function buildInvoiceInfoFields() {
@@ -1188,14 +1217,14 @@ function NewInvoicePage() {
             </div>
 
             <div className="flex items-center gap-2 justify-between sm:justify-end">
-              <button
+              <button data-tour="sales-history"
                 onClick={() => router.push('/sales/invoices')}
                 className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
               >
                 {t('sales.invoicesNew.history')}
               </button>
 
-              <div className="flex items-center bg-blue-600/5 border border-blue-500/15 rounded-lg p-1 text-sm font-medium overflow-x-auto">
+              <div data-tour="inv-format" className="flex items-center bg-blue-600/5 border border-blue-500/15 rounded-lg p-1 text-sm font-medium overflow-x-auto">
                 {(
                   [
                     { value: 'THERMAL_58', label: '58mm' },
@@ -1255,6 +1284,7 @@ function NewInvoicePage() {
           onAddToCart={addToCart}
           posModeEnabled={posModeEnabled}
           taxRates={taxRates}
+          basePriceLevelId={basePriceLevelId}
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
@@ -1280,6 +1310,7 @@ function NewInvoicePage() {
             setEditingPriceKey={setEditingPriceKey}
             changeQty={changeQty}
             changeUnitPrice={changeUnitPrice}
+            onChangePriceLevel={changePriceLevel}
             removeFromCart={removeFromCart}
             stockAtLineLocation={stockAtLineLocation}
             posModeEnabled={posModeEnabled}

@@ -26,6 +26,7 @@ import { AccountingReportsService, AgingBucket } from './accounting-reports.serv
 import { CashFlowService } from './cash-flow.service';
 import { endOfBusinessDay, parseDateOnly, resolveTimezone, todayBusinessDate } from './business-date';
 import { CreateAccountDto, CreateManualJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 const AGING_BUCKETS: AgingBucket[] = ['current', '1-30', '31-60', '61-90', '90+'];
 
@@ -66,6 +67,8 @@ function parseEntryDate(value: string): Date {
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+// The books and every financial report are admin-only; listPeriods below is the one exception.
+@Roles('ADMIN')
 @Controller('accounting')
 export class AccountingController {
   constructor(
@@ -325,6 +328,9 @@ export class AccountingController {
 
   // --- Fiscal periods ---
 
+  // Open to staff: the invoice detail page reads period status to know
+  // whether an issued invoice can still be edited. Only open/closed months.
+  @Roles('ADMIN', 'USER')
   @Get('fiscal-periods')
   listPeriods(@CurrentOrg() organizationId: string) {
     return this.prisma.fiscalPeriod.findMany({

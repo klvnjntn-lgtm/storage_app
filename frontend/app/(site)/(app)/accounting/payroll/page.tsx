@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 
 function formatIDR(amount: number): string {
@@ -206,7 +207,7 @@ function RunsTab() {
 
   async function loadBankAccounts() {
     if (bankAccounts !== null) return;
-    const res = await apiFetch('/organizations/bank-accounts');
+    const res = await apiFetch('/organization/bank-accounts');
     if (res.ok) {
       const data: BankAccount[] = await res.json();
       setBankAccounts(data.filter((b) => !b.archivedAt));
@@ -450,11 +451,11 @@ function RunsTab() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.documentDate')}</label>
-            <input
-              type="date"
+            <DatePicker
+              variant="field"
               value={form.documentDate}
-              onChange={(e) => setForm((f) => ({ ...f, documentDate: e.target.value }))}
-              className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white w-full sm:w-1/3"
+              onChange={(v) => setForm((f) => ({ ...f, documentDate: v }))}
+              className="w-full sm:w-1/3"
             />
           </div>
 
@@ -657,11 +658,11 @@ function RunsTab() {
                             </div>
                             <div className="flex flex-col gap-1">
                               <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
-                              <input
-                                type="date"
+                              <DatePicker
+                                variant="field"
+                                size="sm"
                                 value={payForm.paidAt}
-                                onChange={(e) => setPayForm((f) => ({ ...f, paidAt: e.target.value }))}
-                                className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                                onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}
                               />
                             </div>
                           </div>

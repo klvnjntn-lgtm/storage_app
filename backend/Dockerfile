@@ -24,6 +24,7 @@ ENV NODE_ENV=production
 # install flags. Install the Alpine-native package instead and skip
 # Puppeteer's download entirely.
 RUN apk add --no-cache \
+    su-exec \
     chromium \
     nss \
     freetype \
@@ -44,6 +45,11 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+# Starts as root only to fix volume ownership, then drops to the "node"
+# user (see entrypoint.sh) — the server and Chromium never run as root.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

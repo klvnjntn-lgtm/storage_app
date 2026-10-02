@@ -115,7 +115,7 @@ export function CustomerPicker({
 
   if (value) {
     return (
-      <div className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg bg-blue-600/5 p-2.5 mb-3">
+      <div data-tour="sales-customer" className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg bg-blue-600/5 p-2.5 mb-3">
         <div className="flex items-center gap-2 min-w-0">
           <User size={14} strokeWidth={2} className="text-blue-600/70 shrink-0" />
           <div className="min-w-0">
@@ -134,7 +134,7 @@ export function CustomerPicker({
   }
 
   return (
-    <div className="relative mb-3" ref={containerRef}>
+    <div data-tour="sales-customer" className="relative mb-3" ref={containerRef}>
       <div
         onClick={() => setOpen(true)}
         className={`flex items-center gap-2 border rounded-lg p-2.5 cursor-text bg-white transition-colors ${
