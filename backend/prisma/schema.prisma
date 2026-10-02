@@ -75,6 +75,11 @@ model Customer {
   vehicles     Vehicle[]
   addresses    CustomerAddress[]
 
+  // Price level this customer buys at (Wholesale, Member, …). New sales
+  // lines for them start at this level; null = the org's default level.
+  priceLevelId String?
+  priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
+
   @@unique([id, organizationId])
   @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
   @@index([organizationId])
@@ -147,27 +152,31 @@ model Vehicle {
 }
 
 model Organization {
-  id                         String                @id @default(uuid())
-  name                       String
-  supplierPayments           SupplierPayment[]
-  plan                       String                @default("free")
-  seatLimit                  Int                   @default(1)
-  createdAt                  DateTime              @default(now())
-  fulfillmentMode            FulfillmentMode       @default(PICK_PACK_SHIP)
-  posPricingEnabled          Boolean               @default(false)
-  stockPolicy                StockPolicy           @default(BLOCK)
-  stockOverrideRequiresAdmin Boolean               @default(false)
-  settingsAuditLogs          SettingsAuditLog[]
-  documentSequences          DocumentSequence[]
-  documentCounters           DocumentCounter[]
-  employees                  Employee[]
-  salaryComponentTypes       SalaryComponentType[]
-  payrolls                   Payroll[]
-  expenseCategories          ExpenseCategory[]
-  expenses                   Expense[]
-  chartOfAccounts            ChartOfAccount[]
-  fiscalPeriods              FiscalPeriod[]
-  journalEntries             JournalEntry[]
+  id                              String                @id @default(uuid())
+  name                            String
+  priceLevels                     PriceLevel[]
+  supplierPayments                SupplierPayment[]
+  plan                            String                @default("free")
+  seatLimit                       Int                   @default(1)
+  createdAt                       DateTime              @default(now())
+  fulfillmentMode                 FulfillmentMode       @default(PICK_PACK_SHIP)
+  posPricingEnabled               Boolean               @default(false)
+  // When true, only admins may set a sales line to a price level other
+  // than the customer's (mirrors stockOverrideRequiresAdmin).
+  priceLevelOverrideRequiresAdmin Boolean               @default(false)
+  stockPolicy                     StockPolicy           @default(BLOCK)
+  stockOverrideRequiresAdmin      Boolean               @default(false)
+  settingsAuditLogs               SettingsAuditLog[]
+  documentSequences               DocumentSequence[]
+  documentCounters                DocumentCounter[]
+  employees                       Employee[]
+  salaryComponentTypes            SalaryComponentType[]
+  payrolls                        Payroll[]
+  expenseCategories               ExpenseCategory[]
+  expenses                        Expense[]
+  chartOfAccounts                 ChartOfAccount[]
+  fiscalPeriods                   FiscalPeriod[]
+  journalEntries                  JournalEntry[]
 
   legalName                   String?
   logoUrl                     String?
@@ -490,6 +499,10 @@ model Product {
   organization       Organization             @relation(fields: [organizationId], references: [id])
   sessionItems       SessionItem[]
   stocks             Stock[]
+  // Prices for the non-default price levels. The default level's price is
+  // sellingPrice above (kept there so imports, reports and older code
+  // keep working unchanged).
+  prices             ProductPrice[]
 
   @@unique([organizationId, barcode])
   @@unique([organizationId, sku])
@@ -802,6 +815,12 @@ model SalesQuotationItem {
   product        Product?                @relation(fields: [productId], references: [id])
   location       Location?               @relation(fields: [locationId], references: [id])
   taxes          SalesQuotationItemTax[]
+
+  // Where unitPrice came from. unitPrice itself is the historical price
+  // charged and never follows later price-level edits. Null = custom price
+  // (POS pricing) or a line created before price levels existed.
+  priceLevelId String?
+  priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
 }
 
 model SalesQuotationTax {
@@ -908,6 +927,10 @@ model SalesOrderItem {
   taxes              SalesOrderItemTax[]
   deliveryOrderItems DeliveryOrderItem[]
   invoiceItems       InvoiceItem[]
+
+  // Where unitPrice came from (see SalesQuotationItem.priceLevelId).
+  priceLevelId String?
+  priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
 }
 
 model SalesOrderTax {
@@ -993,6 +1016,11 @@ model DeliveryOrder {
   // never polled. Decimal(9,6) gives ~11cm precision, standard for lat/lng.
   completedLatitude  Decimal?  @db.Decimal(9, 6)
   completedLongitude Decimal?  @db.Decimal(9, 6)
+  // Reported accuracy radius (metres) of that GPS fix, from
+  // GeolocationCoordinates.accuracy — null when the device gave none.
+  // signedAt is the capture time. Drives whether the fix is good enough
+  // to become the customer's first pin (see customer-pin-backfill.ts).
+  completedAccuracy  Float?
   failedAt           DateTime?
   failureReason      String?
   failureLatitude    Decimal?  @db.Decimal(9, 6)
@@ -1172,6 +1200,7 @@ model RouteStop {
   completedByUserId    String?
   completedLatitude    Decimal?         @db.Decimal(9, 6)
   completedLongitude   Decimal?         @db.Decimal(9, 6)
+  completedAccuracy    Float? // metres — same meaning as the DO field
   failedAt             DateTime?
   failureReason        String?
   failureLatitude      Decimal?         @db.Decimal(9, 6)
@@ -1554,6 +1583,10 @@ model InvoiceItem {
   salesOrderItem    SalesOrderItem?    @relation(fields: [salesOrderItemId], references: [id])
   deliveryOrderItem DeliveryOrderItem? // back-relation only — FK lives on DeliveryOrderItem.invoiceItemId
   taxes             InvoiceItemTax[]
+
+  // Where unitPrice came from (see SalesQuotationItem.priceLevelId).
+  priceLevelId String?
+  priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
 }
 
 enum SalesQuotationActivityEventType {
@@ -2310,4 +2343,43 @@ model StockImportBatch {
   sessions       Session[]
 
   @@index([organizationId, createdAt])
+}
+
+// Organization-wide named price levels (Retail, Wholesale, Distributor,
+// Member …). Exactly one per org is the default; its price for a product
+// is Product.sellingPrice. Other levels' prices live in ProductPrice and
+// may be blank, in which case a new sales line falls back to the default
+// level's price and records the default level as its source. Levels are
+// archived rather than deleted so historical lines keep their source.
+model PriceLevel {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  isDefault      Boolean   @default(false)
+  sortOrder      Int       @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization        Organization         @relation(fields: [organizationId], references: [id])
+  productPrices       ProductPrice[]
+  customers           Customer[]
+  salesQuotationItems SalesQuotationItem[]
+  salesOrderItems     SalesOrderItem[]
+  invoiceItems        InvoiceItem[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model ProductPrice {
+  productId    String
+  priceLevelId String
+  price        Decimal  @db.Decimal(12, 2)
+  updatedAt    DateTime @updatedAt
+
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  priceLevel PriceLevel @relation(fields: [priceLevelId], references: [id], onDelete: Cascade)
+
+  @@id([productId, priceLevelId])
+  @@index([priceLevelId])
 }
