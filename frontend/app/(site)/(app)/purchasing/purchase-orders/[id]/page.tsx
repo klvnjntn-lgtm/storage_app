@@ -4,10 +4,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Send, XCircle, Printer, Download, Pencil, ClipboardList } from 'lucide-react';
+import { Send, XCircle, Printer, Download, Pencil, ClipboardList, PackageCheck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { PurchaseOrderTemplate } from '@/app/components/purchase-orders/templates/PurchaseOrderTemplate';
 import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/purchase-orders/types';
+import { ReceiveGoodsDialog } from '@/app/components/purchase-orders/ReceiveGoodsDialog';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -45,6 +46,14 @@ function statusDisplayLabel(status: string, t: (key: string) => string) {
   }
 }
 
+type GoodsReceiptRow = {
+  id: string;
+  receiptNumber: string | null;
+  createdAt: string;
+  location: { name: string } | null;
+  items: { purchaseOrderItemId: string; quantity: number }[];
+};
+
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -57,6 +66,8 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [receipts, setReceipts] = useState<GoodsReceiptRow[]>([]);
 
   async function load() {
     setLoading(true);
@@ -71,8 +82,15 @@ export default function PurchaseOrderDetailPage() {
         setError(body?.message ?? t('purchasing.purchaseOrderDetail.requestFailed', { status: detailRes.status }));
         return;
       }
-      setPo(await detailRes.json());
+      const detail: PurchaseOrderDetail = await detailRes.json();
+      setPo(detail);
       if (printRes.ok) setPrintView(await printRes.json());
+      if (detail.status === 'PARTIALLY_RECEIVED' || detail.status === 'FULLY_RECEIVED') {
+        const receiptsRes = await apiFetch(`/purchase-orders/${id}/receipts`);
+        if (receiptsRes.ok) setReceipts(await receiptsRes.json());
+      } else {
+        setReceipts([]);
+      }
     } catch {
       setError(t('purchasing.purchaseOrderDetail.serverError'));
     } finally {
@@ -207,6 +225,16 @@ export default function PurchaseOrderDetailPage() {
                 </>
               )}
 
+              {(po.status === 'SENT' || po.status === 'PARTIALLY_RECEIVED') && (
+                <button
+                  onClick={() => setReceiveOpen(true)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  <PackageCheck size={14} strokeWidth={2} />
+                  {t('purchasing.purchaseOrderDetail.receive')}
+                </button>
+              )}
+
               {(po.status === 'DRAFT' || po.status === 'SENT') && (
                 <button
                   disabled={actionLoading === 'cancel'}
@@ -242,11 +270,47 @@ export default function PurchaseOrderDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 print:hidden">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
+
+        {receipts.length > 0 && (
+          <section className="bg-white border-2 border-gray-200 rounded-md p-3">
+            <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+              {t('purchasing.purchaseOrderDetail.receipts')}
+            </h2>
+            <ul className="divide-y divide-gray-100 text-sm">
+              {receipts.map((r) => (
+                <li key={r.id} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="font-medium">{r.receiptNumber ?? r.id.slice(0, 8)}</span>
+                  <span className="text-xs text-gray-500">
+                    {new Date(r.createdAt).toLocaleDateString()} · {r.location?.name ?? '—'} ·{' '}
+                    {r.items
+                      .map((i) => `${po.items.find((p) => p.id === i.purchaseOrderItemId)?.product?.name ?? '?'} × ${i.quantity}`)
+                      .join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
+
+      {receiveOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50 p-4">
+          <div className="bg-white rounded-md shadow-lg w-full max-w-lg">
+            <ReceiveGoodsDialog
+              po={po}
+              onReceived={() => {
+                setReceiveOpen(false);
+                load();
+              }}
+              onClose={() => setReceiveOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="py-8 px-4 overflow-x-auto print:p-0 print:overflow-visible">
         <div className="mx-auto w-fit">

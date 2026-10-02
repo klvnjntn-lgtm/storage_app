@@ -3,9 +3,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
-import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
+import { PostingRulesService } from '../accounting/posting-rules.service';
 import { PurchaseOrderStatus, EventType, Prisma } from '@prisma/client';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
+
+// Quantities are Decimal(12,2); keep sums on that grid so float drift never
+// blocks receiving the last 0.1 of a line.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 @Injectable()
 export class GoodsReceiptService {
@@ -14,7 +20,7 @@ export class GoodsReceiptService {
     private stockService: StockService,
     private tenantOwnership: TenantOwnershipService,
     private numbering: DocumentNumberingService,
-    private postingRules: PostingRulesService, // NEW
+    private postingRules: PostingRulesService,
   ) {}
 
   async getReceivingSummary(organizationId: string, purchaseOrderId: string) {
@@ -32,7 +38,7 @@ export class GoodsReceiptService {
           productId: item.productId,
           ordered,
           previouslyReceived: received,
-          remaining: ordered - received,
+          remaining: round2(ordered - received),
         };
       }),
     };
@@ -60,7 +66,7 @@ export class GoodsReceiptService {
         throw new NotFoundException(`Purchase order item ${line.purchaseOrderItemId} not found on this PO`);
       }
       const alreadyReceived = receivedByItem.get(poItem.id) ?? 0;
-      const remaining = Number(poItem.quantity) - alreadyReceived;
+      const remaining = round2(Number(poItem.quantity) - alreadyReceived);
       if (line.quantity > remaining) {
         throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
       }
@@ -78,7 +84,7 @@ export class GoodsReceiptService {
       for (const line of dto.items) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
         const alreadyReceived = freshReceivedByItem.get(poItem.id) ?? 0;
-        const remaining = Number(poItem.quantity) - alreadyReceived;
+        const remaining = round2(Number(poItem.quantity) - alreadyReceived);
         if (line.quantity > remaining) {
           throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
         }
@@ -137,7 +143,7 @@ export class GoodsReceiptService {
         data: { status: newStatus },
       });
 
-      // NEW — Inventory (+ Input VAT) debit, AP credit, same transaction as
+      // Inventory (+ Input VAT) debit, AP credit, same transaction as
       // the receipt. If posting throws, the receipt, stock increase, and
       // status change all roll back together.
       await this.postingRules.postGoodsReceipt(organizationId, receipt.id, tx);
@@ -180,7 +186,7 @@ export class GoodsReceiptService {
 
     for (const r of receiptRows as any[]) {
       const existing = map.get(r.purchaseOrderItemId) ?? 0;
-      map.set(r.purchaseOrderItemId, existing + (r._sum.quantity ?? 0));
+      map.set(r.purchaseOrderItemId, round2(existing + Number(r._sum.quantity ?? 0)));
     }
 
     return map;

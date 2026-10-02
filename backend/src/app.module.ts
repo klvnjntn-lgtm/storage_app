@@ -29,6 +29,7 @@ import { LicenseModule } from './license/license.module';
 import { OrganizationModule } from './organization/organization.module';
 import { HealthModule } from './health/health.module';
 import { IntegrationModule } from './integration/integration.module';
+import { GoodsReceiptModule } from './goods-receipt/goods-receipt.module';
 import { MediaModule } from './media/media.module';
 import { InvoiceModule } from './invoice/invoice.module';
 import { OrganizationModulesModule } from './organization-module/organization-modules.module';
@@ -105,6 +106,7 @@ import { AccessControlModule } from './access-control/access-control.module';
     PriceLevelModule,
     OrganizationModulesModule,
     IntegrationModule,
+    GoodsReceiptModule,
     MediaModule,
     NotificationsModule,
     UsersModule,
