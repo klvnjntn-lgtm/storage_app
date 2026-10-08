@@ -33,7 +33,9 @@ type Row = {
   category: string;
   brand?: string;
   location: string;
-  qty: number;
+  // null = blank/unreadable cell. Kept distinct from 0: in REPLACE mode a 0
+  // sets stock to zero, so a blank cell must never silently become one.
+  qty: number | null;
   sellingPrice?: number;
   costPrice?: number;
 };
@@ -63,7 +65,7 @@ const MAX_LENGTHS = {
 // ProductService's validation. Checked in the same order as the backend
 // so the message matches. The code is turned into a localized message by
 // rowErrorMessage() inside the page component.
-function getValidationErrorCode(r: Row): string | null {
+function getValidationErrorCode(r: Row, mode: ImportMode | null): string | null {
   const sku = r.sku?.toString().trim() ?? '';
   const name = r.name?.toString().trim() ?? '';
   const category = r.category?.toString().trim() ?? '';
@@ -72,7 +74,13 @@ function getValidationErrorCode(r: Row): string | null {
   if (!name) return 'missingNameOrCategory';
   if (!category) return 'missingNameOrCategory';
   if (!sku) return 'missingSku';
-  if (!(Number(r.qty) > 0)) return 'qtyMustBeGreaterThanZero';
+  // REPLACE is a stock-take: 0 is a real count ("none left"). INCREMENT
+  // adds stock, so it needs something to add. Before a mode is picked,
+  // only a missing or negative qty is flagged.
+  if (r.qty == null || !Number.isFinite(r.qty)) return 'qtyMissing';
+  if (mode === 'INCREMENT' ? r.qty <= 0 : r.qty < 0) {
+    return mode === 'INCREMENT' ? 'qtyMustBeGreaterThanZero' : 'qtyMustNotBeNegative';
+  }
 
   // Backend checks price sign before length limits — same order here.
   if (r.sellingPrice != null && r.sellingPrice < 0) return 'sellingPriceNegative';
@@ -86,8 +94,18 @@ function getValidationErrorCode(r: Row): string | null {
   return null;
 }
 
-function isRowValid(r: Row) {
-  return getValidationErrorCode(r) === null;
+function cellText(v: unknown): string {
+  return v == null ? '' : String(v).trim();
+}
+
+function parseQty(v: unknown): number | null {
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isRowValid(r: Row, mode: ImportMode | null) {
+  return getValidationErrorCode(r, mode) === null;
 }
 
 export default function ImportPage() {
@@ -97,7 +115,7 @@ export default function ImportPage() {
   const router = useRouter();
 
   function rowErrorMessage(r: Row): string | null {
-    const code = getValidationErrorCode(r);
+    const code = getValidationErrorCode(r, mode);
     return code ? t(`upload.uploadPage.errors.${code}`) : null;
   }
 
@@ -107,6 +125,9 @@ export default function ImportPage() {
   const [fileName, setFileName] = useState('');
   const [importResult, setImportResult] = useState<{
     accepted: number;
+    // SKUs whose sheet cost wasn't applied (the product already had stock
+    // with a weighted-average cost, which an import doesn't override).
+    costIgnoredSkus: string[];
     rejected: RejectedRow[];
     importedBy: string | null;
     // Set for an "add to stock" import — the delivery can then be labelled
@@ -122,7 +143,7 @@ export default function ImportPage() {
   // becomes a double-count, or a bulk receive accidentally wipes counts.
   const [mode, setMode] = useState<ImportMode | null>(null);
 
-  const invalidCount = rows.filter((r) => !isRowValid(r)).length;
+  const invalidCount = rows.filter((r) => !isRowValid(r, mode)).length;
   const blankLocationCount = rows.filter((r) => !r.location?.toString().trim()).length;
   const canImport = rows.length > 0 && invalidCount === 0 && !columnError && !loading && mode !== null;
 
@@ -198,7 +219,14 @@ export default function ImportPage() {
       setRows(
         json.map((r) => ({
           ...r,
-          qty: Number(r.qty) || 0,
+          // Cells keep the sheet's type — a SKU like 12345 or a location
+          // like 1 arrives as a number — but the API takes text.
+          sku: cellText(r.sku),
+          name: cellText(r.name),
+          category: cellText(r.category),
+          brand: cellText(r.brand) || undefined,
+          location: cellText(r.location),
+          qty: parseQty(r.qty),
           // Blank cell -> undefined, not 0. A blank price column means
           // "don't touch pricing for this row," same as bulkImport()
           // on the backend only updating price fields it was actually
@@ -231,7 +259,8 @@ export default function ImportPage() {
         if (!NUMERIC_FIELDS.includes(field)) return { ...r, [field]: value };
         // Blank price cell means "leave pricing alone," not zero —
         // an empty string here should stay undefined, not become 0.
-        if (value === '' && field !== 'qty') return { ...r, [field]: undefined };
+        if (field === 'qty') return { ...r, qty: parseQty(value) };
+        if (value === '') return { ...r, [field]: undefined };
         return { ...r, [field]: Number(value) || 0 };
       })
     );
@@ -242,7 +271,7 @@ export default function ImportPage() {
   }
 
   function removeInvalidRows() {
-    setRows((prev) => prev.filter((r) => isRowValid(r)));
+    setRows((prev) => prev.filter((r) => isRowValid(r, mode)));
   }
 
   async function handleImport() {
@@ -273,6 +302,9 @@ export default function ImportPage() {
 
       setImportResult({
         accepted: data?.accepted?.length ?? 0,
+        costIgnoredSkus: Array.isArray(data?.accepted)
+          ? data.accepted.filter((r: { costIgnored?: boolean }) => r.costIgnored).map((r: { sku: string }) => r.sku)
+          : [],
         rejected: Array.isArray(data?.rejected) ? data.rejected : [],
         importedBy: profile?.email ?? null, // display label only; the backend records the real user
         deliveryBatchId: data?.mode === 'INCREMENT' ? data?.batchId ?? null : null,
@@ -338,6 +370,15 @@ export default function ImportPage() {
                 )}
               </span>
             </div>
+            {importResult.costIgnoredSkus.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-sm">
+                {t('upload.uploadPage.costIgnored', {
+                  count: importResult.costIgnoredSkus.length,
+                  skus: importResult.costIgnoredSkus.slice(0, 10).join(', ') +
+                    (importResult.costIgnoredSkus.length > 10 ? ', …' : ''),
+                })}
+              </div>
+            )}
 
             {/* Import-first receiving: the delivery's products now exist,
                 so print a label per unit, then count it in a receive
@@ -648,7 +689,7 @@ export default function ImportPage() {
                         <label className="text-[10px] font-semibold text-gray-500">{t('common.quantity')}</label>
                         <input
                           type="number"
-                          value={r.qty}
+                          value={r.qty ?? ''}
                           onChange={(e) => updateRow(i, 'qty', e.target.value)}
                           className={`${fieldClass} font-bold`}
                         />
@@ -765,7 +806,7 @@ export default function ImportPage() {
                           <td className="px-1 py-1">
                             <input
                               type="number"
-                              value={r.qty}
+                              value={r.qty ?? ''}
                               onChange={(e) => updateRow(i, 'qty', e.target.value)}
                               className="w-20 bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none font-bold"
                             />

@@ -266,6 +266,39 @@ export class PostingRulesService {
     );
   }
 
+  // Refund of a customer's credit → AR (debit) + Cash/Bank (credit). The
+  // credit itself is a negative AR balance left by a return against a paid
+  // invoice (postSalesReturn credited AR past zero); paying the money back
+  // brings AR back up to zero. Mirror image of postPayment().
+  async postRefund(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const refund = await db.payment.findFirstOrThrow({
+      where: { id: paymentId, invoice: { organizationId } },
+      include: { invoice: true },
+    });
+    const amount = Number(refund.amount);
+
+    const [cash, ar] = await Promise.all([
+      this.resolveCashDestination(organizationId, refund.method, refund.bankAccountId, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_RECEIVABLE, db),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: refund.createdAt,
+        memo: `Refund to customer for invoice ${refund.invoice.invoiceNumber ?? refund.invoice.id}`,
+        sourceType: JournalSourceType.PAYMENT,
+        sourceId: refund.id,
+        lines: [
+          { accountId: ar, debit: amount, description: 'Customer credit refunded' },
+          { accountId: cash, credit: amount, description: 'Refund paid out' },
+        ],
+      },
+      tx,
+    );
+  }
+
   // Goods Receipt → Inventory (debit, net of discount) + Input VAT
   // Receivable (debit, if the PO has tax) + AP (credit, the real amount
   // owed — net cost plus tax). Liability is recognized here, not at PO

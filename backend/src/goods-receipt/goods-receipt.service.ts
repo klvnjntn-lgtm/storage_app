@@ -4,7 +4,8 @@ import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
-import { PurchaseOrderStatus, EventType, Prisma } from '@prisma/client';
+import { PurchaseOrderStatus, EventType, Prisma, CostChangeSource } from '@prisma/client';
+import { receiveAtCost } from '../accounting/inventory-costing';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
 
 // Quantities are Decimal(12,2); keep sums on that grid so float drift never
@@ -59,18 +60,29 @@ export class GoodsReceiptService {
 
     const poItemsById = new Map(po.items.map((i) => [i.id, i]));
 
-    const receivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId);
+    // Totalled per PO line: the same line listed twice used to be checked
+    // twice against the same "remaining" and could over-receive together.
+    const requestedByItem = new Map<string, number>();
     for (const line of dto.items) {
-      const poItem = poItemsById.get(line.purchaseOrderItemId);
-      if (!poItem) {
+      if (!poItemsById.has(line.purchaseOrderItemId)) {
         throw new NotFoundException(`Purchase order item ${line.purchaseOrderItemId} not found on this PO`);
       }
-      const alreadyReceived = receivedByItem.get(poItem.id) ?? 0;
-      const remaining = round2(Number(poItem.quantity) - alreadyReceived);
-      if (line.quantity > remaining) {
-        throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
-      }
+      requestedByItem.set(
+        line.purchaseOrderItemId,
+        round2((requestedByItem.get(line.purchaseOrderItemId) ?? 0) + line.quantity),
+      );
     }
+    const assertWithinRemaining = (received: Map<string, number>) => {
+      for (const [poItemId, quantity] of requestedByItem) {
+        const poItem = poItemsById.get(poItemId)!;
+        const remaining = round2(Number(poItem.quantity) - (received.get(poItemId) ?? 0));
+        if (quantity > remaining) {
+          throw new BadRequestException(`Cannot receive ${quantity} — only ${remaining} remaining for this item`);
+        }
+      }
+    };
+
+    assertWithinRemaining(await this.receivedQuantitiesByPoItem(purchaseOrderId));
 
     return this.prisma.$transaction(async (tx) => {
       // Lock the PurchaseOrder row so a concurrent receive() against the
@@ -80,15 +92,14 @@ export class GoodsReceiptService {
       // could both read the same "already received" total and both pass.
       await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${po.id} FOR UPDATE`;
 
-      const freshReceivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId, tx);
-      for (const line of dto.items) {
-        const poItem = poItemsById.get(line.purchaseOrderItemId)!;
-        const alreadyReceived = freshReceivedByItem.get(poItem.id) ?? 0;
-        const remaining = round2(Number(poItem.quantity) - alreadyReceived);
-        if (line.quantity > remaining) {
-          throw new BadRequestException(`Cannot receive ${line.quantity} — only ${remaining} remaining for this item`);
-        }
+      // The status was read before the lock — a cancel committed since then
+      // must stop this receipt.
+      const fresh = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: po.id }, select: { status: true } });
+      if (fresh.status !== PurchaseOrderStatus.SENT && fresh.status !== PurchaseOrderStatus.PARTIALLY_RECEIVED) {
+        throw new BadRequestException(`Cannot receive goods against a purchase order in ${fresh.status} status`);
       }
+
+      assertWithinRemaining(await this.receivedQuantitiesByPoItem(purchaseOrderId, tx));
 
       const receiptNumber = await this.numbering.nextSequential(tx, organizationId, 'GOODS_RECEIPT', 'GR');
 
@@ -111,9 +122,27 @@ export class GoodsReceiptService {
         include: { items: true },
       });
 
+      // Unit cost as it lands in Inventory: postGoodsReceipt() books each
+      // receipt net of the PO discount, allocated in proportion to value, so
+      // every line carries the same discount fraction. Tax is input VAT, not
+      // part of the cost.
+      const poSubtotal = Number(po.subtotal);
+      const netFactor = poSubtotal > 0 ? 1 - Number(po.discountAmount) / poSubtotal : 1;
+
       for (const line of dto.items) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
         if (!poItem.productId) continue;
+        // Before the stock increase: the average is taken against what was
+        // on hand before these units arrived.
+        await receiveAtCost(tx, {
+          organizationId,
+          productId: poItem.productId,
+          quantity: line.quantity,
+          unitCost: Number(poItem.unitCost) * netFactor,
+          source: CostChangeSource.GOODS_RECEIPT,
+          sourceId: receipt.id,
+          userId,
+        });
         await this.stockService.increase(
           organizationId,
           poItem.productId,

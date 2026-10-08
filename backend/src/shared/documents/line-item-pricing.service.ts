@@ -126,6 +126,10 @@ export class LineItemPricingService {
       // priceLevelOverrideRequiresAdmin setting when a line picks a level
       // other than the customer's.
       userId?: string;
+      // Conversions and issued-invoice edits carry tax rates over from an
+      // existing document; a rate archived since then must still apply
+      // there, while new documents may only pick active rates.
+      allowArchivedTaxRates?: boolean;
     } = {},
   ): Promise<{
     items: PricedLine[];
@@ -270,8 +274,11 @@ export class LineItemPricingService {
     const allTaxRateIds = Array.from(new Set(items.flatMap((i) => i.taxRateIds ?? [])));
     const rates = allTaxRateIds.length
       ? await client.organizationTaxRate.findMany({
-                    where: { id: { in: allTaxRateIds }, organizationId, archivedAt: null },
-
+          where: {
+            id: { in: allTaxRateIds },
+            organizationId,
+            ...(options.allowArchivedTaxRates ? {} : { archivedAt: null }),
+          },
         })
       : [];
     const ratesById = new Map(rates.map((r) => [r.id, r]));

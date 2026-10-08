@@ -44,8 +44,8 @@ export class ProductController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Post()
-  create(@CurrentOrg() organizationId: string, @Body() body: CreateProductDto) {
-    return this.productService.create(organizationId, body);
+  create(@CurrentOrg() organizationId: string, @Body() body: CreateProductDto, @Req() req) {
+    return this.productService.create(organizationId, body, undefined, req.user?.sub);
   }
 
   // Cost price is admin-only data; everyone else gets the list without it.
@@ -120,14 +120,23 @@ update(
   @CurrentOrg() organizationId: string,
   @Param('id') id: string,
   @Body() body: UpdateProductDto,
+  @Req() req,
 ) {
-  return this.productService.update(organizationId, id, body);
+  return this.productService.update(organizationId, id, body, undefined, req.user?.sub);
 }
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Patch(':id/restore')
   restore(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.productService.restore(organizationId, id);
+  }
+
+  // Cost is admin-only data, same as costPrice itself.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Get(':id/cost-history')
+  getCostHistory(@CurrentOrg() organizationId: string, @Param('id') id: string) {
+    return this.productService.getCostHistory(organizationId, id);
   }
 
   @Get(':id/events')

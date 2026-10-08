@@ -10,6 +10,8 @@ import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
+import { CostHistoryPanel } from '@/app/components/inventory/CostHistoryPanel';
 
 
 type StockRow = {
@@ -47,6 +49,8 @@ type Product = {
   // product (a gallery), but only the primary one is used here and in
   // Grid View / POS — see the "Product Image" section below.
   image: string | null;
+  // Present for admins only (cost is redacted for everyone else).
+  costPrice?: number | string | null;
 };
 
 type OrgLocation = { id: string; name: string };
@@ -55,6 +59,8 @@ export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
 
 const eventColor = (type: string) => {
   switch (type) {
@@ -500,6 +506,14 @@ const eventColor = (type: string) => {
             </table>
           </div>
         </section>
+
+        {/* COST HISTORY — admin only, like cost itself */}
+        {isAdmin && (
+          <CostHistoryPanel
+            productId={product.id}
+            currentCost={product.costPrice != null ? Number(product.costPrice) : null}
+          />
+        )}
 
         {/* EVENT HISTORY */}
         <section>

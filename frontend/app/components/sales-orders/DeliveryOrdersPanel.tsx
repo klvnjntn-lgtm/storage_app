@@ -70,6 +70,7 @@ export function DeliveryOrdersPanel({
   customerDefault,
   status,
   items,
+  blockedByInvoice = false,
   onChanged,
 }: {
   salesOrderId: string;
@@ -79,6 +80,10 @@ export function DeliveryOrdersPanel({
     status: 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED'; // NEW
 
   items: DeliverableSourceItem[];
+  // The order's invoice took its stock at issue (no delivery existed yet),
+  // so the backend refuses new delivery orders — see
+  // DeliveryOrderService.create().
+  blockedByInvoice?: boolean;
   onChanged: () => void;
 }) {
   const { t } = useLanguage();
@@ -228,7 +233,13 @@ export function DeliveryOrdersPanel({
   }
 
   if (loading) return null;
-  if (orders.length === 0 && deliverable.length === 0) return null;
+  if (orders.length === 0 && (deliverable.length === 0 || blockedByInvoice)) {
+    return blockedByInvoice && deliverable.length > 0 ? (
+      <p className="text-xs text-gray-600 border-2 border-gray-200 rounded-md p-3">
+        {t('sales.deliveryOrdersPanel.blockedByInvoice')}
+      </p>
+    ) : null;
+  }
 
   return (
     <div data-tour="od-deliveries" className="space-y-3">
@@ -336,7 +347,12 @@ export function DeliveryOrdersPanel({
       })}
 
       {/* ---- create a new delivery order for remaining quantity ---- */}
-      {deliverable.length > 0 && (
+      {deliverable.length > 0 && blockedByInvoice && (
+        <p className="text-xs text-gray-600 border-2 border-gray-200 rounded-md p-3">
+          {t('sales.deliveryOrdersPanel.blockedByInvoice')}
+        </p>
+      )}
+      {deliverable.length > 0 && !blockedByInvoice && (
         <div className="border-2 border-gray-300 rounded-md p-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
             <Truck size={12} strokeWidth={2} />

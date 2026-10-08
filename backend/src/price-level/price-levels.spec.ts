@@ -241,10 +241,16 @@ describe('Price levels', () => {
       expect(Number(orderItem.unitPrice)).toBe(WHOLESALE);
       expect(orderItem.priceLevelId).toBe(wholesaleId);
 
-      const fromQuote = await invoices.createDraftFromQuotation(orgId, adminId, quote.id);
-      const fromQuoteItem = await prisma.invoiceItem.findFirstOrThrow({ where: { invoiceId: fromQuote.id } });
-      expect(Number(fromQuoteItem.unitPrice)).toBe(WHOLESALE);
-      expect(fromQuoteItem.priceLevelId).toBe(wholesaleId);
+      // The quotation now belongs to the order — invoicing it directly too
+      // would bill the customer twice. The order is what gets invoiced.
+      await expect(invoices.createDraftFromQuotation(orgId, adminId, quote.id)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await orders.confirm(orgId, order.id, adminId);
+      const fromOrder = await invoices.createDraftFromSalesOrder(orgId, adminId, order.id);
+      const fromOrderItem = await prisma.invoiceItem.findFirstOrThrow({ where: { invoiceId: fromOrder.id } });
+      expect(Number(fromOrderItem.unitPrice)).toBe(WHOLESALE);
+      expect(fromOrderItem.priceLevelId).toBe(wholesaleId);
 
       // A new line today gets the new price.
       const { items } = await pricing.priceLines(orgId, [line(filterId, { priceLevelId: wholesaleId })]);

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DocumentType, Prisma } from '@prisma/client';
+import { resolveTimezone, toBusinessDate } from '../../accounting/business-date';
 
 // Format is always PREFIX-YYYY-NNNNN, atomically sequenced per
 // (organizationId, documentType, year) — see nextSequential below.
@@ -30,7 +31,11 @@ export class DocumentNumberingService {
     prefix: string,
     date: Date = new Date(),
   ): Promise<string> {
-    const year = date.getFullYear();
+    // The business year in the org's timezone. The server clock is UTC
+    // (Docker), so documents made in the first hours of Jan 1 in Jakarta
+    // used to get last year's prefix and sequence.
+    const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+    const year = toBusinessDate(date, resolveTimezone(org)).getUTCFullYear();
     const counter = await tx.documentCounter.upsert({
       where: { organizationId_documentType_year: { organizationId, documentType, year } },
       create: { organizationId, documentType, year, lastNumber: 1 },

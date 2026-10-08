@@ -78,6 +78,10 @@ export default function EditIssuedInvoicePage() {
 
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [posPricingEnabled, setPosPricingEnabled] = useState(false);
+  // Whether lines may go past stock — the org's stock policy (WARN/ALLOW),
+  // not the POS pricing toggle. Editing is admin-only, so admin-only
+  // overrides don't restrict it here.
+  const [allowOversell, setAllowOversell] = useState(false);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<string>('');
@@ -96,6 +100,10 @@ export default function EditIssuedInvoicePage() {
       setPosPricingEnabled(!!settings.posPricingEnabled);
     }
     loadSettings();
+    (async () => {
+      const res = await apiFetch('/invoices/stock-policy');
+      if (res.ok) setAllowOversell(!!(await res.json()).allowNegative);
+    })();
   }, []);
 
   useEffect(() => {
@@ -279,16 +287,27 @@ function addToCart(
   },
 ): boolean {
   setError('');
-  let target;
+  let target: { locationId: string; locationName: string; quantity: number } | undefined;
   if (locationFilter) {
     target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
-    if (!target || target.quantity <= 0) {
+    if (!target && allowOversell) {
+      target = { locationId: locationFilter.id, locationName: locationFilter.name, quantity: 0 };
+    }
+    if (!target || (!allowOversell && target.quantity <= 0)) {
       setError(t('sales.invoiceEdit.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
       return false;
     }
   } else {
     target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
-    if (!target || target.quantity <= 0) {
+    if (!target) {
+      setError(
+        allowOversell
+          ? t('sales.invoiceEdit.pickLocationToOversell', { name: product.name })
+          : t('sales.invoiceEdit.noStockAnywhere', { name: product.name }),
+      );
+      return false;
+    }
+    if (!allowOversell && target.quantity <= 0) {
       setError(t('sales.invoiceEdit.noStockAnywhere', { name: product.name }));
       return false;
     }
@@ -296,12 +315,9 @@ function addToCart(
   const resolvedTarget = target;
   const key = cartKey(product.id, resolvedTarget.locationId);
 
-  // Still respects real stock on this first add, same as every sibling
-  // page — POS mode's overselling allowance only kicks in later, on the
-  // stepper for a line already in the cart (see changeQty below).
   const existing = cart[key];
   const nextQty = (existing?.quantity ?? 0) + details.quantity;
-  if (!posPricingEnabled && nextQty > resolvedTarget.quantity) {
+  if (!allowOversell && nextQty > resolvedTarget.quantity) {
     setError(t('sales.invoiceEdit.onlyAvailable', { qty: resolvedTarget.quantity, name: product.name, location: resolvedTarget.locationName }));
     return false;
   }
@@ -348,14 +364,10 @@ function addToCart(
         const { [key]: _removed, ...rest } = prev;
         return rest;
       }
-      // FIX — was an unconditional ceiling with no POS bypass, while the
-      // "+" button's disabled state (below, in the JSX) already implied
-      // one (`disabled={!posPricingEnabled && line.quantity >= available}`).
-      // The button looked enabled in POS mode past available stock but
-      // silently did nothing — the "sell past stock in POS mode" feature
-      // never actually worked. Mirrors CartPanel.tsx's posModeEnabled bypass.
+      // Past stock only when the org's stock policy allows overselling —
+      // same rule as addToCart() and the "+" button below.
       const available = stockAtLineLocation(line);
-      if (!posPricingEnabled && nextQty > available) return prev;
+      if (!allowOversell && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
     });
   }
@@ -643,6 +655,7 @@ function changeServiceUnit(key: string, value: string) {
             onSelectLocationFilter={selectLocationFilter}
             onAddToCart={addToCart}
             posModeEnabled={posPricingEnabled}
+            allowOversell={allowOversell}
             taxRates={taxRates}
             basePriceLevelId={basePriceLevelId}
           />
@@ -781,7 +794,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
                         <button
                           onClick={() => changeQty(line.key, 1)}
-                          disabled={!posPricingEnabled && line.quantity >= available}
+                          disabled={!allowOversell && line.quantity >= available}
                           className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
                         >
                           <Plus size={14} strokeWidth={2} />

@@ -12,13 +12,15 @@ describe('ProductController admin gate', () => {
   const proto = ProductController.prototype as unknown as Record<string, () => unknown>;
   const handlers = Object.getOwnPropertyNames(proto).filter((n) => n !== 'constructor');
   const WRITE = [RequestMethod.POST, RequestMethod.PATCH, RequestMethod.PUT, RequestMethod.DELETE];
+  // Reads that expose cost data, which is admin-only like costPrice itself.
+  const ADMIN_READS = ['getCostHistory'];
 
   it.each(handlers)('%s', (name) => {
     const method = Reflect.getMetadata(METHOD_METADATA, proto[name]);
     if (method === undefined) return; // not a route
     const roles = reflector.get<string[]>(ROLES_KEY, proto[name]);
     const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, proto[name]) ?? [];
-    if (WRITE.includes(method)) {
+    if (WRITE.includes(method) || ADMIN_READS.includes(name)) {
       expect(roles).toEqual(['ADMIN']);
       expect(guards).toContain(RolesGuard);
     } else {

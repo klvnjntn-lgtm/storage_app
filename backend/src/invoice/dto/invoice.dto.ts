@@ -18,7 +18,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 export class InvoiceLineInput {
   // Product lines require this; service lines (WORKSHOP_RMS only) omit it
   // in favor of `description` below — the two are mutually exclusive.
@@ -188,6 +188,13 @@ export class UpdateDraftInvoiceDto {
   @Type(() => InvoiceLineInput)
   items?: InvoiceLineInput[];
 
+  // The draft is created by the first autosave, often before the cashier
+  // has picked a format — without this a later switch (e.g. RECEIPT → A4)
+  // never reached the database.
+  @IsOptional()
+  @IsEnum(InvoiceFormat)
+  format?: InvoiceFormat;
+
   @IsOptional()
   @IsDateString()
   dueDate?: string;
@@ -315,8 +322,9 @@ search?: string;
   @IsEnum(PaymentStatus)
   paymentStatus?: PaymentStatus;
 
+  // Not @Type(() => Boolean): that turns the query string "false" into true.
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
   @IsBoolean()
   overdue?: boolean;
 }

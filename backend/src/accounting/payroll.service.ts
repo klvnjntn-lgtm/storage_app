@@ -97,14 +97,14 @@ export class PayrollService {
   async create(organizationId: string, dto: CreatePayrollDto) {
     const payType = dto.payType ?? PayrollPayType.MONTHLY;
 
-    const duplicate = await this.prisma.payroll.findUnique({
+    // Voided runs don't count — the period can be run again after a void.
+    const duplicate = await this.prisma.payroll.findFirst({
       where: {
-        organizationId_periodYear_periodMonth_payType: {
-          organizationId,
-          periodYear: dto.periodYear,
-          periodMonth: dto.periodMonth,
-          payType,
-        },
+        organizationId,
+        periodYear: dto.periodYear,
+        periodMonth: dto.periodMonth,
+        payType,
+        status: { not: PayrollStatus.VOID },
       },
     });
     if (duplicate) {
@@ -278,7 +278,8 @@ export class PayrollService {
     return this.prisma.$transaction(async (tx) => {
       const claim = await tx.payroll.updateMany({
         where: { id, organizationId, status: { in: [PayrollStatus.POSTED, PayrollStatus.PAID] } },
-        data: { status: PayrollStatus.VOID },
+        // activeSlot: null frees the period for a new run (see schema).
+        data: { status: PayrollStatus.VOID, activeSlot: null },
       });
       if (claim.count === 0) {
         const payroll = await tx.payroll.findFirst({ where: { id, organizationId } });

@@ -1,7 +1,8 @@
 // src/product/product.service.ts
 import { Injectable, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Brand, EventType, Prisma } from '@prisma/client';
+import { EventType, Prisma } from '@prisma/client';
+import { applyOpeningCost, recordManualCost } from '../accounting/inventory-costing';
 
 type Tx = PrismaService | Prisma.TransactionClient;
 
@@ -77,6 +78,35 @@ export class ProductService {
         });
       }
     }
+  }
+
+  // How the current weighted-average cost came to be: every change, newest
+  // first, with what caused it.
+  async getCostHistory(organizationId: string, productId: string) {
+    await this.assertProductOwnership(organizationId, productId);
+    const rows = await this.prisma.productCostHistory.findMany({
+      where: { productId, organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const userIds = Array.from(new Set(rows.map((r) => r.userId).filter((id): id is string => !!id)));
+    const users = userIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } })
+      : [];
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
+    const num = (d: Prisma.Decimal | null) => (d != null ? Number(d) : null);
+    return rows.map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      source: r.source,
+      sourceId: r.sourceId,
+      previousCost: num(r.previousCost),
+      newCost: num(r.newCost),
+      quantityBefore: Number(r.quantityBefore),
+      quantityIn: Number(r.quantityIn),
+      unitCostIn: num(r.unitCostIn),
+      user: r.userId ? (emailById.get(r.userId) ?? null) : null,
+    }));
   }
 
   async getEvents(organizationId: string, productId: string) {
@@ -158,6 +188,7 @@ async create(
     prices?: { priceLevelId: string; price: number | null }[];
   },
   tx: Tx = this.prisma,
+  userId?: string,
 ) {
   const name = data.name.trim();
   const sku = data.sku.trim();
@@ -197,6 +228,15 @@ async create(
       },
     });
     await this.applyLevelPrices(organizationId, product.id, data.prices, tx);
+    if (product.costPrice != null) {
+      await recordManualCost(tx as Prisma.TransactionClient, {
+        organizationId,
+        productId: product.id,
+        previousCost: null,
+        newCost: Number(product.costPrice),
+        userId,
+      });
+    }
     return product;
   } catch (err: any) {
     if (err.code === 'P2002') {
@@ -380,8 +420,13 @@ async update(
     prices?: { priceLevelId: string; price: number | null }[];
   },
   tx: Tx = this.prisma,
+  userId?: string,
 ) {
   await this.assertProductOwnership(organizationId, id);
+  const before =
+    data.costPrice !== undefined
+      ? await tx.product.findUniqueOrThrow({ where: { id }, select: { costPrice: true } })
+      : null;
 
   const updateData: Prisma.ProductUpdateInput = {};
 
@@ -454,6 +499,17 @@ async update(
       data: updateData,
     });
     await this.applyLevelPrices(organizationId, id, data.prices, tx);
+    // A hand edit overrides the weighted average — logged so the cost
+    // history shows where the number came from.
+    if (before) {
+      await recordManualCost(tx as Prisma.TransactionClient, {
+        organizationId,
+        productId: id,
+        previousCost: before.costPrice != null ? Number(before.costPrice) : null,
+        newCost: product.costPrice != null ? Number(product.costPrice) : null,
+        userId,
+      });
+    }
     return data.prices?.length ? tx.product.findUniqueOrThrow({ where: { id } }) : product;
   } catch (err: any) {
     if (err.code === 'P2002') {
@@ -497,15 +553,20 @@ async update(
 
     for (const row of rows) {
       try {
-        const { product, category, brand } = await this.resolveForImport(organizationId, row);
+        const { product, category, brand, costApplied } = await this.prisma.$transaction((tx) =>
+          this.resolveForImport(organizationId, row, tx),
+        );
 
         accepted.push({
           productId: product.id,
           name: product.name,
           sku: product.sku,
-          oem: row.oem?.trim() || undefined,
+          oem: product.oem ?? undefined,
           category: category.name,
           brand: brand?.name ?? null,
+          // The sheet had a cost, but the product already has stock on hand
+          // with a weighted-average cost, which an import doesn't override.
+          costIgnored: row.costPrice != null && !costApplied,
         });
       } catch (err) {
         this.logger.error(
@@ -532,15 +593,21 @@ async update(
       name: string;
       category: string;
       brand?: string;
+      oem?: string;
       sellingPrice?: number;
       costPrice?: number;
     },
     tx: Tx = this.prisma,
+    opts: { userId?: string; sourceId?: string } = {},
   ) {
-    const name = row.name?.trim();
-    const sku = row.sku?.trim();
-    const categoryName = row.category?.trim();
-    const brandName = row.brand?.trim();
+    const { userId, sourceId } = opts;
+    // Raw spreadsheet cells (import-excel) can be numbers, not strings.
+    const text = (v: string | number | null | undefined) => (v == null ? '' : String(v).trim());
+    const name = text(row.name);
+    const sku = text(row.sku);
+    const categoryName = text(row.category);
+    const brandName = text(row.brand);
+    const oem = text(row.oem) || undefined;
 
     if (!name || !categoryName) {
       throw new BadRequestException('missing name or category');
@@ -558,6 +625,7 @@ async update(
     this.validateLengths({
       name,
       sku,
+      oem,
       category: categoryName,
       brand: brandName,
     });
@@ -578,10 +646,10 @@ async update(
           sku,
           categoryId: category.id,
           brandId: brand?.id ?? null,
+          oem: oem ?? null,
           organizationId,
           active: true,
           sellingPrice: row.sellingPrice ?? null,
-          costPrice: row.costPrice ?? null,
         },
       });
     } else {
@@ -596,14 +664,34 @@ async update(
         data: {
           name,
           categoryId: category.id,
-          brandId: brand?.id ?? null,
+          // A blank brand/OEM cell means "not in this sheet", not "clear
+          // it" — re-importing stock without a brand column used to wipe
+          // every product's brand.
+          ...(brand ? { brandId: brand.id } : {}),
+          ...(oem ? { oem } : {}),
           ...(row.sellingPrice !== undefined ? { sellingPrice: row.sellingPrice } : {}),
-          ...(row.costPrice !== undefined ? { costPrice: row.costPrice } : {}),
         },
       });
     }
 
-    return { product, category, brand };
+    // An imported cost only sets the opening cost (no cost yet, or nothing
+    // on hand) — it never overwrites the weighted average built from goods
+    // receipts. costApplied tells the caller which happened.
+    let costApplied = false;
+    if (row.costPrice != null && row.costPrice !== ('' as unknown)) {
+      costApplied = await applyOpeningCost(tx as Prisma.TransactionClient, {
+        organizationId,
+        productId: product.id,
+        unitCost: Number(row.costPrice),
+        sourceId: sourceId ?? 'import',
+        userId,
+      });
+      if (costApplied) {
+        product = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+      }
+    }
+
+    return { product, category, brand, costApplied };
   }
 
   private async findOrCreateCategory(organizationId: string, name: string, tx: Tx = this.prisma) {

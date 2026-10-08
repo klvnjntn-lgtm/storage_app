@@ -11,6 +11,7 @@ import { PrintTokenService } from '../common/print/print-token.service';
 import { BankAccountResolverService } from '../bank-accounts/bank-account-resolver.service';
 import { CreateDraftInvoiceDto, UpdateDraftInvoiceDto } from './dto/invoice.dto';
 import {
+  CostChangeSource,
   DeliveryOrderStatus,
   DocumentType,
   EventType,
@@ -23,7 +24,7 @@ import {
   SessionType,
   StockPolicy,
 } from '@prisma/client';
-import { PaymentStatus } from '@prisma/client';
+import { PaymentKind, PaymentStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
@@ -31,6 +32,9 @@ import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
+import { businessDayBounds, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
+import { deriveStatus } from '../payments/payment-status.util';
+import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
 
 const MM_TO_PX = 96 / 25.4;
 
@@ -123,6 +127,9 @@ export type InvoicePrintView = {
     id: string;
     amount: number;
     method: string;
+    // PAYMENT, REFUND, or one leg of moving credit between invoices
+    // (CREDIT_OUT / CREDIT_IN — the note names the other invoice).
+    kind: string;
     note: string | null;
     createdAt: Date;
   }[];
@@ -287,6 +294,7 @@ constructor(
           return tx.invoice.update({
             where: { id: invoice.id },
             data: {
+              format: dto.format ?? invoice.format,
               customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
               customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
               vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
@@ -356,6 +364,7 @@ constructor(
         return tx.invoice.update({
           where: { id: invoice.id },
           data: {
+            format: dto.format ?? invoice.format,
             customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
             customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
             vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
@@ -443,8 +452,8 @@ async issue(
   issuedByUserRole?: string,
   confirmOversell = false,
 ): Promise<InvoicePrintView & { sessionId: string | null }> {
-  const invoice = await this.getDraftOrThrow(organizationId, invoiceId);
-  if (invoice.items.length === 0) {
+  const draft = await this.getDraftOrThrow(organizationId, invoiceId);
+  if (draft.items.length === 0) {
     throw new BadRequestException('Cannot print an empty invoice');
   }
 
@@ -471,20 +480,6 @@ async issue(
     ? { mode: StockPolicy.BLOCK, confirmOversell: false }
     : { mode: org.stockPolicy, confirmOversell };
 
-  // A sales-order-sourced invoice whose goods already move through delivery
-  // orders must not ALSO decrement stock / post COGS at issue time.
-  const soHasDeliveries = invoice.salesOrderId
-    ? (await this.prisma.deliveryOrder.count({
-        where: {
-          organizationId,
-          salesOrderId: invoice.salesOrderId,
-          status: { not: DeliveryOrderStatus.CANCELLED },
-        },
-      })) > 0
-    : false;
-  const ownedByDeliveryWorkflow = (hasWarehouseOps || soHasDeliveries) && !!invoice.salesOrderId;
-  const decreasesStockHere = !hasWarehouseOps && !ownedByDeliveryWorkflow;
-
   try {
     return await this.prisma.$transaction(async (tx) => {
       // Re-read under a row lock: the lines checked above may have been
@@ -493,6 +488,27 @@ async issue(
       if (invoice.items.length === 0) {
         throw new BadRequestException('Cannot print an empty invoice');
       }
+
+      // A sales-order-sourced invoice whose goods already move through
+      // delivery orders must not ALSO decrement stock / post COGS at issue
+      // time. Checked under the sales order's row lock — the same lock
+      // DeliveryOrderService.create() takes — so a delivery order can't be
+      // created between this check and the stock decrement below (and
+      // create() refuses once this invoice has fulfilled directly).
+      let soHasDeliveries = false;
+      if (invoice.salesOrderId) {
+        await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${invoice.salesOrderId} FOR UPDATE`;
+        soHasDeliveries =
+          (await tx.deliveryOrder.count({
+            where: {
+              organizationId,
+              salesOrderId: invoice.salesOrderId,
+              status: { not: DeliveryOrderStatus.CANCELLED },
+            },
+          })) > 0;
+      }
+      const ownedByDeliveryWorkflow = (hasWarehouseOps || soHasDeliveries) && !!invoice.salesOrderId;
+      const decreasesStockHere = !hasWarehouseOps && !ownedByDeliveryWorkflow;
       if (decreasesStockHere) {
         const missingLocation = invoice.items.find((item) => item.productId && !item.locationId);
         if (missingLocation) {
@@ -527,8 +543,17 @@ async issue(
           );
         }
 
+        // COGS at the weighted-average cost as of now, when the stock
+        // leaves — not the cost copied onto the line when it was drafted,
+        // which a goods receipt since then may have moved.
+        const costNow = await currentCosts(
+          tx,
+          organizationId,
+          invoice.items.filter((i) => i.productId).map((i) => i.productId!),
+        );
         for (const item of invoice.items) {
           if (!item.productId) continue;
+          const unitCost = costNow.get(item.productId) ?? (item.unitCost != null ? Number(item.unitCost) : null);
           const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
             organizationId,
             item.productId,
@@ -544,6 +569,7 @@ async issue(
               where: { id: item.id },
               data: {
                 fulfilledQuantity: { increment: fulfilledQuantity },
+                unitCost,
                 ...(oversold ? { costProvisional: true } : {}),
               },
             });
@@ -551,7 +577,7 @@ async issue(
             costedLines.push({
               productId: item.productId,
               quantity: fulfilledQuantity,
-              unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+              unitCost,
               locationId: item.locationId,
             });
           }
@@ -592,6 +618,8 @@ async issue(
         data: {
           invoiceDate,
           invoiceNumber,
+          // A 0-total invoice (e.g. fully discounted) has nothing to collect.
+          paymentStatus: deriveStatus(0, Number(invoice.total)),
           vehiclePlateNumber: vehicle?.plateNumber ?? null,
           vehicleModel: vehicle?.vehicleModel ?? null,
           vehicleVin: vehicle?.vin ?? null,
@@ -677,15 +705,26 @@ async issue(
         invoiceNumber: true,
         issuedAt: true,
         amountPaid: true,
+        creditedAmount: true,
         total: true,
+        subtotal: true,
+        discount: true,
+        taxAmount: true,
         items: {
-          select: { quantity: true, unitPrice: true, unitCost: true },
+          select: { quantity: true, lineTotal: true, discountAmount: true, unitCost: true },
         },
       },
       orderBy: { issuedAt: 'desc' },
     });
 
+    // revenue: everything invoiced, tax included — the figure collected/
+    // outstanding are measured against. netRevenue: after line discounts,
+    // before tax — what margin is measured against, since tax is owed to
+    // the government, not earned.
     let revenue = 0;
+    let netRevenue = 0;
+    let taxAmount = 0;
+    let credited = 0;
     let cost = 0;
     let profit = 0;
     let profitCoverage = 0;
@@ -705,13 +744,17 @@ async issue(
         if (item.unitCost != null) {
           profitCoverage++;
           const lineCost = Number(item.unitCost) * qty;
-          const lineProfit = (Number(item.unitPrice) - Number(item.unitCost)) * qty;
+          // Line revenue net of its own discount (lineTotal is gross).
+          const lineNet = Number(item.lineTotal) - Number(item.discountAmount);
           invCost += lineCost;
-          invProfit += lineProfit;
+          invProfit += lineNet - lineCost;
         }
       }
 
       revenue += Number(inv.total);
+      netRevenue += Number(inv.subtotal) - Number(inv.discount);
+      taxAmount += Number(inv.taxAmount);
+      credited += Number(inv.creditedAmount);
       cost += invCost;
       profit += invProfit;
       collected += Number(inv.amountPaid);
@@ -721,22 +764,26 @@ async issue(
         invoiceNumber: inv.invoiceNumber,
         issuedAt: inv.issuedAt,
         gross: Number(inv.total),
-        cost: invCost,
-        profit: invProfit,
+        credited: Number(inv.creditedAmount),
+        cost: this.round2(invCost),
+        profit: this.round2(invProfit),
         unitsSold,
         collected: Number(inv.amountPaid),
       };
     });
 
     return {
-      revenue,
+      revenue: this.round2(revenue),
+      netRevenue: this.round2(netRevenue),
+      taxAmount: this.round2(taxAmount),
+      credited: this.round2(credited),
       invoiceCount: invoices.length,
-      cost,
-      profit,
+      cost: this.round2(cost),
+      profit: this.round2(profit),
       profitCoverage,
       lineItemCount,
       invoices: rows,
-      collected,
+      collected: this.round2(collected),
     };
   }
 
@@ -881,8 +928,7 @@ async issue(
       ? { gte: filters.from, lte: filters.to }
       : undefined;
 
-    const now = new Date();
-    const todayUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayUtcMidnight = filters.overdue ? await this.businessToday(organizationId) : undefined;
     const overdueFilter = filters.overdue
       ? {
           status: InvoiceStatus.ISSUED,
@@ -1099,6 +1145,7 @@ async issue(
         id: p.id,
         amount: toNumber(p.amount),
         method: p.method,
+        kind: p.kind,
         note: p.note,
         createdAt: p.createdAt,
       })),
@@ -1140,6 +1187,27 @@ async issue(
   }
 
   // ---- helpers ------------------------------------------------
+
+  // From/to as whole business days in the org's timezone. Report and list
+  // filters used UTC days, so in Jakarta anything issued 00:00–06:59 landed
+  // on the previous day.
+  async businessDayBounds(organizationId: string, from?: string, to?: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { timezone: true },
+    });
+    return businessDayBounds(from, to, resolveTimezone(org));
+  }
+
+  // dueDate is stored as a calendar date (00:00 UTC of that day), so
+  // "overdue" means due before today's business date — not today's UTC date.
+  private async businessToday(organizationId: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { timezone: true },
+    });
+    return todayBusinessDate(resolveTimezone(org));
+  }
 
   private round2(n: number) {
     return Math.round(n * 100) / 100;
@@ -1302,6 +1370,39 @@ async getCustomerStatement(
     openingBalance + periodInvoiced - periodPaidAsOfNow - periodCredited,
   );
 
+  // Refunds and credit moved between this customer's invoices during the
+  // period — the "where did the credit go" side of the statement.
+  const creditPayments = await this.prisma.payment.findMany({
+    where: {
+      voidedAt: null,
+      kind: { in: [PaymentKind.REFUND, PaymentKind.CREDIT_OUT, PaymentKind.CREDIT_IN] },
+      createdAt: { gte: from, lte: to },
+      invoice: { organizationId, customerId, status: InvoiceStatus.ISSUED, ...vehicleFilter },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      kind: true,
+      amount: true,
+      method: true,
+      note: true,
+      createdAt: true,
+      invoice: { select: { id: true, invoiceNumber: true } },
+    },
+  });
+  // Credit still available: paid more than owed after returns, on any of
+  // the customer's issued invoices, as of now.
+  const creditHolders = await this.prisma.invoice.findMany({
+    where: { organizationId, customerId, status: InvoiceStatus.ISSUED },
+    select: { total: true, amountPaid: true, creditedAmount: true },
+  });
+  const availableCredit = this.round2(
+    creditHolders.reduce(
+      (sum, inv) => sum + Math.max(0, Number(inv.amountPaid) + Number(inv.creditedAmount) - Number(inv.total)),
+      0,
+    ),
+  );
+
   return {
     customer,
     organization,
@@ -1311,6 +1412,17 @@ async getCustomerStatement(
     vehicleIds: vehicleIds ?? [],
     openingBalance,
     closingBalance,
+    availableCredit,
+    creditActivity: creditPayments.map((p) => ({
+      id: p.id,
+      date: p.createdAt,
+      kind: p.kind,
+      amount: Number(p.amount),
+      method: p.method,
+      note: p.note,
+      invoiceId: p.invoice.id,
+      invoiceNumber: p.invoice.invoiceNumber,
+    })),
     paymentTimingUnavailable: true,
     lines: periodInvoices.map((inv) => ({
       id: inv.id,
@@ -1352,20 +1464,6 @@ async editIssuedInvoice(
   dto: EditIssuedInvoiceDto,
   userId: string,
 ) {
-  const invoice = await this.prisma.invoice.findFirst({
-    where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
-    include: {
-      items: { include: { product: { select: { name: true, sku: true } } } },
-    },
-  });
-  if (!invoice) throw new NotFoundException('Issued invoice not found');
-
-  if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
-    throw new BadRequestException(
-      'Cannot edit items on an invoice that has payments recorded. Void and reissue instead.',
-    );
-  }
-
   const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
   const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
@@ -1373,36 +1471,91 @@ async editIssuedInvoice(
     where: { id: organizationId },
     select: { stockPolicy: true },
   });
-  // See issue() — same belt-and-suspenders: the fulfill() call below only
-  // runs when !hasWarehouseOps anyway, so this never actually matters for
-  // a warehouse-ops org, but force BLOCK explicitly rather than rely on that.
+  // See issue() — same belt-and-suspenders: the fulfill() call below never
+  // runs for a warehouse-ops org, but force BLOCK explicitly rather than
+  // rely on that.
   const stockPolicy = hasWarehouseOps
     ? { mode: StockPolicy.BLOCK, confirmOversell: false }
     : { mode: org.stockPolicy, confirmOversell: !!dto.confirmOversell };
 
-  const keyOf = (i: { productId: string | null; description: string | null }) =>
-    i.productId ? `p:${i.productId}` : `s:${i.description}`;
+  const updated = await this.prisma.$transaction(async (tx) => {
+    // Row lock first, then read: a concurrent edit or void of this invoice
+    // waits here and then sees what this one committed, instead of both
+    // working from the same stale lines (which double-moved stock).
+    await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
+    const invoice = await tx.invoice.findFirst({
+      where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
+      include: {
+        items: { include: { product: { select: { name: true, sku: true } } }, orderBy: { id: 'asc' } },
+      },
+    });
+    if (!invoice) throw new NotFoundException('Issued invoice not found');
 
-  const oldItemByKey = new Map(invoice.items.map((i) => [keyOf(i), i]));
+    if (Number(invoice.amountPaid) > 0) {
+      throw new BadRequestException(
+        'Cannot edit items on an invoice that has payments recorded. Void and reissue instead.',
+      );
+    }
+    // A return already reversed revenue line by line (creditedAmount);
+    // re-pricing the lines afterwards would leave that credit pointing at
+    // amounts that no longer exist.
+    if (Number(invoice.creditedAmount) > 0) {
+      throw new BadRequestException(
+        'Cannot edit an invoice that has returns recorded against it.',
+      );
+    }
 
-  // FIX — force existing lines to keep the price they were issued at.
-  // Without this, priceLines() re-derives unitPrice from the live
-  // product (unless posPricingEnabled is on and dto sent one), so
-  // editing any line on an issued invoice — even just a quantity change
-  // — silently re-priced every product line to today's selling price,
-  // computed off dto.items directly so it's ready before priceLines runs.
-  const forcedUnitPriceByIndex = new Map<number, number>();
-  const forcedPriceLevelIdByIndex = new Map<number, string | null>();
-  dto.items.forEach((item, idx) => {
-    if (!item.productId) return;
-    const oldItem = oldItemByKey.get(`p:${item.productId}`);
-    if (oldItem?.unitPrice != null) {
+    // Stock moves here only for an invoice whose stock left at issue()
+    // itself. A sales-order invoice fulfilled through delivery orders (or a
+    // warehouse session) must not have its edits pull stock directly — the
+    // delivery/pick flow owns that, and doing both double-counted.
+    const movesStockDirectly =
+      !hasWarehouseOps &&
+      (invoice.fulfillmentPath === 'DIRECT_ISSUE' || (!invoice.fulfillmentPath && !invoice.salesOrderId));
+
+    // Product lines are matched to the issued ones by product AND location:
+    // the POS allows the same product twice from different locations, and
+    // matching by product alone sent both new lines to the same old one.
+    // Duplicates are consumed in line order. `stockMatch` decides stock: a
+    // line whose location changed counts as removed (restocked at its old
+    // location) plus added (taken at the new one). `priceMatch` additionally
+    // falls back to product-only, so moving a line keeps its issued price.
+    type OldItem = (typeof invoice.items)[number];
+    const lineKey = (productId: string, locationId: string | null | undefined) => `${productId}@${locationId ?? ''}`;
+    const matchLines = (allowProductOnly: boolean) => {
+      const remaining = invoice.items.filter((i) => i.productId);
+      const byIndex = new Map<number, OldItem>();
+      const take = (pred: (o: OldItem) => boolean) => {
+        const at = remaining.findIndex(pred);
+        return at === -1 ? undefined : remaining.splice(at, 1)[0];
+      };
+      dto.items.forEach((item, idx) => {
+        if (!item.productId) return;
+        const old = take((o) => lineKey(o.productId!, o.locationId) === lineKey(item.productId!, item.locationId));
+        if (old) byIndex.set(idx, old);
+      });
+      if (allowProductOnly) {
+        dto.items.forEach((item, idx) => {
+          if (!item.productId || byIndex.has(idx)) return;
+          const old = take((o) => o.productId === item.productId);
+          if (old) byIndex.set(idx, old);
+        });
+      }
+      return { byIndex, unmatched: remaining };
+    };
+    const priceMatch = matchLines(true);
+    const stockMatch = matchLines(!movesStockDirectly);
+
+    // Existing lines keep the price they were issued at. Without this,
+    // priceLines() re-derives unitPrice from the live product, so editing
+    // any line silently re-priced every product line to today's price.
+    const forcedUnitPriceByIndex = new Map<number, number>();
+    const forcedPriceLevelIdByIndex = new Map<number, string | null>();
+    for (const [idx, oldItem] of priceMatch.byIndex) {
       forcedUnitPriceByIndex.set(idx, Number(oldItem.unitPrice));
       forcedPriceLevelIdByIndex.set(idx, oldItem.priceLevelId ?? null);
     }
-  });
 
-  const updated = await this.prisma.$transaction(async (tx) => {
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items, tx, {
         requireLocationForProducts: !hasWarehouseOps,
@@ -1410,6 +1563,9 @@ async editIssuedInvoice(
         forcedPriceLevelIdByIndex,
         customerId: invoice.customerId,
         userId,
+        // A line keeps the tax it was issued with even if that rate has
+        // since been archived.
+        allowArchivedTaxRates: true,
       });
     const newTotal = this.round2(subtotal - discountAmount + taxAmount);
 
@@ -1428,12 +1584,8 @@ async editIssuedInvoice(
     const demandChanges: { label: string; before: number; after: number }[] = [];
     const carriedFulfilledByLineIndex = new Map<number, number>();
     const unitCostByLineIndex = new Map<number, number | null>();
-    // FIX — same idea for product identity: preserve the name/sku that
-    // was on the invoice when it was issued, don't re-pull today's
-    // product.name/sku for a line that already existed. A line being
-    // added for the first time during this edit has no history to
-    // preserve, so it takes today's product identity — same as a brand
-    // new invoice line would.
+    // Preserve the name/sku that was on the invoice when it was issued; a
+    // line added during this edit has no history and takes today's.
     const productNameByLineIndex = new Map<number, string | null>();
     const skuByLineIndex = new Map<number, string | null>();
     const costProvisionalByLineIndex = new Map<number, boolean>();
@@ -1443,84 +1595,106 @@ async editIssuedInvoice(
       ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId } })
       : [];
     const productInfoById = new Map(products.map((p) => [p.id, p]));
+    // Units fulfilled by this edit leave stock now, at today's average.
+    const costNow = await currentCosts(tx, organizationId, productIds);
 
     for (let idx = 0; idx < lines.length; idx++) {
       const l = lines[idx];
       if (!l.productId) continue;
 
-      const key = keyOf(l);
-      const oldItem = oldItemByKey.get(key);
+      const oldItem = stockMatch.byIndex.get(idx);
+      const identity = priceMatch.byIndex.get(idx);
       const currentProduct = productInfoById.get(l.productId);
+      const label = currentProduct?.name ?? l.productId;
       // Preserve the cost basis already locked in when this line's units
       // were fulfilled — re-pricing to today's product.costPrice would
       // silently rewrite historical COGS for units that already shipped.
       const oldUnitCost = oldItem?.unitCost != null ? Number(oldItem.unitCost) : null;
       unitCostByLineIndex.set(idx, oldUnitCost ?? l.unitCost);
-      productNameByLineIndex.set(idx, oldItem?.productName ?? oldItem?.product?.name ?? currentProduct?.name ?? null);
-      skuByLineIndex.set(idx, oldItem?.sku ?? oldItem?.product?.sku ?? currentProduct?.sku ?? null);
+      productNameByLineIndex.set(idx, identity?.productName ?? identity?.product?.name ?? currentProduct?.name ?? null);
+      skuByLineIndex.set(idx, identity?.sku ?? identity?.product?.sku ?? currentProduct?.sku ?? null);
       if (oldItem?.costProvisional) costProvisionalByLineIndex.set(idx, true);
       const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
       const oldQty = oldItem ? Number(oldItem.quantity) : 0;
 
       if (l.quantity < oldFulfilled) {
         throw new BadRequestException(
-          `Cannot reduce "${l.description ?? key}" to ${l.quantity} — ${oldFulfilled} unit(s) are already fulfilled. Process a return instead.`,
+          `Cannot reduce "${label}" to ${l.quantity} — ${oldFulfilled} unit(s) are already fulfilled. Process a return instead.`,
         );
       }
 
       if (hasWarehouseOps && l.quantity !== oldQty) {
-        demandChanges.push({ label: l.description ?? key, before: oldQty, after: l.quantity });
+        demandChanges.push({ label, before: oldQty, after: l.quantity });
       }
 
       let fulfilledForThisLine = oldFulfilled;
 
-      if (!hasWarehouseOps) {
-        const addedDemand = l.quantity - oldQty;
+      if (movesStockDirectly) {
+        const addedDemand = this.round2(l.quantity - oldQty);
         if (addedDemand > 0) {
           const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
             organizationId, l.productId, l.locationId!, addedDemand, userId,
             { type: EventType.SALE, invoiceId: invoice.id }, tx, stockPolicy,
           );
-          fulfilledForThisLine += fulfilledQuantity;
+          fulfilledForThisLine = this.round2(fulfilledForThisLine + fulfilledQuantity);
           if (oversold) costProvisionalByLineIndex.set(idx, true);
+          // Units already fulfilled keep the cost they left at; the new ones
+          // are at today's average. The line carries the blend of the two,
+          // which is what the COGS repost below books for the whole line.
+          if (fulfilledQuantity > 0) {
+            unitCostByLineIndex.set(
+              idx,
+              blendLineCost(oldFulfilled, oldItem ? oldUnitCost : null, fulfilledQuantity, costNow.get(l.productId) ?? l.unitCost),
+            );
+          }
         }
       }
 
       carriedFulfilledByLineIndex.set(idx, fulfilledForThisLine);
     }
 
-    const newKeys = new Set(lines.filter((l) => l.productId).map((l) => keyOf(l)));
-    for (const item of invoice.items) {
-      if (!item.productId) continue;
-      if (newKeys.has(keyOf(item))) continue;
+    for (const item of stockMatch.unmatched) {
+      const label = item.productName ?? item.product?.name ?? item.description ?? item.productId!;
+      const fulfilled = Number(item.fulfilledQuantity);
 
       if (hasWarehouseOps) {
         // A line with fulfilled units can't just be dropped — the same
-        // rule as the quantity-reduction check above (l.quantity <
-        // oldFulfilled). Deleting it outright would silently sever the
-        // DeliveryOrderItem.invoiceItemId link (SetNull on delete) for
-        // stock that's already shipped, with no error and no journal
-        // reversal.
-        const fulfilled = Number(item.fulfilledQuantity);
+        // rule as the quantity-reduction check above. Deleting it would
+        // silently sever the DeliveryOrderItem.invoiceItemId link (SetNull
+        // on delete) for stock that's already shipped.
         if (fulfilled > 0) {
           throw new BadRequestException(
-            `Cannot remove "${item.product?.name ?? item.description ?? keyOf(item)}" — ${fulfilled} unit(s) are already fulfilled. Process a return instead.`,
+            `Cannot remove "${label}" — ${fulfilled} unit(s) are already fulfilled. Process a return instead.`,
           );
         }
-        demandChanges.push({
-          label: item.product?.name ?? item.description ?? keyOf(item),
-          before: Number(item.quantity),
-          after: 0,
-        });
+        demandChanges.push({ label, before: Number(item.quantity), after: 0 });
         continue;
       }
 
-      if (!item.locationId) continue;
+      if (!movesStockDirectly) {
+        // Fulfilled through delivery orders: the unit count can't drop
+        // below what shipped, same as the quantity check above.
+        if (fulfilled > 0) {
+          throw new BadRequestException(
+            `Cannot remove "${label}" — ${fulfilled} unit(s) are already fulfilled. Process a return instead.`,
+          );
+        }
+        continue;
+      }
 
-      const fulfilled = Number(item.fulfilledQuantity);
-      if (fulfilled > 0) {
+      if (item.locationId && fulfilled > 0) {
+        // Back on the shelf at the cost it left at.
+        await receiveAtCost(tx, {
+          organizationId,
+          productId: item.productId!,
+          quantity: fulfilled,
+          unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+          source: CostChangeSource.SALE_REVERSAL,
+          sourceId: `invoice:${invoice.id}`,
+          userId,
+        });
         await this.stockService.increase(
-          organizationId, item.productId, item.locationId, fulfilled, userId,
+          organizationId, item.productId!, item.locationId, fulfilled, userId,
           { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
         );
       }
@@ -1594,8 +1768,9 @@ async editIssuedInvoice(
       await this.journal.voidEntry(organizationId, priorRevenue.id, userId, voidReason, tx);
       await this.postingRules.postInvoiceIssued(organizationId, invoice.id, tx);
 
-      // Warehouse-ops orgs post COGS at pick/ship, so edits never touch it.
-      if (!hasWarehouseOps) {
+      // COGS for anything not taken at issue() is posted where it left
+      // (pick, delivery-order ship), so edits only repost the issue-time one.
+      if (movesStockDirectly) {
         const cogsSourceId = `${invoice.id}:cogs:issue`;
         const priorCogs = await this.journal.findPostedBySource(
           organizationId, JournalSourceType.INVOICE, cogsSourceId, tx,
@@ -1669,6 +1844,7 @@ async editIssuedInvoice(
   private buildEditDiff(
     oldItems: {
       productId: string | null;
+      locationId: string | null;
       description: string | null;
       quantity: number;
       unitPrice: any;
@@ -1677,6 +1853,7 @@ async editIssuedInvoice(
     }[],
     newItems: {
       productId: string | null;
+      locationId: string | null;
       description: string | null;
       quantity: number;
       unitPrice: number;
@@ -1684,8 +1861,8 @@ async editIssuedInvoice(
     }[],
     productNames: Map<string, string>,
   ): { label: string; before: string; after: string }[] {
-    const keyOf = (i: { productId: string | null; description: string | null }) =>
-      i.productId ? `p:${i.productId}` : `s:${i.description}`;
+    const keyOf = (i: { productId: string | null; locationId?: string | null; description: string | null }) =>
+      i.productId ? `p:${i.productId}@${i.locationId ?? ''}` : `s:${i.description}`;
     const labelOf = (i: { productId: string | null; description: string | null; product?: { name: string } | null }) =>
       i.productId ? (i.product?.name ?? productNames.get(i.productId) ?? 'Unknown product') : (i.description ?? 'Service');
 
@@ -1732,8 +1909,7 @@ async editIssuedInvoice(
   }
 
   async getOverdueCount(organizationId: string): Promise<number> {
-    const now = new Date();
-    const todayUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayUtcMidnight = await this.businessToday(organizationId);
 
     return this.prisma.invoice.count({
       where: {
@@ -1758,8 +1934,14 @@ async recostInvoiceItem(
   return this.prisma.$transaction(async (tx) => {
     const item = await tx.invoiceItem.findFirst({
       where: { id: itemId, invoiceId, invoice: { organizationId } },
+      include: { invoice: { select: { status: true } } },
     });
     if (!item) throw new NotFoundException('Invoice item not found');
+    // A voided invoice's COGS is already reversed; correcting it would post
+    // a delta against cost that no longer exists.
+    if (item.invoice.status !== InvoiceStatus.ISSUED) {
+      throw new BadRequestException('Only lines on an issued invoice can be recosted');
+    }
     if (!item.costProvisional) {
       throw new BadRequestException('This line is not marked as having a provisional cost');
     }
@@ -1826,19 +2008,31 @@ async voidInvoice(
     throw new BadRequestException('A reason is required to void an invoice');
   }
 
-  const invoice = await this.prisma.invoice.findFirst({
-    where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
-    include: { items: true },
-  });
-  if (!invoice) throw new NotFoundException('Issued invoice not found');
-
-  if (invoice.paymentStatus !== PaymentStatus.UNPAID) {
-    throw new BadRequestException(
-      'Cannot void an invoice with payments recorded. Void the payment(s) first.',
-    );
-  }
-
   return this.prisma.$transaction(async (tx) => {
+    // Row lock first, then read: two concurrent voids (a double-click) used
+    // to both pass the ISSUED check and both put the stock back.
+    await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
+    const invoice = await tx.invoice.findFirst({
+      where: { id: invoiceId, organizationId, status: InvoiceStatus.ISSUED },
+      include: { items: true },
+    });
+    if (!invoice) throw new NotFoundException('Issued invoice not found');
+
+    // Returns post their own revenue/AR reversals (postSalesReturn, keyed
+    // off the delivery order or returns session, not this invoice), which
+    // voidAllForSource below doesn't touch — voiding on top of them
+    // reversed the returned amount a second time.
+    if (Number(invoice.creditedAmount) > 0) {
+      throw new BadRequestException(
+        'Cannot void — returns have already been recorded against this invoice.',
+      );
+    }
+    if (Number(invoice.amountPaid) > 0) {
+      throw new BadRequestException(
+        'Cannot void an invoice with payments recorded. Void the payment(s) first.',
+      );
+    }
+
     // ---- Block on anything physically shipped ------------------------
     // A SalesOrder-sourced DeliveryOrder never sets deliveryOrder.invoiceId
     // (see DeliveryOrderService.create()) — it only carries
@@ -1854,7 +2048,17 @@ async voidInvoice(
     const shippedCount = await tx.deliveryOrder.count({
       where: {
         organizationId,
-        status: { in: [DeliveryOrderStatus.SHIPPED, DeliveryOrderStatus.PARTIALLY_RETURNED] },
+        // Every status where goods left (and COGS posted at ship()) —
+        // FAILED is still out with the driver, RETURNED carries its own
+        // revenue reversal.
+        status: {
+          in: [
+            DeliveryOrderStatus.SHIPPED,
+            DeliveryOrderStatus.PARTIALLY_RETURNED,
+            DeliveryOrderStatus.RETURNED,
+            DeliveryOrderStatus.FAILED,
+          ],
+        },
         OR: [
           { invoiceId: invoice.id },
           ...(invoiceSalesOrderItemIds.length > 0
@@ -1865,7 +2069,7 @@ async voidInvoice(
     });
     if (shippedCount > 0) {
       throw new BadRequestException(
-        `Cannot void — this invoice has ${shippedCount} shipped delivery order(s). Process a return on each before voiding.`,
+        `Cannot void — this invoice has ${shippedCount} delivery order(s) that already left the warehouse.`,
       );
     }
 
@@ -1940,10 +2144,23 @@ async voidInvoice(
         if (!item.productId || !item.locationId) continue;
         const fulfilled = Number(item.fulfilledQuantity);
         if (fulfilled <= 0) continue;
+        // Back on the shelf at the cost it left at (its COGS is reversed below).
+        await receiveAtCost(tx, {
+          organizationId,
+          productId: item.productId,
+          quantity: fulfilled,
+          unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+          source: CostChangeSource.SALE_REVERSAL,
+          sourceId: `invoice:${invoice.id}`,
+          userId,
+        });
         await this.stockService.increase(
           organizationId, item.productId, item.locationId, fulfilled, userId,
           { type: EventType.ADJUSTMENT, invoiceId: invoice.id }, tx,
         );
+        // The units are back on the shelf, so nothing on this line is
+        // "fulfilled" any more — a returns session can't count them again.
+        await tx.invoiceItem.update({ where: { id: item.id }, data: { fulfilledQuantity: 0 } });
       }
     }
 
@@ -2000,13 +2217,25 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
 
         const quotation = await tx.salesQuotation.findFirst({
           where: { id: quotationId, organizationId },
-          include: { items: true, invoices: { select: { id: true, status: true } } },
+          include: {
+            items: { include: { taxes: { select: { taxRateId: true } } } },
+            invoices: { select: { id: true, status: true } },
+            salesOrders: { select: { id: true, status: true } },
+          },
         });
         if (!quotation) throw new NotFoundException('Quotation not found');
 
-        const invoiceableStatuses = ['SENT', 'ACCEPTED', 'CONVERTED'];
-        if (!invoiceableStatuses.includes(quotation.status)) {
-          throw new BadRequestException('Only a sent, accepted, or converted quotation can be invoiced');
+        // CONVERTED is also the status after conversion to a sales order —
+        // that order gets invoiced on its own, so invoicing the quotation
+        // too billed the customer twice. Only SENT/ACCEPTED, and never
+        // while a live sales order exists for it.
+        if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
+          throw new BadRequestException('Only a sent or accepted quotation can be invoiced');
+        }
+        if (quotation.salesOrders.some((so) => so.status !== 'CANCELLED')) {
+          throw new BadRequestException(
+            'This quotation was converted to a sales order — invoice the sales order instead',
+          );
         }
         const activeInvoices = quotation.invoices.filter((inv) => inv.status !== 'VOID');
         if (activeInvoices.length > 0) {
@@ -2021,7 +2250,9 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           unitPrice: Number(i.unitPrice),
           discountType: i.discountType ?? undefined,
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-          taxRateIds: [] as string[],
+          // The source line's tax carries over — it used to be dropped, so a
+          // quotation/order with PPN became an invoice without it.
+          taxRateIds: i.taxes.map((t) => t.taxRateId).filter((id): id is string => !!id),
         }));
 
         // Carry each source line's price and level forward unchanged — a
@@ -2039,6 +2270,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           await this.pricing.priceLines(organizationId, items, tx, {
             forcedUnitPriceByIndex,
             forcedPriceLevelIdByIndex,
+            allowArchivedTaxRates: true,
           });
         const invoice = await tx.invoice.create({
           data: {
@@ -2100,7 +2332,10 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
 
         const order = await tx.salesOrder.findFirst({
           where: { id: salesOrderId, organizationId },
-          include: { items: true, invoices: { select: { id: true } } },
+          include: {
+            items: { include: { taxes: { select: { taxRateId: true } } } },
+            invoices: { select: { id: true, status: true } },
+          },
         });
         if (!order) throw new NotFoundException('Sales order not found');
 
@@ -2122,7 +2357,9 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           }
         }
 
-        if (order.invoices.length > 0) {
+        // A voided invoice doesn't count — otherwise voiding one left the
+        // order impossible to invoice ever again.
+        if (order.invoices.some((inv) => inv.status !== InvoiceStatus.VOID)) {
           throw new BadRequestException('This sales order has already been invoiced');
         }
 
@@ -2134,7 +2371,9 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           unitPrice: Number(i.unitPrice),
           discountType: i.discountType ?? undefined,
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-          taxRateIds: [] as string[],
+          // The source line's tax carries over — it used to be dropped, so a
+          // quotation/order with PPN became an invoice without it.
+          taxRateIds: i.taxes.map((t) => t.taxRateId).filter((id): id is string => !!id),
         }));
 
         // Carry each source line's price and level forward unchanged — a
@@ -2152,6 +2391,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
           await this.pricing.priceLines(organizationId, items, tx, {
             forcedUnitPriceByIndex,
             forcedPriceLevelIdByIndex,
+            allowArchivedTaxRates: true,
           });
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
         const invoice = await tx.invoice.create({

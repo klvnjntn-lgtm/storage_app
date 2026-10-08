@@ -204,7 +204,7 @@ await this.logActivity(tx, {
   salesOrderId: order.id,
   organizationId,
   userId,
-  eventType: SalesOrderActivityEventType.EDITED,
+  eventType: SalesOrderActivityEventType.CREATED,
   metadata: {
     fields: {
       locationId: dto.locationId,
@@ -248,7 +248,7 @@ await this.logActivity(tx, {
 
         const quotation = await tx.salesQuotation.findFirst({
           where: { id: quotationId, organizationId },
-          include: { items: true },
+          include: { items: { include: { taxes: { select: { taxRateId: true } } } } },
         });
         if (!quotation) throw new NotFoundException('Quotation not found');
         if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
@@ -271,7 +271,8 @@ await this.logActivity(tx, {
           unit: i.unit ?? undefined,
           discountType: i.discountType ?? undefined,
           discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-          taxRateIds: [] as string[],
+          // The quotation line's tax carries over (it used to be dropped).
+          taxRateIds: i.taxes.map((t) => t.taxRateId).filter((id): id is string => !!id),
         }));
 
         // Carry each source line's price and level forward unchanged — a
@@ -289,6 +290,7 @@ await this.logActivity(tx, {
           await this.pricing.priceLines(organizationId, items, tx, {
             forcedUnitPriceByIndex,
             forcedPriceLevelIdByIndex,
+            allowArchivedTaxRates: true,
           });
 
         const order = await tx.salesOrder.create({
@@ -423,6 +425,7 @@ await this.logActivity(tx, {
     if (!dto.items) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          await this.lockDraft(tx, organizationId, order.id);
           const updated = await tx.salesOrder.update({
             where: { id: order.id },
             data: {
@@ -469,6 +472,7 @@ await this.logActivity(tx, {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await this.lockDraft(tx, organizationId, order.id);
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, dto.items!, tx, {
             customerId: dto.customerId ?? order.customerId,
@@ -693,11 +697,23 @@ async confirm(organizationId: string, id: string, userId: string) {
         customer: true,
         quotation: { select: { id: true, quotationNumber: true, status: true } },
         deliveryOrders: { select: { id: true, doNumber: true, status: true } },
-        invoices: { select: { id: true, invoiceNumber: true, status: true } },
+        invoices: { select: { id: true, invoiceNumber: true, status: true, fulfillmentPath: true } },
       },
     });
     if (!order) throw new NotFoundException('Order not found');
     return order;
+  }
+
+  // Row-locks the order and re-checks it's still a draft, inside the
+  // caller's transaction. getDraftOrThrow() reads outside any transaction,
+  // so a concurrent confirm() could land in between and an edit then
+  // rewrote the lines of an already-confirmed order.
+  private async lockDraft(tx: Prisma.TransactionClient, organizationId: string, id: string) {
+    await tx.$queryRaw`SELECT id FROM "SalesOrder" WHERE id = ${id} FOR UPDATE`;
+    const fresh = await tx.salesOrder.findFirst({ where: { id, organizationId }, select: { status: true } });
+    if (!fresh || fresh.status !== SalesOrderStatus.DRAFT) {
+      throw new BadRequestException('Order is no longer editable');
+    }
   }
 
   private async getDraftOrThrow(organizationId: string, id: string) {

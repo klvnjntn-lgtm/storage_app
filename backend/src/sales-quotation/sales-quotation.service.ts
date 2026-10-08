@@ -470,6 +470,15 @@ export class SalesQuotationService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Claim first: a second concurrent send (double-click) finds no
+        // DRAFT row and stops before taking a number from the sequence.
+        const claim = await tx.salesQuotation.updateMany({
+          where: { id: quotation.id, organizationId, status: SalesQuotationStatus.DRAFT },
+          data: { status: SalesQuotationStatus.SENT },
+        });
+        if (claim.count === 0) {
+          throw new BadRequestException('Quotation is no longer a draft — it may have already been sent');
+        }
         const quotationNumber = await this.numbering.nextSequential(tx, organizationId, 'SALES_QUOTATION', 'SQ');
 
         const updated = await tx.salesQuotation.update({

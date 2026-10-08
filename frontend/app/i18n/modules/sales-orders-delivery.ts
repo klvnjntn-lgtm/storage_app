@@ -175,6 +175,7 @@ export const salesOrdersDelivery = {
         },
       },
       deliveryOrdersPanel: {
+        blockedByInvoice: "This order's invoice already took the goods out of stock when it was issued, so there is nothing left to deliver.",
         requestFailed: 'Request failed ({status})',
         couldNotReachServer: 'Could not reach the server.',
         qtyRequired: 'Enter a quantity for at least one item.',
@@ -273,6 +274,15 @@ export const salesOrdersDelivery = {
         totalBalance: 'Total balance',
         periodActivity: 'Period activity',
         closingBalance: 'Closing balance',
+        creditActivity: 'Credit and refunds',
+        availableCredit: 'Credit available: {amount}',
+        colCreditType: 'Type',
+        colAmount: 'Amount',
+        creditKind: {
+          REFUND: 'Refund paid out',
+          CREDIT_OUT: 'Credit used from this invoice',
+          CREDIT_IN: 'Paid with credit',
+        },
       },
       statementNew: {
         title: 'Generate Statement',
@@ -509,6 +519,7 @@ export const salesOrdersDelivery = {
         },
       },
       deliveryOrdersPanel: {
+        blockedByInvoice: 'Invois pesanan ini sudah mengurangi stok saat diterbitkan, jadi tidak ada lagi yang perlu dikirim.',
         requestFailed: 'Permintaan gagal ({status})',
         couldNotReachServer: 'Tidak dapat terhubung ke server.',
         qtyRequired: 'Isi kuantitas untuk minimal satu item.',
@@ -607,6 +618,15 @@ export const salesOrdersDelivery = {
         totalBalance: 'Total saldo',
         periodActivity: 'Aktivitas periode',
         closingBalance: 'Saldo akhir',
+        creditActivity: 'Kredit dan pengembalian dana',
+        availableCredit: 'Kredit tersedia: {amount}',
+        colCreditType: 'Jenis',
+        colAmount: 'Jumlah',
+        creditKind: {
+          REFUND: 'Dana dikembalikan',
+          CREDIT_OUT: 'Kredit dari faktur ini dipakai',
+          CREDIT_IN: 'Dibayar dengan kredit',
+        },
       },
       statementNew: {
         title: 'Buat Rekening Koran',

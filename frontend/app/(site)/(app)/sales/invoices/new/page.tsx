@@ -27,6 +27,7 @@ import {
 import { PAGE_CSS } from '@/lib/mappers/invoice-format';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -143,6 +144,19 @@ function NewInvoicePage() {
 
   const [posPricingEnabled, setPosPricingEnabled] = useState(false);
   const posModeEnabled = posPricingEnabled;
+  const { profile } = useAuth();
+  // Whether the cart may go past stock — the org's stock policy (WARN/ALLOW),
+  // not the POS pricing toggle it used to be tied to. The backend still
+  // enforces it at issue; under WARN with admin-only overrides, a non-admin
+  // can't confirm the oversell, so the cart doesn't offer it either.
+  const [stockPolicy, setStockPolicy] = useState<{
+    requiresConfirmation: boolean;
+    allowNegative: boolean;
+    overrideRequiresAdmin: boolean;
+  } | null>(null);
+  const allowOversell =
+    !!stockPolicy?.allowNegative &&
+    !(stockPolicy.requiresConfirmation && stockPolicy.overrideRequiresAdmin && profile?.role !== 'ADMIN');
 
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
@@ -157,7 +171,12 @@ function NewInvoicePage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<string>('');
 
-  const [currentDraftId, setCurrentDraftId] = useState<string | null>(urlDraftId);
+  // The current draft's id — a ref, not state, because it's read after
+  // awaits where a state value would be stale — and the autosave request
+  // currently in flight, so printing can wait for it instead of creating a
+  // second draft.
+  const draftIdRef = useRef<string | null>(urlDraftId);
+  const autosaveInFlightRef = useRef<Promise<void> | null>(null);
   const skipAutosaveRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -219,6 +238,13 @@ function NewInvoicePage() {
       setPosPricingEnabled(!!settings.posPricingEnabled);
     }
     loadSettings();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch('/invoices/stock-policy');
+      if (res.ok) setStockPolicy(await res.json());
+    })();
   }, []);
 
   useEffect(() => {
@@ -363,7 +389,7 @@ function NewInvoicePage() {
     setCart({});
     setQuery('');
     setResults([]);
-    setCurrentDraftId(null);
+    draftIdRef.current = null;
     setBankAccountId('');
     setEmployeeId('');
   }
@@ -421,7 +447,7 @@ function NewInvoicePage() {
     }
     skipAutosaveRef.current = true;
     setCart(restoredCart);
-    setCurrentDraftId(id);
+    draftIdRef.current = id;
   }
 
   useEffect(() => {
@@ -489,16 +515,29 @@ function NewInvoicePage() {
     },
   ): boolean {
     setError('');
-    let target;
+    let target: { locationId: string; locationName: string; quantity: number } | undefined;
     if (locationFilter) {
       target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
-      if (!target || target.quantity <= 0) {
+      if (!target && allowOversell) {
+        target = { locationId: locationFilter.id, locationName: locationFilter.name, quantity: 0 };
+      }
+      if (!target || (!allowOversell && target.quantity <= 0)) {
         setError(t('sales.invoicesNew.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
         return false;
       }
     } else {
       target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
-      if (!target || target.quantity <= 0) {
+      if (!target) {
+        // Nothing recorded anywhere: overselling still needs a location to
+        // take it from, and guessing one would be wrong.
+        setError(
+          allowOversell
+            ? t('sales.invoicesNew.pickLocationToOversell', { name: product.name })
+            : t('sales.invoicesNew.noStockAnywhere', { name: product.name }),
+        );
+        return false;
+      }
+      if (!allowOversell && target.quantity <= 0) {
         setError(t('sales.invoicesNew.noStockAnywhere', { name: product.name }));
         return false;
       }
@@ -508,7 +547,7 @@ function NewInvoicePage() {
     const key = cartKey(product.id, resolvedTarget.locationId);
     const existing = cart[key];
     const nextQty = (existing?.quantity ?? 0) + details.quantity;
-    if (!posModeEnabled && nextQty > resolvedTarget.quantity) {
+    if (!allowOversell && nextQty > resolvedTarget.quantity) {
       setError(
         t('sales.invoicesNew.onlyAvailable', {
           qty: resolvedTarget.quantity,
@@ -552,15 +591,10 @@ function NewInvoicePage() {
         const { [key]: _removed, ...rest } = prev;
         return rest;
       }
-      // FIX — CartPanel's "+" stepper is only disabled past available
-      // stock when posModeEnabled is false (`disabled={!posModeEnabled &&
-      // line.quantity >= available}`), implying POS mode should allow
-      // overselling — but this unconditional ceiling meant the button
-      // looked enabled and silently did nothing once past stock. The
-      // very first addToCart() still respects real stock (above); this
-      // bypass only applies to the stepper once a line already exists.
+      // Same rule as addToCart() and CartPanel's "+" stepper: past stock
+      // only when the org's stock policy allows overselling.
       const available = stockAtLineLocation(line);
-      if (!posModeEnabled && nextQty > available) return prev;
+      if (!allowOversell && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
     });
   }
@@ -884,7 +918,7 @@ function NewInvoicePage() {
 
   function adoptDraftId(id: string) {
     loadedDraftIdRef.current = id;
-    setCurrentDraftId(id);
+    draftIdRef.current = id;
     window.history.replaceState(null, '', `/sales/invoices/new?draftId=${id}`);
   }
 
@@ -896,12 +930,22 @@ function NewInvoicePage() {
       printData ||
       !hasSaveableContent(cartRef.current, servicesRef.current, hasWorkshopRms, customerRef.current, customerNameRef.current)
     ) return;
+    const run = saveDraftNow(useKeepalive);
+    autosaveInFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (autosaveInFlightRef.current === run) autosaveInFlightRef.current = null;
+    }
+  }
 
+  async function saveDraftNow(useKeepalive: boolean) {
     const itemsPayload = buildItemsPayload();
+    const draftId = draftIdRef.current;
 
     try {
-      if (currentDraftId) {
-        await apiFetch(`/invoices/${currentDraftId}`, {
+      if (draftId) {
+        await apiFetch(`/invoices/${draftId}`, {
           method: 'PATCH',
           keepalive: useKeepalive,
           body: JSON.stringify({
@@ -1013,13 +1057,19 @@ function NewInvoicePage() {
     setError('');
 
     try {
-      let invoiceId = currentDraftId;
+      // A pending or in-flight autosave would otherwise race this request:
+      // with no draft yet, both POSTed and left an orphan draft behind.
+      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+      if (autosaveInFlightRef.current) await autosaveInFlightRef.current;
+
+      let invoiceId = draftIdRef.current;
       const itemsPayload = buildItemsPayload();
 
       if (invoiceId) {
         const updateRes = await apiFetch(`/invoices/${invoiceId}`, {
           method: 'PATCH',
           body: JSON.stringify({
+            format,
             ...buildCustomerFields(),
             ...buildOdometerField(),
             ...buildInvoiceInfoFields(),
@@ -1175,7 +1225,7 @@ function NewInvoicePage() {
       setReminderStaged(false);
       setReminderSaved(false);
       setReminderError('');
-      setCurrentDraftId(null);
+      draftIdRef.current = null;
       loadedDraftIdRef.current = null;
       router.replace('/sales/invoices/new', { scroll: false });
     }, 50);
@@ -1283,6 +1333,7 @@ function NewInvoicePage() {
           onSelectLocationFilter={selectLocationFilter}
           onAddToCart={addToCart}
           posModeEnabled={posModeEnabled}
+          allowOversell={allowOversell}
           taxRates={taxRates}
           basePriceLevelId={basePriceLevelId}
         />
@@ -1314,6 +1365,7 @@ function NewInvoicePage() {
             removeFromCart={removeFromCart}
             stockAtLineLocation={stockAtLineLocation}
             posModeEnabled={posModeEnabled}
+            allowOversell={allowOversell}
             subtotal={subtotal}
             discount={discount}
             distinctLocationNames={distinctLocationNames}

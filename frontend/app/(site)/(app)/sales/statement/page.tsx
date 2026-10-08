@@ -310,6 +310,36 @@ function InvoiceStatementPageInner() {
               </div>
             )}
 
+            {/* Refunds and credit moved between invoices this period */}
+            {(statement.creditActivity?.length ?? 0) > 0 && (
+              <div className="mt-6">
+                <p className="text-sm font-semibold text-black mb-2">{t('sales.statement.creditActivity')}</p>
+                <table className="w-full text-sm text-black border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-gray-300 text-left">
+                      <th className="py-1.5 pr-2">{t('sales.statement.colDate')}</th>
+                      <th className="py-1.5 pr-2">{t('sales.statement.colInvoice')}</th>
+                      <th className="py-1.5 pr-2">{t('sales.statement.colCreditType')}</th>
+                      <th className="py-1.5 text-right">{t('sales.statement.colAmount')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statement.creditActivity!.map((a) => (
+                      <tr key={a.id} className="border-b border-gray-200">
+                        <td className="py-1.5 pr-2">{new Date(a.date).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}</td>
+                        <td className="py-1.5 pr-2">{a.invoiceNumber ?? '—'}</td>
+                        <td className="py-1.5 pr-2">
+                          {t(`sales.statement.creditKind.${a.kind}`)}
+                          {a.note ? <span className="text-gray-500"> · {a.note}</span> : null}
+                        </td>
+                        <td className="py-1.5 text-right">{formatIDR(a.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* Closing balance */}
             <div className="flex justify-end mt-4 pt-4 border-t-2 border-gray-300">
               <div className="w-64 text-sm text-black">
@@ -325,6 +355,11 @@ function InvoiceStatementPageInner() {
                   <span>{t('sales.statement.closingBalance')}</span>
                   <span>{formatIDR(statement.closingBalance)}</span>
                 </div>
+                {(statement.availableCredit ?? 0) > 0 && (
+                  <p className="text-xs text-emerald-800 mt-1 text-right">
+                    {t('sales.statement.availableCredit', { amount: formatIDR(statement.availableCredit!) })}
+                  </p>
+                )}
               </div>
             </div>
           </>

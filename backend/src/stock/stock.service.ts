@@ -421,9 +421,10 @@ export class StockService {
   // can't overwrite an in-flight sale's decrement), and posts the quantity
   // change to the ledger: net increases against Opening Balance Equity,
   // net decreases against Inventory Adjustments (so a REPLACE that lowers
-  // stock actually hits the P&L instead of disappearing into equity). Cost
-  // comes from the import row's costPrice, falling back to Product.costPrice;
-  // with neither, stock moves but nothing is posted.
+  // stock actually hits the P&L instead of disappearing into equity). Valued
+  // at the product's weighted-average cost; a row's own costPrice only sets
+  // that cost when it's the opening cost (see applyOpeningCost). With no
+  // cost at all, stock moves but nothing is posted.
   async import(
     orgId: string,
     userId: string,
@@ -448,7 +449,20 @@ export class StockService {
       data: { organizationId: orgId, mode, userId },
     });
 
-    for (const row of rows) {
+    // Spreadsheet cells arrive as whatever type the sheet had: a SKU like
+    // 12345 or a location like "1" is a number, and calling .trim() on it
+    // threw, rejecting the row with "row.sku?.trim is not a function".
+    const text = (v: string | number | null | undefined) => (v == null ? '' : String(v).trim());
+
+    for (const rawRow of rows) {
+      const row = {
+        ...rawRow,
+        sku: text(rawRow.sku),
+        name: text(rawRow.name),
+        category: text(rawRow.category),
+        brand: text(rawRow.brand) || undefined,
+        location: text(rawRow.location),
+      };
       try {
         if (
           !row.sku?.trim() ||
@@ -466,10 +480,11 @@ export class StockService {
         }
 
         const result = await this.prisma.$transaction(async (tx) => {
-          const { product } = await this.productService.resolveForImport(
+          const { product, costApplied } = await this.productService.resolveForImport(
             orgId,
             row,
             tx,
+            { userId, sourceId: `import:${batch.id}` },
           );
 
           const locationId = `${orgId}_${slugify(row.location)}`;
@@ -536,8 +551,10 @@ export class StockService {
             where: { id: product.id, organizationId: orgId },
             select: { costPrice: true },
           });
-          const unitCost =
-            row.costPrice ?? (costRow?.costPrice != null ? Number(costRow.costPrice) : null);
+          // Valued at the product's cost after resolveForImport: the row's
+          // own cost only counts when it set the opening cost; otherwise
+          // the stock moves at the existing weighted average.
+          const unitCost = costRow?.costPrice != null ? Number(costRow.costPrice) : null;
 
           // A net increase (bulk-loading/adding stock) is treated as an
           // opening-balance event; a net decrease (a REPLACE that lowers
@@ -557,7 +574,7 @@ export class StockService {
             tx,
           );
 
-          return { product, location };
+          return { product, location, costApplied };
         });
 
         accepted.push({
@@ -565,6 +582,9 @@ export class StockService {
           productId: result.product.id,
           location: result.location.name,
           qty: row.qty,
+          // The row had a cost, but the product already has stock with a
+          // weighted-average cost, which an import doesn't override.
+          costIgnored: row.costPrice != null && !result.costApplied,
         });
       } catch (err) {
         console.error('Stock import row failed:', row, err);

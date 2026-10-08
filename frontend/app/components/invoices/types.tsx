@@ -233,6 +233,19 @@ export type CustomerStatement = {
   vehicleIds?: string[];
   openingBalance: number;
   closingBalance: number;
+  // Credit the customer holds right now (paid more than owed after returns).
+  availableCredit?: number;
+  // Refunds and credit moved between this customer's invoices in the period.
+  creditActivity?: {
+    id: string;
+    date: string;
+    kind: 'REFUND' | 'CREDIT_OUT' | 'CREDIT_IN';
+    amount: number;
+    method: string;
+    note: string | null;
+    invoiceId: string;
+    invoiceNumber: string | null;
+  }[];
   paymentTimingUnavailable: boolean;
   lines: StatementLine[];
 };

@@ -18,6 +18,7 @@ type InvoiceReportRow = {
   invoiceNumber: string | null;
   issuedAt: string | null;
   gross: number;
+  credited: number; // returned value — no longer owed
   cost: number;
   profit: number;
   unitsSold: number;
@@ -25,7 +26,10 @@ type InvoiceReportRow = {
 };
 
 type RevenueReport = {
-  revenue: number; // accrual — full invoiced amount
+  revenue: number; // accrual — full invoiced amount, tax included
+  netRevenue: number; // after line discounts, before tax — margin base
+  taxAmount: number;
+  credited: number; // returned value — no longer owed
   invoiceCount: number;
   cost: number;
   profit: number;
@@ -144,14 +148,18 @@ export default function ReportsPage() {
     setFrom(toCalendarDateString(start));
   }
 
-  const margin = report && report.revenue > 0 ? (report.profit / report.revenue) * 100 : 0;
+  // Margin against revenue before tax — tax isn't earned, it's owed on.
+  const margin = report && report.netRevenue > 0 ? (report.profit / report.netRevenue) * 100 : 0;
   const hasPartialCoverage = !!report && report.profitCoverage < report.lineItemCount;
 
   // Cash actually collected vs still outstanding — both derived from
   // report.collected, which the backend aggregates from each invoice's
   // amountPaid.
-  const outstanding = report ? Math.max(report.revenue - report.collected, 0) : 0;
-  const collectionRate = report && report.revenue > 0 ? (report.collected / report.revenue) * 100 : 0;
+  // Returned goods (credited) are no longer owed, so they count toward
+  // neither side.
+  const owed = report ? report.revenue - report.credited : 0;
+  const outstanding = report ? Math.max(owed - report.collected, 0) : 0;
+  const collectionRate = report && owed > 0 ? (report.collected / owed) * 100 : 0;
 
   const sortedRows = useMemo(() => {
     if (!report) return [];
@@ -382,10 +390,10 @@ export default function ReportsPage() {
                           <p className="text-[11px] text-gray-500">{t('sales.reports.collected')}</p>
                           <p className="text-sm font-semibold">
                             {formatIDRCompact(row.collected)}
-                            {row.collected < row.gross && (
+                            {row.collected < row.gross - row.credited && (
                               <span className="text-amber-600 font-normal">
                                 {' '}
-                                · {formatIDRCompact(row.gross - row.collected)} {t('sales.reports.due')}
+                                · {formatIDRCompact(row.gross - row.credited - row.collected)} {t('sales.reports.due')}
                               </span>
                             )}
                           </p>
@@ -413,10 +421,10 @@ export default function ReportsPage() {
                             <p className="text-xs text-gray-500">{t('sales.reports.collected')}</p>
                             <p className="text-sm font-semibold">
                               {formatIDR(row.collected)}
-                              {row.collected < row.gross && (
+                              {row.collected < row.gross - row.credited && (
                                 <span className="text-amber-600 font-normal">
                                   {' '}
-                                  · {formatIDR(row.gross - row.collected)} {t('sales.reports.due')}
+                                  · {formatIDR(row.gross - row.credited - row.collected)} {t('sales.reports.due')}
                                 </span>
                               )}
                             </p>

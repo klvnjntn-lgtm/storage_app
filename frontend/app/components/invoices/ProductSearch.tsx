@@ -41,6 +41,7 @@ export function ProductSearch({
   onSelectLocationFilter,
   onAddToCart,
   posModeEnabled,
+  allowOversell,
   taxRates,
   basePriceLevelId = null,
 }: {
@@ -66,12 +67,16 @@ export function ProductSearch({
     },
   ) => boolean;
   posModeEnabled: boolean;
+  /** Whether lines may exceed stock (the org's WARN/ALLOW stock policy).
+   *  Defaults to posModeEnabled for callers that don't pass it. */
+  allowOversell?: boolean;
   taxRates: TaxRate[];
   /** The document's starting price level (customer's, else default). */
   basePriceLevelId?: string | null;
 }) {
   const { t } = useLanguage();
   const { defaultLevelId, nameOf } = usePriceLevels();
+  const canOversell = allowOversell ?? posModeEnabled;
   // Price a product at the document's level — what the line will start at.
   const priceAtBase = (product: ProductSearchResult) =>
     resolveLinePrice(product, basePriceLevelId ?? defaultLevelId, defaultLevelId);
@@ -336,13 +341,13 @@ export function ProductSearch({
                 value={staged.quantity}
                 onCommit={(q) =>
                   setStaged((prev) =>
-                    prev && (posModeEnabled || q <= stagedAvailable) ? { ...prev, quantity: q } : prev,
+                    prev && (canOversell || q <= stagedAvailable) ? { ...prev, quantity: q } : prev,
                   )
                 }
               />
               <button
                 onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: roundQty(prev.quantity + 1) } : prev))}
-                disabled={!posModeEnabled && staged.quantity >= stagedAvailable}
+                disabled={!canOversell && staged.quantity >= stagedAvailable}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Plus size={14} strokeWidth={2} />
@@ -432,7 +437,7 @@ export function ProductSearch({
           const relevantStock = locationFilter
             ? product.stockByLocation.find((s) => s.locationId === locationFilter.id)?.quantity ?? 0
             : product.stockByLocation.reduce((s, l) => s + l.quantity, 0);
-          const outOfStock = !posModeEnabled && relevantStock === 0;
+          const outOfStock = !canOversell && relevantStock <= 0;
 
           if (viewMode === 'grid') {
             const showImage = product.image && !brokenImageIds[product.id];

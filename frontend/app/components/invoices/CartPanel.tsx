@@ -52,6 +52,7 @@ export function CartPanel({
   removeFromCart,
   stockAtLineLocation,
   posModeEnabled,
+  allowOversell,
   subtotal,
   discount,
   distinctLocationNames,
@@ -126,6 +127,9 @@ export function CartPanel({
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
   posModeEnabled: boolean;
+  /** Whether lines may exceed stock (the org's WARN/ALLOW stock policy).
+   *  Defaults to posModeEnabled when not passed. */
+  allowOversell?: boolean;
   subtotal: number;
   discount: number;
   distinctLocationNames: string[];
@@ -577,7 +581,7 @@ export function CartPanel({
                   <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
                   <button
                     onClick={() => changeQty(line.key, 1)}
-                    disabled={!posModeEnabled && line.quantity >= available}
+                    disabled={!(allowOversell ?? posModeEnabled) && line.quantity >= available}
                     className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={14} strokeWidth={2} />

@@ -225,6 +225,7 @@ model Organization {
   mediaAssets        MediaAsset[]
   notifications      Notification[]
   stockImportBatches StockImportBatch[]
+  productCostHistory ProductCostHistory[]
 }
 
 model User {
@@ -488,6 +489,9 @@ model Product {
   goodsReceiptItems   GoodsReceiptItem[]
 
   barcode            String?
+  // Current weighted-average cost of the stock on hand. Moved only by
+  // inventory-costing.ts (goods receipts, returns, opening imports) or a
+  // logged manual edit; sales book COGS at whatever it is when stock leaves.
   costPrice          Decimal?                 @db.Decimal(12, 2)
   sellingPrice       Decimal?                 @db.Decimal(12, 2)
   events             Event[]
@@ -503,6 +507,9 @@ model Product {
   // sellingPrice above (kept there so imports, reports and older code
   // keep working unchanged).
   prices             ProductPrice[]
+  // Every change to costPrice (the current weighted-average cost) and
+  // what caused it — see inventory-costing.ts.
+  costHistory        ProductCostHistory[]
 
   @@unique([organizationId, barcode])
   @@unique([organizationId, sku])
@@ -711,6 +718,8 @@ enum InvoiceActivityEventType {
   MARKED_PAID
   VOIDED
   COST_CORRECTED
+  REFUNDED
+  CREDIT_APPLIED
 }
 
 enum SalesQuotationStatus {
@@ -1672,7 +1681,21 @@ model Payment {
   voidedById String?
   voidReason String?
 
+  // What this row does to the invoice's amountPaid (amount itself is always
+  // positive): PAYMENT and CREDIT_IN add, REFUND and CREDIT_OUT subtract.
+  // A credit application is a CREDIT_OUT on the invoice holding the credit
+  // plus a CREDIT_IN on the one it pays, linked to each other.
+  kind            PaymentKind @default(PAYMENT)
+  linkedPaymentId String?
+
   @@index([invoiceId])
+}
+
+enum PaymentKind {
+  PAYMENT
+  REFUND
+  CREDIT_OUT
+  CREDIT_IN
 }
 
 enum FulfillmentMode {
@@ -2012,7 +2035,13 @@ model Payroll {
   user         User?         @relation(fields: [userId], references: [id])
   items        PayrollItem[]
 
-  @@unique([organizationId, periodYear, periodMonth, payType])
+  // true while the run is live, NULL once voided. Part of the unique key
+  // below so a period can hold one live run but any number of voided ones
+  // (Postgres treats NULLs as distinct) — without it, voiding a run left
+  // that month impossible to run again.
+  activeSlot Boolean? @default(true)
+
+  @@unique([organizationId, periodYear, periodMonth, payType, activeSlot])
 }
 
 model PayrollItem {
@@ -2392,4 +2421,37 @@ model ProductPrice {
 
   @@id([productId, priceLevelId])
   @@index([priceLevelId])
+}
+
+// Why a product's weighted-average cost is what it is: one row per change
+// (and per goods receipt, even when the average didn't move), newest last.
+enum CostChangeSource {
+  GOODS_RECEIPT
+  SALES_RETURN
+  SALE_REVERSAL
+  OPENING_IMPORT
+  MANUAL
+}
+
+model ProductCostHistory {
+  id             String           @id @default(cuid())
+  organizationId String
+  productId      String
+  source         CostChangeSource
+  // What caused it, e.g. a goods receipt id or "invoice:<id>".
+  sourceId       String?
+  previousCost   Decimal?         @db.Decimal(12, 2)
+  newCost        Decimal?         @db.Decimal(12, 2)
+  // Stock on hand (all locations) just before, and what came in at what cost.
+  quantityBefore Decimal          @db.Decimal(12, 2)
+  quantityIn     Decimal          @default(0) @db.Decimal(12, 2)
+  unitCostIn     Decimal?         @db.Decimal(12, 2)
+  userId         String?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@index([productId, createdAt])
+  @@index([organizationId])
 }

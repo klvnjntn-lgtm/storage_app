@@ -145,7 +145,16 @@ export type ARAgingReport = {
   // regardless of page or filters.
   byCustomer: ARAgingByCustomer[];
   totals: Omit<ARAgingByCustomer, 'customerId' | 'customerName'>;
-  reconciliation: { arLedgerBalance: number; sumOfOutstandingInvoices: number; matches: boolean };
+  // Credit customers hold (paid more than they still owe after a return)
+  // that hasn't been refunded or applied yet — a negative balance in the AR
+  // ledger, so the reconciliation nets it off the outstanding total.
+  customerCredits: number;
+  reconciliation: {
+    arLedgerBalance: number;
+    sumOfOutstandingInvoices: number;
+    customerCredits: number;
+    matches: boolean;
+  };
 };
 
 export type APAgingLine = {
@@ -573,10 +582,20 @@ async getARAging(
   });
   const arLedgerBalance = this.round2(Number(arAgg._sum.debit ?? 0) - Number(arAgg._sum.credit ?? 0));
 
+  const creditRows = await this.prisma.$queryRaw<{ credits: string | null }[]>(Prisma.sql`
+    SELECT SUM(GREATEST(0, "amountPaid" + "creditedAmount" - total)) AS credits
+    FROM "Invoice"
+    WHERE "organizationId" = ${organizationId}
+      AND status = 'ISSUED'
+      AND ("issuedAt" <= ${asOf} OR ("issuedAt" IS NULL AND "invoiceDate" <= ${asOf}))
+  `);
+  const customerCredits = this.round2(Number(creditRows[0]?.credits ?? 0));
+
   const reconciliation = {
     arLedgerBalance,
     sumOfOutstandingInvoices: totals.total,
-    matches: Math.abs(arLedgerBalance - totals.total) < EPS,
+    customerCredits,
+    matches: Math.abs(arLedgerBalance - (totals.total - customerCredits)) < EPS,
   };
   if (!reconciliation.matches) {
     this.logger.error(
@@ -599,6 +618,7 @@ async getARAging(
     pagination: this.buildPagination(page, pageSize, filtered.length),
     byCustomer,
     totals,
+    customerCredits,
     reconciliation,
   };
 }

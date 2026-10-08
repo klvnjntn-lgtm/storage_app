@@ -13,6 +13,7 @@ import { InvoiceService } from '../invoice/invoice.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import {
+  CostChangeSource,
   DeliveryOrderStatus,
   SalesOrderStatus,
   EventType,
@@ -24,6 +25,7 @@ import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { backfillCustomerPin } from '../customers/customer-pin-backfill';
+import { currentCosts, receiveAtCost } from '../accounting/inventory-costing';
 
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
@@ -87,12 +89,10 @@ export class DeliveryOrderService {
   // physical movement. No stock is touched here. The actual departure
   // event is ship(), below.
   //
-  // Each created line snapshots unitCost off the originating
-  // SalesOrderItem, same denormalization pattern as productName just
-  // below it. This is what lets ship() and recordReturn() post COGS
-  // without a join back to the sales order — the cost basis travels with
-  // the delivery order the way productName already does, and doesn't
-  // drift if the product's costPrice changes between order and shipment.
+  // Each created line starts with the order line's unitCost as a
+  // placeholder; ship() overwrites it with the weighted-average cost at the
+  // moment the goods leave, and recordReturn() reverses at that stamped
+  // cost — so it travels with the delivery order the way productName does.
   async create(
     organizationId: string,
     userId: string,
@@ -127,6 +127,24 @@ export class DeliveryOrderService {
       if (!allowedStatuses.includes(salesOrder.status)) {
         throw new BadRequestException(
           `Cannot deliver against a sales order in ${salesOrder.status} status`,
+        );
+      }
+
+      // An invoice issued for this order before any delivery existed took
+      // its stock (and posted COGS) at issue — InvoiceService.issue() checks
+      // for deliveries under this same row lock. Shipping a delivery order
+      // on top of that took the goods a second time.
+      const directlyFulfilled = await tx.invoice.count({
+        where: {
+          organizationId,
+          salesOrderId: salesOrder.id,
+          status: { not: 'VOID' },
+          fulfillmentPath: 'DIRECT_ISSUE',
+        },
+      });
+      if (directlyFulfilled > 0) {
+        throw new BadRequestException(
+          "This order's invoice already took its goods out of stock when it was issued — there is nothing left to deliver.",
         );
       }
 
@@ -182,6 +200,11 @@ export class DeliveryOrderService {
           })
         : [];
       const productNameById = new Map(products.map((p) => [p.id, p.name]));
+      // A delivery made from a warehouse session never passes through
+      // ship()'s costing — its stock already left at pick, at the average
+      // cost then — so its lines take today's average (the closest
+      // record of that) rather than the order line's older snapshot.
+      const costNow = dto.sessionId ? await currentCosts(tx, organizationId, productIds) : null;
 
       const savedAddress = dto.customerAddressId
         ? await tx.customerAddress.findFirst({
@@ -245,7 +268,10 @@ export class DeliveryOrderService {
                 quantity: line.quantity,
                 unit: soItem.unit,
                 locationId: soItem.locationId,
-                unitCost: soItem.unitCost,
+                unitCost:
+                  costNow && soItem.productId
+                    ? (costNow.get(soItem.productId) ?? soItem.unitCost)
+                    : soItem.unitCost,
               };
             }),
           },
@@ -351,8 +377,19 @@ export class DeliveryOrderService {
       }[] = [];
 
       if (shouldDecreaseStock) {
+        // COGS at the weighted-average cost now, as the goods leave — not the
+        // cost copied from the sales order line when this delivery was
+        // planned. Stamped on the delivery line so a return reverses
+        // exactly what was booked.
+        const costNow = await currentCosts(
+          tx,
+          organizationId,
+          deliveryOrder.items.filter((i) => i.productId).map((i) => i.productId!),
+        );
         for (const item of deliveryOrder.items) {
           if (!item.productId || !item.locationId) continue;
+          const unitCost = costNow.get(item.productId) ?? (item.unitCost != null ? Number(item.unitCost) : null);
+          await tx.deliveryOrderItem.update({ where: { id: item.id }, data: { unitCost } });
           await this.stockService.decrease(
             organizationId,
             item.productId,
@@ -375,7 +412,7 @@ export class DeliveryOrderService {
           costedLines.push({
             productId: item.productId,
             quantity: Number(item.quantity),
-            unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+            unitCost,
             locationId: item.locationId,
           });
         }
@@ -867,12 +904,13 @@ export class DeliveryOrderService {
     }
     if (!doItem.salesOrderItemId) return null;
 
-    // Safe to assume at most one invoice per SO — createDraftFromSalesOrder
-    // refuses to create a second invoice while any prior one exists on the
-    // order (see its `order.invoices.length > 0` check), so this can't
-    // resolve to two different invoices across lines of the same DO.
+    // Safe to assume at most one live invoice per SO — createDraftFromSalesOrder
+    // refuses a second invoice while a non-void one exists on the order, so
+    // this can't resolve to two different invoices across lines of one DO.
+    // Only the live invoice — after a void and re-invoice, the voided
+    // invoice's items carry the same salesOrderItemId.
     return tx.invoiceItem.findFirst({
-      where: { salesOrderItemId: doItem.salesOrderItemId },
+      where: { salesOrderItemId: doItem.salesOrderItemId, invoice: { status: 'ISSUED' } },
       select: { id: true, invoiceId: true },
     });
   }
@@ -909,53 +947,61 @@ export class DeliveryOrderService {
       );
     }
 
-    const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
-      where: { id, organizationId },
-      include: { items: true },
-    });
-    if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
-    // FAILED is included: stock and COGS already moved at ship(), so goods
-    // brought back from a failed attempt that won't be rescheduled must be
-    // able to come back into stock the same way a customer return does.
-    const returnableStatuses: DeliveryOrderStatus[] = [
-      DeliveryOrderStatus.SHIPPED,
-      DeliveryOrderStatus.PARTIALLY_RETURNED,
-      DeliveryOrderStatus.FAILED,
-    ];
-    if (!returnableStatuses.includes(deliveryOrder.status)) {
-      throw new BadRequestException(
-        'Only a shipped or failed delivery order can have items returned',
-      );
-    }
-
-    const itemsById = new Map(deliveryOrder.items.map((i) => [i.id, i]));
-    for (const line of items) {
-      const doItem = itemsById.get(line.deliveryOrderItemId);
-      if (!doItem) {
-        throw new BadRequestException(
-          `Delivery order item ${line.deliveryOrderItemId} not found on this delivery`,
-        );
-      }
-      if (line.quantity <= 0)
-        throw new BadRequestException('Return quantity must be positive');
-      const outstanding =
-        Number(doItem.quantity) - Number(doItem.returnedQuantity);
-      if (line.quantity > outstanding) {
-        throw new BadRequestException(
-          `Cannot return ${line.quantity} — only ${outstanding} of this line hasn't already been returned`,
-        );
-      }
-    }
-
-    const salesOrderId = deliveryOrder.salesOrderId;
-    const invoiceId = deliveryOrder.invoiceId;
-    if (!salesOrderId && !invoiceId) {
-      throw new BadRequestException(
-        'This delivery order has no originating sales order or invoice',
-      );
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      // Row lock, then read: two concurrent returns against the same delivery
+      // order used to both pass the "not yet returned" check below and both
+      // put the stock back.
+      await tx.$queryRaw`SELECT id FROM "DeliveryOrder" WHERE id = ${id} FOR UPDATE`;
+      const deliveryOrder = await tx.deliveryOrder.findFirst({
+        where: { id, organizationId },
+        include: { items: true },
+      });
+      if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+      // FAILED is included: stock and COGS already moved at ship(), so goods
+      // brought back from a failed attempt that won't be rescheduled must be
+      // able to come back into stock the same way a customer return does.
+      const returnableStatuses: DeliveryOrderStatus[] = [
+        DeliveryOrderStatus.SHIPPED,
+        DeliveryOrderStatus.PARTIALLY_RETURNED,
+        DeliveryOrderStatus.FAILED,
+      ];
+      if (!returnableStatuses.includes(deliveryOrder.status)) {
+        throw new BadRequestException(
+          'Only a shipped or failed delivery order can have items returned',
+        );
+      }
+
+      const itemsById = new Map(deliveryOrder.items.map((i) => [i.id, i]));
+      // The same line listed twice would pass the per-line check twice.
+      if (new Set(items.map((l) => l.deliveryOrderItemId)).size !== items.length) {
+        throw new BadRequestException('Each delivery order item can only appear once in a return');
+      }
+      for (const line of items) {
+        const doItem = itemsById.get(line.deliveryOrderItemId);
+        if (!doItem) {
+          throw new BadRequestException(
+            `Delivery order item ${line.deliveryOrderItemId} not found on this delivery`,
+          );
+        }
+        if (line.quantity <= 0)
+          throw new BadRequestException('Return quantity must be positive');
+        const outstanding =
+          Number(doItem.quantity) - Number(doItem.returnedQuantity);
+        if (line.quantity > outstanding) {
+          throw new BadRequestException(
+            `Cannot return ${line.quantity} — only ${outstanding} of this line hasn't already been returned`,
+          );
+        }
+      }
+
+      const salesOrderId = deliveryOrder.salesOrderId;
+      const invoiceId = deliveryOrder.invoiceId;
+      if (!salesOrderId && !invoiceId) {
+        throw new BadRequestException(
+          'This delivery order has no originating sales order or invoice',
+        );
+      }
+
       const costedReturnLines: {
         productId: string;
         quantity: number;
@@ -1020,6 +1066,16 @@ export class DeliveryOrderService {
         }
 
         if (doItem.productId && doItem.locationId) {
+          // Back on the shelf at the cost it shipped at.
+          await receiveAtCost(tx, {
+            organizationId,
+            productId: doItem.productId,
+            quantity: line.quantity,
+            unitCost: doItem.unitCost != null ? Number(doItem.unitCost) : null,
+            source: CostChangeSource.SALES_RETURN,
+            sourceId: deliveryOrder.id,
+            userId,
+          });
           await this.stockService.increase(
             organizationId,
             doItem.productId,
@@ -1438,6 +1494,27 @@ export class DeliveryOrderService {
               ? 'Cannot fulfill invoice directly. This invoice is already assigned to a warehouse fulfillment session.'
               : 'Cannot fulfill invoice directly. This invoice was already fulfilled directly at issuance.',
           );
+        }
+
+        // The claim above holds this invoice's row lock until commit, so a
+        // second concurrent request waits there. Recheck outstanding against
+        // the lines as they are now — the check before the transaction read
+        // them unlocked, and two submits both passed it and over-reserved.
+        const freshItems = await tx.invoiceItem.findMany({
+          where: { id: { in: candidateLines.map((l) => l.item.id) } },
+          select: { id: true, quantity: true, fulfilledQuantity: true, reservedQuantity: true },
+        });
+        const freshById = new Map(freshItems.map((i) => [i.id, i]));
+        for (const l of candidateLines) {
+          const fresh = freshById.get(l.item.id);
+          const outstanding = fresh
+            ? Number(fresh.quantity) - Number(fresh.fulfilledQuantity) - Number(fresh.reservedQuantity)
+            : 0;
+          if (l.quantity > outstanding + 1e-9) {
+            throw new BadRequestException(
+              `Only ${Math.max(outstanding, 0)} unit(s) of "${l.item.product?.name ?? l.item.description}" are still outstanding — another delivery order was just created for this invoice.`,
+            );
+          }
         }
 
         const doNumber = await this.numbering.nextSequential(

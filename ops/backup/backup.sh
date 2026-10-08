@@ -204,12 +204,16 @@ daemon() {
   find "$DAILY" "$WEEKLY" "$STATUS" -name '.*.tmp' -delete 2>/dev/null || true
   log "daemon started: daily at $BACKUP_TIME ($(date +%Z)), keeping $KEEP_DAILY daily + $KEEP_WEEKLY weekly"
 
+  # Each scheduled backup runs as its own `sh backup.sh once` process: a
+  # function called as `run_backup || true` runs with `set -e` switched off
+  # for its whole body (POSIX), so an unexpected failure inside it would
+  # carry on and could still write last_success.
   last_attempt=0
   # No backup at all yet (fresh install): take one right away rather than
   # waiting until tonight.
   if ! ls "$DAILY"/waresys_*.dump > /dev/null 2>&1; then
     last_attempt=$(date +%s)
-    run_backup || true
+    sh "$0" once || true
   fi
 
   # Checked every minute rather than sleeping 24h, so a container restart
@@ -220,7 +224,7 @@ daemon() {
     if [ "$(date +%H:%M)" \> "$BACKUP_TIME" ] || [ "$(date +%H:%M)" = "$BACKUP_TIME" ]; then
       if ! today_done && [ $((now - last_attempt)) -ge $((RETRY_MINUTES * 60)) ]; then
         last_attempt=$now
-        run_backup || true
+        sh "$0" once || true
       fi
     fi
     # Backgrounded + wait, so a stop signal is handled immediately

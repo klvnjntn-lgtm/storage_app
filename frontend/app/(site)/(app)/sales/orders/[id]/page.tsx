@@ -45,7 +45,7 @@ type SalesOrderDetail = {
   }[];
   quotation: { id: string; quotationNumber: string | null; status: string } | null;
   deliveryOrders: { id: string; doNumber: string | null; status: string }[];
-  invoices: { id: string; invoiceNumber: string | null; status: string }[];
+  invoices: { id: string; invoiceNumber: string | null; status: string; fulfillmentPath: string | null }[];
 };
 
 function statusStyle(status: SalesOrderStatus) {
@@ -234,9 +234,17 @@ export default function SalesOrderDetailPage() {
   // once — see backend createDraftFromSalesOrder). Non-WAREHOUSE_OPS:
   // unchanged three-status list, full order quantity, no delivery
   // workflow to conflict with.
-  const canInvoiceDirectly = hasWarehouseOps
-    ? order.status === 'FULLY_DELIVERED'
-    : CAN_INVOICE_NO_WAREHOUSE_OPS.includes(order.status);
+  // A voided invoice doesn't count — the order can be invoiced again.
+  const hasLiveInvoice = order.invoices.some((inv) => inv.status !== 'VOID');
+  const canInvoiceDirectly =
+    !hasLiveInvoice &&
+    (hasWarehouseOps
+      ? order.status === 'FULLY_DELIVERED'
+      : CAN_INVOICE_NO_WAREHOUSE_OPS.includes(order.status));
+  // Issued before any delivery existed, so the invoice took the stock.
+  const deliveryBlockedByInvoice = order.invoices.some(
+    (inv) => inv.status !== 'VOID' && inv.fulfillmentPath === 'DIRECT_ISSUE',
+  );
 
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
@@ -356,6 +364,7 @@ export default function SalesOrderDetailPage() {
     customerDefault={order.customer}
     items={order.items}
     status={order.status}
+    blockedByInvoice={deliveryBlockedByInvoice}
     onChanged={load}
           />
         )}

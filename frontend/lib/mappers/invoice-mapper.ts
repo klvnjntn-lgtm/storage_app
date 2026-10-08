@@ -76,6 +76,9 @@ export type InvoicePrintView = {
     id: string;
     amount: number;
     method: string;
+    // PAYMENT, REFUND, or one leg of moving credit between invoices
+    // (CREDIT_OUT / CREDIT_IN — the note names the other invoice).
+    kind?: 'PAYMENT' | 'REFUND' | 'CREDIT_OUT' | 'CREDIT_IN';
     note: string | null;
     createdAt: string;
   }[];

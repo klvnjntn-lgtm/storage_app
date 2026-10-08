@@ -247,6 +247,13 @@ export class PurchaseOrderService {
     await this.tenantOwnership.validate(organizationId, { locationId: dto.locationId });
 
     return this.prisma.$transaction(async (tx) => {
+      // Re-check under the row lock — a concurrent send() could have moved
+      // it out of DRAFT since the read above.
+      await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${po.id} FOR UPDATE`;
+      const fresh = await tx.purchaseOrder.findFirst({ where: { id: po.id, organizationId }, select: { status: true } });
+      if (fresh?.status !== PurchaseOrderStatus.DRAFT) {
+        throw new BadRequestException('Purchase order is no longer editable');
+      }
       await this.validateSupplier(organizationId, dto.supplierId, tx);
 
       if (!dto.items) {
@@ -346,6 +353,14 @@ export class PurchaseOrderService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Claim first so a double-click can't send twice or burn a number.
+        const claim = await tx.purchaseOrder.updateMany({
+          where: { id: po.id, organizationId, status: PurchaseOrderStatus.DRAFT },
+          data: { status: PurchaseOrderStatus.SENT },
+        });
+        if (claim.count === 0) {
+          throw new BadRequestException('Purchase order is no longer a draft — it may have already been sent');
+        }
         const poNumber = await this.numbering.nextSequential(tx, organizationId, 'PURCHASE_ORDER', 'PO');
         const updated = await tx.purchaseOrder.update({
           where: { id: po.id },
@@ -375,6 +390,10 @@ export class PurchaseOrderService {
 
   async cancel(organizationId: string, id: string, userId: string) {
     return this.prisma.$transaction(async (tx) => {
+      // Same row lock GoodsReceiptService.receive() takes, so a cancel can't
+      // interleave with a receipt and overwrite PARTIALLY_RECEIVED after
+      // stock has already come in.
+      await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findFirst({ where: { id, organizationId } });
       if (!po) throw new NotFoundException('Purchase order not found');
       if (po.status !== PurchaseOrderStatus.DRAFT && po.status !== PurchaseOrderStatus.SENT) {

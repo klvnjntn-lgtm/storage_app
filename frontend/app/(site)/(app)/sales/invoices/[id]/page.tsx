@@ -8,6 +8,8 @@ import { apiFetch } from '@/lib/apifetch';
 
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
+import { ApplyCreditDialog, CreditTarget } from '@/app/components/invoices/ApplyCreditDialog';
+import { useAuth } from '@/app/context/AuthContext';
 import { VoidInvoiceDialog } from '@/app/components/invoices/VoidInvoiceDialog';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import { InvoiceFormat } from '@/app/components/invoices/types';
@@ -23,7 +25,24 @@ type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 // needs to be declared in lib/invoice-mapper.ts.
 type FulfillmentStatus = 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED';
 
-type InvoiceActivityEventType = 'CREATED' | 'ISSUED' | 'EDITED' | 'PAYMENT_RECORDED' | 'MARKED_PAID' | 'VOIDED';
+type InvoiceActivityEventType =
+  | 'CREATED'
+  | 'ISSUED'
+  | 'EDITED'
+  | 'PAYMENT_RECORDED'
+  | 'MARKED_PAID'
+  | 'VOIDED'
+  | 'COST_CORRECTED'
+  | 'REFUNDED'
+  | 'CREDIT_APPLIED';
+
+// GET /invoices/:id/payments/credit
+type CreditInfo = {
+  credit: number; // held on this invoice
+  balance: number; // still owed on this invoice
+  customerCredit: number; // held on the customer's other invoices
+  targets: CreditTarget[]; // the customer's other invoices with money owed
+};
 
 type ActivityEntry = {
   id: string;
@@ -43,6 +62,9 @@ const ACTIVITY_LABEL_KEY: Record<InvoiceActivityEventType, string> = {
   PAYMENT_RECORDED: 'sales.invoiceDetail.activityPaymentRecorded',
   MARKED_PAID: 'sales.invoiceDetail.activityMarkedPaid',
   VOIDED: 'sales.invoiceDetail.activityVoided',
+  COST_CORRECTED: 'sales.invoiceDetail.activityCostCorrected',
+  REFUNDED: 'sales.invoiceDetail.activityRefunded',
+  CREDIT_APPLIED: 'sales.invoiceDetail.activityCreditApplied',
 };
 
 const FORMAT_OPTIONS: { value: InvoiceFormat; label: string }[] = [
@@ -187,6 +209,12 @@ export default function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [refundDialogOpen, setRefundDialogOpen] = useState(false);
+  const [applyCreditOpen, setApplyCreditOpen] = useState(false);
+  const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
+  const [applyingCredit, setApplyingCredit] = useState(false);
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -212,10 +240,11 @@ export default function InvoiceDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [invRes, historyRes, periodsRes] = await Promise.all([
+      const [invRes, historyRes, periodsRes, creditRes] = await Promise.all([
         apiFetch(`/invoices/${params.id}`),
         apiFetch(`/invoices/${params.id}/edit-history`),
         apiFetch('/accounting/fiscal-periods'),
+        apiFetch(`/invoices/${params.id}/payments/credit`),
       ]);
       if (!invRes.ok) {
         const body = await invRes.json().catch(() => null);
@@ -232,6 +261,7 @@ export default function InvoiceDetailPage() {
       if (periodsRes.ok) {
         setPeriods(await periodsRes.json());
       }
+      setCreditInfo(creditRes.ok ? await creditRes.json() : null);
     } catch {
       setError(t('sales.invoiceDetail.serverUnreachable'));
     } finally {
@@ -329,6 +359,30 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  // Pays this invoice from credit the customer holds on other invoices
+  // (oldest first, as much as both sides allow).
+  async function handleApplyCustomerCredit() {
+    if (!invoice) return;
+    setApplyingCredit(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/invoices/${invoice.id}/payments/apply-credit`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('sales.invoiceDetail.requestFailed', { status: res.status }));
+        return;
+      }
+      await load();
+    } catch {
+      setError(t('sales.invoiceDetail.serverUnreachable'));
+    } finally {
+      setApplyingCredit(false);
+    }
+  }
+
   async function handleDownloadPdf() {
     if (!invoice) return;
     setPdfGenerating(true);
@@ -358,6 +412,11 @@ export default function InvoiceDetailPage() {
   // FIX — was total - amountPaid, so a returned invoice kept showing a
   // balance due for units the customer no longer owes for.
   const balanceDue = Math.max(total - amountPaid - creditedAmount, 0);
+  // Paid more than is owed after a return — the customer's credit.
+  const creditBalance = Math.max(amountPaid + creditedAmount - total, 0);
+  const refundedTotal = invoice
+    ? invoice.payments.filter((p) => p.kind === 'REFUND').reduce((sum, p) => sum + Number(p.amount), 0)
+    : 0;
   const overdue = isOverdue(invoice);
   const period = invoicePeriodStatus(invoice, periods);
   const periodClosed = period?.status === 'CLOSED' || period?.status === 'LOCKED';
@@ -434,8 +493,12 @@ export default function InvoiceDetailPage() {
                 ))}
               </div>
 
+              {/* Same rule as the backend: nothing paid and no returns. A
+                  0-total invoice counts as settled (PAID) yet has no money
+                  against it, so this keys off amounts, not the status. */}
               {invoice.status === 'ISSUED' &&
-                invoice.paymentStatus === 'UNPAID' &&
+                amountPaid <= 0 &&
+                creditedAmount <= 0 &&
                  (
                   <button data-tour="id-edit"
                     onClick={() => router.push(`/sales/invoices/${invoice.id}/edit`)}
@@ -446,7 +509,7 @@ export default function InvoiceDetailPage() {
                   </button>
                 )}
 
-              {invoice.status === 'ISSUED' && invoice.paymentStatus === 'UNPAID' && (
+              {invoice.status === 'ISSUED' && amountPaid <= 0 && creditedAmount <= 0 && (
                 <button data-tour="id-void"
                   onClick={() => setVoidDialogOpen(true)}
                   className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-700 font-semibold hover:bg-red-50 h-fit"
@@ -638,6 +701,65 @@ export default function InvoiceDetailPage() {
               </div>
             )}
 
+            {/* Customer credit — paid more than owed after a return. Can be
+                refunded or applied to another of the customer's invoices. */}
+            {invoice.status === 'ISSUED' && (creditBalance > 0 || refundedTotal > 0) && (
+              <div className="border-2 border-emerald-300 bg-emerald-50 rounded-md p-3 text-sm flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  {creditBalance > 0 && (
+                    <>
+                      <p className="font-semibold text-emerald-900">
+                        {t('sales.invoiceDetail.creditBalance', { amount: formatIDR(creditBalance) })}
+                      </p>
+                      <p className="text-xs text-emerald-800">{t('sales.invoiceDetail.creditBalanceHint')}</p>
+                    </>
+                  )}
+                  {refundedTotal > 0 && (
+                    <p className="text-xs text-emerald-900 mt-1">
+                      {t('sales.invoiceDetail.refunded', { amount: formatIDR(refundedTotal) })} ·{' '}
+                      {t('sales.invoiceDetail.remainingCredit', { amount: formatIDR(creditBalance) })}
+                    </p>
+                  )}
+                </div>
+                {isAdmin && creditBalance > 0 && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setRefundDialogOpen(true)}
+                      className="text-sm px-3 py-1.5 rounded-md border-2 border-emerald-600/40 text-emerald-800 font-semibold hover:bg-emerald-100"
+                    >
+                      {t('sales.invoiceDetail.refundCredit')}
+                    </button>
+                    {(creditInfo?.targets.length ?? 0) > 0 && (
+                      <button
+                        onClick={() => setApplyCreditOpen(true)}
+                        className="text-sm px-3 py-1.5 rounded-md border-2 border-emerald-600/40 text-emerald-800 font-semibold hover:bg-emerald-100"
+                      >
+                        {t('sales.invoiceDetail.applyToInvoice')}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Credit the customer holds on other invoices, usable here. */}
+            {invoice.status === 'ISSUED' && balanceDue > 0 && (creditInfo?.customerCredit ?? 0) > 0 && (
+              <div className="border-2 border-emerald-300 bg-emerald-50 rounded-md p-3 text-sm flex flex-wrap items-center justify-between gap-3">
+                <p className="text-emerald-900">
+                  {t('sales.invoiceDetail.customerCreditAvailable', { amount: formatIDR(creditInfo!.customerCredit) })}
+                </p>
+                {isAdmin && (
+                  <button
+                    onClick={handleApplyCustomerCredit}
+                    disabled={applyingCredit}
+                    className="text-sm px-3 py-1.5 rounded-md border-2 border-emerald-600/40 text-emerald-800 font-semibold hover:bg-emerald-100 disabled:opacity-50"
+                  >
+                    {applyingCredit ? t('sales.invoiceDetail.applying') : t('sales.invoiceDetail.applyCredit')}
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Payments — individual Payment rows, each voidable to reverse
                 a mistaken/duplicate entry (reverses its ledger entry and
                 recomputes amountPaid/paymentStatus). */}
@@ -651,8 +773,19 @@ export default function InvoiceDetailPage() {
                   {invoice.payments.map((p) => (
                     <div key={p.id} className="p-3 text-sm flex items-center justify-between gap-4">
                       <div>
-                        <p className="font-medium">
+                        <p className={`font-medium ${p.kind === 'REFUND' || p.kind === 'CREDIT_OUT' ? 'text-red-700' : ''}`}>
+                          {p.kind === 'REFUND' || p.kind === 'CREDIT_OUT' ? '−' : ''}
                           {formatIDR(p.amount)}{' '}
+                          {p.kind && p.kind !== 'PAYMENT' && (
+                            <span className="text-gray-600 font-normal">
+                              {p.kind === 'REFUND'
+                                ? t('sales.invoiceDetail.kindRefund')
+                                : p.kind === 'CREDIT_OUT'
+                                  ? t('sales.invoiceDetail.kindCreditOut')
+                                  : t('sales.invoiceDetail.kindCreditIn')}{' '}
+                            </span>
+                          )}
+                          {(p.kind === 'PAYMENT' || p.kind === 'REFUND' || !p.kind) && (
                           <span className="text-gray-400 font-normal">
                             {t('sales.invoiceDetail.viaMethod', {
                               method:
@@ -667,6 +800,7 @@ export default function InvoiceDetailPage() {
                                         : p.method,
                             })}
                           </span>
+                          )}
                         </p>
                         <p className="text-xs text-gray-500">
                           {new Date(p.createdAt).toLocaleString()}
@@ -702,7 +836,9 @@ export default function InvoiceDetailPage() {
                       <div className="flex items-start justify-between gap-4">
                         <p className={`flex-1 font-medium ${ev.eventType === 'VOIDED' ? 'text-red-700' : ''}`}>
                           {t(ACTIVITY_LABEL_KEY[ev.eventType])}
-                          {ev.eventType === 'PAYMENT_RECORDED' && ev.reason ? `: ${ev.reason}` : ''}
+                          {(ev.eventType === 'PAYMENT_RECORDED' || ev.eventType === 'REFUNDED' || ev.eventType === 'CREDIT_APPLIED') && ev.reason
+                            ? `: ${ev.reason}`
+                            : ''}
                         </p>
                         <p className="text-gray-500 whitespace-nowrap text-xs">
                           {new Date(ev.createdAt).toLocaleString()}
@@ -783,6 +919,34 @@ export default function InvoiceDetailPage() {
               balanceDue={balanceDue}
               onRecorded={load}
               onClose={() => setPaymentDialogOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {invoice && refundDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
+          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+            <RecordPaymentDialog
+              mode="refund"
+              invoiceId={invoice.id}
+              balanceDue={creditBalance}
+              onRecorded={load}
+              onClose={() => setRefundDialogOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {invoice && applyCreditOpen && creditInfo && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
+          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+            <ApplyCreditDialog
+              sourceInvoiceId={invoice.id}
+              credit={creditBalance}
+              targets={creditInfo.targets}
+              onApplied={load}
+              onClose={() => setApplyCreditOpen(false)}
             />
           </div>
         </div>

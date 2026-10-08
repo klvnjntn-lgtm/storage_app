@@ -261,8 +261,12 @@ export default function QuotationDetailPage() {
   </button>
 )}
 
-{['SENT', 'ACCEPTED', 'CONVERTED'].includes(quotation.status) &&
-  quotation.invoices.length === 0 && (
+{/* Not once CONVERTED: that status also means "converted to a sales
+    order", which is invoiced from the order — invoicing here too billed
+    the customer twice. */}
+{(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') &&
+  !quotation.salesOrders.some((so) => so.status !== 'CANCELLED') &&
+  !quotation.invoices.some((inv) => inv.status !== 'VOID') && (
     <button data-tour="qd-to-invoice"
       disabled={actionLoading === 'convert-invoice'}
       onClick={handleConvertToInvoice}

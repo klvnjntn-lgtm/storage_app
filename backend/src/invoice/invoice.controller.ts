@@ -36,11 +36,20 @@ export class InvoiceController {
   constructor(private invoiceService: InvoiceService) {}
 
   @Get()
-  list(@CurrentOrg() organizationId: string, @Query() query: ListInvoicesQueryDto) {
+  async list(@CurrentOrg() organizationId: string, @Query() query: ListInvoicesQueryDto) {
+    // invoiceDate is a calendar-date column, so it compares against plain
+    // dates; issuedAt/createdAt are instants and need the org's business day.
+    const bounds =
+      query.dateField === 'invoice'
+        ? {
+            gte: query.from ? new Date(query.from) : undefined,
+            lte: query.to ? this.endOfDay(query.to) : undefined,
+          }
+        : await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
     return this.invoiceService.list(organizationId, {
       status: query.status,
-      from: query.from ? new Date(query.from) : undefined,
-      to: query.to ? this.endOfDay(query.to) : undefined,
+      from: bounds.gte,
+      to: bounds.lte,
       locationId: query.locationId,
       customerId: query.customerId,
       dateField: query.dateField,
@@ -59,32 +68,23 @@ export class InvoiceController {
   }
 
   @Get('reports')
-  getReports(@CurrentOrg() organizationId: string, @Query() query: RevenueReportQueryDto) {
-    return this.invoiceService.getRevenueReport(
-      organizationId,
-      new Date(query.from),
-      this.endOfDay(query.to),
-      query.locationId,
-    );
+  async getReports(@CurrentOrg() organizationId: string, @Query() query: RevenueReportQueryDto) {
+    const { gte, lte } = await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
+    return this.invoiceService.getRevenueReport(organizationId, gte!, lte!, query.locationId);
   }
 
   // Top customers / top products / top vehicles, for the Sales Insights
   // charts. Two segments ("reports/top"), so this never collides with the
   // single-segment @Get(':id') below regardless of declaration order.
   @Get('reports/top')
-  getTopReport(
+  async getTopReport(
     @CurrentOrg() organizationId: string,
     @Query() query: TopReportQueryDto,
     @Query('vehicleId') vehicleId?: string | string[],
   ) {
     const vehicleIds = vehicleId ? (Array.isArray(vehicleId) ? vehicleId : [vehicleId]) : undefined;
-    return this.invoiceService.getTopReport(
-      organizationId,
-      new Date(query.from),
-      this.endOfDay(query.to),
-      vehicleIds,
-      query.limit,
-    );
+    const { gte, lte } = await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
+    return this.invoiceService.getTopReport(organizationId, gte!, lte!, vehicleIds, query.limit);
   }
 
   // Non-admin-safe: only the derived, POS-relevant behaviour (never the
@@ -120,9 +120,13 @@ export class InvoiceController {
     @Query('to') to: string,
     @Query('vehicleId') vehicleId?: string | string[],
   ) {
+    if (!customerId || !from || !to) {
+      throw new BadRequestException('customerId, from and to are required');
+    }
     const vehicleIds = vehicleId ? (Array.isArray(vehicleId) ? vehicleId : [vehicleId]) : undefined;
+    const bounds = await this.invoiceService.businessDayBounds(organizationId, from, to);
     return this.invoiceService.getCustomerStatement(
-      organizationId, customerId, new Date(from), this.endOfDay(to), vehicleIds,
+      organizationId, customerId, bounds.gte!, bounds.lte!, vehicleIds,
     );
   }
 

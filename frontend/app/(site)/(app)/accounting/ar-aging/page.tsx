@@ -35,7 +35,8 @@ type ARAgingReport = {
   lines: ARLine[];
   byCustomer: ByCustomer[];
   totals: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number; total: number };
-  reconciliation: { arLedgerBalance: number; sumOfOutstandingInvoices: number; matches: boolean };
+  customerCredits?: number;
+  reconciliation: { arLedgerBalance: number; sumOfOutstandingInvoices: number; customerCredits?: number; matches: boolean };
 };
 
 // The backend's max page size for `lines` (see accounting.controller.ts's
@@ -202,6 +203,11 @@ export default function ARAgingPage() {
                 {report.reconciliation.matches
                   ? t('accounting.arAging.reconciledMessage', { amount: formatIDR(report.reconciliation.arLedgerBalance) })
                   : t('accounting.arAging.notReconciledMessage', { ledger: formatIDR(report.reconciliation.arLedgerBalance), sum: formatIDR(report.reconciliation.sumOfOutstandingInvoices) })}
+                {(report.customerCredits ?? 0) > 0 && (
+                  <span className="block text-xs mt-1">
+                    {t('accounting.arAging.customerCreditsNote', { amount: formatIDR(report.customerCredits!) })}
+                  </span>
+                )}
               </span>
             </div>
 

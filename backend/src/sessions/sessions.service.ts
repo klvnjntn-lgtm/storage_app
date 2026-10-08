@@ -2,12 +2,13 @@
 import { Injectable, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { runSerializable } from '../prisma/serializable';
-import { EventType, SessionType, FulfillmentMode, ModuleKey, Prisma, DeliveryOrderStatus } from '@prisma/client';
+import { EventType, SessionType, FulfillmentMode, ModuleKey, Prisma, DeliveryOrderStatus, CostChangeSource } from '@prisma/client';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status.util';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
 
 const RETURN_REASONS = [
   'DAMAGED',
@@ -128,9 +129,15 @@ export class SessionsService {
     const { invoiceId, productId, qty } = params;
     const invoice = await tx.invoice.findFirstOrThrow({
       where: { id: invoiceId, organizationId },
-      select: { invoiceNumber: true, id: true },
+      select: { invoiceNumber: true, id: true, status: true },
     });
     const label = invoice.invoiceNumber ?? invoice.id.slice(0, 8);
+    // Checked per scan, not just when the session opened: an invoice voided
+    // while its returns session was still open has already had its stock
+    // put back and its revenue reversed.
+    if (invoice.status !== 'ISSUED') {
+      throw new BadRequestException(`Invoice ${label} is no longer issued, so nothing on it can be returned`);
+    }
 
     const lines = await tx.invoiceItem.findMany({
       where: { invoiceId, productId },
@@ -170,6 +177,20 @@ export class SessionsService {
       remaining = round2(remaining - take);
     }
 
+    // Back on the shelf at the cost each unit left at. The caller increments
+    // the stock row only after this, so the average is taken against what
+    // was on hand before the return.
+    for (const a of allocations) {
+      await receiveAtCost(tx, {
+        organizationId,
+        productId,
+        quantity: a.quantity,
+        unitCost: a.unitCost,
+        source: CostChangeSource.SALES_RETURN,
+        sourceId: params.sessionId,
+      });
+    }
+
     await this.postingRules.postCogsReturn(
       organizationId,
       {
@@ -205,17 +226,20 @@ export class SessionsService {
   // issue()/delivery-order ship() do for the other paths. Previously
   // nothing did, leaving these invoices UNFULFILLED forever and giving a
   // linked return nothing to count against.
+  // Each line's unitCost becomes the average of what its picked units were
+  // actually costed at, so a linked return reverses exactly that.
   private async recordInvoicePick(
     tx: Prisma.TransactionClient,
     organizationId: string,
     invoiceId: string,
     productId: string,
     qty: number,
+    unitCost: number | null,
   ) {
     const lines = await tx.invoiceItem.findMany({
       where: { invoiceId, productId },
       orderBy: { id: 'asc' },
-      select: { id: true, quantity: true, fulfilledQuantity: true },
+      select: { id: true, quantity: true, fulfilledQuantity: true, unitCost: true },
     });
     let remaining = qty;
     for (const line of lines) {
@@ -223,9 +247,18 @@ export class SessionsService {
       const room = Number(line.quantity) - Number(line.fulfilledQuantity);
       const take = round2(Math.min(room, remaining));
       if (take <= 0) continue;
+      const alreadyFulfilled = Number(line.fulfilledQuantity);
       await tx.invoiceItem.update({
         where: { id: line.id },
-        data: { fulfilledQuantity: { increment: take } },
+        data: {
+          fulfilledQuantity: { increment: take },
+          unitCost: blendLineCost(
+            alreadyFulfilled,
+            alreadyFulfilled > 0 && line.unitCost != null ? Number(line.unitCost) : null,
+            take,
+            unitCost,
+          ),
+        },
       });
       remaining = round2(remaining - take);
     }
@@ -676,115 +709,6 @@ async findAll(
     return costedQty > 0 ? costedTotal / costedQty : null;
   }
 
-  // Splits a single pick's qty across the order lines it actually draws
-  // from, FIFO by line order, instead of blending one average cost across
-  // every line for the product. `alreadyPicked` is how much of this
-  // product this session picked before this call (so a later pick resumes
-  // consumption where the previous one left off rather than starting over
-  // from line 1 each time).
-  private allocateFifo(
-    lines: { quantity: Prisma.Decimal | number; unitCost: Prisma.Decimal | null }[],
-    qty: number,
-    alreadyPicked: number,
-  ): { quantity: number; unitCost: number }[] | null {
-    const costed = lines
-      .filter((l) => l.unitCost != null)
-      .map((l) => ({ quantity: Number(l.quantity), unitCost: Number(l.unitCost) }));
-    if (costed.length === 0) return null;
-
-    const slices: { quantity: number; unitCost: number }[] = [];
-    let skip = alreadyPicked;
-    let remaining = qty;
-
-    for (const line of costed) {
-      if (remaining <= 0) break;
-      let available = line.quantity;
-      if (skip > 0) {
-        const consumed = Math.min(skip, available);
-        available -= consumed;
-        skip -= consumed;
-      }
-      if (available <= 0) continue;
-      const take = Math.min(available, remaining);
-      slices.push({ quantity: take, unitCost: line.unitCost });
-      remaining -= take;
-    }
-
-    if (slices.length === 0) return null;
-    if (remaining > 0) {
-      // Picked more than the known lines account for (shouldn't happen —
-      // the invoice-item path is guarded against over-picking above — but
-      // cost any overflow at the last known line's rate rather than
-      // dropping it from COGS silently).
-      slices.push({ quantity: remaining, unitCost: costed[costed.length - 1].unitCost });
-    }
-    return slices;
-  }
-
-  // Resolves the unit cost(s) to post COGS with at pick time, as slices of
-  // (quantity, unitCost) so a pick spanning more than one order line posts
-  // each portion at its own line's cost. Tries the linked Invoice's
-  // item(s) first (same unitCost snapshot DeliveryOrderService already
-  // relies on), then the linked SalesOrder's item(s). Returns [] — not
-  // Product.costPrice — when a linked document exists but has no snapshot,
-  // since costPrice can drift after the order was placed and postCogs()
-  // already treats a null unitCost as "skip this line" rather than posting
-  // a fabricated amount.
-  //
-  // The one exception is a session with NO source document at all (an
-  // ad-hoc FULFILLMENT started from the warehouse hub, or an integration
-  // order): there's no order-time snapshot to drift from, so the product's
-  // current costPrice IS the pick-time snapshot. Without this, those picks
-  // took stock out with no COGS entry at all.
-  //
-  // Only the invoice path gets exact FIFO attribution: InvoiceItem.id is
-  // an autoincrement int, so ordering by it reliably reflects the order
-  // lines were entered in. SalesOrderItem and DeliveryOrderItem use uuid
-  // ids with no createdAt/sequence column, so there's no reliable line
-  // order to allocate against for those — they fall back to a
-  // quantity-weighted average across all of that product's lines, same as
-  // before.
-  private async resolvePickCostSlices(
-    session: { id: string; invoiceId: string | null; salesOrderId?: string | null },
-    productId: string,
-    qty: number,
-    alreadyPicked: number,
-    productCostPrice: Prisma.Decimal | null,
-    tx: Prisma.TransactionClient,
-  ): Promise<{ quantity: number; unitCost: number }[]> {
-    if (session.invoiceId) {
-      const invoiceItems = await tx.invoiceItem.findMany({
-        where: { invoiceId: session.invoiceId, productId },
-        select: { quantity: true, unitCost: true },
-        orderBy: { id: 'asc' },
-      });
-      const slices = this.allocateFifo(invoiceItems, qty, alreadyPicked);
-      if (slices != null) return slices;
-    }
-    if (session.salesOrderId) {
-      const salesOrderItems = await tx.salesOrderItem.findMany({
-        where: { salesOrderId: session.salesOrderId, productId },
-        select: { quantity: true, unitCost: true },
-      });
-      const cost = this.weightedAvgUnitCost(salesOrderItems);
-      if (cost != null) return [{ quantity: qty, unitCost: cost }];
-    }
-    // Session-linked delivery orders snapshot unitCost per item; ship() skips
-    // COGS for them, so the pick is the only place it can post.
-    const deliveryItems = await tx.deliveryOrderItem.findMany({
-      where: { productId, deliveryOrder: { sessionId: session.id } },
-      select: { quantity: true, unitCost: true },
-    });
-    const cost = this.weightedAvgUnitCost(deliveryItems);
-    if (cost != null) return [{ quantity: qty, unitCost: cost }];
-
-    const unlinked = !session.invoiceId && !session.salesOrderId && deliveryItems.length === 0;
-    if (unlinked && productCostPrice != null) {
-      return [{ quantity: qty, unitCost: Number(productCostPrice) }];
-    }
-    return [];
-  }
-
   // Unit cost to put returned stock back on the books at. Mirrors
   // resolvePickCostSlices' source order (invoice → sales order), falling
   // back to the product's current costPrice — a RETURNS session is usually
@@ -1058,18 +982,21 @@ async findAll(
           break;
 
         case EventType.RETURNS: {
-          await tx.stock.upsert({
-            where: {
-              productId_locationId: { productId, locationId: toLocationId! },
-            },
-            update: { quantity: { increment: qty } },
-            create: {
-              productId,
-              locationId: toLocationId!,
-              quantity: qty,
-              organizationId,
-            },
-          });
+          // Costing first, stock row second: the average cost is blended
+          // against what was on hand before the return came in.
+          const returnStock = () =>
+            tx.stock.upsert({
+              where: {
+                productId_locationId: { productId, locationId: toLocationId! },
+              },
+              update: { quantity: { increment: qty } },
+              create: {
+                productId,
+                locationId: toLocationId!,
+                quantity: qty,
+                organizationId,
+              },
+            });
 
           if (session.returnInvoiceId) {
             await this.applyLinkedReturn(tx, organizationId, {
@@ -1081,6 +1008,7 @@ async findAll(
               toLocationId: toLocationId!,
               reason,
             });
+            await returnStock();
             break;
           }
 
@@ -1088,6 +1016,16 @@ async findAll(
           // back on the books at cost — Dr Inventory, Cr COGS — so the GL
           // inventory balance keeps tracking the physical increment.
           const unitCost = await this.resolveReturnUnitCost(session, productId, product.costPrice, tx);
+          await receiveAtCost(tx, {
+            organizationId,
+            productId,
+            quantity: qty,
+            unitCost,
+            source: CostChangeSource.SALES_RETURN,
+            sourceId: sessionId,
+            userId,
+          });
+          await returnStock();
           if (unitCost != null) {
             await this.postingRules.postCogsReturn(
               organizationId,
@@ -1131,8 +1069,12 @@ const picked = await tx.stock.updateMany({
 if (picked.count === 0) {
   throw new BadRequestException('Insufficient stock at source location');
 }
+// COGS at the weighted-average cost now, as the stock leaves.
+const pickCost = session.type === SessionType.FULFILLMENT
+  ? (await currentCosts(tx, organizationId, [productId])).get(productId) ?? null
+  : null;
 if (session.type === SessionType.FULFILLMENT && session.invoiceId) {
-  await this.recordInvoicePick(tx, organizationId, session.invoiceId, productId, qty);
+  await this.recordInvoicePick(tx, organizationId, session.invoiceId, productId, qty, pickCost);
 }
 
           // This is the pick-time stock decrement that DeliveryOrder.ship()'s
@@ -1144,34 +1086,21 @@ if (session.type === SessionType.FULFILLMENT && session.invoiceId) {
           //
           // Verified no double-posting: InvoiceService.issue() only pushes
           // into costedLines when decreasesStockHere is true, which is
-          // false whenever hasWarehouseOps is on; editIssuedInvoice() gates
-          // its repost behind `if (!hasWarehouseOps)` directly; and
+          // false whenever hasWarehouseOps is on; editIssuedInvoice() only
+          // reposts COGS for an invoice that took its stock at issue; and
           // DeliveryOrder.ship() sets shouldDecreaseStock = !sessionId, so
           // costedLines stays empty and its postCogs() call never fires for
           // a session-linked delivery. All three skip COGS whenever a
           // FULFILLMENT session already posted it here.
 if (session.type === SessionType.FULFILLMENT) {
-  const pickedAgg = await tx.event.aggregate({
-    where: { sessionId, productId, type: EventType.PICK },
-    _sum: { quantity: true },
-  });
-  // pickedAgg already includes this pick's own event (inserted above with
-  // quantity -qty), so back it out to get what was picked before this call.
-  const alreadyPicked = Math.abs(Number(pickedAgg._sum.quantity ?? 0)) - qty;
-  const costSlices = await this.resolvePickCostSlices(session, productId, qty, alreadyPicked, product.costPrice, tx);
-  if (costSlices.length > 0) {
+  if (pickCost != null) {
     await this.postingRules.postCogs(
       organizationId,
       {
         sourceId: `${sessionId}:cogs:pick:${item.id}`,
         date: new Date(),
         memo: `COGS for pick session ${sessionId}`,
-        lines: costSlices.map((s) => ({
-          productId,
-          quantity: s.quantity,
-          unitCost: s.unitCost,
-          locationId: fromLocationId ?? null,
-        })),
+        lines: [{ productId, quantity: qty, unitCost: pickCost, locationId: fromLocationId ?? null }],
       },
       tx,
     );
