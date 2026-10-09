@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   XCircle,
   MapPin,
+  MapPinOff,
   Navigation,
   AlertTriangle,
   Camera,
@@ -57,12 +58,12 @@ function formatEta(iso: string | null): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Navigation only ever uses the pin. The address is a free-text note for
+// the driver ("behind the mosque, blue gate") — Google Maps would search it
+// literally and route somewhere wrong, so an unpinned stop gets no button.
 function googleMapsUrl(stop: Stop): string {
   if (stop.destinationLatitude && stop.destinationLongitude) {
     return `https://www.google.com/maps/dir/?api=1&destination=${stop.destinationLatitude},${stop.destinationLongitude}`;
-  }
-  if (stop.address) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(stop.address)}`;
   }
   return '';
 }
@@ -558,6 +559,13 @@ export default function DriverRoutePage() {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {!mapsUrl && (
+                    <p className="flex items-start gap-2 text-base text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                      <MapPinOff size={20} className="shrink-0 mt-0.5" />
+                      {t('delivery.driver.noPin')}
+                    </p>
                   )}
 
                   {(mapsUrl || info?.phone) && (
