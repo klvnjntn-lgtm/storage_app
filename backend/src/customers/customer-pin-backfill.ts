@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 // A fix vaguer than this is kept on the delivery but never becomes an
 // address pin — a 300m circle in a dense kampung could be the wrong street.
-export const MAX_BACKFILL_ACCURACY_METERS = 100;
+export const MAX_BACKFILL_ACCURACY_METERS = 50;
 
 function normalizeAddress(address: string | null | undefined): string | null {
   const s = address?.trim().replace(/\s+/g, ' ').toLowerCase();

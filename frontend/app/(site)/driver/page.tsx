@@ -158,7 +158,7 @@ function captureLocation(): Promise<Fix> {
 
 // Matches the backend's MAX_BACKFILL_ACCURACY_METERS: anything vaguer is
 // saved on the delivery but never becomes a customer pin.
-const FAIR_ACCURACY_M = 100;
+const FAIR_ACCURACY_M = 50;
 const GOOD_ACCURACY_M = 30;
 
 // Location quality the driver sees before tapping Mark delivered.

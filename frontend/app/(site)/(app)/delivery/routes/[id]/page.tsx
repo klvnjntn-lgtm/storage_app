@@ -10,6 +10,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import ProofPhoto from '@/app/components/delivery/ProofPhoto';
 import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
 import { driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
@@ -46,6 +47,7 @@ type Stop = {
   deliveryWindowStart: string | null;
   deliveryWindowEnd: string | null;
   receivedBy: string | null;
+  hasProofPhoto: boolean;
   failureReason: string | null;
   deliveryOrder: { id: string } | null;
 };
@@ -821,6 +823,15 @@ export default function DeliveryRouteDetailPage() {
                     )}
                     {stop.status === 'DELIVERED' && stop.receivedBy && (
                       <div className="text-xs text-green-700">{t('delivery.routeDetail.receivedByLabel')}: {stop.receivedBy}</div>
+                    )}
+                    {stop.status === 'DELIVERED' && stop.hasProofPhoto && (
+                      <ProofPhoto
+                        linkPath={
+                          stop.deliveryOrder
+                            ? `/delivery-orders/${stop.deliveryOrder.id}/proof-photo-link`
+                            : `/delivery-routes/${id}/stops/${stop.id}/proof-photo-link`
+                        }
+                      />
                     )}
                     {stop.status === 'FAILED' && stop.failureReason && (
                       <div className="text-xs text-red-600">{stop.failureReason}</div>
