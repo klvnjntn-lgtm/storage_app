@@ -203,6 +203,7 @@ describe('Team routes & customer stops', () => {
     const view = await routes.getRoute(orgId, route.id);
     expect(view.stops.map((s) => [s.kind, s.label])).toEqual([
       ['CUSTOMER', 'Toko Maju'],
+      ['CUSTOMER', 'No Pin'],
       ['DELIVERY_ORDER', 'Warehouse DO'],
     ]);
     expect(Number(view.stops[0].destinationLatitude)).toBeCloseTo(1.1);
