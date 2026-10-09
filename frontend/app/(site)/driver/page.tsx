@@ -39,6 +39,8 @@ type Stop = {
   label: string;
   customerName: string | null;
   address: string | null;
+  // Saved-address name for a customer stop ("Gudang Timur"); null = main address.
+  addressLabel: string | null;
   failureReason: string | null;
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   destinationLatitude: string | null;
@@ -295,17 +297,33 @@ export default function DriverRoutePage() {
     return captureLocation();
   }
 
-  // Shrinks the photo for a weak signal and takes the GPS reading at the
-  // same moment. A retake replaces both.
+  // Takes the GPS reading at the moment of the photo, stamps date, day,
+  // time and that reading onto the photo, and shrinks it for a weak
+  // signal. A retake replaces both.
   async function onPhotoPicked(stopId: string, file: File) {
     setPreparingPhotoFor(stopId);
     try {
-      const [small, fix] = await Promise.all([shrinkPhoto(file), takeFix()]);
+      const takenAt = new Date();
+      const fix = await takeFix();
+      const small = await shrinkPhoto(file, { stamp: photoStamp(takenAt, fix) });
       setPhotoDraft((d) => ({ ...d, [stopId]: small }));
       setPhotoFix((f) => ({ ...f, [stopId]: fix }));
     } finally {
       setPreparingPhotoFor((id) => (id === stopId ? null : id));
     }
+  }
+
+  // "Jumat, 10 Oktober 2026" / "14.32.05 WIB" / "-6.12345, 106.12345 (±12 m)"
+  // in the driver's language, from the phone's clock.
+  function photoStamp(at: Date, fix: Fix): string[] {
+    const locale = language === 'id' ? 'id-ID' : 'en-GB';
+    const date = at.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const time = at.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
+    const where =
+      fix.latitude != null && fix.longitude != null
+        ? `${fix.latitude.toFixed(6)}, ${fix.longitude.toFixed(6)}${fix.accuracy != null ? ` (±${Math.round(fix.accuracy)} m)` : ''}`
+        : t('delivery.driver.photoNoGps');
+    return [date, time, where];
   }
 
   useEffect(() => {
@@ -528,10 +546,15 @@ export default function DriverRoutePage() {
                     <StopMarker stop={stop} current={isCurrent} />
                     <div className="min-w-0 flex-1">
                       <div className={`${display.className} text-xl font-bold leading-tight break-words`}>{stop.label}</div>
-                      {stop.address && (
+                      {(stop.addressLabel || stop.address) && (
                         <div className="text-base text-gray-600 flex items-start gap-1.5 mt-1">
                           <MapPin size={18} className="shrink-0 mt-0.5 text-blue-600" />
-                          <span className="break-words">{stop.address}</span>
+                          <span className="break-words">
+                            {stop.addressLabel && (
+                              <span className="block font-semibold text-gray-900">{stop.addressLabel}</span>
+                            )}
+                            {stop.address}
+                          </span>
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-2 mt-2">

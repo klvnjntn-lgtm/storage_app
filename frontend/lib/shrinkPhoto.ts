@@ -4,9 +4,11 @@
 // (storage/private-photo.ts), so nothing it keeps is lost.
 //
 // Draws the photo onto a canvas (EXIF orientation applied, metadata
-// dropped) and re-encodes as JPEG, stepping quality and then size down
-// until it fits. If the browser can't do any of that, the original goes up
-// unchanged — the server accepts up to 10 MB.
+// dropped), optionally burns a text stamp into its bottom-left corner
+// (date, time, GPS — see the driver page), and re-encodes as JPEG, stepping
+// quality and then size down until it fits. If the browser can't do any of
+// that, the original goes up unchanged and unstamped — the server accepts
+// up to 10 MB.
 
 export const MAX_PROOF_PHOTO_BYTES = 500 * 1024;
 const MAX_DIMENSION = 1600;
@@ -16,8 +18,13 @@ function toJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
 }
 
-export async function shrinkPhoto(file: File, maxBytes = MAX_PROOF_PHOTO_BYTES): Promise<File> {
-  if (file.size <= maxBytes && (file.type === 'image/jpeg' || file.type === 'image/webp')) return file;
+export async function shrinkPhoto(
+  file: File,
+  { maxBytes = MAX_PROOF_PHOTO_BYTES, stamp = [] }: { maxBytes?: number; stamp?: string[] } = {},
+): Promise<File> {
+  if (stamp.length === 0 && file.size <= maxBytes && (file.type === 'image/jpeg' || file.type === 'image/webp')) {
+    return file;
+  }
   let bitmap: ImageBitmap | null = null;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -31,6 +38,7 @@ export async function shrinkPhoto(file: File, maxBytes = MAX_PROOF_PHOTO_BYTES):
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
       canvas.height = Math.max(1, Math.round(bitmap.height * scale));
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      drawStamp(ctx, canvas.width, canvas.height, stamp);
       for (const quality of QUALITIES) {
         const blob = await toJpeg(canvas, quality);
         if (!blob) return file;
@@ -47,6 +55,24 @@ export async function shrinkPhoto(file: File, maxBytes = MAX_PROOF_PHOTO_BYTES):
   } finally {
     bitmap?.close();
   }
+}
+
+// White text on a dark band in the bottom-left corner, sized to the photo
+// so it reads the same on a thumbnail and full size.
+function drawStamp(ctx: CanvasRenderingContext2D, width: number, height: number, lines: string[]) {
+  if (lines.length === 0) return;
+  const fontSize = Math.max(14, Math.round(Math.min(width, height) / 28));
+  const pad = Math.round(fontSize * 0.6);
+  const lineHeight = Math.round(fontSize * 1.3);
+  ctx.font = `600 ${fontSize}px system-ui, -apple-system, Roboto, sans-serif`;
+  ctx.textBaseline = 'top';
+  const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const boxWidth = Math.min(width, Math.ceil(textWidth + pad * 2));
+  const boxHeight = lines.length * lineHeight + pad * 2 - (lineHeight - fontSize);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, height - boxHeight, boxWidth, boxHeight);
+  ctx.fillStyle = '#fff';
+  lines.forEach((line, i) => ctx.fillText(line, pad, height - boxHeight + pad + i * lineHeight));
 }
 
 function asFile(blob: Blob, originalName: string): File {
