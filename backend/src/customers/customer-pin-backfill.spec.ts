@@ -62,6 +62,16 @@ describe('backfillCustomerPin', () => {
     });
   });
 
+  it('pins the saved address a route stop names, whatever its text', async () => {
+    const prisma = makePrisma({ address: base.deliveryAddress });
+    await backfillCustomerPin(prisma, { ...base, customerAddressId: 'a9', deliveryAddress: 'anything' });
+    expect(prisma.customer.updateMany).not.toHaveBeenCalled();
+    expect(prisma.customerAddress.updateMany).toHaveBeenCalledWith({
+      where: { id: 'a9', organizationId: 'org1', customerId: 'c1', ...replaceable(15) },
+      data: gpsPin(15),
+    });
+  });
+
   it('leaves the customer alone for a one-off delivery address', async () => {
     const prisma = makePrisma({ address: 'Jl. Lain 1' }, [
       { id: 'a1', address: 'Gudang Timur' },

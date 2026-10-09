@@ -220,6 +220,63 @@ describe('Team routes & customer stops', () => {
     ).rejects.toThrow(/must be delivery orders/);
   });
 
+  it("sends a customer stop to one of the customer's saved addresses", async () => {
+    const route = await mkRoute();
+    const customer = await mkCustomer('Multi Site');
+    const branch = await prisma.customerAddress.create({
+      data: {
+        organizationId: orgId,
+        customerId: customer.id,
+        label: 'Gudang Timur',
+        address: 'Jl. Timur 5',
+        latitude: 1.9,
+        longitude: 104.9,
+      },
+    });
+    const unpinned = await prisma.customerAddress.create({
+      data: { organizationId: orgId, customerId: customer.id, label: 'Kantor', address: 'Jl. Kantor 1' },
+    });
+
+    // Saved address: its text, name and pin.
+    const atBranch = await routes.addStop(orgId, route.id, {
+      customerId: customer.id,
+      customerAddressId: branch.id,
+    });
+    expect(atBranch.address).toBe('Jl. Timur 5');
+    expect(atBranch.addressLabel).toBe('Gudang Timur');
+    expect(Number(atBranch.destinationLatitude)).toBeCloseTo(1.9);
+
+    // The main address is a different site: allowed on the same route...
+    const atMain = await routes.addStop(orgId, route.id, { customerId: customer.id });
+    expect(atMain.address).toBe('Multi Site street');
+    expect(atMain.addressLabel).toBeNull();
+    // ...but the same site twice isn't.
+    await expect(
+      routes.addStop(orgId, route.id, { customerId: customer.id, customerAddressId: branch.id }),
+    ).rejects.toThrow(/Gudang Timur\) is already a pending stop/);
+    // Another customer's address is refused.
+    const other = await mkCustomer('Other Co');
+    await expect(
+      routes.addStop(orgId, route.id, { customerId: other.id, customerAddressId: branch.id }),
+    ).rejects.toThrow(/Saved address not found/);
+
+    // Switching a pending stop moves text, name and pin together — an
+    // unpinned saved address leaves the stop unpinned.
+    await routes.applyStopAddress(orgId, route.id, atBranch.id, unpinned.id);
+    let row = await prisma.routeStop.findUniqueOrThrow({ where: { id: atBranch.id } });
+    expect(row.address).toBe('Jl. Kantor 1');
+    expect(row.addressLabel).toBe('Kantor');
+    expect(row.destinationLatitude).toBeNull();
+    // Back to the main address clashes with the main-address stop.
+    await expect(
+      routes.applyStopAddress(orgId, route.id, atBranch.id, undefined),
+    ).rejects.toThrow(/already a pending stop/);
+    await routes.applyStopAddress(orgId, route.id, atBranch.id, branch.id);
+    row = await prisma.routeStop.findUniqueOrThrow({ where: { id: atBranch.id } });
+    expect(row.customerAddressId).toBe(branch.id);
+    expect(Number(row.destinationLatitude)).toBeCloseTo(1.9);
+  });
+
   it("corrects a stop's pin for the route only, until the route is finished", async () => {
     const route = await mkRoute();
     const customer = await mkCustomer('Pin Co');

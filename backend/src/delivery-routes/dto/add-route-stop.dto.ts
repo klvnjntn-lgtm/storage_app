@@ -20,6 +20,12 @@ export class AddRouteStopDto {
   @IsString()
   customerId?: string;
 
+  // Customer stops only: one of the customer's saved addresses to go to
+  // instead of their main address.
+  @IsOptional()
+  @IsString()
+  customerAddressId?: string;
+
   // Customer stops only — a DO stop takes these from its DO.
   @IsOptional()
   @IsEnum(DeliveryPriority)

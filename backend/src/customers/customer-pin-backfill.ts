@@ -22,9 +22,11 @@ function normalizeAddress(address: string | null | undefined): string | null {
 // Those rules live in the UPDATE's WHERE, so a pin set concurrently by the
 // office or a better fix always wins.
 //
-// The delivered-to address text picks which pin to fill: the customer's
-// default address, or a matching saved CustomerAddress. Anything else is
-// a one-off site (job site, third party) and leaves the customer alone.
+// A customer route stop for a saved address says which one directly
+// (customerAddressId). Otherwise the delivered-to address text picks which
+// pin to fill: the customer's default address, or a matching saved
+// CustomerAddress. Anything else is a one-off site (job site, third party)
+// and leaves the customer alone.
 // Requires a reported accuracy — without one there's no telling whether
 // the fix is any better than what's there.
 export async function backfillCustomerPin(
@@ -32,6 +34,7 @@ export async function backfillCustomerPin(
   params: {
     organizationId: string;
     customerId: string | null;
+    customerAddressId?: string | null;
     deliveryAddress: string | null;
     latitude?: number;
     longitude?: number;
@@ -61,6 +64,14 @@ export async function backfillCustomerPin(
       { pinSource: PinSource.GPS, pinAccuracy: { gt: accuracy } },
     ],
   } satisfies Prisma.CustomerWhereInput & Prisma.CustomerAddressWhereInput;
+  if (params.customerAddressId) {
+    await prisma.customerAddress.updateMany({
+      where: { id: params.customerAddressId, organizationId, customerId, ...replaceable },
+      data: pin,
+    });
+    return;
+  }
+
   const target = normalizeAddress(params.deliveryAddress);
 
   if (!target || target === normalizeAddress(customer.address)) {

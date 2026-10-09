@@ -39,6 +39,7 @@ import {
   RecordCustomerStopProofDto,
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
+  ApplyStopAddressDto,
 } from './dto/customer-stop-actions.dto';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import {
@@ -313,6 +314,27 @@ export class DeliveryRoutesController {
       organizationId,
       routeId,
       stopId,
+      req.user.sub,
+    );
+  }
+
+  // Points a pending customer stop at a saved address (or back to the
+  // customer's main one) — see applyStopAddress.
+  @Patch(':id/stops/:stopId/address')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  applyStopAddress(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: ApplyStopAddressDto,
+  ) {
+    return this.deliveryRoutesService.applyStopAddress(
+      organizationId,
+      routeId,
+      stopId,
+      dto.customerAddressId,
       req.user.sub,
     );
   }

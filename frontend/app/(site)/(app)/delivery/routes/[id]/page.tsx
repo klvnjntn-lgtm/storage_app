@@ -41,6 +41,8 @@ type Stop = {
   customerName: string | null;
   doNumber: string | null;
   address: string | null;
+  // Saved-address name for a customer stop ("Gudang Timur"); null = main address.
+  addressLabel: string | null;
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   destinationLatitude: string | null;
   destinationLongitude: string | null;
@@ -145,6 +147,8 @@ export default function DeliveryRouteDetailPage() {
   const [showAddStop, setShowAddStop] = useState(false);
   const [addMode, setAddMode] = useState<'CUSTOMER' | 'DELIVERY_ORDER'>('CUSTOMER');
   const [selectedCustomer, setSelectedCustomer] = useState<StopCustomer | null>(null);
+  // '' = the customer's main address, else one of their saved addresses.
+  const [newStopAddressId, setNewStopAddressId] = useState('');
   const [newStopPriority, setNewStopPriority] = useState<'NORMAL' | 'HIGH'>('NORMAL');
   const [newStopWindowStart, setNewStopWindowStart] = useState('');
   const [newStopWindowEnd, setNewStopWindowEnd] = useState('');
@@ -155,6 +159,7 @@ export default function DeliveryRouteDetailPage() {
   const [pickedPosition, setPickedPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
   const { addresses: savedAddresses } = useCustomerAddresses(pickingStop?.customerId);
+  const { addresses: newStopAddresses } = useCustomerAddresses(selectedCustomer?.id);
 
   const [departureTime, setDepartureTime] = useState('');
   const [optimizing, setOptimizing] = useState(false);
@@ -232,6 +237,7 @@ export default function DeliveryRouteDetailPage() {
       stopMode === 'CUSTOMER'
         ? selectedCustomer && {
             customerId: selectedCustomer.id,
+            customerAddressId: newStopAddressId || undefined,
             priority: newStopPriority,
             deliveryWindowStart: newStopWindowStart ? new Date(newStopWindowStart).toISOString() : undefined,
             deliveryWindowEnd: newStopWindowEnd ? new Date(newStopWindowEnd).toISOString() : undefined,
@@ -253,6 +259,7 @@ export default function DeliveryRouteDetailPage() {
       setShowAddStop(false);
       setSelectedOrderId('');
       setSelectedCustomer(null);
+      setNewStopAddressId('');
       setNewStopPriority('NORMAL');
       setNewStopWindowStart('');
       setNewStopWindowEnd('');
@@ -353,20 +360,18 @@ export default function DeliveryRouteDetailPage() {
     await saveStopPin(pickingStop, pickedPosition);
   }
 
-  async function handleApplySavedAddress(customerAddressId: string) {
+  async function handleApplySavedAddress(customerAddressId: string | undefined) {
     if (!pickingStop) return;
-    // A customer stop has no DO to copy the address onto — just take the
-    // saved address's pin for this route.
-    if (!pickingStop.deliveryOrder) {
-      const a = savedAddresses.find((x) => x.id === customerAddressId);
-      if (a?.latitude && a.longitude) await saveStopPin(pickingStop, { lat: Number(a.latitude), lng: Number(a.longitude) });
-      return;
-    }
-    const deliveryOrderId = pickingStop.deliveryOrder.id;
+    // A DO stop changes address on its delivery order; a customer stop on
+    // the stop itself. Either way the address text, name and pin change
+    // together. customerAddressId undefined = back to the main address.
+    const url = pickingStop.deliveryOrder
+      ? `/delivery-orders/${pickingStop.deliveryOrder.id}/address`
+      : `/delivery-routes/${id}/stops/${pickingStop.id}/address`;
     setSavingLocation(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-orders/${deliveryOrderId}/address`, {
+      const res = await apiFetch(url, {
         method: 'PATCH',
         body: JSON.stringify({ customerAddressId }),
       });
@@ -732,7 +737,33 @@ export default function DeliveryRouteDetailPage() {
             )}
             {stopMode === 'CUSTOMER' ? (
               <>
-                <CustomerStopPicker className="w-full sm:w-auto" value={selectedCustomer} onChange={setSelectedCustomer} />
+                <CustomerStopPicker
+                  className="w-full sm:w-auto"
+                  value={selectedCustomer}
+                  onChange={(c) => {
+                    setSelectedCustomer(c);
+                    setNewStopAddressId('');
+                  }}
+                />
+                {selectedCustomer && newStopAddresses.length > 0 && (
+                  <select
+                    value={newStopAddressId}
+                    onChange={(e) => setNewStopAddressId(e.target.value)}
+                    aria-label={t('delivery.addresses.deliverTo')}
+                    className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+                  >
+                    <option value="">
+                      {t('delivery.addresses.mainAddress')}
+                      {selectedCustomer.address ? ` — ${selectedCustomer.address}` : ''}
+                    </option>
+                    {newStopAddresses.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                        {a.address ? ` — ${a.address}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <select
                   value={newStopPriority}
                   onChange={(e) => setNewStopPriority(e.target.value as 'NORMAL' | 'HIGH')}
@@ -822,10 +853,13 @@ export default function DeliveryRouteDetailPage() {
                       )}
                       <span className="truncate">{stop.label}</span>
                     </div>
-                    {stop.address && (
+                    {(stop.addressLabel || stop.address) && (
                       // Wraps on phones where a truncated address is useless;
                       // single-line on wider screens where the row has room.
-                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">{stop.address}</div>
+                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">
+                        {stop.addressLabel && <span className="font-semibold text-gray-700">{stop.addressLabel}{stop.address ? ' · ' : ''}</span>}
+                        {stop.address}
+                      </div>
                     )}
                     {stop.status === 'DELIVERED' && stop.receivedBy && (
                       <div className="text-xs text-green-700">{t('delivery.routeDetail.receivedByLabel')}: {stop.receivedBy}</div>
@@ -1195,6 +1229,15 @@ export default function DeliveryRouteDetailPage() {
               <div>
                 <p className="text-xs font-semibold text-gray-500 mb-1">{t('delivery.addresses.useSaved')}</p>
                 <div className="flex flex-wrap gap-1.5">
+                  {pickingStop.kind === 'CUSTOMER' && (
+                    <button
+                      disabled={savingLocation}
+                      onClick={() => handleApplySavedAddress(undefined)}
+                      className="inline-flex items-center gap-1 text-xs font-medium border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-full px-2.5 py-1.5 sm:py-1 disabled:opacity-50"
+                    >
+                      {t('delivery.addresses.mainAddress')}
+                    </button>
+                  )}
                   {savedAddresses.map((a) => (
                     <button
                       key={a.id}

@@ -71,6 +71,8 @@ export const stopSelect = {
   customerId: true,
   customerName: true,
   address: true,
+  customerAddressId: true,
+  addressLabel: true,
   destinationLatitude: true,
   destinationLongitude: true,
   priority: true,
@@ -295,6 +297,9 @@ export class DeliveryRoutesService {
       kind: d ? ('DELIVERY_ORDER' as const) : ('CUSTOMER' as const),
       label: stopLabel(stop),
       ...target,
+      // Saved-address name for a customer stop ("Gudang Timur"); null for
+      // the main address and for DO stops.
+      addressLabel: d ? null : stop.addressLabel,
       receivedBy: d ? d.receivedBy : stop.receivedBy,
       signedAt: d ? d.signedAt : stop.signedAt,
       hasProofPhoto: d
@@ -1038,30 +1043,145 @@ export class DeliveryRoutesService {
     // An unpinned customer can still be visited: the stop starts without a
     // pin (set it per-route, or the driver's GPS fills it on delivery), it
     // just can't be optimized until then.
+    const site = await this.resolveStopSite(organizationId, customer, dto.customerAddressId);
+    // Same customer at two different sites on one route is fine; the same
+    // site twice isn't.
     const duplicate = await this.prisma.routeStop.findFirst({
       where: {
         routeId,
         customerId: customer.id,
+        customerAddressId: site.customerAddressId,
         signedAt: null,
         failedAt: null,
       },
       select: { id: true },
     });
     if (duplicate) {
-      throw new BadRequestException(`${customer.name} is already a pending stop on this route`);
+      throw new BadRequestException(
+        `${customer.name}${site.addressLabel ? ` (${site.addressLabel})` : ''} is already a pending stop on this route`,
+      );
     }
     return {
       customerId: customer.id,
       customerName: customer.name,
-      address: customer.address,
-      destinationLatitude: customer.latitude,
-      destinationLongitude: customer.longitude,
+      ...site,
       priority: dto.priority ?? DeliveryPriority.NORMAL,
       deliveryWindowStart: dto.deliveryWindowStart
         ? new Date(dto.deliveryWindowStart)
         : null,
       deliveryWindowEnd: dto.deliveryWindowEnd ? new Date(dto.deliveryWindowEnd) : null,
     };
+  }
+
+  // Address text + pin a customer stop snapshots: the customer's main ones,
+  // or one of their saved addresses (CustomerAddress).
+  private async resolveStopSite(
+    organizationId: string,
+    customer: {
+      id: string;
+      address: string | null;
+      latitude: Prisma.Decimal | null;
+      longitude: Prisma.Decimal | null;
+    },
+    customerAddressId?: string | null,
+  ) {
+    if (!customerAddressId) {
+      return {
+        customerAddressId: null,
+        addressLabel: null,
+        address: customer.address,
+        destinationLatitude: customer.latitude,
+        destinationLongitude: customer.longitude,
+      };
+    }
+    const saved = await this.prisma.customerAddress.findFirst({
+      where: { id: customerAddressId, organizationId, customerId: customer.id },
+    });
+    if (!saved) {
+      throw new BadRequestException("Saved address not found for this stop's customer");
+    }
+    return {
+      customerAddressId: saved.id,
+      addressLabel: saved.label,
+      address: saved.address,
+      destinationLatitude: saved.latitude,
+      destinationLongitude: saved.longitude,
+    };
+  }
+
+  // Points a pending customer stop at one of the customer's saved
+  // addresses, or back to their main address (customerAddressId omitted):
+  // address text, name and pin all change together. A DO stop changes
+  // address on its delivery order instead.
+  async applyStopAddress(
+    organizationId: string,
+    routeId: string,
+    stopId: string,
+    customerAddressId: string | undefined,
+    userId?: string,
+  ) {
+    const stop = await this.prisma.routeStop.findFirst({
+      where: { id: stopId, routeId, route: { organizationId } },
+      select: {
+        id: true,
+        customerId: true,
+        deliveryOrderId: true,
+        supersededAt: true,
+        signedAt: true,
+        failedAt: true,
+        deliveryOrder: { select: { status: true, signedAt: true } },
+        route: { select: { status: true, teamId: true } },
+      },
+    });
+    if (!stop) throw new NotFoundException('Stop not found');
+    if (stop.deliveryOrderId || !stop.customerId) {
+      throw new BadRequestException(
+        'This stop is a delivery order — change the address on the delivery order',
+      );
+    }
+    this.assertRouteOpen(stop.route);
+    if (this.stopStatus(stop) !== 'PENDING') {
+      throw new BadRequestException('This stop is already resolved');
+    }
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: stop.customerId, organizationId },
+      select: { id: true, name: true, address: true, latitude: true, longitude: true },
+    });
+    if (!customer) throw new NotFoundException('Customer not found');
+    const site = await this.resolveStopSite(organizationId, customer, customerAddressId);
+    const duplicate = await this.prisma.routeStop.findFirst({
+      where: {
+        routeId,
+        id: { not: stopId },
+        customerId: customer.id,
+        customerAddressId: site.customerAddressId,
+        signedAt: null,
+        failedAt: null,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException(
+        `${customer.name}${site.addressLabel ? ` (${site.addressLabel})` : ''} is already a pending stop on this route`,
+      );
+    }
+    await this.prisma.routeStop.update({ where: { id: stopId }, data: site });
+    await this.recordHistory(routeId, RouteHistoryEventType.START_SET, userId, {
+      stopId,
+      stopDestination: true,
+      customerAddressId: site.customerAddressId,
+      addressLabel: site.addressLabel,
+    });
+    if (stop.route.status === RouteStatus.ACTIVE) {
+      await this.notifyTeam(
+        organizationId,
+        stop.route.teamId,
+        'ROUTE_STOPS_CHANGED',
+        "A stop's address on your route was changed",
+        routeId,
+      );
+    }
+    return this.getRoute(organizationId, routeId);
   }
 
   // Corrects a stop's pin for this route only. A customer stop's pin is
@@ -1147,6 +1267,7 @@ export class DeliveryRoutesService {
         customerName: true,
         customerId: true,
         address: true,
+        customerAddressId: true,
         deliveryOrderId: true,
         signedAt: true,
         failedAt: true,
@@ -1207,6 +1328,7 @@ export class DeliveryRoutesService {
       await backfillCustomerPin(this.prisma, {
         organizationId,
         customerId: stop.customerId,
+        customerAddressId: stop.customerAddressId,
         deliveryAddress: stop.address,
         latitude: params.latitude,
         longitude: params.longitude,
@@ -1351,6 +1473,7 @@ export class DeliveryRoutesService {
         where: {
           routeId: target.id,
           customerId: stop.customerId,
+          customerAddressId: stop.customerAddressId,
           signedAt: null,
           failedAt: null,
         },
@@ -1385,6 +1508,8 @@ export class DeliveryRoutesService {
           customerId: stop.customerId,
           customerName: stop.customerName,
           address: stop.address,
+          customerAddressId: stop.customerAddressId,
+          addressLabel: stop.addressLabel,
           destinationLatitude: stop.destinationLatitude,
           destinationLongitude: stop.destinationLongitude,
           priority: stop.priority,

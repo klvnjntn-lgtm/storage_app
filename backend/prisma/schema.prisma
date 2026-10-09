@@ -56,8 +56,8 @@ model Customer {
   // as DeliveryOrder.destinationLatitude), copied onto a new DeliveryOrder
   // at creation time; that individual shipment's own pin can still
   // override it (job site, branch, third party — see that field's comment).
-  latitude  Decimal? @db.Decimal(9, 6)
-  longitude Decimal? @db.Decimal(9, 6)
+  latitude    Decimal?   @db.Decimal(9, 6)
+  longitude   Decimal?   @db.Decimal(9, 6)
   // Where the pin came from — see PinSource. pinAccuracy is the driver's
   // GPS accuracy in metres (GPS pins only); pinSetAt is when it was set.
   pinSource   PinSource?
@@ -97,22 +97,23 @@ model Customer {
 // onto that DO (snapshot — editing the saved address later doesn't move
 // already-created shipments).
 model CustomerAddress {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   organizationId String
   customerId     String
   label          String
   address        String?
-  latitude       Decimal? @db.Decimal(9, 6)
-  longitude      Decimal? @db.Decimal(9, 6)
+  latitude       Decimal?   @db.Decimal(9, 6)
+  longitude      Decimal?   @db.Decimal(9, 6)
   // Same meaning as on Customer.
   pinSource      PinSource?
   pinAccuracy    Float?
   pinSetAt       DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  routeStops   RouteStop[]
 
   @@index([organizationId, customerId])
 }
@@ -1216,6 +1217,12 @@ model RouteStop {
   customerId           String?
   customerName         String?
   address              String?
+  // Which of the customer's saved addresses the stop goes to (null = the
+  // customer's main address). addressLabel is that address's name ("Gudang
+  // Timur"), snapshotted like the rest so the driver still sees it if the
+  // saved address is renamed or deleted later.
+  customerAddressId    String?
+  addressLabel         String?
   destinationLatitude  Decimal?         @db.Decimal(9, 6)
   destinationLongitude Decimal?         @db.Decimal(9, 6)
   priority             DeliveryPriority @default(NORMAL)
@@ -1234,10 +1241,11 @@ model RouteStop {
   failureLatitude      Decimal?         @db.Decimal(9, 6)
   failureLongitude     Decimal?         @db.Decimal(9, 6)
 
-  route               Route          @relation(fields: [routeId], references: [id])
-  deliveryOrder       DeliveryOrder? @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id], onDelete: Restrict)
-  customer            Customer?      @relation(fields: [customerId], references: [id])
-  activeDeliveryOrder DeliveryOrder? @relation("ActiveRouteStop", fields: [activeDeliveryOrderId], references: [id])
+  route               Route            @relation(fields: [routeId], references: [id])
+  deliveryOrder       DeliveryOrder?   @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id], onDelete: Restrict)
+  customer            Customer?        @relation(fields: [customerId], references: [id])
+  customerAddress     CustomerAddress? @relation(fields: [customerAddressId], references: [id], onDelete: SetNull)
+  activeDeliveryOrder DeliveryOrder?   @relation("ActiveRouteStop", fields: [activeDeliveryOrderId], references: [id])
 
   @@unique([routeId, sequence])
   @@index([routeId])

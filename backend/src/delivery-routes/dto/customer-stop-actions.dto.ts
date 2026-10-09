@@ -82,3 +82,11 @@ export class RescheduleCustomerStopDto {
   @IsDateString()
   deliveryWindowEnd?: string;
 }
+
+// Which address a pending customer stop goes to: a saved address, or the
+// customer's main address when customerAddressId is omitted.
+export class ApplyStopAddressDto {
+  @IsOptional()
+  @IsString()
+  customerAddressId?: string;
+}
