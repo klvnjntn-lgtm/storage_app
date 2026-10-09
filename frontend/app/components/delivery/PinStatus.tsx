@@ -3,9 +3,24 @@
 import { Lock, MapPin, MapPinOff, AlertTriangle, LocateFixed } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-// A GPS pin vaguer than this is flagged to the office as weak. Matches the
-// backend's WEAK_PIN_ACCURACY_METERS.
+// GPS quality, the same three levels the driver sees on their phone:
+// good up to 30 m, OK up to 50 m, weak beyond. A pin vaguer than 50 m is
+// flagged to the office — matches the backend's WEAK_PIN_ACCURACY_METERS.
+export const GOOD_GPS_ACCURACY_M = 30;
 export const WEAK_PIN_ACCURACY_M = 50;
+
+export type GpsQuality = 'GOOD' | 'OK' | 'WEAK';
+
+export function gpsQuality(accuracy: number): GpsQuality {
+  if (accuracy <= GOOD_GPS_ACCURACY_M) return 'GOOD';
+  return accuracy <= WEAK_PIN_ACCURACY_M ? 'OK' : 'WEAK';
+}
+
+const QUALITY_TONE: Record<GpsQuality, string> = {
+  GOOD: 'text-green-700',
+  OK: 'text-amber-700',
+  WEAK: 'text-red-700',
+};
 
 // The pin fields a Customer / CustomerAddress comes back with. Prisma
 // Decimal fields serialize as strings over JSON.
@@ -26,28 +41,26 @@ export function pinStatus(p: PinFields): PinStatus {
   return p.pinAccuracy != null && p.pinAccuracy > WEAK_PIN_ACCURACY_M ? 'WEAK_GPS' : 'GPS';
 }
 
-const TONE: Record<PinStatus, string> = {
-  NONE: 'text-amber-700',
-  MANUAL: 'text-green-700',
-  GPS: 'text-green-700',
-  WEAK_GPS: 'text-red-700',
-};
-
-// One-line pin label for lists: "Set by office" / "Driver GPS ±12 m" /
-// "Weak GPS ±80 m" / "No pin".
+// One-line pin label for lists: "Set by office" / "Driver GPS ±12 m · good"
+// / "Driver GPS ±40 m · OK" / "Weak GPS ±80 m" / "No pin".
 export function PinStatusBadge({ pin, className = '' }: { pin: PinFields; className?: string }) {
   const { t } = useLanguage();
   const status = pinStatus(pin);
   const m = Math.round(pin.pinAccuracy ?? 0);
+  const quality = gpsQuality(pin.pinAccuracy ?? 0);
   const Icon = status === 'NONE' ? MapPinOff : status === 'MANUAL' ? Lock : status === 'WEAK_GPS' ? AlertTriangle : MapPin;
   const label =
     status === 'NONE'
       ? t('delivery.pin.none')
       : status === 'MANUAL'
         ? t('delivery.pin.manual')
-        : t(status === 'WEAK_GPS' ? 'delivery.pin.weakGps' : 'delivery.pin.gps', { m });
+        : status === 'WEAK_GPS'
+          ? t('delivery.pin.weakGps', { m })
+          : t(quality === 'GOOD' ? 'delivery.pin.gpsGood' : 'delivery.pin.gpsOk', { m });
+  const tone =
+    status === 'NONE' ? 'text-amber-700' : status === 'MANUAL' ? 'text-green-700' : QUALITY_TONE[quality];
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${TONE[status]} ${className}`}>
+    <span className={`inline-flex items-center gap-1 text-xs ${tone} ${className}`}>
       <Icon size={13} className="shrink-0" />
       {label}
     </span>
@@ -74,7 +87,8 @@ export function pinHint(
   return t(status === 'WEAK_GPS' ? 'delivery.pin.weakHint' : 'delivery.pin.gpsHint', { date, m });
 }
 
-// Where a delivery was marked done, and how good that GPS fix was.
+// Where a delivery was marked done, and how good that GPS fix was:
+// "Delivered at ±12 m (good signal)".
 export function DeliveryFixBadge({ accuracy }: { accuracy: number | null | undefined }) {
   const { t } = useLanguage();
   if (accuracy == null) {
@@ -86,11 +100,12 @@ export function DeliveryFixBadge({ accuracy }: { accuracy: number | null | undef
     );
   }
   const m = Math.round(accuracy);
-  const weak = accuracy > WEAK_PIN_ACCURACY_M;
+  const quality = gpsQuality(accuracy);
+  const key = { GOOD: 'delivery.pin.deliveredAtGood', OK: 'delivery.pin.deliveredAtOk', WEAK: 'delivery.pin.deliveredAtWeak' }[quality];
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${weak ? 'text-red-700' : 'text-green-700'}`}>
+    <span className={`inline-flex items-center gap-1 text-xs ${QUALITY_TONE[quality]}`}>
       <LocateFixed size={13} className="shrink-0" />
-      {t(weak ? 'delivery.pin.deliveredAtWeak' : 'delivery.pin.deliveredAt', { m })}
+      {t(key, { m })}
     </span>
   );
 }

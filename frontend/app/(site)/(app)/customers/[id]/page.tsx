@@ -13,7 +13,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
-import { PinStatusBadge, pinStatus, pinHint } from '@/app/components/delivery/PinStatus';
+import { PinStatusBadge, pinStatus, pinHint, gpsQuality } from '@/app/components/delivery/PinStatus';
 import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
 import CustomerDriverInfoSection from '@/app/components/delivery/CustomerDriverInfoSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
@@ -276,7 +276,7 @@ export default function CustomerDetailPage() {
               className={`flex items-start justify-between gap-3 border-2 rounded-md p-3 mb-6 ${
                 status === 'WEAK_GPS'
                   ? 'border-red-300 bg-red-50'
-                  : status === 'NONE'
+                  : status === 'NONE' || (status === 'GPS' && gpsQuality(customer.pinAccuracy ?? 0) === 'OK')
                     ? 'border-amber-300 bg-amber-50'
                     : 'border-green-300 bg-green-50'
               }`}

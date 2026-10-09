@@ -24,6 +24,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -161,8 +162,8 @@ function captureLocation(): Promise<Fix> {
 
 // Matches WEAK_PIN_ACCURACY_M: a vaguer fix still becomes the customer's
 // pin if they have none, but the office sees it flagged as weak.
-const FAIR_ACCURACY_M = 50;
-const GOOD_ACCURACY_M = 30;
+const FAIR_ACCURACY_M = WEAK_PIN_ACCURACY_M;
+const GOOD_ACCURACY_M = GOOD_GPS_ACCURACY_M;
 
 // Location quality the driver sees before tapping Mark delivered.
 function GpsChip({ status, best }: { status: GpsStatus; best: GpsFix | null }) {
