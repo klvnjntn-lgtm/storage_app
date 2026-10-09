@@ -998,7 +998,7 @@ export class DeliveryRoutesService {
 
   // What a new stop points at. With INVOICE_POS every delivery goes out
   // on a delivery order, so a stop must be one. Without it, a stop is a
-  // customer (with a pin) — or a DO, if the org has them anyway (e.g.
+  // customer — or a DO, if the org has them anyway (e.g.
   // from WAREHOUSE_OPS pack sessions).
   private async resolveNewStopTarget(
     organizationId: string,
@@ -1035,11 +1035,9 @@ export class DeliveryRoutesService {
       select: { id: true, name: true, address: true, latitude: true, longitude: true },
     });
     if (!customer) throw new NotFoundException('Customer not found');
-    if (customer.latitude == null || customer.longitude == null) {
-      throw new BadRequestException(
-        `${customer.name} has no location pin yet — set it on the customer first`,
-      );
-    }
+    // An unpinned customer can still be visited: the stop starts without a
+    // pin (set it per-route, or the driver's GPS fills it on delivery), it
+    // just can't be optimized until then.
     const duplicate = await this.prisma.routeStop.findFirst({
       where: {
         routeId,

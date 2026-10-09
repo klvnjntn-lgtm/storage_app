@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { Check, ChevronDown, MapPin, MapPinOff, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -17,8 +16,8 @@ export type StopCustomer = {
 const SEARCH_DEBOUNCE_MS = 250;
 
 // Picks a customer to visit as a route stop (orgs without INVOICE_POS).
-// Only customers with a location pin can be chosen; the rest link to the
-// customer page so the pin can be set there.
+// Customers without a location pin can be chosen too — the stop starts
+// unpinned (set it on the route, or the driver's GPS fills it on delivery).
 export default function CustomerStopPicker({
   value,
   onChange,
@@ -106,42 +105,34 @@ export default function CustomerStopPicker({
             {!searching && results.length === 0 && (
               <li className="px-3 py-3 text-sm text-gray-500">{t('delivery.driverPicker.noMatches')}</li>
             )}
-            {results.map((c) =>
-              hasPin(c) ? (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={value?.id === c.id}
-                    onClick={() => {
-                      onChange(c);
-                      setOpen(false);
-                    }}
-                    className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-blue-50"
-                  >
+            {results.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={value?.id === c.id}
+                  onClick={() => {
+                    onChange(c);
+                    setOpen(false);
+                  }}
+                  className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-blue-50"
+                >
+                  {hasPin(c) ? (
                     <MapPin size={14} className="text-green-600 shrink-0 mt-0.5" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium truncate">{c.name}</span>
-                      {c.address && <span className="block text-xs text-gray-500 truncate">{c.address}</span>}
-                    </span>
-                    {value?.id === c.id && <Check size={14} className="text-blue-600 shrink-0" />}
-                  </button>
-                </li>
-              ) : (
-                <li key={c.id} className="flex items-start gap-2.5 px-3 py-2">
-                  <MapPinOff size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                  ) : (
+                    <MapPinOff size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                  )}
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium truncate text-gray-400">{c.name}</span>
-                    <span className="block text-xs text-amber-700">
-                      {t('delivery.routeDetail.customerNoPin')}{' '}
-                      <Link href={`/customers/${c.id}`} className="underline">
-                        {t('delivery.routeDetail.setCustomerPin')}
-                      </Link>
-                    </span>
+                    <span className="block text-sm font-medium truncate">{c.name}</span>
+                    {c.address && <span className="block text-xs text-gray-500 truncate">{c.address}</span>}
+                    {!hasPin(c) && (
+                      <span className="block text-xs text-amber-700">{t('delivery.routeDetail.customerNoPinOptional')}</span>
+                    )}
                   </span>
-                </li>
-              ),
-            )}
+                  {value?.id === c.id && <Check size={14} className="text-blue-600 shrink-0" />}
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       )}

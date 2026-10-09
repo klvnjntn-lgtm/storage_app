@@ -176,16 +176,17 @@ describe('Team routes & customer stops', () => {
     ).resolves.toBeDefined();
   });
 
-  it('without INVOICE_POS: adds customer stops from the customer pin, and DOs still work', async () => {
+  it('without INVOICE_POS: adds customer stops (pinned or not), and DOs still work', async () => {
     const route = await mkRoute();
     const customer = await mkCustomer('Toko Maju');
     await routes.addStop(orgId, route.id, { customerId: customer.id });
 
-    await expect(
-      routes.addStop(orgId, route.id, {
-        customerId: (await mkCustomer('No Pin', false)).id,
-      }),
-    ).rejects.toThrow(/no location pin/);
+    // No pin yet is fine — the stop just starts unpinned.
+    const unpinned = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('No Pin', false)).id,
+    });
+    expect(unpinned.destinationLatitude).toBeNull();
+    expect(unpinned.destinationLongitude).toBeNull();
     await expect(
       routes.addStop(orgId, route.id, { customerId: customer.id }),
     ).rejects.toThrow(/already a pending stop/);
