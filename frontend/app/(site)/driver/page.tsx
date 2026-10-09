@@ -23,6 +23,7 @@ import { display } from '@/lib/fonts';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
+import { shrinkPhoto } from '@/lib/shrinkPhoto';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -278,6 +279,10 @@ export default function DriverRoutePage() {
   const [failingStopId, setFailingStopId] = useState<string | null>(null);
   const [photoDraft, setPhotoDraft] = useState<Record<string, File>>({});
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
+  // GPS reading taken when the photo was, so the delivery is placed where
+  // the photo was shot even if the upload only gets through later.
+  const [photoFix, setPhotoFix] = useState<Record<string, Fix>>({});
+  const [preparingPhotoFor, setPreparingPhotoFor] = useState<string | null>(null);
 
   // GPS stays warm only while there's something left to deliver.
   const hasPending = routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
@@ -288,6 +293,19 @@ export default function DriverRoutePage() {
     const f = gps.bestFix();
     if (f) return { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy };
     return captureLocation();
+  }
+
+  // Shrinks the photo for a weak signal and takes the GPS reading at the
+  // same moment. A retake replaces both.
+  async function onPhotoPicked(stopId: string, file: File) {
+    setPreparingPhotoFor(stopId);
+    try {
+      const [small, fix] = await Promise.all([shrinkPhoto(file), takeFix()]);
+      setPhotoDraft((d) => ({ ...d, [stopId]: small }));
+      setPhotoFix((f) => ({ ...f, [stopId]: fix }));
+    } finally {
+      setPreparingPhotoFor((id) => (id === stopId ? null : id));
+    }
   }
 
   useEffect(() => {
@@ -326,7 +344,10 @@ export default function DriverRoutePage() {
     setError(null);
     setNotice(null);
     try {
-      const { latitude, longitude, accuracy } = await takeFix();
+      // The reading from when the photo was taken; a new one only if there
+      // was no photo or the phone gave no location then.
+      const shotFix = photoDraft[key] ? photoFix[key] : undefined;
+      const { latitude, longitude, accuracy } = shotFix?.latitude != null ? shotFix : await takeFix();
 
       // Photo first: it attaches to the stop/delivery order directly, and
       // the proof locks it once the delivery is signed for.
@@ -637,7 +658,8 @@ export default function DriverRoutePage() {
                               className="hidden"
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
-                                if (file) setPhotoDraft((d) => ({ ...d, [doId]: file }));
+                                if (file) onPhotoPicked(doId, file);
+                                e.target.value = '';
                               }}
                             />
                           </label>
@@ -653,10 +675,14 @@ export default function DriverRoutePage() {
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) setPhotoDraft((d) => ({ ...d, [doId]: file }));
+                              if (file) onPhotoPicked(doId, file);
+                              e.target.value = '';
                             }}
                           />
                         </label>
+                      )}
+                      {preparingPhotoFor === doId && (
+                        <p className="text-base text-gray-500">{t('delivery.driver.preparingPhoto')}</p>
                       )}
                       {uploadingPhotoFor === doId && (
                         <p className="text-base text-gray-500">{t('delivery.driver.uploadingPhoto')}</p>
@@ -694,7 +720,7 @@ export default function DriverRoutePage() {
                       ) : (
                         <div className="space-y-2">
                           <button
-                            disabled={busy || proofMissing}
+                            disabled={busy || proofMissing || preparingPhotoFor === doId}
                             onClick={() => handleMarkDelivered(route.id, stop)}
                             className="w-full h-14 flex items-center justify-center gap-2 bg-green-600 text-white text-lg font-bold rounded-xl shadow-sm disabled:opacity-40 active:bg-green-700"
                           >
