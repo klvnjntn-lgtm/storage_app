@@ -1,15 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { MapPin, MapPinOff, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, Trash2, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import { PinStatusBadge } from '@/app/components/delivery/PinStatus';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 
-type Draft = { id: string | null; label: string; address: string; position: { lat: number; lng: number } | null };
+type LatLng = { lat: number; lng: number };
+// original = the pin as loaded; the location is only sent when it changed,
+// so renaming an address doesn't re-save (and lock) a driver's GPS pin.
+type Draft = { id: string | null; label: string; address: string; position: LatLng | null; original: LatLng | null };
 
 // Saved delivery sites for a customer (branches, warehouses…), managed on
 // the customer page. The customer's own address/location stays the default.
@@ -30,7 +34,7 @@ export default function CustomerAddressesSection({
 
   function openNew() {
     setError('');
-    setDraft({ id: null, label: '', address: '', position: null });
+    setDraft({ id: null, label: '', address: '', position: null, original: null });
   }
 
   function openEdit(a: CustomerAddress) {
@@ -40,6 +44,7 @@ export default function CustomerAddressesSection({
       label: a.label,
       address: a.address ?? '',
       position: a.latitude && a.longitude ? { lat: Number(a.latitude), lng: Number(a.longitude) } : null,
+      original: a.latitude && a.longitude ? { lat: Number(a.latitude), lng: Number(a.longitude) } : null,
     });
   }
 
@@ -55,7 +60,10 @@ export default function CustomerAddressesSection({
           body: JSON.stringify({
             label: draft.label.trim(),
             address: draft.address.trim(),
-            ...(draft.position ? { latitude: draft.position.lat, longitude: draft.position.lng } : {}),
+            ...(draft.position &&
+            (draft.position.lat !== draft.original?.lat || draft.position.lng !== draft.original?.lng)
+              ? { latitude: draft.position.lat, longitude: draft.position.lng }
+              : {}),
           }),
         },
       );
@@ -102,22 +110,12 @@ export default function CustomerAddressesSection({
       {addresses.length === 0 && <p className="text-xs text-gray-400">{t('delivery.addresses.empty')}</p>}
       <div className="divide-y divide-gray-100">
         {addresses.map((a) => {
-          const hasLocation = !!(a.latitude && a.longitude);
           return (
             <div key={a.id} className="flex items-start justify-between gap-2 py-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-sm font-medium">{a.label}</span>
-                  <span
-                    className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${
-                      hasLocation
-                        ? 'bg-green-50 text-green-800 border-green-300'
-                        : 'bg-amber-50 text-amber-800 border-amber-300'
-                    }`}
-                  >
-                    {hasLocation ? <MapPin size={10} /> : <MapPinOff size={10} />}
-                    {hasLocation ? t('delivery.routeDetail.locationSet') : t('delivery.routeDetail.noLocation')}
-                  </span>
+                  <PinStatusBadge pin={a} className="font-medium" />
                 </div>
                 <p className="text-xs text-gray-500 line-clamp-2">{a.address || t('delivery.addresses.noAddressText')}</p>
                 <GoogleMapsLink lat={a.latitude} lng={a.longitude} />

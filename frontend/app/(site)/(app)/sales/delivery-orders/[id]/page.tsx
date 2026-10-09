@@ -12,6 +12,7 @@ import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView }
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
+import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 
 
@@ -398,6 +399,13 @@ export default function DeliveryOrderDetailPage() {
             >
               {t('sales.deliveryOrderDetail.saveSignature')}
             </button>
+          </div>
+        )}
+
+        {order.signedAt && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <DeliveryFixBadge accuracy={order.completedLatitude ? order.completedAccuracy : null} />
+            <GoogleMapsLink lat={order.completedLatitude} lng={order.completedLongitude} className="!px-2 !py-1" />
           </div>
         )}
 

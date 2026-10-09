@@ -11,6 +11,7 @@ import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
+import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
 import { driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
@@ -48,6 +49,11 @@ type Stop = {
   deliveryWindowEnd: string | null;
   receivedBy: string | null;
   hasProofPhoto: boolean;
+  // Where the driver marked it delivered (Decimal → string) and how good
+  // that GPS fix was, in metres.
+  completedLatitude: string | null;
+  completedLongitude: string | null;
+  completedAccuracy: number | null;
   failureReason: string | null;
   deliveryOrder: { id: string } | null;
 };
@@ -823,6 +829,12 @@ export default function DeliveryRouteDetailPage() {
                     )}
                     {stop.status === 'DELIVERED' && stop.receivedBy && (
                       <div className="text-xs text-green-700">{t('delivery.routeDetail.receivedByLabel')}: {stop.receivedBy}</div>
+                    )}
+                    {stop.status === 'DELIVERED' && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <DeliveryFixBadge accuracy={stop.completedLatitude ? stop.completedAccuracy : null} />
+                        <GoogleMapsLink lat={stop.completedLatitude} lng={stop.completedLongitude} className="!px-2 !py-1" />
+                      </div>
                     )}
                     {stop.status === 'DELIVERED' && stop.hasProofPhoto && (
                       <ProofPhoto

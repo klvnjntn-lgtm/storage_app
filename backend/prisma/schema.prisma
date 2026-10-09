@@ -58,6 +58,11 @@ model Customer {
   // override it (job site, branch, third party — see that field's comment).
   latitude  Decimal? @db.Decimal(9, 6)
   longitude Decimal? @db.Decimal(9, 6)
+  // Where the pin came from — see PinSource. pinAccuracy is the driver's
+  // GPS accuracy in metres (GPS pins only); pinSetAt is when it was set.
+  pinSource   PinSource?
+  pinAccuracy Float?
+  pinSetAt    DateTime?
 
   // DELIVERY_DMS — directions for the driver ("gate behind the mosque,
   // ring the bell twice"), shown on every route stop for this customer
@@ -99,6 +104,10 @@ model CustomerAddress {
   address        String?
   latitude       Decimal? @db.Decimal(9, 6)
   longitude      Decimal? @db.Decimal(9, 6)
+  // Same meaning as on Customer.
+  pinSource      PinSource?
+  pinAccuracy    Float?
+  pinSetAt       DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -106,6 +115,15 @@ model CustomerAddress {
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
 
   @@index([organizationId, customerId])
+}
+
+// How a customer (or saved address) pin was set. MANUAL: placed by
+// someone in the office — locked, a driver's GPS never moves it. GPS:
+// taken from a driver's fix at a completed delivery (customer-pin-backfill);
+// a later delivery with a tighter fix replaces it.
+enum PinSource {
+  MANUAL
+  GPS
 }
 
 // DELIVERY_DMS — photos of the customer's building/entrance so a driver

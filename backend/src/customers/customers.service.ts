@@ -3,6 +3,7 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerLocationService } from './customer-location.service';
+import { manualPinData } from './customer-pin-backfill';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ImportCustomerRowDto } from './dto/import-customers.dto';
@@ -71,7 +72,9 @@ export class CustomersService {
 // src/customers/customers.service.ts — only create() and update() changed from last version
 async create(organizationId: string, dto: CreateCustomerDto) {
   await this.assertPriceLevel(organizationId, dto.priceLevelId);
-  return this.prisma.customer.create({ data: { ...dto, organizationId } });
+  return this.prisma.customer.create({
+    data: { ...dto, organizationId, ...manualPinData(dto.latitude, dto.longitude) },
+  });
 }
 
 // Bulk create from a spreadsheet. Never updates an existing customer: a
@@ -138,8 +141,7 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
       phone,
       address,
       npwp,
-      latitude: r.latitude,
-      longitude: r.longitude,
+      ...manualPinData(r.latitude, r.longitude),
       deliveryNotes: r.deliveryNotes?.trim() || undefined,
       priceLevelId,
     });
@@ -165,7 +167,7 @@ async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
   await this.assertPriceLevel(organizationId, dto.priceLevelId);
   return this.prisma.customer.update({
     where: { id, organizationId },
-    data: dto,
+    data: { ...dto, ...manualPinData(dto.latitude, dto.longitude) },
   });
 }
 
@@ -228,8 +230,7 @@ async remove(organizationId: string, id: string) {
         customerId,
         label: dto.label.trim(),
         address: dto.address?.trim() || null,
-        latitude: dto.latitude ?? null,
-        longitude: dto.longitude ?? null,
+        ...manualPinData(dto.latitude ?? null, dto.longitude ?? null),
       },
     });
   }
@@ -246,8 +247,7 @@ async remove(organizationId: string, id: string) {
       data: {
         label: dto.label?.trim(),
         address: dto.address !== undefined ? dto.address.trim() || null : undefined,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
+        ...manualPinData(dto.latitude, dto.longitude),
       },
     });
   }

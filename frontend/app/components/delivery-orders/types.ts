@@ -78,6 +78,10 @@ export type DeliveryOrderDetail = {
   // Private photo (or a legacy media-library one) — view via
   // GET /delivery-orders/:id/proof-photo-link.
   hasProofPhoto: boolean;
+  // Where the driver marked it delivered and that GPS fix's accuracy (m).
+  completedLatitude: string | null;
+  completedLongitude: string | null;
+  completedAccuracy: number | null;
   salesOrder: { orderNumber: string | null } | null;
   invoice: { invoiceNumber: string | null } | null; // NEW
   location: { name: string | null } | null;

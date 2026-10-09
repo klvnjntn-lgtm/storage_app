@@ -334,12 +334,15 @@ describe('Delivery proof photos', () => {
     ).toBeNull();
   });
 
-  it("gives an unpinned customer address its first pin from the driver's GPS, never overwriting one", async () => {
+  it("pins a customer address from the driver's GPS, improving GPS pins but never moving a manual one", async () => {
     const customer = await prisma.customer.create({
       data: { organizationId: orgId, name: 'ABC', address: 'Komplek XYZ Blok B No. 6' },
     });
     const pinned = await prisma.customer.create({
-      data: { organizationId: orgId, name: 'Pinned', address: 'Jl. A', latitude: -6.1, longitude: 106.1 },
+      data: {
+        organizationId: orgId, name: 'Pinned', address: 'Jl. A',
+        latitude: -6.1, longitude: 106.1, pinSource: 'MANUAL',
+      },
     });
     const deliverTo = async (customerId: string, deliveryAddress: string, gps: object) => {
       const order = await shippedDo(driverId);
@@ -349,28 +352,39 @@ describe('Delivery proof photos', () => {
       });
       return orders.recordProofOfDelivery(orgId, order.id, gps, driver());
     };
+    const pinOf = (id: string) => prisma.customer.findUniqueOrThrow({ where: { id } });
 
-    // Vague fix: kept on the delivery, address stays unpinned.
+    // Weak fix: kept on the delivery and still becomes the pin, flagged by its accuracy.
     const vague = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
       completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 500,
     });
     expect(Number(vague.completedLatitude)).toBeCloseTo(-6.3);
     expect(vague.completedAccuracy).toBe(500);
-    expect((await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).latitude).toBeNull();
+    let pin = await pinOf(customer.id);
+    expect(Number(pin.latitude)).toBeCloseTo(-6.3);
+    expect(pin.pinSource).toBe('GPS');
+    expect(pin.pinAccuracy).toBe(500);
 
-    // Good fix: becomes the customer's pin.
+    // Better fix: replaces the weak GPS pin.
     await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
       completedLatitude: -6.2, completedLongitude: 106.8, completedAccuracy: 12,
     });
-    const after = await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } });
-    expect(Number(after.latitude)).toBeCloseTo(-6.2);
-    expect(Number(after.longitude)).toBeCloseTo(106.8);
+    pin = await pinOf(customer.id);
+    expect(Number(pin.latitude)).toBeCloseTo(-6.2);
+    expect(Number(pin.longitude)).toBeCloseTo(106.8);
+    expect(pin.pinAccuracy).toBe(12);
 
-    // A later delivery never moves an existing pin.
+    // Worse fix: the better GPS pin stays.
+    await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+      completedLatitude: -6.4, completedLongitude: 106.4, completedAccuracy: 40,
+    });
+    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.2);
+
+    // A manual pin never moves, even for a tighter fix.
     const later = await deliverTo(pinned.id, 'Jl. A', {
       completedLatitude: -6.9, completedLongitude: 106.9, completedAccuracy: 5,
     });
     expect(Number(later.completedLatitude)).toBeCloseTo(-6.9);
-    expect(Number((await prisma.customer.findUniqueOrThrow({ where: { id: pinned.id } })).latitude)).toBeCloseTo(-6.1);
+    expect(Number((await pinOf(pinned.id)).latitude)).toBeCloseTo(-6.1);
   });
 });

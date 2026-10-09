@@ -12,6 +12,10 @@ export type CustomerAddress = {
   // Prisma Decimal fields serialize as strings over JSON.
   latitude: string | null;
   longitude: string | null;
+  // Where the pin came from — see PinStatus.tsx.
+  pinSource?: 'MANUAL' | 'GPS' | null;
+  pinAccuracy?: number | null;
+  pinSetAt?: string | null;
 };
 
 export function useCustomerAddresses(customerId: string | null | undefined) {

@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { User, Car, Plus, X, Check, MapPin, MapPinOff } from 'lucide-react';
+import { User, Car, Plus, X, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
@@ -13,6 +13,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import { PinStatusBadge, pinStatus, pinHint } from '@/app/components/delivery/PinStatus';
 import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
 import CustomerDriverInfoSection from '@/app/components/delivery/CustomerDriverInfoSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
@@ -39,6 +40,9 @@ type CustomerDetail = {
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   latitude: string | null;
   longitude: string | null;
+  pinSource: 'MANUAL' | 'GPS' | null;
+  pinAccuracy: number | null;
+  pinSetAt: string | null;
   deliveryNotes: string | null;
   addresses?: CustomerAddress[];
 };
@@ -164,20 +168,46 @@ export default function CustomerDetailPage() {
     setPickingLocation(true);
   }
 
+  // Saving a location here marks it as set by the office (locked against
+  // driver GPS) — including re-saving a GPS pin unchanged, which is how
+  // Confirm works.
+  async function putLocation(position: { lat: number; lng: number }) {
+    if (!customer) return;
+    const res = await apiFetch(`/customers/${customer.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ latitude: position.lat, longitude: position.lng }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.message || `Failed to save (${res.status})`);
+    setCustomer({
+      ...customer,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      pinSource: body.pinSource,
+      pinAccuracy: body.pinAccuracy,
+      pinSetAt: body.pinSetAt,
+    });
+  }
+
+  async function confirmLocation() {
+    if (!customer?.latitude || !customer.longitude) return;
+    setSavingLocation(true);
+    setLocationError('');
+    try {
+      await putLocation({ lat: Number(customer.latitude), lng: Number(customer.longitude) });
+    } catch {
+      setLocationError(t('delivery.pin.confirmFailed'));
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   async function saveLocation() {
     if (!pickedPosition || !customer) return;
     setSavingLocation(true);
     setLocationError('');
     try {
-      const res = await apiFetch(`/customers/${customer.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ latitude: pickedPosition.lat, longitude: pickedPosition.lng }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `Failed to save (${res.status})`);
-      }
-      setCustomer({ ...customer, latitude: String(pickedPosition.lat), longitude: String(pickedPosition.lng) });
+      await putLocation(pickedPosition);
       setPickingLocation(false);
     } catch (e: any) {
       setLocationError(e.message || t('customers.detailPage.saveLocationFailed'));
@@ -238,49 +268,53 @@ export default function CustomerDetailPage() {
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
 
-        {customer && hasDelivery && (
-          <div
-            className={`flex items-center justify-between border-2 rounded-md p-3 mb-6 ${
-              customer.latitude && customer.longitude ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'
-            }`}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              {customer.latitude && customer.longitude ? (
-                <MapPin size={16} strokeWidth={2} className="text-green-700 shrink-0" />
-              ) : (
-                <MapPinOff size={16} strokeWidth={2} className="text-amber-700 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">
+        {customer && hasDelivery && (() => {
+          const status = pinStatus(customer);
+          const hint = pinHint(customer, t, language);
+          return (
+            <div
+              className={`flex items-start justify-between gap-3 border-2 rounded-md p-3 mb-6 ${
+                status === 'WEAK_GPS'
+                  ? 'border-red-300 bg-red-50'
+                  : status === 'NONE'
+                    ? 'border-amber-300 bg-amber-50'
+                    : 'border-green-300 bg-green-50'
+              }`}
+            >
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-semibold flex items-center gap-2 flex-wrap">
                   {t('customers.detailPage.deliveryLocation')}
-                  <span
-                    className={`ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full border ${
-                      customer.latitude && customer.longitude
-                        ? 'bg-green-100 text-green-800 border-green-300'
-                        : 'bg-amber-100 text-amber-800 border-amber-300'
-                    }`}
-                  >
-                    {customer.latitude && customer.longitude
-                      ? t('delivery.routeDetail.locationSet')
-                      : t('delivery.routeDetail.noLocation')}
-                  </span>
+                  <PinStatusBadge pin={customer} className="font-medium" />
                 </p>
                 <p className="text-xs text-gray-600 truncate tabular-nums">
                   {customer.latitude && customer.longitude
                     ? `${Number(customer.latitude).toFixed(5)}, ${Number(customer.longitude).toFixed(5)}`
                     : t('customers.detailPage.noLocationSet')}
                 </p>
+                {hint && <p className="text-xs text-gray-700">{hint}</p>}
+                {locationError && !pickingLocation && <p className="text-xs text-red-600">{locationError}</p>}
                 <GoogleMapsLink lat={customer.latitude} lng={customer.longitude} />
               </div>
+              <div className="flex flex-col gap-1.5 shrink-0">
+                {(status === 'GPS' || status === 'WEAK_GPS') && (
+                  <button
+                    onClick={confirmLocation}
+                    disabled={savingLocation}
+                    className="text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {t('delivery.pin.confirm')}
+                  </button>
+                )}
+                <button
+                  onClick={openLocationPicker}
+                  className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 transition-colors"
+                >
+                  {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={openLocationPicker}
-              className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 transition-colors shrink-0"
-            >
-              {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
         {customer && hasDelivery && (
           <CustomerDriverInfoSection

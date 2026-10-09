@@ -156,8 +156,8 @@ function captureLocation(): Promise<Fix> {
   });
 }
 
-// Matches the backend's MAX_BACKFILL_ACCURACY_METERS: anything vaguer is
-// saved on the delivery but never becomes a customer pin.
+// Matches WEAK_PIN_ACCURACY_M: a vaguer fix still becomes the customer's
+// pin if they have none, but the office sees it flagged as weak.
 const FAIR_ACCURACY_M = 50;
 const GOOD_ACCURACY_M = 30;
 

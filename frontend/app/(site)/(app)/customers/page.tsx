@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, Search, Pencil, Trash2, X, Check, MapPin, MapPinOff, FileSpreadsheet } from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -17,6 +17,7 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { usePriceLevels } from '@/lib/price-levels';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import { PinStatusBadge, pinStatus, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
 
 
 // Columns the (desktop) table can be sorted by. Address is deliberately
@@ -32,6 +33,9 @@ type EditState = {
   address: string;
   // DELIVERY_DMS only — see Customer.latitude / deliveryNotes.
   position: { lat: number; lng: number } | null;
+  // The pin as loaded — the location is only sent when it changed, so
+  // editing a name doesn't re-save (and lock) a driver's GPS pin.
+  originalPosition: { lat: number; lng: number } | null;
   deliveryNotes: string;
   // '' = the org's default price level.
   priceLevelId: string;
@@ -44,6 +48,7 @@ const EMPTY_EDIT: EditState = {
   phone: '',
   address: '',
   position: null,
+  originalPosition: null,
   deliveryNotes: '',
   priceLevelId: '',
 };
@@ -63,6 +68,7 @@ export default function CustomersPage() {
   // customer's detail page restores the same search/page instead of
   // resetting to page 1 with no search.
   const [query, setQuery] = useState<string>(() => getInitialParam('query', ''));
+  const [pinFilter, setPinFilter] = useState<PinStatus | ''>(() => getInitialParam('pin', '') as PinStatus | '');
 
   const [editing, setEditing] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
@@ -73,6 +79,7 @@ export default function CustomersPage() {
 
   useSyncQueryParams({
     query: query.trim(),
+    pin: pinFilter || null,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
   });
@@ -123,14 +130,16 @@ export default function CustomersPage() {
       return;
     }
     setPage(1);
-  }, [query]);
+  }, [query, pinFilter]);
 
   // The whole result set is loaded client-side (no server pagination here,
   // unlike Purchase Orders), so — same as Stock — sorting applies across
   // the full list, not just the current page, and pagination slices the
   // already-sorted array below.
+  // Pin filter is client-side too, like sorting.
+  const filteredCustomers = hasDelivery && pinFilter ? customers.filter((c) => pinStatus(c) === pinFilter) : customers;
   const { sorted: sortedCustomers, sort, toggleSort } = useSortableData<Customer, SortKey>(
-    customers,
+    filteredCustomers,
     {
       name: (c) => c.name,
       phone: (c) => c.phone ?? '',
@@ -158,6 +167,7 @@ export default function CustomersPage() {
       phone: c.phone ?? '',
       address: c.address ?? '',
       position: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
+      originalPosition: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
       deliveryNotes: c.deliveryNotes ?? '',
       priceLevelId: c.priceLevelId ?? '',
     });
@@ -181,8 +191,11 @@ export default function CustomersPage() {
         ...(priceLevels.length > 1 ? { priceLevelId: editing.priceLevelId || null } : {}),
         ...(hasDelivery
           ? {
-              latitude: editing.position?.lat,
-              longitude: editing.position?.lng,
+              ...(editing.position &&
+              (editing.position.lat !== editing.originalPosition?.lat ||
+                editing.position.lng !== editing.originalPosition?.lng)
+                ? { latitude: editing.position.lat, longitude: editing.position.lng }
+                : {}),
               deliveryNotes: editing.id ? editing.deliveryNotes.trim() : editing.deliveryNotes.trim() || undefined,
             }
           : {}),
@@ -276,6 +289,20 @@ export default function CustomersPage() {
               placeholder={t('customers.listPage.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
+            {hasDelivery && (
+              <select
+                value={pinFilter}
+                onChange={(e) => setPinFilter(e.target.value as PinStatus | '')}
+                aria-label={t('customers.listPage.locationColumn')}
+                className="shrink-0 max-w-[45%] text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700"
+              >
+                <option value="">{t('delivery.pin.filterAll')}</option>
+                <option value="NONE">{t('delivery.pin.filterNone')}</option>
+                <option value="WEAK_GPS">{t('delivery.pin.filterWeak', { m: WEAK_PIN_ACCURACY_M })}</option>
+                <option value="GPS">{t('delivery.pin.filterGps')}</option>
+                <option value="MANUAL">{t('delivery.pin.filterManual')}</option>
+              </select>
+            )}
           </div>
         </div>
       </div>
@@ -325,11 +352,12 @@ export default function CustomersPage() {
               <div className="mt-2 flex flex-col gap-0.5 text-xs text-gray-600">
                 <p className="truncate">{c.phone ?? '—'}</p>
                 <p className="truncate">{c.address ?? '—'}</p>
+                {hasDelivery && <PinStatusBadge pin={c} />}
               </div>
             </div>
           ))}
 
-          {!loading && customers.length === 0 && (
+          {!loading && filteredCustomers.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
               {t('customers.listPage.noCustomersFound')}
             </div>
@@ -377,17 +405,7 @@ export default function CustomersPage() {
                   <td className="px-4 py-3 text-gray-600 truncate max-w-xs">{c.address ?? '—'}</td>
                   {hasDelivery && (
                     <td className="px-4 py-3">
-                      {c.latitude && c.longitude ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-green-700">
-                          <MapPin size={13} />
-                          {t('customers.listPage.locationSet')}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-amber-700">
-                          <MapPinOff size={13} />
-                          {t('customers.listPage.locationMissing')}
-                        </span>
-                      )}
+                      <PinStatusBadge pin={c} />
                     </td>
                   )}
                   <td className="px-4 py-3">
@@ -413,7 +431,7 @@ export default function CustomersPage() {
             </tbody>
           </table>
 
-          {!loading && customers.length === 0 && (
+          {!loading && filteredCustomers.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500">{t('customers.listPage.noCustomersFound')}</div>
           )}
           {loading && <div className="p-8 text-center text-sm text-gray-500">{t('common.loading')}</div>}
