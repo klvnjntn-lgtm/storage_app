@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet } from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet, MapPinOff } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -195,7 +195,10 @@ export default function CustomersPage() {
               (editing.position.lat !== editing.originalPosition?.lat ||
                 editing.position.lng !== editing.originalPosition?.lng)
                 ? { latitude: editing.position.lat, longitude: editing.position.lng }
-                : {}),
+                : // An admin cleared the pin in the form.
+                  !editing.position && editing.originalPosition && isAdmin
+                  ? { latitude: null, longitude: null }
+                  : {}),
               deliveryNotes: editing.id ? editing.deliveryNotes.trim() : editing.deliveryNotes.trim() || undefined,
             }
           : {}),
@@ -216,6 +219,22 @@ export default function CustomersPage() {
       setError(e.message || t('customers.listPage.saveFailed'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Admin only: removes the pin and its lock, so the next delivery's driver
+  // GPS sets a fresh one.
+  async function clearLocation(c: Customer) {
+    if (!confirm(t('delivery.pin.clearConfirm', { name: c.name }))) return;
+    const res = await apiFetch(`/customers/${c.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ latitude: null, longitude: null }),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok) {
+      setCustomers((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...body } : x)));
+    } else {
+      alert(body?.message || t('delivery.pin.clearFailed', { status: res.status }));
     }
   }
 
@@ -338,6 +357,16 @@ export default function CustomersPage() {
                   >
                     <Pencil size={14} strokeWidth={2} />
                   </button>
+                  {isAdmin && hasDelivery && c.latitude && c.longitude && (
+                    <button
+                      onClick={() => clearLocation(c)}
+                      title={t('delivery.pin.clearLocation')}
+                      aria-label={t('delivery.pin.clearLocation')}
+                      className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-amber-50 hover:border-amber-300 text-amber-700"
+                    >
+                      <MapPinOff size={14} strokeWidth={2} />
+                    </button>
+                  )}
                   {isAdmin && (
                     <button
                       onClick={() => remove(c)}
@@ -416,6 +445,16 @@ export default function CustomersPage() {
                       >
                         <Pencil size={13} strokeWidth={2} />
                       </button>
+                      {isAdmin && hasDelivery && c.latitude && c.longitude && (
+                        <button
+                          onClick={() => clearLocation(c)}
+                          title={t('delivery.pin.clearLocation')}
+                          aria-label={t('delivery.pin.clearLocation')}
+                          className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-amber-50 hover:border-amber-300 text-amber-700"
+                        >
+                          <MapPinOff size={13} strokeWidth={2} />
+                        </button>
+                      )}
                       {isAdmin && (
                         <button
                           onClick={() => remove(c)}
@@ -523,6 +562,16 @@ export default function CustomersPage() {
                     onChange={(position) => setEditing({ ...editing, position })}
                     showMapsLink={!!editing.id}
                   />
+                  {isAdmin && editing.position && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing({ ...editing, position: null })}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:underline"
+                    >
+                      <MapPinOff size={13} />
+                      {t('delivery.pin.clearLocation')}
+                    </button>
+                  )}
                   <textarea
                     value={editing.deliveryNotes}
                     onChange={(e) => setEditing({ ...editing, deliveryNotes: e.target.value })}

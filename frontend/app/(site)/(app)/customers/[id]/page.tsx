@@ -10,6 +10,7 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { Vehicle } from '@/app/components/invoices/types';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAuth } from '@/app/context/AuthContext';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
@@ -62,6 +63,8 @@ export default function CustomerDetailPage() {
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const hasDelivery = useHasModule('DELIVERY_DMS');
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
@@ -189,6 +192,30 @@ export default function CustomerDetailPage() {
     });
   }
 
+  // Admin only: removes the pin and its lock, so the next delivery's driver
+  // GPS sets a fresh one.
+  async function clearLocation() {
+    if (!customer || !confirm(t('delivery.pin.clearConfirm', { name: customer.name }))) return;
+    setSavingLocation(true);
+    setLocationError('');
+    try {
+      const res = await apiFetch(`/customers/${customer.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ latitude: null, longitude: null }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setLocationError(body?.message || t('delivery.pin.clearFailed', { status: res.status }));
+        return;
+      }
+      setCustomer({ ...customer, latitude: null, longitude: null, pinSource: null, pinAccuracy: null, pinSetAt: null });
+    } catch {
+      setLocationError(t('delivery.pin.clearFailed', { status: '—' }));
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   async function confirmLocation() {
     if (!customer?.latitude || !customer.longitude) return;
     setSavingLocation(true);
@@ -311,6 +338,15 @@ export default function CustomerDetailPage() {
                 >
                   {customer.latitude ? t('customers.detailPage.changeLocation') : t('customers.detailPage.setLocation')}
                 </button>
+                {isAdmin && status !== 'NONE' && (
+                  <button
+                    onClick={clearLocation}
+                    disabled={savingLocation}
+                    className="text-xs px-2.5 py-1.5 rounded-md border-2 border-amber-300 bg-white text-amber-800 font-semibold hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                  >
+                    {t('delivery.pin.clearLocation')}
+                  </button>
+                )}
               </div>
             </div>
           );

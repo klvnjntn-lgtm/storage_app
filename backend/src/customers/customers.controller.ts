@@ -1,6 +1,6 @@
 // src/customers/customers.controller.ts
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
 import { CustomersService } from './customers.service';
@@ -68,7 +68,13 @@ export class CustomersController {
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
     @Body() dto: UpdateCustomerDto,
+    @Req() req,
   ) {
+    // Clearing a location unlocks the pin for the next driver's GPS, so
+    // only an admin may do it; anyone who can edit customers can move it.
+    if ((dto.latitude === null || dto.longitude === null) && req.user?.role !== 'ADMIN') {
+      throw new ForbiddenException("Only an administrator can clear a customer's location");
+    }
     return this.customersService.update(organizationId, id, dto);
   }
 
