@@ -5,13 +5,13 @@ import { PayslipPrintView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function PayslipA4Template({ payslip }: { payslip: PayslipPrintView }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const logoUrl = resolveUploadUrl(payslip.businessLogoUrl);
 
   const allowances = payslip.components.filter((c) => c.type === 'ALLOWANCE');
@@ -44,12 +44,12 @@ export function PayslipA4Template({ payslip }: { payslip: PayslipPrintView }) {
           </p>
           <p className="text-gray-600">
             {t('accounting.payroll.payslipTemplate.documentDate')}{' '}
-            {parseCalendarDate(payslip.documentDate).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+            {formatDMY(parseCalendarDate(payslip.documentDate))}
           </p>
           {payslip.status === 'PAID' && payslip.paidAt && (
             <p className="text-gray-600">
               {t('accounting.payroll.payslipTemplate.paidOn')}{' '}
-              {parseCalendarDate(payslip.paidAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+              {formatDMY(parseCalendarDate(payslip.paidAt))}
             </p>
           )}
         </div>

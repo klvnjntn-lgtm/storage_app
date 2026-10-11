@@ -9,6 +9,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMYTime } from '@/lib/dates';
 
 
 type Session = {
@@ -36,8 +37,7 @@ const statusStyle = (status: string) => {
 
 export default function SessionsPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
-  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
+  const { t } = useLanguage();
 
   const typeLabel = (type: string) => t(`inventory.sessionTypeLabels.${type}`) || type;
   const statusLabel = (status: string) => t(`inventory.sessionStatusLabels.${status}`) || status;
@@ -189,7 +189,7 @@ export default function SessionsPage() {
                   </div>
                   <p className="flex items-center gap-1 text-xs text-gray-500 mt-1">
                     <Calendar size={12} strokeWidth={2} />
-                    {new Date(session.createdAt).toLocaleString(dateLocale)}
+                    {formatDMYTime(new Date(session.createdAt))}
                   </p>
                 </div>
 

@@ -4,7 +4,7 @@
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { RECEIPT_CONTENT_WIDTH_MM } from '@/lib/mappers/invoice-format';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -41,7 +41,7 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
         {/* Business invoice date — immutable after issuance */}
 {invoice.invoiceDate && (
           <p className="text-gray-600">
-    {parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')}
+    {formatDMY(parseCalendarDate(invoice.invoiceDate))}
           </p>
 )}
 

@@ -10,6 +10,7 @@ import { PurchaseOrderTemplate } from '@/app/components/purchase-orders/template
 import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/purchase-orders/types';
 import { ReceiveGoodsDialog } from '@/app/components/purchase-orders/ReceiveGoodsDialog';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 function statusBadgeClasses(status: string) {
@@ -285,7 +286,7 @@ export default function PurchaseOrderDetailPage() {
                 <li key={r.id} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="font-medium">{r.receiptNumber ?? r.id.slice(0, 8)}</span>
                   <span className="text-xs text-gray-500">
-                    {new Date(r.createdAt).toLocaleDateString()} · {r.location?.name ?? '—'} ·{' '}
+                    {formatDMY(new Date(r.createdAt))} · {r.location?.name ?? '—'} ·{' '}
                     {r.items
                       .map((i) => `${po.items.find((p) => p.id === i.purchaseOrderItemId)?.product?.name ?? '?'} × ${i.quantity}`)
                       .join(', ')}

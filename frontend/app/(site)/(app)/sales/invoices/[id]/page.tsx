@@ -14,7 +14,7 @@ import { VoidInvoiceDialog } from '@/app/components/invoices/VoidInvoiceDialog';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import { InvoiceFormat } from '@/app/components/invoices/types';
 import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
-import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
+import { parseCalendarDate, toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { PAGE_CSS, MARGIN_MM } from '@/lib/mappers/invoice-format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -465,10 +465,10 @@ export default function InvoiceDetailPage() {
                 </div>
                 {invoice?.invoiceDate && (
                   <p className="text-xs text-gray-500 mt-1">
-                    {t('sales.invoiceDetail.invoiceDateLabel')} {parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')}
+                    {t('sales.invoiceDetail.invoiceDateLabel')} {formatDMY(parseCalendarDate(invoice.invoiceDate))}
                     {invoice.issuedAt && (
                       <span className="text-gray-400">
-                        {' '}· {t('sales.invoiceDetail.issuedLabel')} {new Date(invoice.issuedAt).toLocaleDateString('id-ID')}
+                        {' '}· {t('sales.invoiceDetail.issuedLabel')} {formatDMY(new Date(invoice.issuedAt))}
                       </span>
                     )}
                   </p>
@@ -579,7 +579,7 @@ export default function InvoiceDetailPage() {
                 <AlertCircle size={16} strokeWidth={2} className="shrink-0 mt-0.5" />
                 <span>
                   {t('sales.invoiceDetail.overdueNotice', {
-                    date: invoice.dueDate ? parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID') : '',
+                    date: invoice.dueDate ? formatDMY(parseCalendarDate(invoice.dueDate)) : '',
                   })}
                 </span>
               </div>
@@ -803,7 +803,7 @@ export default function InvoiceDetailPage() {
                           )}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {new Date(p.createdAt).toLocaleString()}
+                          {formatDMYTime(new Date(p.createdAt))}
                           {p.note ? ` · ${p.note}` : ''}
                         </p>
                       </div>
@@ -841,7 +841,7 @@ export default function InvoiceDetailPage() {
                             : ''}
                         </p>
                         <p className="text-gray-500 whitespace-nowrap text-xs">
-                          {new Date(ev.createdAt).toLocaleString()}
+                          {formatDMYTime(new Date(ev.createdAt))}
                           {ev.user?.email ? ` · ${ev.user.email}` : ''}
                         </p>
                       </div>

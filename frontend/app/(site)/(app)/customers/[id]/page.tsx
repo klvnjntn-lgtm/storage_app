@@ -18,6 +18,7 @@ import { PinStatusBadge, pinStatus, pinHint, gpsQuality } from '@/app/components
 import CustomerAddressesSection from '@/app/components/delivery/CustomerAddressesSection';
 import CustomerDriverInfoSection from '@/app/components/delivery/CustomerDriverInfoSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
+import { formatDMYTime } from '@/lib/dates';
 
 
 type CustomerInvoice = {
@@ -504,7 +505,7 @@ export default function CustomerDetailPage() {
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {new Date(inv.issuedAt ?? inv.createdAt).toLocaleString(dateLocale)}
+                      {formatDMYTime(new Date(inv.issuedAt ?? inv.createdAt))}
                     </p>
                   </div>
                   <span className="font-semibold">{formatIDR(Number(inv.total))}</span>

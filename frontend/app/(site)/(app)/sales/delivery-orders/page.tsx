@@ -12,6 +12,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import type { DeliveryOrderListItem, DeliveryOrderStatus } from '@/app/components/delivery-orders/types';
 import { mapDeliveryOrderToListItem } from '@/lib/mappers/delivery-orders-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 type DateField = 'shipped' | 'created';
@@ -40,7 +41,7 @@ const STATUS_OPTIONS = [
 
 export default function DeliveryOrdersPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   // Seeded from the URL so pressing the browser's Back button from a
   // delivery order's detail page restores the same filters/search/page
@@ -295,7 +296,7 @@ export default function DeliveryOrdersPage() {
                     {o.salesOrder?.orderNumber ? `SO ${o.salesOrder.orderNumber} · ` : ''}
                     {o.items.length} {t(o.items.length === 1 ? 'sales.deliveryOrders.itemSingular' : 'sales.deliveryOrders.itemPlural')}
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
-                    {new Date(o.shippedAt ?? o.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                    {formatDMY(new Date(o.shippedAt ?? o.createdAt))}
                   </p>
                 </div>
               </div>

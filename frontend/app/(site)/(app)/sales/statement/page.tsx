@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FileText, Printer, Calendar, Info } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { CustomerStatement } from '@/app/components/invoices/types';
-import { toCalendarDateString } from '@/lib/dates';
+import { toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 
@@ -43,7 +43,7 @@ export default function InvoiceStatementPage() {
 
 function InvoiceStatementPageInner() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const searchParams = useSearchParams();
 
   const customerId = searchParams.get('customerId');
@@ -222,14 +222,14 @@ function InvoiceStatementPageInner() {
             <div className="flex justify-between items-center text-xs text-black mb-4">
               <span>
                 {t('sales.statement.periodLabel', {
-                  from: new Date(statement.from).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US'),
-                  to: new Date(statement.to).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US'),
+                  from: formatDMY(new Date(statement.from)),
+                  to: formatDMY(new Date(statement.to)),
                 })}
               </span>
               {statement.generatedAt && (
                 <span>
                   {t('sales.statement.generatedLabel', {
-                    datetime: new Date(statement.generatedAt).toLocaleString(language === 'id' ? 'id-ID' : 'en-US'),
+                    datetime: formatDMYTime(new Date(statement.generatedAt)),
                   })}
                 </span>
               )}
@@ -274,7 +274,7 @@ function InvoiceStatementPageInner() {
                       >
                         <td className="p-2 font-medium text-black">{line.invoiceNumber ?? '—'}</td>
                         <td className="p-2 text-black">
-                          {line.issuedAt ? new Date(line.issuedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US') : '—'}
+                          {line.issuedAt ? formatDMY(new Date(line.issuedAt)) : '—'}
                         </td>
                         <td className="p-2 text-black">
                           {line.vehiclePlateNumber
@@ -326,7 +326,7 @@ function InvoiceStatementPageInner() {
                   <tbody>
                     {statement.creditActivity!.map((a) => (
                       <tr key={a.id} className="border-b border-gray-200">
-                        <td className="py-1.5 pr-2">{new Date(a.date).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}</td>
+                        <td className="py-1.5 pr-2">{formatDMY(new Date(a.date))}</td>
                         <td className="py-1.5 pr-2">{a.invoiceNumber ?? '—'}</td>
                         <td className="py-1.5 pr-2">
                           {t(`sales.statement.creditKind.${a.kind}`)}

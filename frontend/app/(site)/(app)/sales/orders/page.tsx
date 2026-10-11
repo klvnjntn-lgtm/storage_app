@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 type SalesOrderStatus = 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED';
@@ -62,7 +63,7 @@ const STATUS_OPTIONS = [
 
 export default function SalesOrdersPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   // Seeded from the URL so pressing the browser's Back button from an
   // order's detail page restores the same filters/search/page instead of
@@ -325,7 +326,7 @@ export default function SalesOrdersPage() {
                     {o.location?.name ?? '—'} · {o.items.length}{' '}
                     {t(o.items.length === 1 ? 'sales.orders.itemSingular' : 'sales.orders.itemPlural')}
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
-                    {new Date(o.confirmedAt ?? o.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                    {formatDMY(new Date(o.confirmedAt ?? o.createdAt))}
                   </p>
                 </div>
 

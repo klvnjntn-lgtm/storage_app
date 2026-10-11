@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { CheckCircle2, XCircle, Printer, Download, Pencil, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { SalesOrderA4Template } from '@/app/components/sales-orders/templates/SalesOrderA4Template';
 import { SalesOrderPrintView, toSalesOrderView } from '@/lib/mappers/sales-order-mapper';
 import { DeliveryOrdersPanel } from '@/app/components/sales-orders/DeliveryOrdersPanel';
@@ -71,7 +71,7 @@ const CAN_INVOICE_NO_WAREHOUSE_OPS: SalesOrderStatus[] = ['CONFIRMED', 'PARTIALL
 
 export default function SalesOrderDetailPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -399,7 +399,7 @@ export default function SalesOrderDetailPage() {
           <p className="text-sm text-gray-600">
             {t('sales.orderDetail.confirmedLabel')}{' '}
             <span className="font-medium">
-              {parseCalendarDate(order.confirmedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+              {formatDMY(parseCalendarDate(order.confirmedAt))}
             </span>
           </p>
         )}

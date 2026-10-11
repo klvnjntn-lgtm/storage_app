@@ -7,7 +7,7 @@ import { display } from '@/lib/fonts';
 import { ClipboardList, Plus, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
@@ -64,7 +64,7 @@ const PAGE_SIZE_DEFAULT = 20;
 
 export default function PurchaseOrdersListPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const STATUS_OPTIONS = useStatusOptions(t);
   const statusLabel = useStatusLabel(t);
 
@@ -305,7 +305,7 @@ export default function PurchaseOrdersListPage() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {po.supplier?.name ?? '—'}
                     {po.location?.name ? ` · ${po.location.name}` : ''} ·{' '}
-                    {parseCalendarDate(po.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                    {formatDMY(parseCalendarDate(po.createdAt))}
                   </p>
                 </div>
 

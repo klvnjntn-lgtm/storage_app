@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
 import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -30,7 +30,7 @@ export default function QuotationDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   // Flat print-shaped data for the paper preview — separate fetch from
@@ -339,7 +339,7 @@ export default function QuotationDetailPage() {
           <p className="text-sm text-gray-600">
             {t('sales.quotationDetail.validUntil')}{' '}
             <span className="font-medium">
-              {parseCalendarDate(quotation.validUntil).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+              {formatDMY(parseCalendarDate(quotation.validUntil))}
             </span>
           </p>
         )}

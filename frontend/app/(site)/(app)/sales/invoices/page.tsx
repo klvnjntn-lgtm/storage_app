@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
@@ -696,11 +696,11 @@ export default function InvoicesPage() {
                       {inv.location?.name ?? '—'} · {inv.items.length}{' '}
                       {t(inv.items.length === 1 ? 'sales.invoicesList.itemCountOne' : 'sales.invoicesList.itemCountOther')}
                       {inv.customerName ? ` · ${inv.customerName}` : ''} ·{' '}
-                      {displayDateFor(inv).toLocaleDateString('id-ID')}
+                      {formatDMY(displayDateFor(inv))}
                       {inv.dueDate && (
                         <span className={overdue ? 'text-red-600 font-medium' : ''}>
                           {' '}
-                          · {t('sales.invoicesList.dueSeparator')} {parseCalendarDate(inv.dueDate).toLocaleDateString('id-ID')}
+                          · {t('sales.invoicesList.dueSeparator')} {formatDMY(parseCalendarDate(inv.dueDate))}
                         </span>
                       )}
                     </p>

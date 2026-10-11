@@ -20,6 +20,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
+import { formatDMY, formatDMYTime } from '@/lib/dates';
 
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -606,7 +607,7 @@ export default function DeliveryRouteDetailPage() {
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15">
         <div className="max-w-5xl mx-auto min-w-0">
           <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
-            {route.name ?? new Date(route.routeDate).toLocaleDateString()}
+            {route.name ?? formatDMY(new Date(route.routeDate))}
           </h1>
           {changingTeam ? (
             <div className="mt-1 flex items-center gap-2 max-w-sm">
@@ -1088,7 +1089,7 @@ export default function DeliveryRouteDetailPage() {
                         )}
                       </span>
                       <span className="text-gray-400 break-all sm:break-normal">
-                        {h.createdBy ? driverLabel(h.createdBy) : '—'} · {new Date(h.createdAt).toLocaleString()}
+                        {h.createdBy ? driverLabel(h.createdBy) : '—'} · {formatDMYTime(new Date(h.createdAt))}
                       </span>
                     </div>
                     {open && snapshot && (

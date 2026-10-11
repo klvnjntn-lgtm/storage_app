@@ -5,11 +5,11 @@ import { SalesOrderView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const logoUrl = resolveUploadUrl(order.businessLogoUrl);
 
   return (
@@ -40,7 +40,7 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
 
           {order.orderDate && (
             <p className="text-gray-600">
-              {parseCalendarDate(order.orderDate).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+              {formatDMY(parseCalendarDate(order.orderDate))}
             </p>
           )}
 
@@ -54,7 +54,7 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
               toLocaleDateString() is the correct conversion here instead. */}
           {order.confirmedAt && (
             <p className="text-gray-600">
-              {t('sales.orderTemplate.confirmed')} {new Date(order.confirmedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+              {t('sales.orderTemplate.confirmed')} {formatDMY(new Date(order.confirmedAt))}
             </p>
           )}
         </div>

@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
@@ -92,7 +93,7 @@ export default function SalesSearchPage() {
 
 function SalesSearchPageInner() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   // Seeded from the URL so pressing the browser's Back button from a
   // result's detail page restores the same query/filter/page instead of
@@ -316,7 +317,7 @@ function SalesSearchPageInner() {
                       </div>
                       <p className="text-xs text-gray-500 truncate">
                         {r.customerName ?? t('sales.search.noCustomer')} ·{' '}
-                        {new Date(r.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                        {formatDMY(new Date(r.createdAt))}
                       </p>
                     </div>
                     {r.total != null && (

@@ -7,7 +7,7 @@ import { display } from '@/lib/fonts';
 import { Car, Search, Gauge, ChevronRight, ExternalLink, Loader2, AlertCircle, RotateCcw, Trash2, CornerDownLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -590,7 +590,7 @@ function VehicleLookupPageInner() {
                     }`}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500 font-mono tabular-nums">{displayDateFor(h).toLocaleDateString(dateLocale)}</span>
+                      <span className="text-xs text-gray-500 font-mono tabular-nums">{formatDMY(displayDateFor(h))}</span>
                       <span className="font-semibold font-mono">{h.invoiceNumber ?? t('workshop.vehicleSearch.unissuedDraft')}</span>
                       {h.status === 'DRAFT' && (
                         <span className="text-[11px] px-1.5 py-0.5 rounded-md border bg-amber-50 text-amber-800 border-amber-200 font-semibold uppercase tracking-wide">

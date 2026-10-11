@@ -4,9 +4,10 @@
 import type { DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
 import { resolveUploadUrl } from '@/lib/assets';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const logoUrl = resolveUploadUrl(order.business.logoUrl);
 
   return (
@@ -45,7 +46,7 @@ export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView })
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.deliveryDate')}</p>
           <p className="text-sm font-semibold">
             {order.shippedAt
-              ? new Date(order.shippedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')
+              ? formatDMY(new Date(order.shippedAt))
               : t('sales.deliveryOrderTemplate.pendingShipment')}
           </p>
         </div>
@@ -55,7 +56,7 @@ export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView })
         </div>
         <div>
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{t('sales.deliveryOrderTemplate.orderCreated')}</p>
-          <p className="text-sm">{new Date(order.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}</p>
+          <p className="text-sm">{formatDMY(new Date(order.createdAt))}</p>
         </div>
       </div>
 
@@ -112,7 +113,7 @@ export function DeliveryOrderA4Template({ order }: { order: DeliveryOrderView })
             {order.proofOfDelivery.signedAt && (
               <span className="text-[10px] text-gray-400">
                 {t('sales.deliveryOrderTemplate.signedLabel', {
-                  date: new Date(order.proofOfDelivery.signedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US'),
+                  date: formatDMY(new Date(order.proofOfDelivery.signedAt)),
                 })}
               </span>
             )}

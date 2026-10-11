@@ -11,6 +11,7 @@ import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TimeInput from '@/app/components/shared/TimeInput';
+import { formatDMYTime } from '@/lib/dates';
 
 
 type Driver = { id: string; email: string; displayName: string | null; active: boolean; teamId: string | null; createdAt: string };
@@ -327,7 +328,7 @@ export default function DriversAdminPage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold truncate">{d.user.displayName || d.user.email}</div>
                   <div className="text-xs text-gray-500 truncate">
-                    {shortDevice(d.userAgent)} · {t('delivery.driversAdmin.requestedAt')} {new Date(d.firstSeenAt).toLocaleString()}
+                    {shortDevice(d.userAgent)} · {t('delivery.driversAdmin.requestedAt')} {formatDMYTime(new Date(d.firstSeenAt))}
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
@@ -467,7 +468,7 @@ export default function DriversAdminPage() {
                             </span>
                           </div>
                           <div className="text-[10px] text-gray-400 mt-0.5">
-                            {t('delivery.driversAdmin.lastSeen')}: {new Date(d.lastSeenAt).toLocaleString()}
+                            {t('delivery.driversAdmin.lastSeen')}: {formatDMYTime(new Date(d.lastSeenAt))}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { FileSpreadsheet, Plus, RotateCcw, Trash2, Search, X, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
@@ -99,7 +99,7 @@ function quotationStatusLabel(t: (key: string) => string, status: QuotationStatu
 
 export default function QuotationsPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   // Seeded from the URL so pressing the browser's Back button from a
   // quotation's detail page restores the same filters/search/page instead
@@ -394,12 +394,12 @@ export default function QuotationsPage() {
                       {q.location?.name ?? '—'} · {q.items.length}{' '}
                       {t(q.items.length === 1 ? 'sales.quotations.item' : 'sales.quotations.items')}
                       {q.customerName ? ` · ${q.customerName}` : ''} ·{' '}
-                      {new Date(q.sentAt ?? q.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                      {formatDMY(new Date(q.sentAt ?? q.createdAt))}
                       {q.validUntil && (
                         <span className={expiry === 'expired' ? 'text-red-600 font-medium' : ''}>
                           {' '}
                           · {t('sales.quotations.validUntil')}{' '}
-                          {parseCalendarDate(q.validUntil).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                          {formatDMY(parseCalendarDate(q.validUntil))}
                         </span>
                       )}
                     </p>

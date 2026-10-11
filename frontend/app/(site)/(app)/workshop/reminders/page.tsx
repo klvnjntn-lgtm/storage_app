@@ -7,7 +7,7 @@ import { display } from '@/lib/fonts';
 import { Bell, Check, Clock, Trash2, Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
-import { toCalendarDateString } from '@/lib/dates';
+import { toCalendarDateString, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 
@@ -23,14 +23,13 @@ function formatDue(
   dueDate: string,
   status: Reminder['status'],
   t: (key: string, vars?: Record<string, string | number>) => string,
-  dateLocale: string,
 ): { label: string; tone: 'overdue' | 'soon' | 'upcoming' | 'done' } {
   const due = new Date(dueDate);
   const now = new Date();
   const diff = daysBetween(due, now);
 
   if (status === 'COMPLETED') {
-    return { label: t('workshop.reminders.completedWasDue', { date: due.toLocaleDateString(dateLocale) }), tone: 'done' };
+    return { label: t('workshop.reminders.completedWasDue', { date: formatDMY(due) }), tone: 'done' };
   }
   if (diff < 0) {
     const count = Math.abs(diff);
@@ -48,7 +47,7 @@ function formatDue(
       tone: 'soon',
     };
   }
-  return { label: t('workshop.reminders.dueOn', { date: due.toLocaleDateString(dateLocale) }), tone: 'upcoming' };
+  return { label: t('workshop.reminders.dueOn', { date: formatDMY(due) }), tone: 'upcoming' };
 }
 
 function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
@@ -66,8 +65,7 @@ function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
 
 export default function RemindersPage() {
   const router = useRouter();
-  const { t, language } = useLanguage();
-  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
+  const { t } = useLanguage();
 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,7 +154,7 @@ export default function RemindersPage() {
   const upcoming = pending.filter((r) => daysBetween(new Date(r.dueDate), new Date()) > DUE_SOON_DAYS);
 
   function ReminderRow({ r }: { r: Reminder }) {
-    const due = formatDue(r.dueDate, r.status, t, dateLocale);
+    const due = formatDue(r.dueDate, r.status, t);
     const isSnoozing = snoozingId === r.id;
 
     return (

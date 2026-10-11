@@ -7,6 +7,7 @@ import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/H
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
@@ -63,7 +64,7 @@ const DEBOUNCE_MS = 350;
 
 export default function SalesHome() {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   const SALES_ITEMS = [
     {
@@ -235,7 +236,7 @@ export default function SalesHome() {
                       </div>
                       <p className="text-xs text-gray-500 truncate">
                         {r.customerName ?? t('sales.overview.noCustomer')} ·{' '}
-                        {new Date(r.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US')}
+                        {formatDMY(new Date(r.createdAt))}
                       </p>
                     </div>
                     {r.total != null && (

@@ -6,11 +6,11 @@ import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
 import { PurchaseOrderPrintView } from '../types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const logoUrl = resolveUploadUrl(po.businessLogoUrl);
-  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
@@ -37,11 +37,11 @@ export function PurchaseOrderTemplate({ po }: { po: PurchaseOrderPrintView }) {
             <strong>{t('purchasing.purchaseOrderTemplate.purchaseOrder')}</strong> {po.poNumber ?? t('purchasing.purchaseOrderTemplate.unissuedDraft')}
           </p>
 
-          <p className="text-gray-600">{new Date(po.orderDate).toLocaleDateString(dateLocale)}</p>
+          <p className="text-gray-600">{formatDMY(new Date(po.orderDate))}</p>
 
           {po.expectedDate && (
             <p className="text-gray-600">
-              {t('purchasing.purchaseOrderTemplate.expected', { date: new Date(po.expectedDate).toLocaleDateString(dateLocale) })}
+              {t('purchasing.purchaseOrderTemplate.expected', { date: formatDMY(new Date(po.expectedDate)) })}
             </p>
           )}
         </div>

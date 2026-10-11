@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -346,7 +346,7 @@ export default function VehicleDetailPage() {
                   {t('workshop.vehicleDetail.lastService')}
                 </p>
                 <p className="font-bold text-sm sm:text-base truncate">
-                  {serviceStats.lastServiceDate ? serviceStats.lastServiceDate.toLocaleDateString(dateLocale) : '—'}
+                  {serviceStats.lastServiceDate ? formatDMY(serviceStats.lastServiceDate) : '—'}
                 </p>
               </div>
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">
@@ -434,7 +434,7 @@ export default function VehicleDetailPage() {
                         lives inside the invoice itself. Overdue is kept
                         as a small flag since it's actionable at a glance. */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500">{displayDateFor(inv).toLocaleDateString(dateLocale)}</span>
+                      <span className="text-xs text-gray-500">{formatDMY(displayDateFor(inv))}</span>
                       <span className="font-semibold">{inv.invoiceNumber ?? t('workshop.vehicleDetail.unissuedDraft')}</span>
                       {inv.status === 'VOID' && (
                         <span className="text-xs px-2 py-0.5 rounded-md border bg-gray-100 text-gray-600 border-gray-300">

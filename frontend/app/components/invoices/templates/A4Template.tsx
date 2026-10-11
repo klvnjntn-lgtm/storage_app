@@ -5,7 +5,7 @@ import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 export function A4Template({ invoice }: { invoice: InvoiceView }) {
@@ -25,8 +25,8 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
   const billTo = invoice.billingAddress ?? invoice.customerAddress;
 
   const displayDate = invoice.invoiceDate
-    ? parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')
-    : new Date(invoice.issuedAt).toLocaleDateString('id-ID');
+    ? formatDMY(parseCalendarDate(invoice.invoiceDate))
+    : formatDMY(new Date(invoice.issuedAt));
 
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
@@ -78,7 +78,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           {invoice.dueDate && (
             <p className="text-black">
               {t('sales.invoiceTemplate.due')}{' '}
-              {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}
+              {formatDMY(parseCalendarDate(invoice.dueDate))}
             </p>
           )}
           {invoice.paymentTerms && (

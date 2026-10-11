@@ -22,6 +22,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { readErrorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
+import { formatDMYTime } from '@/lib/dates';
 
 type SessionItem = {
   id: number;
@@ -456,7 +457,7 @@ export default function SessionPage() {
             <Calendar size={18} strokeWidth={2} className="text-gray-500 mt-0.5" />
             <div>
               <p className="text-xs text-gray-500 font-semibold">{t('inventory.sessionDetail.created')}</p>
-              <p className="font-medium">{new Date(session.createdAt).toLocaleString(dateLocale)}</p>
+              <p className="font-medium">{formatDMYTime(new Date(session.createdAt))}</p>
             </div>
           </div>
 

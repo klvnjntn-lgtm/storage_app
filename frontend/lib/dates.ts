@@ -31,3 +31,18 @@ export function toCalendarDateString(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+// How every numeric date in the app reads, in both languages: DD/MM/YYYY
+// (11/10/2026 is 11 October). Uses local getters, like toLocaleDateString()
+// did before — pass a calendar date through parseCalendarDate() first.
+export function formatDMY(d: Date): string {
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${d.getFullYear()}`;
+}
+
+// DD/MM/YYYY HH:mm (24-hour), for timestamps.
+export function formatDMYTime(d: Date): string {
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${formatDMY(d)} ${h}:${m}`;
+}

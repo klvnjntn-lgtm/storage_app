@@ -4,7 +4,7 @@
 import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 // 58mm thermal paper prints roughly 48mm wide once printer margins are
@@ -41,7 +41,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
         {/* Immutable business invoice date */}
 {invoice.invoiceDate && (
           <p className="text-gray-600">
-    {parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')}
+    {formatDMY(parseCalendarDate(invoice.invoiceDate))}
           </p>
 )}
 

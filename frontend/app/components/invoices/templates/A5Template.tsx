@@ -5,7 +5,7 @@ import { InvoiceView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { A5_CONTENT_WIDTH_MM } from '@/lib/mappers/invoice-format';
 import { useLanguage } from '@/app/context/LanguageContext';
 
@@ -23,8 +23,8 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
   // invoiceDate is the invoice's business date; issuedAt is a system
   // timestamp. Fall back to issuedAt only when invoiceDate isn't set.
   const displayDate = invoice.invoiceDate
-    ? parseCalendarDate(invoice.invoiceDate).toLocaleDateString('id-ID')
-    : new Date(invoice.issuedAt).toLocaleDateString('id-ID');
+    ? formatDMY(parseCalendarDate(invoice.invoiceDate))
+    : formatDMY(new Date(invoice.issuedAt));
 
   return (
     <div
@@ -56,7 +56,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           </p>
           <p className="text-black">{displayDate}</p>
           {invoice.dueDate && (
-            <p className="text-black">{t('sales.invoiceTemplate.due')} {parseCalendarDate(invoice.dueDate).toLocaleDateString('id-ID')}</p>
+            <p className="text-black">{t('sales.invoiceTemplate.due')} {formatDMY(parseCalendarDate(invoice.dueDate))}</p>
           )}
           {invoice.employeeName && <p className="text-black">{t('sales.invoiceTemplate.salesLabel', { name: invoice.employeeName })}</p>}
         </div>

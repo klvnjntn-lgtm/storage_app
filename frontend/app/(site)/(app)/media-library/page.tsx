@@ -8,6 +8,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import Pagination from '@/app/components/shared/Pagination';
 import type { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
+import { formatDMY } from '@/lib/dates';
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB — mirrors MediaLibraryModal's limit
@@ -22,7 +23,7 @@ const MIME_FILTERS: { value: string; label: string | null }[] = [
 export default function MediaLibraryPage() {
   const router = useRouter();
   const { profile, loading: authLoading, error: authError } = useAuth();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [assets, setAssets] = useState<MediaAsset[]>([]);
@@ -268,7 +269,7 @@ export default function MediaLibraryPage() {
                   </p>
                   <p className="text-[10px] text-white/60">
                     {t('shared.mediaLibrary.uploadedOn', {
-                      date: new Date(asset.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US'),
+                      date: formatDMY(new Date(asset.createdAt)),
                     })}
                   </p>
                 </div>

@@ -5,14 +5,13 @@ import { QuotationView } from '../types';
 import { formatIDR } from '@/lib/format';
 import { terbilang } from '@/lib/terbilang';
 import { resolveUploadUrl } from '@/lib/assets';
-import { parseCalendarDate } from '@/lib/dates';
+import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 export function QuotationA4Template({ quotation }: { quotation: QuotationView }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const hasBankDetails = !!quotation.bankName && !!quotation.bankAccountNumber;
   const logoUrl = resolveUploadUrl(quotation.businessLogoUrl);
-  const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   return (
     <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
@@ -42,11 +41,11 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
 
           {/* FIX — was quotation.issuedAt, a field that never existed on
               the backend. quotationDate is the real "Quote Date". */}
-          <p className="text-gray-600">{parseCalendarDate(quotation.quotationDate).toLocaleDateString(dateLocale)}</p>
+          <p className="text-gray-600">{formatDMY(parseCalendarDate(quotation.quotationDate))}</p>
 
           {quotation.validUntil && (
             <p className="text-gray-600">
-              {t('sales.quotationTemplate.validUntil')} {parseCalendarDate(quotation.validUntil).toLocaleDateString(dateLocale)}
+              {t('sales.quotationTemplate.validUntil')} {formatDMY(parseCalendarDate(quotation.validUntil))}
             </p>
           )}
         </div>

@@ -8,6 +8,7 @@ import { CalendarClock, Lock, LockOpen, Loader2, Info } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { formatDMY } from '@/lib/dates';
 
 
 const MONTH_NAMES_EN = [
@@ -252,7 +253,7 @@ export default function FiscalPeriodsPage() {
                     </span>
                     <span className="text-sm font-semibold">{MONTH_NAMES[p.month - 1]} {p.year}</span>
                     {p.closedAt && (
-                      <span className="text-xs text-gray-400">{t('accounting.fiscalPeriods.closedOn', { date: new Date(p.closedAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US') })}</span>
+                      <span className="text-xs text-gray-400">{t('accounting.fiscalPeriods.closedOn', { date: formatDMY(new Date(p.closedAt)) })}</span>
                     )}
                   </div>
 
