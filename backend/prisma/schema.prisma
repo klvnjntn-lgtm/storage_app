@@ -211,6 +211,15 @@ model Organization {
   // period a journal entry posts into (business-date.ts) — was a single
   // global ACCOUNTING_TIMEZONE env var before; now per-org.
   timezone                     String                        @default("Asia/Jakarta")
+
+  // Platform billing/admin (see src/platform). Set only from the platform
+  // console, never by the org's own users. suspendedAt blocks every API
+  // call from the org's members (OrgGuard); suspendedReason is shown to
+  // them, billingNote is internal and never is.
+  suspendedAt                  DateTime?
+  suspendedReason              String?
+  paidUntil                    DateTime?
+  billingNote                  String?
   brands                       Brand[]
   categories                   Category[]
   customers                    Customer[]
@@ -268,6 +277,19 @@ model User {
 
   role             Role           @default(USER)
   active           Boolean        @default(true)
+  lastLoginAt      DateTime?
+
+  // Platform console access (src/platform). Granted only by the
+  // platform-owner script, never through the API, and only honoured
+  // while the email is also listed in PLATFORM_OWNER_EMAILS. Each login
+  // session must separately be unlocked with password + emailed code;
+  // the unlock is bound to that session and expires.
+  isPlatformOwner           Boolean   @default(false)
+  platformOtpHash           String?
+  platformOtpExpires        DateTime?
+  platformOtpAttempts       Int       @default(0)
+  platformUnlockSessionId   String?
+  platformUnlockedUntil     DateTime?
   // Set when an admin removes the member from the org. Users can't be
   // hard-deleted (invoices, journals, routes… reference them), so removal
   // = inactive + hidden from member lists + seat freed. Re-inviting the
@@ -1743,6 +1765,24 @@ enum StockPolicy {
 // Generic org-settings change log — reusable beyond stockPolicy. There was
 // no cross-entity audit table before this; per-document activity is tracked
 // on *ActivityEvent models instead, which don't fit a settings field change.
+// Every change made from the platform console, and every unlock. Actor
+// email is copied so the row still reads correctly if the user changes.
+model PlatformAuditLog {
+  id             String    @id @default(cuid())
+  actorUserId    String
+  actorEmail     String
+  action         String
+  organizationId String?
+  before         Json?
+  after          Json?
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([createdAt])
+}
+
 model SettingsAuditLog {
   id             String       @id @default(cuid())
   organizationId String

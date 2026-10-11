@@ -8,6 +8,7 @@ import { adminSettingsShared } from './modules/admin-settings-shared';
 import { landing } from './modules/landing';
 import { delivery } from './modules/delivery';
 import { tour } from './modules/tour';
+import { platform } from './modules/platform';
 
 export type Locale = 'en' | 'id';
 
@@ -147,6 +148,7 @@ const base = {
         admin: 'Admin',
         settings: 'Settings',
         mediaLibrary: 'Media Library',
+        platform: 'Platform console',
       },
     },
     theme: {
@@ -422,6 +424,7 @@ const base = {
         admin: 'Admin',
         settings: 'Pengaturan',
         mediaLibrary: 'Pustaka Media',
+        platform: 'Konsol platform',
       },
     },
     theme: {
@@ -587,6 +590,7 @@ export const translations = {
     ...landing.en,
     ...delivery.en,
     ...tour.en,
+    ...platform.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -602,6 +606,7 @@ export const translations = {
     ...landing.id,
     ...delivery.id,
     ...tour.id,
+    ...platform.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

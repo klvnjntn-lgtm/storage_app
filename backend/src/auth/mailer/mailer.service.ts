@@ -118,4 +118,32 @@ export class MailerService implements OnModuleInit {
 
     return info;
   }
+
+  // Second factor for the platform console (src/platform). The email says
+  // plainly what the code unlocks, so an unexpected one is a clear alarm.
+  async sendPlatformUnlockCode(toEmail: string, code: string) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+
+    const info = await this.transporter.sendMail({
+      from: this.fromAddress,
+      to: toEmail,
+      subject: 'WareSys platform console sign-in code',
+      text: `Your platform console code is: ${code}\n\nIt expires in 10 minutes. If you didn't just try to open the platform console, change your password now — someone has it.`,
+      html: `
+        <p>Someone is opening the WareSys platform console with your account.</p>
+        <p>Your code is:</p>
+        <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+        <p>It expires in 10 minutes. If this wasn't you, change your password now — someone has it.</p>
+      `,
+    });
+
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      this.logger.log(`Platform unlock code email preview: ${previewUrl}`);
+    }
+
+    return info;
+  }
 }

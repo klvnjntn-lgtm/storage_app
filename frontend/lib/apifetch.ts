@@ -1,6 +1,7 @@
 import { CSRF_HEADERS, clearSession } from "./session";
 
 let redirectingToLogin = false;
+let redirectingToSuspended = false;
 
 // Client-generated, persisted per-browser identity — how the backend
 // recognizes "the same device" across logins for DRIVER accounts (device
@@ -71,6 +72,20 @@ export async function apiFetch(
     }
 
     throw new Error("Session expired");
+  }
+
+  // The platform owner suspended this organization (backend OrgGuard).
+  // Every call fails from now on, so move to the page that explains why.
+  if (res.status === 403 && typeof window !== "undefined" && !redirectingToSuspended) {
+    const code = await res
+      .clone()
+      .json()
+      .then((b) => b?.code)
+      .catch(() => null);
+    if (code === "ORG_SUSPENDED" && window.location.pathname !== "/suspended") {
+      redirectingToSuspended = true;
+      window.location.href = "/suspended";
+    }
   }
 
   return res;

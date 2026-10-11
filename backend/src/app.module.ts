@@ -59,6 +59,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { UsersModule } from './users/users.module';
 import { DevicesModule } from './devices/devices.module';
 import { AccessControlModule } from './access-control/access-control.module';
+import { PlatformModule } from './platform/platform.module';
 @Module({
   imports: [
     // FIX — @nestjs/throttler was a listed dependency and @Throttle()
@@ -112,6 +113,7 @@ import { AccessControlModule } from './access-control/access-control.module';
     UsersModule,
     DevicesModule,
     AccessControlModule,
+    PlatformModule,
   ],
   controllers: [AppController],
   providers: [

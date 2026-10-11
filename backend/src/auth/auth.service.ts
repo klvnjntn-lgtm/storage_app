@@ -15,6 +15,7 @@ import { DevicesService } from './devices.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { LoginLockout } from './login-lockout';
+import { platformOwnerEmails } from '../platform/platform-owner.guard';
 
 // Compared against when the account doesn't exist, so a login for an
 // unknown email costs the same bcrypt work as one for a real account.
@@ -463,6 +464,7 @@ export class AuthService {
       where: { id: sub },
       data: {
         currentSessionId: sessionId,
+        lastLoginAt: new Date(),
       },
     });
 
@@ -478,7 +480,7 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: {
         id: userId,
       },
@@ -487,14 +489,32 @@ export class AuthService {
         email: true,
         role: true,
         avatarUrl: true,
+        active: true,
+        removedAt: true,
+        isPlatformOwner: true,
         organization: {
           select: {
             id: true,
             name: true,
+            // suspendedReason is written to be shown to the org's members;
+            // billingNote is internal and deliberately not selected.
+            suspendedAt: true,
+            suspendedReason: true,
           },
         },
       },
     });
+    if (!user) return null;
+    const { active, removedAt, isPlatformOwner, ...profile } = user;
+    // Only decides whether the app shows the console link; the console's
+    // own routes re-check everything (PlatformOwnerGuard).
+    const platformOwner =
+      isPlatformOwner &&
+      active &&
+      !removedAt &&
+      user.role === 'ADMIN' &&
+      platformOwnerEmails().has(user.email.toLowerCase());
+    return { ...profile, platformOwner };
   }
 
   async updateAvatar(userId: string, avatarUrl: string | null | undefined) {

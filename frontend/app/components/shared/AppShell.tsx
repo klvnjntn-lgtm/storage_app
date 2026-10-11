@@ -512,6 +512,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
               { href: '/settings', label: t('nav.items.settings'), icon: Settings },
               { href: '/media-library', label: t('nav.items.mediaLibrary'), icon: Images },
+              ...(profile?.platformOwner
+                ? [{ href: '/platform', label: t('nav.items.platform'), icon: Building2 }]
+                : []),
             ]
           : [],
     },

@@ -14,13 +14,25 @@ const checkIsPublic = (pathname: string) =>
 // A DRIVER account only ever sees its own route page — no landing page,
 // home, or other modules (the backend refuses them anyway, see
 // DriverScopeGuard). Password reset stays reachable.
-const DRIVER_PATHS = ['/driver', '/forgot-password', '/reset-password'];
+const DRIVER_PATHS = ['/driver', '/forgot-password', '/reset-password', '/suspended'];
 const driverMayView = (pathname: string) =>
   DRIVER_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 // Where a freshly verified session lands from an auth page or a page its
-// role may not view; null = stay.
-function redirectFor(role: string | null, pathname: string, isAuthPage: boolean): string | null {
+// role may not view; null = stay. A suspended organization (platform
+// console) sees only /suspended and the public pages, and /suspended is
+// only for it.
+function redirectFor(
+  role: string | null,
+  suspended: boolean,
+  pathname: string,
+  isAuthPage: boolean,
+): string | null {
+  if (suspended) {
+    const stays = pathname === '/suspended' || (checkIsPublic(pathname) && !isAuthPage);
+    return stays ? null : '/suspended';
+  }
+  if (pathname === '/suspended') return role === 'DRIVER' ? '/driver' : '/home';
   if (role === 'DRIVER') return driverMayView(pathname) ? null : '/driver';
   return isAuthPage ? '/home' : null;
 }
@@ -37,6 +49,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const verifiedTokenRef = useRef<string | null>(null);
   // Role of the verified token — drives the DRIVER-only routing above.
   const [role, setRole] = useState<string | null>(null);
+  const [suspended, setSuspended] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +70,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     // triggers the loading flash — only a genuinely new/unverified token
     // does (the branch below that still calls setChecked(false)).
     if (token && verifiedTokenRef.current === token) {
-      const target = redirectFor(role, pathname, isAuthPage);
+      const target = redirectFor(role, suspended, pathname, isAuthPage);
       if (target) {
         router.replace(target);
       } else {
@@ -69,6 +82,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!token) {
       verifiedTokenRef.current = null;
       setRole(null);
+      setSuspended(false);
       if (!isPublic) {
         router.replace('/login');
         return;
@@ -99,8 +113,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         verifiedTokenRef.current = token;
         setRole(me?.role ?? null);
+        const isSuspended = !!me?.organization?.suspendedAt;
+        setSuspended(isSuspended);
 
-        const target = redirectFor(me?.role ?? null, pathname, isAuthPage);
+        const target = redirectFor(me?.role ?? null, isSuspended, pathname, isAuthPage);
         if (target) {
           router.replace(target);
           return;
@@ -117,13 +133,15 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router, role]);
+  }, [pathname, router, role, suspended]);
 
   const isPublic = checkIsPublic(pathname);
   // Don't flash a page (landing, AppShell) a driver is being sent away from.
   const leavingAsDriver = role === 'DRIVER' && !driverMayView(pathname);
+  // Nor a page of a suspended org's app (it would only fill with errors).
+  const leavingAsSuspended = suspended && pathname !== '/suspended' && !isPublic;
 
-  if ((!checked && !isPublic) || leavingAsDriver) {
+  if ((!checked && !isPublic) || leavingAsDriver || leavingAsSuspended) {
     return (
       <main className="min-h-screen bg-white flex items-center justify-center">
         <p className="text-sm text-gray-500">{t('common.loading')}</p>

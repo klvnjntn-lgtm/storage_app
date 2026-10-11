@@ -7,7 +7,14 @@ type Profile = {
   email: string;
   role: string;
   avatarUrl?: string | null;
-  organization: { name: string };
+  organization: {
+    id: string;
+    name: string;
+    suspendedAt?: string | null;
+    suspendedReason?: string | null;
+  };
+  // Shows the platform console link; the console's routes re-check.
+  platformOwner?: boolean;
   [key: string]: any;
 };
 

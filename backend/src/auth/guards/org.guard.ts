@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { ALLOW_SUSPENDED_ORG_KEY } from '../decorators/allow-suspended-org.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -42,11 +43,26 @@ export class OrgGuard implements CanActivate {
 
     const org = await this.prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true },
+      select: { id: true, suspendedAt: true },
     });
 
     if (!org) {
       throw new ForbiddenException('Organization not found or inactive');
+    }
+
+    // Suspended from the platform console (src/platform). Checked on every
+    // request, so it takes effect immediately without ending sessions.
+    if (org.suspendedAt) {
+      const allowed = this.reflector.getAllAndOverride<boolean>(
+        ALLOW_SUSPENDED_ORG_KEY,
+        [ctx.getHandler(), ctx.getClass()],
+      );
+      if (!allowed) {
+        throw new ForbiddenException({
+          code: 'ORG_SUSPENDED',
+          message: 'This organization is suspended. Please contact support.',
+        });
+      }
     }
 
     request.organizationId = organizationId;

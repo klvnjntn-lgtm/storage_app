@@ -30,6 +30,7 @@ import { Roles } from './decorators/roles.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AdminKeyGuard } from './guards/admin-key.guard';
+import { AllowSuspendedOrg } from './decorators/allow-suspended-org.decorator';
 import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.decorator';
 import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 
@@ -93,8 +94,10 @@ export class AuthController {
     return { ok: true };
   }
 
-  // Every role, DRIVER included — see DriverScopeGuard.
+  // Every role, DRIVER included — see DriverScopeGuard. Still answers for
+  // a suspended org, so the app can show why everything else is blocked.
   @Roles('ADMIN', 'USER', 'DRIVER')
+  @AllowSuspendedOrg()
   @Get('me')
   async me(@CurrentUser() user: any) {
     return this.authService.me(user.sub);
