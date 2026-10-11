@@ -16,6 +16,10 @@ import {
   LocateFixed,
   LocateOff,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  User,
 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { CSRF_HEADERS } from '@/lib/session';
@@ -24,6 +28,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -43,6 +48,14 @@ type Stop = {
   // Saved-address name for a customer stop ("Gudang Timur"); null = main address.
   addressLabel: string | null;
   failureReason: string | null;
+  // What was recorded when the stop was finished — shown back to the
+  // driver on the finished row.
+  receivedBy: string | null;
+  signedAt: string | null;
+  failedAt: string | null;
+  hasProofPhoto: boolean;
+  completedLatitude: string | null;
+  completedAccuracy: number | null;
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   destinationLatitude: string | null;
   destinationLongitude: string | null;
@@ -57,7 +70,7 @@ type Stop = {
   } | null;
 };
 
-function formatEta(iso: string | null): string {
+function formatTime(iso: string | null): string {
   if (!iso) return '';
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -266,6 +279,142 @@ function StopMarker({ stop, current }: { stop: Stop; current: boolean }) {
   );
 }
 
+// The proof photo the driver sent, fetched as a short-lived signed link
+// once the row is opened (see ProofPhoto for the office's version).
+function SentProofPhoto({ linkPath }: { linkPath: string }) {
+  const { t } = useLanguage();
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(linkPath)
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok || !body?.path) setFailed(true);
+        else setSrc(body.kind === 'signed' ? `/api${body.path}` : body.path);
+      })
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [linkPath]);
+
+  if (failed) return <p className="text-sm text-red-600">{t('delivery.driver.photoLoadFailed')}</p>;
+  if (!src) return <p className="text-sm text-gray-500">{t('delivery.driver.loadingPhoto')}</p>;
+  return (
+    <a href={src} target="_blank" rel="noreferrer" className="block">
+      {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived URL; not for next/image */}
+      <img
+        src={src}
+        alt={t('delivery.driver.proofPhotoAlt')}
+        onError={() => setFailed(true)}
+        className="w-full max-h-80 object-contain rounded-lg border border-gray-200 bg-gray-50"
+      />
+    </a>
+  );
+}
+
+// A finished stop (or any stop on a past day) as one line; tap it to see
+// what was recorded — when, who received it, the GPS and the photo.
+function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Stop; statusLabel: string }) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const doneAt = stop.status === 'DELIVERED' ? stop.signedAt : stop.status === 'FAILED' ? stop.failedAt : null;
+  const photoLink = stop.deliveryOrder
+    ? `/delivery-orders/${stop.deliveryOrder.id}/proof-photo-link`
+    : `/delivery-routes/${routeId}/stops/${stop.id}/proof-photo-link`;
+  const tone =
+    stop.status === 'DELIVERED' ? 'text-green-700' : stop.status === 'FAILED' ? 'text-red-700' : 'text-gray-500';
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white/70">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+      >
+        <StopMarker stop={stop} current={false} />
+        <div className="min-w-0 flex-1">
+          <div className="text-base font-semibold truncate text-gray-700">{stop.label}</div>
+          {!open && stop.status === 'FAILED' && stop.failureReason && (
+            <div className="text-sm text-red-600 truncate">{stop.failureReason}</div>
+          )}
+        </div>
+        <span className={`text-sm font-semibold shrink-0 text-right ${tone}`}>
+          {statusLabel}
+          {doneAt && <span className="block text-xs font-medium text-gray-500">{formatTime(doneAt)}</span>}
+        </span>
+        <ChevronDown size={20} className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100 text-base">
+          {(stop.addressLabel || stop.address) && (
+            <p className="flex items-start gap-1.5 text-gray-600">
+              <MapPin size={18} className="shrink-0 mt-0.5 text-blue-600" />
+              <span className="break-words">
+                {stop.addressLabel && <span className="block font-semibold text-gray-900">{stop.addressLabel}</span>}
+                {stop.address}
+              </span>
+            </p>
+          )}
+          {doneAt && (
+            <p className="flex items-center gap-1.5 text-gray-700">
+              <Clock size={18} className="shrink-0 text-gray-500" />
+              {t(stop.status === 'DELIVERED' ? 'delivery.driver.deliveredAt' : 'delivery.driver.failedAt', {
+                time: formatTime(doneAt),
+              })}
+            </p>
+          )}
+          {stop.status === 'DELIVERED' && (
+            <>
+              {stop.receivedBy && (
+                <p className="flex items-center gap-1.5 text-gray-700">
+                  <User size={18} className="shrink-0 text-gray-500" />
+                  {t('delivery.driver.receivedByValue', { name: stop.receivedBy })}
+                </p>
+              )}
+              <p className="flex items-center gap-1.5 text-gray-700">
+                {stop.completedLatitude ? (
+                  <LocateFixed size={18} className="shrink-0 text-gray-500" />
+                ) : (
+                  <LocateOff size={18} className="shrink-0 text-amber-600" />
+                )}
+                {!stop.completedLatitude
+                  ? t('delivery.driver.noLocationSaved')
+                  : stop.completedAccuracy != null
+                    ? t('delivery.driver.locationSaved', { m: Math.round(stop.completedAccuracy) })
+                    : t('delivery.driver.locationSavedNoAccuracy')}
+              </p>
+              {stop.hasProofPhoto ? (
+                <SentProofPhoto linkPath={photoLink} />
+              ) : (
+                <p className="flex items-center gap-1.5 text-gray-500">
+                  <Camera size={18} className="shrink-0" />
+                  {t('delivery.driver.noProofPhoto')}
+                </p>
+              )}
+            </>
+          )}
+          {stop.status === 'FAILED' && stop.failureReason && (
+            <p className="text-red-700 whitespace-pre-line">{stop.failureReason}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Days back from today the driver can look through: 0 = today.
+function dayAt(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - offset);
+  return toCalendarDateString(d);
+}
+
 export default function DriverRoutePage() {
   const router = useRouter();
   const { t, language } = useLanguage();
@@ -286,9 +435,12 @@ export default function DriverRoutePage() {
   // the photo was shot even if the upload only gets through later.
   const [photoFix, setPhotoFix] = useState<Record<string, Fix>>({});
   const [preparingPhotoFor, setPreparingPhotoFor] = useState<string | null>(null);
+  // 0 = today; past days are view-only, to look back at what was done.
+  const [daysBack, setDaysBack] = useState(0);
+  const isToday = daysBack === 0;
 
-  // GPS stays warm only while there's something left to deliver.
-  const hasPending = routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
+  // GPS stays warm only while there's something left to deliver today.
+  const hasPending = isToday && routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
   const gps = useGpsWatch(user?.role === 'DRIVER' && hasPending);
 
   // Best warm reading if there is one, else ask the phone once.
@@ -337,7 +489,8 @@ export default function DriverRoutePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch('/delivery-routes/mine');
+      // Today leaves the date to the server, as it always has.
+      const res = await apiFetch(isToday ? '/delivery-routes/mine' : `/delivery-routes/mine?date=${dayAt(daysBack)}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
@@ -354,7 +507,7 @@ export default function DriverRoutePage() {
   useEffect(() => {
     if (user?.role === 'DRIVER') load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, daysBack]);
 
   async function handleMarkDelivered(routeId: string, stop: Stop) {
     const key = stop.id;
@@ -439,7 +592,7 @@ export default function DriverRoutePage() {
     }
   }
 
-  if (userLoading || (user?.role === 'DRIVER' && loading)) {
+  if (userLoading) {
     return <p className="text-base text-gray-500">{t('delivery.driver.loading')}</p>;
   }
 
@@ -453,12 +606,51 @@ export default function DriverRoutePage() {
     FAILED: t('delivery.driver.statusLabel.FAILED'),
   };
 
-  const allStops = routes.flatMap((r) => r.stops);
+  const locale = language === 'id' ? 'id-ID' : 'en-GB';
+  const dayLabel =
+    daysBack === 0
+      ? t('delivery.driver.today')
+      : daysBack === 1
+        ? t('delivery.driver.yesterday')
+        : new Date(`${dayAt(daysBack)}T00:00:00`).toLocaleDateString(locale, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+          });
+
+  // Nothing from the previous day shows under the new day's heading.
+  const shownRoutes = loading ? [] : routes;
+  const allStops = shownRoutes.flatMap((r) => r.stops);
   const hasAnyStops = allStops.length > 0;
   const doneCount = allStops.filter((s) => s.status !== 'PENDING').length;
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setDaysBack((d) => d + 1)}
+          disabled={loading}
+          aria-label={t('delivery.driver.prevDay')}
+          className="h-12 w-12 flex items-center justify-center rounded-xl border-2 border-gray-300 bg-white text-gray-700 disabled:opacity-40"
+        >
+          <ChevronLeft size={24} />
+        </button>
+        <div className="flex-1 text-center">
+          <p className={`${display.className} text-lg font-bold`}>{dayLabel}</p>
+          {!isToday && <p className="text-xs text-gray-500">{t('delivery.driver.pastDayViewOnly')}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={() => setDaysBack((d) => Math.max(0, d - 1))}
+          disabled={isToday || loading}
+          aria-label={t('delivery.driver.nextDay')}
+          className="h-12 w-12 flex items-center justify-center rounded-xl border-2 border-gray-300 bg-white text-gray-700 disabled:opacity-40"
+        >
+          <ChevronRight size={24} />
+        </button>
+      </div>
+
       {error && (
         <div className="flex items-start gap-2 bg-red-50 border-2 border-red-200 text-red-700 text-base font-medium rounded-xl px-4 py-3">
           <AlertTriangle size={20} className="shrink-0 mt-0.5" />
@@ -472,18 +664,22 @@ export default function DriverRoutePage() {
         </div>
       )}
 
+      {loading && <p className="text-base text-gray-500">{t('delivery.driver.loading')}</p>}
+
       {hasPending && <GpsBlockedBanner status={gps.status} />}
 
       {!hasAnyStops && !loading && (
         <div className="rounded-2xl border border-blue-500/15 bg-white shadow-sm p-6 text-center text-base text-gray-500">
-          {t('delivery.driver.noRoute')}
+          {t(isToday ? 'delivery.driver.noRoute' : 'delivery.driver.noRouteOnDay')}
         </div>
       )}
 
       {hasAnyStops && (
         <div className="rounded-2xl border border-blue-500/15 bg-white shadow-sm p-4 space-y-2">
           <p className={`${display.className} text-lg font-bold`}>
-            {hasPending ? t('delivery.driver.progress', { done: doneCount, total: allStops.length }) : t('delivery.driver.allDone')}
+            {doneCount < allStops.length
+              ? t('delivery.driver.progress', { done: doneCount, total: allStops.length })
+              : t('delivery.driver.allDone')}
           </p>
           <div className="h-3 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
             <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${(doneCount / allStops.length) * 100}%` }} />
@@ -491,7 +687,7 @@ export default function DriverRoutePage() {
         </div>
       )}
 
-      {routes.map((route) => (
+      {shownRoutes.map((route) => (
         <div key={route.id} className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-blue-900/50">
             {route.team.name}{route.name ? ` · ${route.name}` : ''}
@@ -510,24 +706,10 @@ export default function DriverRoutePage() {
             const info = stop.customerInfo;
             const mapsUrl = googleMapsUrl(stop);
 
-            // Finished stops collapse to one line so the remaining work stands out.
-            if (stop.status !== 'PENDING') {
-              return (
-                <div key={stop.id} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white/70 px-3 py-2.5">
-                  <StopMarker stop={stop} current={false} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-base font-semibold truncate text-gray-700">{stop.label}</div>
-                    {stop.status === 'FAILED' && stop.failureReason && (
-                      <div className="text-sm text-red-600 truncate">{stop.failureReason}</div>
-                    )}
-                  </div>
-                  <span
-                    className={`text-sm font-semibold shrink-0 ${stop.status === 'DELIVERED' ? 'text-green-700' : 'text-red-700'}`}
-                  >
-                    {statusLabels[stop.status]}
-                  </span>
-                </div>
-              );
+            // Finished stops collapse to one line so the remaining work
+            // stands out; a past day shows every stop that way.
+            if (stop.status !== 'PENDING' || !isToday) {
+              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} />;
             }
 
             return (
@@ -562,7 +744,7 @@ export default function DriverRoutePage() {
                         {stop.plannedEta && (
                           <span className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700 bg-gray-100 rounded-full px-2.5 py-1">
                             <Clock size={14} />
-                            {t('delivery.driver.eta')} {formatEta(stop.plannedEta)}
+                            {t('delivery.driver.eta')} {formatTime(stop.plannedEta)}
                           </span>
                         )}
                         {stop.late && (

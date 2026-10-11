@@ -6,6 +6,7 @@ import { LogOut, Bell } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { display } from '@/lib/fonts';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
+import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import { apiFetch } from '@/lib/apifetch';
 import { clearSession } from '@/lib/session';
 import { useNotifications } from '@/lib/hooks/useNotifications';
@@ -17,13 +18,23 @@ import { ensurePushSubscription } from '@/lib/push';
 // gets its own bell (rather than AppShell's NotificationDrawer) since it
 // never renders AppShell at all.
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
-  const { t } = useLanguage();
+  const { t, setLanguage } = useLanguage();
   const [open, setOpen] = useState(false);
   const { unreadCount, notifications, ensureListLoaded, markRead } = useNotifications(true);
 
   useEffect(() => {
     ensurePushSubscription();
   }, []);
+
+  // Drivers start in Indonesian; once they pick a language it sticks.
+  // Runs before LanguageProvider's own effect reads the saved choice.
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('language')) setLanguage('id');
+    } catch {
+      // storage blocked — stay on the provider's default
+    }
+  }, [setLanguage]);
 
   async function handleLogout() {
     try {
@@ -59,6 +70,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <LanguageSwitcher />
           <ThemeToggle />
           <div className="relative">
             <button
@@ -104,10 +116,12 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
           </div>
           <button
             onClick={handleLogout}
+            aria-label={t('appShell.logOut')}
             className="h-11 flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700"
           >
             <LogOut size={18} />
-            {t('appShell.logOut')}
+            {/* Icon only on the narrowest phones, to fit the language switch. */}
+            <span className="hidden min-[400px]:inline">{t('appShell.logOut')}</span>
           </button>
         </div>
       </header>
