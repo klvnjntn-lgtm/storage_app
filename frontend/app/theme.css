@@ -33,9 +33,12 @@ html[data-theme='dark'] .theme-icon-moon {
   display: none;
 }
 
-/* ─── App: dark ───────────────────────────────────────────────────── */
+/* ─── App: dark ─────────────────────────────────────────────────────
+   .console-dark gets the same palette on any theme: the platform console
+   is designed dark, so everything inside it (unlock form, drawer, panels)
+   follows without its own dark classes. */
 @media screen {
-  html[data-theme='dark']:not(:has(.landing)) {
+  :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
     --background: #0b0f17;
     --foreground: #e8edf4;
     --page-bg: #0b0f17;
@@ -100,7 +103,7 @@ html[data-theme='dark'] .theme-icon-moon {
 
   /* text-white always sits on a coloured fill (buttons, badges, gradient
      icons), so it stays white even though --color-white is now dark… */
-  html[data-theme='dark']:not(:has(.landing)) {
+  :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
     & .text-white,
     & .hover\:text-white:hover {
       color: #fff;
@@ -137,7 +140,7 @@ html[data-theme='dark'] .theme-icon-moon {
    options a surface; in the base layer so bg-* utilities still win. */
 @layer base {
   @media screen {
-    html[data-theme='dark']:not(:has(.landing)) {
+    :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
       & select {
         background-color: var(--color-white);
         color: var(--color-gray-900);

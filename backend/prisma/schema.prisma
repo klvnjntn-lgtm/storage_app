@@ -278,6 +278,10 @@ model User {
   role             Role           @default(USER)
   active           Boolean        @default(true)
   lastLoginAt      DateTime?
+  // Last time the user used the app, signed in by password or not
+  // (refreshed at most every few minutes — see jwt.strategy.ts). A login
+  // lasts 7 days, so lastLoginAt alone says little about who's active.
+  lastActiveAt     DateTime?
 
   // Platform console access (src/platform). Granted only by the
   // platform-owner script, never through the API, and only honoured

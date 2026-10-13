@@ -500,6 +500,7 @@ export class AuthService {
       data: {
         currentSessionId: sessionId,
         lastLoginAt: new Date(),
+        lastActiveAt: new Date(),
       },
     });
 

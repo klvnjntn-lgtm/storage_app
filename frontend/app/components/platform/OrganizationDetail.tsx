@@ -393,7 +393,7 @@ export default function OrganizationDetail({
                             {!u.active && <span className="ml-1 text-red-600">· {t('platform.detail.inactive')}</span>}
                           </p>
                           <p className="text-[11px] text-gray-500">
-                            {u.lastLoginAt ? formatDateTime(u.lastLoginAt, language) : t('platform.never')}
+                            {u.lastActiveAt ? formatDateTime(u.lastActiveAt, language) : t('platform.never')}
                           </p>
                         </div>
                       </li>

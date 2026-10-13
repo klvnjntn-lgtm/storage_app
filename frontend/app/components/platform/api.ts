@@ -19,7 +19,7 @@ export type PlatformOrg = {
   suspendedReason: string | null;
   paidUntil: string | null;
   billingNote: string | null;
-  lastLoginAt: string | null;
+  lastActiveAt: string | null;
   modules: { module: ModuleKey; enabled: boolean; expiresAt: string | null }[];
 };
 
@@ -39,7 +39,7 @@ export type PlatformOrgDetail = PlatformOrg & {
     displayName: string | null;
     role: 'ADMIN' | 'USER' | 'DRIVER';
     active: boolean;
-    lastLoginAt: string | null;
+    lastActiveAt: string | null;
   }[];
   recentAudit: PlatformAuditEntry[];
 };

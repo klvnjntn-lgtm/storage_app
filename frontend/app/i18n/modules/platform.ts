@@ -9,6 +9,17 @@ export const platform = {
       subtitle: 'Every customer organization on this server',
       lock: 'Lock',
       unlockedUntil: 'Unlocked until {time}',
+      sessionLive: 'Session live',
+      sessionLeft: '{time} left',
+      lockedBadge: 'Locked',
+      stat: {
+        organizations: 'Organizations',
+        paymentDue: 'Payment due',
+        suspended: 'Suspended',
+        seats: 'Seats in use',
+        seatsOf: 'of {limit}',
+      },
+      showingCount: '{shown} of {total}',
       lockedTitle: 'Unlock the platform console',
       lockedHint:
         'This console can change every customer’s account, so it needs your password again and a code sent to {email}. It stays unlocked for 30 minutes on this login.',
@@ -35,7 +46,7 @@ export const platform = {
         plan: 'Plan',
         seats: 'Seats',
         paidUntil: 'Paid until',
-        lastLogin: 'Last login',
+        lastLogin: 'Last active',
         status: 'Status',
       },
       status: {
@@ -115,6 +126,17 @@ export const platform = {
       subtitle: 'Semua organisasi pelanggan di server ini',
       lock: 'Kunci',
       unlockedUntil: 'Terbuka sampai {time}',
+      sessionLive: 'Sesi aktif',
+      sessionLeft: 'sisa {time}',
+      lockedBadge: 'Terkunci',
+      stat: {
+        organizations: 'Organisasi',
+        paymentDue: 'Perlu bayar',
+        suspended: 'Ditangguhkan',
+        seats: 'Kursi terpakai',
+        seatsOf: 'dari {limit}',
+      },
+      showingCount: '{shown} dari {total}',
       lockedTitle: 'Buka konsol platform',
       lockedHint:
         'Konsol ini dapat mengubah akun semua pelanggan, jadi perlu kata sandi Anda lagi dan kode yang dikirim ke {email}. Konsol tetap terbuka 30 menit pada login ini.',
@@ -141,7 +163,7 @@ export const platform = {
         plan: 'Paket',
         seats: 'Kursi',
         paidUntil: 'Dibayar sampai',
-        lastLogin: 'Login terakhir',
+        lastLogin: 'Terakhir aktif',
         status: 'Status',
       },
       status: {

@@ -50,19 +50,19 @@ export class PlatformService {
       }),
       this.prisma.user.groupBy({
         by: ['organizationId'],
-        _max: { lastLoginAt: true },
+        _max: { lastActiveAt: true },
       }),
     ]);
     const seatsUsed = new Map(
       seats.map((s) => [s.organizationId, s._count._all]),
     );
-    const lastLogin = new Map(
-      logins.map((l) => [l.organizationId, l._max.lastLoginAt]),
+    const lastActive = new Map(
+      logins.map((l) => [l.organizationId, l._max.lastActiveAt]),
     );
     return orgs.map((o) => ({
       ...o,
       seatsUsed: seatsUsed.get(o.id) ?? 0,
-      lastLoginAt: lastLogin.get(o.id) ?? null,
+      lastActiveAt: lastActive.get(o.id) ?? null,
     }));
   }
 
@@ -80,7 +80,7 @@ export class PlatformService {
             role: true,
             active: true,
             createdAt: true,
-            lastLoginAt: true,
+            lastActiveAt: true,
           },
           orderBy: [{ role: 'asc' }, { email: 'asc' }],
         },

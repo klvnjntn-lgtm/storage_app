@@ -11,6 +11,7 @@ import { DevicesService } from './devices.service';
 import { CSRF_HEADER, CSRF_HEADER_VALUE, readSessionCookie } from './session-cookie';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const LAST_ACTIVE_RESOLUTION_MS = 5 * 60 * 1000;
 
 interface JwtPayload {
   sub: string;
@@ -111,6 +112,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       if (typeof deviceId === 'string' && deviceId) {
         void this.devices.touchLastSeen(user.id, deviceId);
       }
+    }
+
+    // Best-effort, like the device touch above: one write per user every
+    // few minutes rather than one per request.
+    if (
+      !user.lastActiveAt ||
+      Date.now() - user.lastActiveAt.getTime() > LAST_ACTIVE_RESOLUTION_MS
+    ) {
+      void this.prisma.user
+        .update({ where: { id: user.id }, data: { lastActiveAt: new Date() } })
+        .catch(() => undefined);
     }
 
     return {
