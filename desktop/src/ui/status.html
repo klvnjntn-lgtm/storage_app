@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>WareSys</title>
+  <style>
+    :root { color-scheme: light; --blue: #2563eb; --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font: 15px/1.5 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+      background: #f8fafc radial-gradient(circle at 1px 1px, rgba(37,99,235,0.07) 1px, transparent 0) 0 0 / 24px 24px;
+    }
+    .card { width: min(440px, calc(100vw - 32px)); background: #fff; border: 1px solid var(--line);
+      border-radius: 14px; padding: 32px; box-shadow: 0 10px 30px rgba(15,23,42,0.06); }
+    .logo { height: 34px; display: block; margin-bottom: 24px; }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    p { margin: 0 0 16px; color: var(--muted); }
+    .error { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+      padding: 10px 12px; white-space: pre-wrap; word-break: break-word; }
+    .spinner { width: 22px; height: 22px; border: 3px solid #dbeafe; border-top-color: var(--blue);
+      border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .row { display: flex; align-items: center; gap: 12px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+    input:focus { outline: 2px solid var(--blue); outline-offset: 1px; border-color: transparent; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    button { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--line); background: #fff; color: var(--ink); }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .choices { display: grid; gap: 10px; }
+    .choice { text-align: left; padding: 14px 16px; font-weight: 400; }
+    .choice strong { display: block; font-weight: 600; margin-bottom: 2px; }
+    .choice span { color: var(--muted); font-size: 14px; }
+    .choice:hover, .pc:hover { border-color: var(--blue); background: #eff6ff; }
+    .pcs { display: grid; gap: 8px; margin-bottom: 16px; }
+    .pcs:empty { display: none; }
+    .pc { text-align: left; font-weight: 400; display: flex; justify-content: space-between; gap: 12px; }
+    .pc strong { font-weight: 600; }
+    .pc span { color: var(--muted); }
+    .muted-row { color: var(--muted); margin-bottom: 16px; }
+    .link { border: none; background: none; padding: 9px 4px; color: var(--muted); font-weight: 500; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="waresys-logo.svg" alt="WareSys">
+
+    <section id="loading">
+      <div class="row"><div class="spinner" aria-hidden="true"></div><h1 id="loading-text" role="status">Starting…</h1></div>
+    </section>
+
+    <section id="role" hidden>
+      <h1>Set up this PC</h1>
+      <p>All PCs in the office share one set of data, stored on the main PC.</p>
+      <div class="choices">
+        <button class="choice" id="role-main" type="button">
+          <strong>This is the main PC</strong>
+          <span>It stores the data and must be on whenever anyone uses WareSys. Choose this for the first PC.</span>
+        </button>
+        <button class="choice" id="role-client" type="button">
+          <strong>Connect to the main PC</strong>
+          <span>Use the data on the office's main PC, over the office network.</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="connect" hidden>
+      <h1>Connect to the main PC</h1>
+      <p id="connect-error" class="error" hidden></p>
+      <div id="searching" class="row muted-row"><div class="spinner" aria-hidden="true"></div><span role="status">Looking for the main PC on the network…</span></div>
+      <div id="pcs" class="pcs"></div>
+      <p id="none-found" class="muted-row" hidden>No main PC found. Check that it is on, WareSys is open on it, and both PCs are on the same network — or type its address below (shown on the main PC under File → This PC's Address).</p>
+      <form id="manual">
+        <label for="address">Main PC address</label>
+        <input id="address" placeholder="e.g. 192.168.1.10" autocomplete="off" spellcheck="false" required>
+        <div class="actions">
+          <button class="primary" type="submit">Connect</button>
+          <button id="search-again" type="button">Search again</button>
+          <button id="connect-back" class="link" type="button">Back</button>
+        </div>
+      </form>
+    </section>
+
+    <form id="license" hidden>
+      <h1>Activate WareSys</h1>
+      <p>Enter the license key you received. The first activation needs an internet connection; after that WareSys works offline.</p>
+      <p id="license-error" class="error" hidden></p>
+      <label for="license-key">License key</label>
+      <input id="license-key" autocomplete="off" spellcheck="false" required>
+      <div class="actions"><button class="primary" type="submit">Activate</button></div>
+    </form>
+
+    <section id="error" hidden>
+      <h1>WareSys could not start</h1>
+      <p id="error-text" class="error"></p>
+      <div class="actions">
+        <button class="primary" id="retry" type="button">Try again</button>
+        <button id="choose-main" type="button">Choose main PC…</button>
+        <button id="restore" type="button">Import a backup…</button>
+        <button id="logs" type="button">Open logs</button>
+      </div>
+    </section>
+  </main>
+  <script src="status.js"></script>
+</body>
+</html>

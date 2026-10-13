@@ -10,6 +10,7 @@ import { formatIDR } from '@/lib/format';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
+import { useIsDesktopApp } from '@/lib/desktop';
 
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
@@ -94,6 +95,8 @@ export default function SalesSearchPage() {
 function SalesSearchPageInner() {
   const router = useRouter();
   const { t } = useLanguage();
+  // The desktop app has invoices only (lib/desktop.ts): no type tabs.
+  const desktopApp = useIsDesktopApp();
 
   // Seeded from the URL so pressing the browser's Back button from a
   // result's detail page restores the same query/filter/page instead of
@@ -121,7 +124,8 @@ function SalesSearchPageInner() {
   async function loadResults(q: string, page: number, type: 'ALL' | SalesSearchResultType) {
     setSearching(true);
     try {
-      const typeParam = type === 'ALL' ? '' : `&type=${type}`;
+      const effectiveType = desktopApp ? 'INVOICE' : type;
+      const typeParam = effectiveType === 'ALL' ? '' : `&type=${effectiveType}`;
       const res = await apiFetch(
         `/sales/search?q=${encodeURIComponent(q)}&page=${page}&limit=${RESULTS_LIMIT}${typeParam}`,
       );
@@ -256,7 +260,7 @@ function SalesSearchPageInner() {
             )}
           </div>
 
-          {results && results.items.length > 0 && (
+          {results && results.items.length > 0 && !desktopApp && (
             <div className="flex gap-1.5 overflow-x-auto mt-3 -mx-6 px-6 sm:mx-0 sm:px-0 sm:overflow-visible">
               {TYPE_FILTERS.map((f) => (
                 <button

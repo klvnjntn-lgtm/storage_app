@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Building2, Lock, Search, ChevronRight } from 'lucide-react';
+import { Building2, Lock, Search, ChevronRight, Upload } from 'lucide-react';
 import { display } from '@/lib/fonts';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import UnlockPanel from '@/app/components/platform/UnlockPanel';
 import OrganizationDetail from '@/app/components/platform/OrganizationDetail';
+import ImportOrganizationPanel from '@/app/components/platform/ImportOrganizationPanel';
 import {
   formatDate,
   formatDateTime,
@@ -42,6 +43,8 @@ export default function PlatformPage() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<string | null>(null);
 
   const onLocked = useCallback(() => {
     setSession((s) => (s ? { ...s, unlocked: false, unlockedUntil: null } : s));
@@ -196,6 +199,13 @@ export default function PlatformPage() {
                   className="flex-1 min-w-0 py-2 sm:py-1.5 text-base sm:text-sm outline-none bg-transparent"
                 />
               </div>
+              <button
+                onClick={() => setImporting((v) => !v)}
+                className="shrink-0 flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 bg-white rounded-md px-3 py-1.5 hover:bg-gray-50"
+              >
+                <Upload size={14} />
+                {t('orgTransfer.platform.importButton')}
+              </button>
               <div className="flex gap-1.5 overflow-x-auto">
                 {(['all', 'overdue', 'suspended'] as const).map((f) => (
                   <button
@@ -213,6 +223,22 @@ export default function PlatformPage() {
                 ))}
               </div>
             </div>
+
+            {importing && (
+              <ImportOrganizationPanel
+                onCancel={() => setImporting(false)}
+                onLocked={onLocked}
+                onImported={(r) => {
+                  setImporting(false);
+                  setImported(t('orgTransfer.platform.imported', { name: r.name, rows: r.rows, files: r.files }));
+                  loadOrgs();
+                  setSelected(r.organizationId);
+                }}
+              />
+            )}
+            {imported && (
+              <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-md px-3 py-2">{imported}</div>
+            )}
 
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="hidden md:grid grid-cols-[minmax(0,2fr)_90px_80px_120px_130px_100px_20px] gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-gray-100">

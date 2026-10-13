@@ -9,10 +9,13 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { markSignedIn } from '@/lib/session';
+import { useIsDesktopApp } from '@/lib/desktop';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  // The desktop app can bring a business in from an export instead.
+  const desktopApp = useIsDesktopApp();
   const [organizationName, setOrganizationName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -133,6 +136,14 @@ export default function RegisterPage() {
             {loading ? t('auth.register.creating') : t('auth.register.createOrganization')}
           </button>
         </div>
+
+        {desktopApp && (
+          <p className="text-center text-sm">
+            <Link href="/register/import" className="text-blue-700 font-semibold hover:underline">
+              {t('orgTransfer.import.link')}
+            </Link>
+          </p>
+        )}
 
         <p className="text-center text-sm text-gray-500">
           {t('auth.register.haveAccount')}{' '}

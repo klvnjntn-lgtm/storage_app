@@ -43,6 +43,7 @@ type HistoryItem = {
     id: string | number; // API sends a numeric id (e.g. 97319)
     quantity: number;
     description: string | null;
+    netAmount: string; // after discount, before tax
     product: { name: string } | null; // nested, matches the actual API response
   }>;
 };
@@ -57,7 +58,6 @@ type HistoryPage = {
 
 const DEBOUNCE_MS = 350;
 const HISTORY_LIMIT_DEFAULT = 20;
-const ITEMS_SUMMARY_MAX = 3;
 
 function displayDateFor(h: HistoryItem): Date {
   return new Date(h.issuedAt ?? h.createdAt);
@@ -82,31 +82,23 @@ function itemLabel(item: HistoryItem['items'][number], t: (key: string) => strin
   return item.quantity > 1 ? `${item.quantity}× ${label}` : label;
 }
 
-// Same shape as /vehicles/[id]'s itemsToShow — one line per item (not
-// comma-joined, so a multi-part job stays readable) capped at 3, with an
-// overflow count beyond that. Takes an optional item-level search query
-// (separate from the vehicle-lookup query above): when present, matching
-// items float to the top, same as /vehicles/[id].
+// Every item on the invoice, one row each with its amount. Takes an
+// optional item-level search query (separate from the vehicle-lookup query
+// above): when present, matching items float to the top, same as
+// /vehicles/[id].
 function itemsToShow(
   items: HistoryItem['items'],
   itemQuery: string,
   t: (key: string) => string,
-): { lines: string[]; overflow: number } {
-  if (items.length === 0) return { lines: [t('workshop.vehicleSearch.noItemsRecorded')], overflow: 0 };
-
+): Array<{ label: string; amount: number }> {
   const q = itemQuery.trim().toLowerCase();
-  const labels = items.map((item) => itemLabel(item, t));
-
-  const ordered = q
-    ? [...labels].sort((a, b) => {
-        const aMatch = a.toLowerCase().includes(q) ? 0 : 1;
-        const bMatch = b.toLowerCase().includes(q) ? 0 : 1;
-        return aMatch - bMatch;
-      })
-    : labels;
-
-  if (ordered.length <= ITEMS_SUMMARY_MAX) return { lines: ordered, overflow: 0 };
-  return { lines: ordered.slice(0, ITEMS_SUMMARY_MAX), overflow: ordered.length - ITEMS_SUMMARY_MAX };
+  const rows = items.map((item) => ({ label: itemLabel(item, t), amount: Number(item.netAmount) }));
+  if (!q) return rows;
+  return [...rows].sort((a, b) => {
+    const aMatch = a.label.toLowerCase().includes(q) ? 0 : 1;
+    const bMatch = b.label.toLowerCase().includes(q) ? 0 : 1;
+    return aMatch - bMatch;
+  });
 }
 
 // FIX — useSearchParams() requires a Suspense boundary for static
@@ -575,7 +567,7 @@ function VehicleLookupPageInner() {
 
             <div className="flex flex-col gap-2">
               {history?.items.map((h) => {
-                const { lines, overflow } = itemsToShow(h.items, itemSearch, t);
+                const rows = itemsToShow(h.items, itemSearch, t);
                 const overdue = isOverdue(h);
                 return (
                   <div
@@ -610,12 +602,13 @@ function VehicleLookupPageInner() {
                       )}
                     </div>
                     <div className="text-sm text-gray-700 leading-snug">
-                      {lines.map((line, i) => (
-                        <p key={i} className="truncate">
-                          {line}
-                        </p>
+                      {rows.length === 0 && <p>{t('workshop.vehicleSearch.noItemsRecorded')}</p>}
+                      {rows.map((row, i) => (
+                        <div key={i} className="flex items-baseline justify-between gap-3">
+                          <span className="min-w-0 break-words">{row.label}</span>
+                          <span className="shrink-0 text-xs text-gray-500 font-mono tabular-nums">{formatIDR(row.amount)}</span>
+                        </div>
                       ))}
-                      {overflow > 0 && <p className="text-xs text-gray-400">{t('workshop.vehicleSearch.more', { count: overflow })}</p>}
                     </div>
                     <div className="flex items-center justify-between gap-2 pt-0.5">
                       <span className="flex items-center gap-1 text-xs text-gray-500 font-mono tabular-nums">

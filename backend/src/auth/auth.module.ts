@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { LicenseModule } from '../license/license.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy, getJwtSecret } from './jwt.strategy';
@@ -16,6 +17,7 @@ import { DevicesService } from './devices.service';
     PassportModule,
     MailerModule,
     NotificationsModule,
+    LicenseModule,
     // FIX — was `process.env.JWT_SECRET ?? 'dev-secret-change-me'`, a
     // hardcoded, publicly-known fallback that let any client forge a
     // valid JWT for any user if JWT_SECRET was ever unset. Reuses

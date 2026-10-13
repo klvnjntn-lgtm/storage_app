@@ -1,0 +1,49 @@
+{
+  "name": "waresys-desktop",
+  "productName": "WareSys",
+  "version": "1.0.0",
+  "description": "WareSys desktop app: Sales, Purchasing and Accounting",
+  "author": "WareSys",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "stage": "node scripts/stage.mjs",
+    "stage:linux": "node scripts/stage.mjs --target=linux",
+    "dist": "node scripts/stage.mjs --target=win32 && electron-builder --win nsis --x64",
+    "dist:wsl": "node scripts/stage.mjs --target=win32 && docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp/home -v \"$PWD\":/project -w /project electronuserland/builder:wine sh -c \"mkdir -p /tmp/home && npx electron-builder --win nsis --x64\""
+  },
+  "build": {
+    "appId": "com.waresys.desktop",
+    "productName": "WareSys",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "WareSys",
+      "artifactName": "WareSys-Setup-${version}.exe",
+      "include": "build/installer.nsh"
+    },
+    "afterPack": "scripts/after-pack.js"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}

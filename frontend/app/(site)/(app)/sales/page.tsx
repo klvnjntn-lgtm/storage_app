@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
+import { isDesktopRoute, useIsDesktopApp } from '@/lib/desktop';
 
 
 type SalesSearchResultType = 'QUOTATION' | 'ORDER' | 'INVOICE' | 'DELIVERY_ORDER';
@@ -65,6 +66,8 @@ const DEBOUNCE_MS = 350;
 export default function SalesHome() {
   const router = useRouter();
   const { t } = useLanguage();
+  // The desktop app sells straight to invoices (lib/desktop.ts).
+  const desktopApp = useIsDesktopApp();
 
   const SALES_ITEMS = [
     {
@@ -95,7 +98,7 @@ export default function SalesHome() {
       icon: Truck,
       gradient: 'from-emerald-500 to-teal-700',
     },
-  ];
+  ].filter((item) => !desktopApp || isDesktopRoute(item.href));
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SalesSearchResult[]>([]);
@@ -120,7 +123,9 @@ export default function SalesHome() {
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await apiFetch(`/sales/search?q=${encodeURIComponent(trimmed)}`);
+        const res = await apiFetch(
+          `/sales/search?q=${encodeURIComponent(trimmed)}${desktopApp ? '&type=INVOICE' : ''}`,
+        );
         if (res.ok) {
           const data: SalesSearchResult[] = await res.json();
           setResults(data);
@@ -138,7 +143,7 @@ export default function SalesHome() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, desktopApp]);
 
   // Selecting a specific dropdown row already tells us exactly which
   // document it is, so — unlike Workshop's quick box, which always routes

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { X, PauseCircle, PlayCircle, Check } from 'lucide-react';
+import { apiFetch } from '@/lib/apifetch';
+import { downloadResponse } from '@/lib/download';
+import ExportPasswordForm from '@/app/components/org-transfer/ExportPasswordForm';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
@@ -121,6 +124,27 @@ export default function OrganizationDetail({
       method: 'PUT',
       body: JSON.stringify({ enabled: !on }),
     });
+  }
+
+  // A file download, so not platformCall (which reads JSON).
+  async function exportOrg(password: string) {
+    setBusy('export');
+    setError(null);
+    try {
+      const res = await apiFetch(`/platform/organizations/${id}/export`, {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        await downloadResponse(res, 'business.wsexport');
+        await load();
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      failed({ ok: false, status: res.status, message: String(body?.message ?? ''), code: body?.code });
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function suspend() {
@@ -289,6 +313,12 @@ export default function OrganizationDetail({
                     );
                   })}
                 </ul>
+              </div>
+
+              <div className={section}>
+                <h3 className="text-sm font-semibold">{t('orgTransfer.platform.exportTitle', { name: org.name })}</h3>
+                <p className="text-xs text-gray-500">{t('orgTransfer.platform.exportHelp')}</p>
+                <ExportPasswordForm busy={busy === 'export'} onExport={exportOrg} />
               </div>
 
               <div className={section}>

@@ -9,6 +9,7 @@ import { landing } from './modules/landing';
 import { delivery } from './modules/delivery';
 import { tour } from './modules/tour';
 import { platform } from './modules/platform';
+import { orgTransfer } from './modules/org-transfer';
 
 export type Locale = 'en' | 'id';
 
@@ -591,6 +592,7 @@ export const translations = {
     ...delivery.en,
     ...tour.en,
     ...platform.en,
+    ...orgTransfer.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -607,6 +609,7 @@ export const translations = {
     ...delivery.id,
     ...tour.id,
     ...platform.id,
+    ...orgTransfer.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

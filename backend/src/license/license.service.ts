@@ -2,6 +2,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { KeygenService } from './keygen.service';
+import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -51,7 +52,14 @@ export class LicenseService implements OnModuleInit {
   // blocking api.keygen.sh.
   private lastKnownValid = true;
 
-  constructor(private readonly keygen: KeygenService) {}
+  // User seats the license grants (its Keygen metadata "seats"), from the
+  // last check-in that reached Keygen; null = not set on the license.
+  private seats: number | null = null;
+
+  constructor(
+    private readonly keygen: KeygenService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async onModuleInit() {
     this.loadPersistedState();
@@ -158,6 +166,9 @@ export class LicenseService implements OnModuleInit {
       }
 
       const valid = result.meta?.valid === true;
+      if (valid) {
+        await this.applySeats(result.data?.attributes?.metadata?.seats);
+      }
       const expiresAt = result.data?.attributes?.expiry ?? null;
 
       this.state = {
@@ -204,6 +215,30 @@ export class LicenseService implements OnModuleInit {
     const edition = process.env.WARESYS_EDITION;
     if (edition === 'desktop' || edition === 'cloud') return edition;
     return process.env.LICENSE_KEY ? 'desktop' : 'cloud';
+  }
+
+  // The desktop app (SINGLE_ORGANIZATION) is licensed per business, so the
+  // seat limit is set on the license in Keygen rather than per install
+  // with the superadmin secret; changes apply at the next check-in.
+  // Without "seats" on the license, seatLimit is left as it is.
+  private async applySeats(raw: unknown): Promise<void> {
+    const seats = Number(raw);
+    this.seats = Number.isInteger(seats) && seats > 0 ? seats : null;
+    if (this.seats === null || process.env.SINGLE_ORGANIZATION !== 'true') {
+      return;
+    }
+    try {
+      await this.prisma.organization.updateMany({
+        data: { seatLimit: this.seats },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not apply licensed seats: ${message}`);
+    }
+  }
+
+  licensedSeats(): number | null {
+    return this.seats;
   }
 
   getStatus(): LicenseState {

@@ -7,6 +7,7 @@ import { Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, Al
 import { apiFetch } from '@/lib/apifetch';
 
 import { useHasModule } from '@/lib/hooks/useHasModule';
+import { useIsDesktopApp } from '@/lib/desktop';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
 import { ApplyCreditDialog, CreditTarget } from '@/app/components/invoices/ApplyCreditDialog';
 import { useAuth } from '@/app/context/AuthContext';
@@ -204,6 +205,8 @@ export default function InvoiceDetailPage() {
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const hasWarehouseOps = useHasModule('WAREHOUSE_OPS');
   const { t, language } = useLanguage();
+  // The desktop app has no delivery orders (lib/desktop.ts).
+  const desktopApp = useIsDesktopApp();
 
   const [invoice, setInvoice] = useState<InvoicePrintView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -524,7 +527,7 @@ export default function InvoiceDetailPage() {
                   called repeatedly as backorders get fulfilled in batches, so this
                   needs to key off whether there's still outstanding demand, not
                   whether a delivery order has ever been created before. */}
-              {invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
+              {!desktopApp && invoice.status === 'ISSUED' && !invoice.salesOrderId && invoice.fulfillmentStatus !== 'FULFILLED' && (
                 <button data-tour="id-to-do"
                   disabled={actionLoading === 'convert-do'}
                   onClick={handleConvertToDeliveryOrder}
@@ -672,7 +675,7 @@ export default function InvoiceDetailPage() {
                 Now that an invoice can accumulate more than one delivery
                 order over its life (first partial shipment, then a
                 second once more stock arrives), it's worth listing. */}
-            {invoice.deliveryOrders.length > 0 && (
+            {!desktopApp && invoice.deliveryOrders.length > 0 && (
               <div className="mb-4">
                 <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2 flex items-center gap-2">
                   <Truck size={16} strokeWidth={2} />

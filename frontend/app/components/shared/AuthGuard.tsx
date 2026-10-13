@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { getSessionMarker } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
 
-const PUBLIC_PATHS = ['/', '/login', '/register', '/forgot-password', '/reset-password'];
+const PUBLIC_PATHS = ['/', '/login', '/register', '/register/import', '/forgot-password', '/reset-password'];
 
 const checkIsPublic = (pathname: string) =>
   PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/print/');
@@ -57,7 +57,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     // The session itself is an httpOnly cookie; this marker only says the
     // browser signed in (lib/session.ts). /auth/me below is the real check.
     const token = getSessionMarker();
-    const isAuthPage = pathname === '/login' || pathname === '/register';
+    const isAuthPage = pathname === '/login' || pathname === '/register' || pathname === '/register/import';
 
     // FIX — was calling setChecked(false) unconditionally at the top of
     // every run of this effect, i.e. on every single route change, even

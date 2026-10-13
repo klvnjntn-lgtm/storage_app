@@ -5,6 +5,12 @@ const backendUrl =
 
 const isDev = process.env.NODE_ENV === "development";
 
+// The desktop app (desktop/) ships this frontend as a self-contained
+// server.js. Image optimization is off there: it needs sharp's native
+// binary for the target OS, and every image is a logo or a photo the
+// backend has already compressed.
+const isDesktopBuild = !!process.env.DESKTOP_BUILD;
+
 // Content-Security-Policy for the app's pages. 'unsafe-inline' scripts are
 // still needed (Next's inline bootstrap and the theme-init script in the
 // root layout), so this mainly limits where code, frames and form posts
@@ -40,6 +46,13 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  ...(isDesktopBuild && {
+    // Own build folder, so it never clobbers a dev or Docker build in .next.
+    distDir: ".next-desktop",
+    output: "standalone",
+    outputFileTracingRoot: __dirname,
+    images: { unoptimized: true },
+  }),
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

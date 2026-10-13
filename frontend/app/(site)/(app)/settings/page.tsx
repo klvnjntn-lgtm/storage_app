@@ -9,6 +9,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import PriceLevelsSettings from '@/app/components/settings/PriceLevelsSettings';
+import ExportBusinessSettings from '@/app/components/settings/ExportBusinessSettings';
 
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -1042,6 +1043,8 @@ export default function SettingsPage() {
             </p>
           </section>
         )}
+
+        {loaded && <ExportBusinessSettings />}
 
         {loaded && !hasWarehouseOps && !hasInvoicePos && (
           <div className="text-sm text-gray-500 border border-dashed border-blue-500/25 rounded-xl p-5 text-center bg-white/60">

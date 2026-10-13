@@ -52,6 +52,7 @@ import {
 import { apiFetch } from '@/lib/apifetch';
 import { CSRF_HEADERS, clearSession } from '@/lib/session';
 import { ensurePushSubscription } from '@/lib/push';
+import { DESKTOP_HOME, isDesktopRoute, useIsDesktopApp } from '@/lib/desktop';
 import NotificationDrawer from '@/app/components/shared/NotificationDrawer';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
@@ -136,6 +137,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, refreshProfile } = useAuth();
   const { t } = useLanguage();
+
+  // In the desktop app only the INVOICE_POS side exists; anything else
+  // (including /home, where login lands) goes to Sales instead.
+  const desktopApp = useIsDesktopApp();
+  const desktopBlocked = desktopApp && !isDesktopRoute(pathname);
+  useEffect(() => {
+    if (desktopBlocked) router.replace(DESKTOP_HOME);
+  }, [desktopBlocked, router]);
 
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [pendingOrders, setPendingOrders] = useState<number | null>(null);
@@ -429,7 +438,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: accountingChildren,
   };
 
-  const navGroups: { label: string; items: NavItem[] }[] = [
+  const allNavGroups: { label: string; items: NavItem[] }[] = [
     {
       label: t('nav.groups.overview'),
       items: [
@@ -519,6 +528,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           : [],
     },
   ];
+  const navGroups = desktopApp
+    ? allNavGroups.map((group) => ({
+        ...group,
+        items: group.items
+          .filter((item) => isDesktopRoute(item.href))
+          .map((item) =>
+            item.children ? { ...item, children: item.children.filter((c) => isDesktopRoute(c.href)) } : item,
+          ),
+      }))
+    : allNavGroups;
   // Mobile bottom bar: the first four destinations this org actually has,
   // in priority order, plus "More" for the full grouped nav. Five slots
   // is the most a bottom bar holds before labels stop fitting at 375px.
@@ -531,7 +550,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
     { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
   ];
-  const bottomTabs = tabCandidates.filter((x): x is NavItem => !!x).slice(0, 4);
+  const bottomTabs = tabCandidates
+    .filter((x): x is NavItem => !!x && (!desktopApp || isDesktopRoute(x.href)))
+    .slice(0, 4);
   // Longest matching prefix wins, so /inventory/stock beats /inventory.
   const activeTab = bottomTabs
     .filter((tab) => pathname === tab.href || pathname.startsWith(`${tab.href}/`))
@@ -1106,7 +1127,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 min-w-0 pb-[var(--app-bottom-nav-h)] md:pb-[env(safe-area-inset-bottom)]">
-          {children}
+          {desktopBlocked ? null : children}
         </main>
       </div>
       </TourProvider>

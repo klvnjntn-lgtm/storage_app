@@ -298,6 +298,7 @@ export class VehiclesService {
               id: true,
               quantity: true,
               description: true,
+              netAmount: true, // line amount after discount, before tax — the printed "Total" column
               product: { select: { name: true } },
             },
           },

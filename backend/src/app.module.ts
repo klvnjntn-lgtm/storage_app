@@ -60,6 +60,7 @@ import { UsersModule } from './users/users.module';
 import { DevicesModule } from './devices/devices.module';
 import { AccessControlModule } from './access-control/access-control.module';
 import { PlatformModule } from './platform/platform.module';
+import { OrgTransferModule } from './org-transfer/org-transfer.module';
 @Module({
   imports: [
     // FIX — @nestjs/throttler was a listed dependency and @Throttle()
@@ -114,6 +115,7 @@ import { PlatformModule } from './platform/platform.module';
     DevicesModule,
     AccessControlModule,
     PlatformModule,
+    OrgTransferModule,
   ],
   controllers: [AppController],
   providers: [

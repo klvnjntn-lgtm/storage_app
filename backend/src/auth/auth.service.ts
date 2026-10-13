@@ -12,10 +12,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer/mailer.service';
 import { randomUUID, randomBytes, randomInt, createHash } from 'crypto';
 import { DevicesService } from './devices.service';
+import { LicenseService } from '../license/license.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { LoginLockout } from './login-lockout';
 import { platformOwnerEmails } from '../platform/platform-owner.guard';
+import { ModuleKey } from '@prisma/client';
+
+// The desktop app (desktop/) runs its own backend for a single business,
+// with no platform owner to grant modules — it sets this to the modules
+// every newly registered org starts with (comma-separated ModuleKeys).
+export function autoEnabledModules(): ModuleKey[] {
+  const keys = Object.values(ModuleKey) as string[];
+  return (process.env.AUTO_ENABLE_MODULES ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter((m): m is ModuleKey => keys.includes(m));
+}
 
 // Compared against when the account doesn't exist, so a login for an
 // unknown email costs the same bcrypt work as one for a real account.
@@ -34,6 +47,7 @@ export class AuthService {
     private jwt: JwtService,
     private mailer: MailerService,
     private devices: DevicesService,
+    private license: LicenseService,
   ) {}
 
   async login(
@@ -122,13 +136,34 @@ export class AuthService {
       throw new ForbiddenException('organizationName is required');
     }
 
+    // The desktop app is licensed per business: once its one organization
+    // exists, nobody on the office network can register another.
+    if (
+      process.env.SINGLE_ORGANIZATION === 'true' &&
+      (await this.prisma.organization.count()) > 0
+    ) {
+      throw new ForbiddenException(
+        'This WareSys install already has a business registered',
+      );
+    }
+
     const hashed = await bcrypt.hash(password, 10);
 
     const org = await this.prisma.organization.create({
       data: {
         name: organizationName.trim(),
+        // Desktop app: the seats on its license (see LicenseService).
+        ...(process.env.SINGLE_ORGANIZATION === 'true' && {
+          seatLimit: this.license.licensedSeats() ?? undefined,
+        }),
         users: {
           create: { email: normalizedEmail, password: hashed, role: 'ADMIN' },
+        },
+        modules: {
+          create: autoEnabledModules().map((module) => ({
+            module,
+            enabled: true,
+          })),
         },
       },
       include: { users: true },

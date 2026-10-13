@@ -12,11 +12,16 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { promises as fs } from 'fs';
 import { Throttle } from '@nestjs/throttler';
 import { ModuleKey } from '@prisma/client';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
 import {
   PlatformActor,
@@ -27,6 +32,15 @@ import { auditContext } from './platform-audit';
 import { PlatformAuthService } from './platform-auth.service';
 import { PlatformService } from './platform.service';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import { OrgTransferService } from '../org-transfer/org-transfer.service';
+import { TransferPasswordDto } from '../org-transfer/org-transfer.dto';
+import {
+  requireFile,
+  sendExport,
+  TransferFileInterceptor,
+} from '../org-transfer/transfer-upload';
+import { writeAudit } from './platform-audit';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   AuditLogQueryDto,
   SetModuleDto,
@@ -48,6 +62,8 @@ export class PlatformController {
   constructor(
     private readonly auth: PlatformAuthService,
     private readonly platform: PlatformService,
+    private readonly transfer: OrgTransferService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // --- Unlock (step-up) ---
@@ -136,6 +152,49 @@ export class PlatformController {
       dto.enabled,
       dto.expiresAt,
     );
+  }
+
+  // --- Moving a business between installs (web ⇄ desktop) ---
+
+  // A business from a .wsexport (e.g. a desktop customer moving to the
+  // web). It arrives with no modules and the default plan/seats: set
+  // those here afterwards, as for any customer.
+  @HttpCode(200)
+  @Post('organizations/import')
+  @UseInterceptors(TransferFileInterceptor)
+  async importOrganization(
+    @Req() req: PlatformRequest,
+    @UploadedFile() upload: Express.Multer.File | undefined,
+    @Body() dto: TransferPasswordDto,
+  ) {
+    const file = requireFile(upload);
+    try {
+      const result = await this.transfer.import(file.path, dto.password);
+      await writeAudit(this.prisma, auditContext(req), 'organization.import', {
+        organizationId: result.organizationId,
+        after: result,
+      });
+      return result;
+    } finally {
+      await fs.rm(file.path, { force: true });
+    }
+  }
+
+  // A customer's business as a .wsexport (e.g. moving them to the desktop
+  // app), encrypted with the password given here.
+  @HttpCode(200)
+  @Post('organizations/:id/export')
+  async exportOrganization(
+    @Req() req: PlatformRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TransferPasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const exported = await this.transfer.export(id, dto.password);
+    await writeAudit(this.prisma, auditContext(req), 'organization.export', {
+      organizationId: id,
+    });
+    return sendExport(res, exported);
   }
 
   // --- Audit ---

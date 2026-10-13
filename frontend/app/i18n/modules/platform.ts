@@ -94,6 +94,8 @@ export const platform = {
         organization_reactivate: 'Reactivated',
         module_enable: 'Module turned on',
         module_disable: 'Module turned off',
+        organization_import: 'Imported from an export',
+        organization_export: 'Exported',
       },
     },
     suspended: {
@@ -198,6 +200,8 @@ export const platform = {
         organization_reactivate: 'Diaktifkan lagi',
         module_enable: 'Modul diaktifkan',
         module_disable: 'Modul dinonaktifkan',
+        organization_import: 'Diimpor dari file ekspor',
+        organization_export: 'Diekspor',
       },
     },
     suspended: {
