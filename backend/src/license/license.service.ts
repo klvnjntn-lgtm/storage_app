@@ -6,11 +6,26 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const KNOWN_STATUSES = ['ACTIVE', 'EXPIRED', 'SUSPENDED', 'NOT_ACTIVATED', 'UNKNOWN'] as const;
+const KNOWN_STATUSES = [
+  'ACTIVE',
+  'EXPIRED',
+  'SUSPENDED',
+  'NOT_ACTIVATED',
+  'UNKNOWN',
+] as const;
 type LicenseStatus = (typeof KNOWN_STATUSES)[number];
 
+// What a Keygen response says, without echoing the response (it contains
+// the license key, which must never reach the logs).
+function describe(
+  result: { meta?: { valid?: boolean; code?: string } } | null | undefined,
+): string {
+  return `valid=${result?.meta?.valid === true} code=${result?.meta?.code ?? 'none'}`;
+}
+
 function toKnownStatus(code: unknown): LicenseStatus {
-  return typeof code === 'string' && (KNOWN_STATUSES as readonly string[]).includes(code)
+  return typeof code === 'string' &&
+    (KNOWN_STATUSES as readonly string[]).includes(code)
     ? (code as LicenseStatus)
     : 'UNKNOWN';
 }
@@ -37,7 +52,8 @@ export class LicenseService implements OnModuleInit {
   // Persisted outside the container's ephemeral memory so that a
   // `docker compose down && up` (or crash loop) can't be used to dodge
   // the grace-period clock. Mount this path onto a persistent volume.
-  private readonly stateFilePath = process.env.LICENSE_STATE_FILE || '/data/license-state.json';
+  private readonly stateFilePath =
+    process.env.LICENSE_STATE_FILE || '/data/license-state.json';
 
   private state: LicenseState = {
     valid: false, // fail-closed until proven otherwise
@@ -81,9 +97,14 @@ export class LicenseService implements OnModuleInit {
           // A check-in dated in the future (an edited state file) would make
           // the grace period never run out — treat it as no check-in at all.
           // A day of slack covers ordinary clock drift.
-          const valid = !Number.isNaN(checkIn.getTime()) && checkIn.getTime() <= Date.now() + 24 * 60 * 60 * 1000;
+          const valid =
+            !Number.isNaN(checkIn.getTime()) &&
+            checkIn.getTime() <= Date.now() + 24 * 60 * 60 * 1000;
           this.state.lastSuccessfulCheckIn = valid ? checkIn : null;
-          if (!valid) this.logger.warn('Ignoring persisted license check-in with an invalid or future date');
+          if (!valid)
+            this.logger.warn(
+              'Ignoring persisted license check-in with an invalid or future date',
+            );
         }
         this.lastKnownValid = parsed.lastKnownValid !== false;
       }
@@ -100,7 +121,8 @@ export class LicenseService implements OnModuleInit {
       const dir = path.dirname(this.stateFilePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const payload: PersistedState = {
-        lastSuccessfulCheckIn: this.state.lastSuccessfulCheckIn?.toISOString() ?? '',
+        lastSuccessfulCheckIn:
+          this.state.lastSuccessfulCheckIn?.toISOString() ?? '',
         lastKnownValid: this.lastKnownValid,
       };
       fs.writeFileSync(this.stateFilePath, JSON.stringify(payload), 'utf-8');
@@ -140,7 +162,8 @@ export class LicenseService implements OnModuleInit {
 
     try {
       let result = await this.keygen.validateKey(key, fingerprint);
-      this.logger.log(`Keygen raw result: ${JSON.stringify(result)}`);
+      // Summaries only — Keygen's responses include the license key.
+      this.logger.log(`Keygen validation: ${describe(result)}`);
 
       const needsActivation = [
         'FINGERPRINT_SCOPE_MISMATCH',
@@ -151,17 +174,27 @@ export class LicenseService implements OnModuleInit {
       if (needsActivation) {
         const licenseId = result.data?.id;
         if (licenseId) {
-          const activation = await this.keygen.activateMachine(key, licenseId, fingerprint);
-          this.logger.log(`Activation result: ${JSON.stringify(activation)}`);
+          const activation = await this.keygen.activateMachine(
+            key,
+            licenseId,
+            fingerprint,
+          );
+          this.logger.log(
+            `Activation result: ${activation.data?.id ? 'machine activated' : 'not activated'}`,
+          );
           if (activation.data?.id) {
             this.logger.log('Machine activated for this deployment');
             result = await this.keygen.validateKey(key, fingerprint); // re-validate
-            this.logger.log(`Keygen re-validate result: ${JSON.stringify(result)}`);
+            this.logger.log(`Keygen re-validation: ${describe(result)}`);
           } else {
-            this.logger.warn(`Machine activation failed: ${JSON.stringify(activation.errors ?? activation)}`);
+            this.logger.warn(
+              `Machine activation failed: ${(activation.errors ?? []).map((e: { code?: string; detail?: string }) => e.code ?? e.detail).join(', ') || 'unknown error'}`,
+            );
           }
         } else {
-          this.logger.warn('Activation needed but no license id present in result.data');
+          this.logger.warn(
+            'Activation needed but no license id present in result.data',
+          );
         }
       }
 
@@ -181,10 +214,14 @@ export class LicenseService implements OnModuleInit {
 
       this.persistState();
 
-      this.logger.log(`License check: valid=${valid} status=${this.state.status}`);
+      this.logger.log(
+        `License check: valid=${valid} status=${this.state.status}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`License check failed (network/parse error): ${message}`);
+      this.logger.warn(
+        `License check failed (network/parse error): ${message}`,
+      );
 
       // Fail-closed by default. Only stay valid if we're still inside
       // an active grace period counted from a *previously verified*
@@ -206,7 +243,10 @@ export class LicenseService implements OnModuleInit {
     const elapsedMs = Date.now() - this.state.lastSuccessfulCheckIn.getTime();
     // Negative elapsed time means the clock was wound back past the last
     // check-in; don't let that extend the grace period either.
-    return elapsedMs < -24 * 60 * 60 * 1000 || elapsedMs > this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+    return (
+      elapsedMs < -24 * 60 * 60 * 1000 ||
+      elapsedMs > this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000
+    );
   }
 
   // WARESYS_EDITION wins when set; otherwise a LICENSE_KEY means this is a

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { normalizePlate } from '../lib/plate';
+import { escapeLike } from '../common/text/escape-like';
 
 const SEARCH_RESULT_LIMIT = 8;
 const HISTORY_DEFAULT_LIMIT = 20;
@@ -173,10 +174,10 @@ export class VehiclesService {
         ...(search
           ? {
               OR: [
-                { plateNumber: { contains: search, mode: 'insensitive' } },
-                { vehicleModel: { contains: search, mode: 'insensitive' } },
-                { vin: { contains: search, mode: 'insensitive' } },
-                { customer: { name: { contains: search, mode: 'insensitive' } } },
+                { plateNumber: { contains: escapeLike(search), mode: 'insensitive' } },
+                { vehicleModel: { contains: escapeLike(search), mode: 'insensitive' } },
+                { vin: { contains: escapeLike(search), mode: 'insensitive' } },
+                { customer: { name: { contains: escapeLike(search), mode: 'insensitive' } } },
               ],
             }
           : {}),
@@ -205,10 +206,10 @@ export class VehiclesService {
       where: {
         organizationId,
         OR: [
-          ...(normalizedPlate.length > 0 ? [{ plateNormalized: { contains: normalizedPlate } }] : []),
-          { vehicleModel: { contains: trimmed, mode: 'insensitive' as const } },
-          { vin: { contains: trimmed, mode: 'insensitive' as const } },
-          { customer: { name: { contains: trimmed, mode: 'insensitive' as const } } },
+          ...(normalizedPlate.length > 0 ? [{ plateNormalized: { contains: escapeLike(normalizedPlate) } }] : []),
+          { vehicleModel: { contains: escapeLike(trimmed), mode: 'insensitive' as const } },
+          { vin: { contains: escapeLike(trimmed), mode: 'insensitive' as const } },
+          { customer: { name: { contains: escapeLike(trimmed), mode: 'insensitive' as const } } },
         ],
       },
       select: {

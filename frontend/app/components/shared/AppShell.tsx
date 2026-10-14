@@ -4,9 +4,18 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner';
 import {
   LayoutDashboard,
   Settings,
+  CreditCard,
+  MessageCircle,
+  KeyRound,
+  Hash,
+  Undo2,
+  FileCheck2,
+  PackageSearch,
+  ArrowRightLeft,
   Tag,
   Package,
   Upload as UploadIcon,
@@ -403,6 +412,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/purchasing', label: t('nav.items.purchasingHome'), icon: Home },
     { href: '/purchasing/purchase-orders', label: t('nav.items.purchaseOrders'), icon: ClipboardList },
     { href: '/purchasing/suppliers', label: t('nav.items.suppliers'), icon: Building2 },
+    { href: '/purchasing/reorder', label: t('nav.items.reorder'), icon: PackageSearch },
+    { href: '/purchasing/returns', label: t('nav.items.purchaseReturns'), icon: Undo2 },
+    ...(profile?.role === 'ADMIN'
+      ? [{ href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 }]
+      : []),
+    { href: '/approvals', label: t('nav.items.approvals'), icon: ShieldCheck },
   ];
 
   const purchasingItem: NavItem = {
@@ -445,6 +460,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         { href: '/home', label: t('nav.items.home'), icon: Home },
         { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
         { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
+        { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
+        { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
+        { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
       ],
     },
 {
@@ -520,6 +538,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ? [
               { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
               { href: '/settings', label: t('nav.items.settings'), icon: Settings },
+              { href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard },
+              { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },
+              { href: '/settings/security', label: t('nav.items.security'), icon: ShieldAlert },
+              { href: '/settings/integrations', label: t('nav.items.integrations'), icon: KeyRound },
               { href: '/media-library', label: t('nav.items.mediaLibrary'), icon: Images },
               ...(profile?.platformOwner
                 ? [{ href: '/platform', label: t('nav.items.platform'), icon: Building2 }]
@@ -1089,6 +1111,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     </button>
                   </form>
                 )}
+                {!showChangePassword && profile.role !== 'DRIVER' && (
+                  <Link
+                    href="/settings/security"
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-md border border-blue-500/15 text-[13px] font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-500/30 transition-colors"
+                  >
+                    <ShieldCheck size={14} aria-hidden="true" />
+                    {t('nav.items.security')}
+                  </Link>
+                )}
               </div>
 
               <button
@@ -1127,7 +1158,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 min-w-0 pb-[var(--app-bottom-nav-h)] md:pb-[env(safe-area-inset-bottom)]">
+          {profile && <PlanBanner isAdmin={profile.role === 'ADMIN'} />}
           {desktopBlocked ? null : children}
+          {profile && <PlanLimitToast isAdmin={profile.role === 'ADMIN'} />}
         </main>
       </div>
       </TourProvider>

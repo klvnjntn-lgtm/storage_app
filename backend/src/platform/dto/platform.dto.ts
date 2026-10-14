@@ -5,6 +5,8 @@ import {
   IsISO8601,
   IsInt,
   IsNotEmpty,
+  IsNumber,
+  NotEquals,
   IsOptional,
   IsString,
   IsUUID,
@@ -58,4 +60,17 @@ export class AuditLogQueryDto {
   @Min(1)
   @Max(200)
   limit?: number;
+}
+
+// Goodwill credit or a correction to an org's WhatsApp balance, in IDR.
+// Negative takes balance away (never below zero).
+export class AdjustWaBalanceDto {
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @NotEquals(0)
+  amount!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  note!: string;
 }

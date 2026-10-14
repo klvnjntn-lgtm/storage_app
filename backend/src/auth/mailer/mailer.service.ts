@@ -65,6 +65,41 @@ export class MailerService implements OnModuleInit {
     }
   }
 
+  isConfigured(): boolean {
+    return !!this.transporter;
+  }
+
+  // General-purpose send for business documents (invoices, POs,
+  // statements, reminders). replyTo is the business's own address, so a
+  // customer replying reaches them rather than the WareSys sender.
+  async send(params: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    replyTo?: string;
+    fromName?: string;
+    attachments?: { filename: string; content: Buffer; contentType?: string }[];
+  }) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+    const info = await this.transporter.sendMail({
+      from: params.fromName ? { name: params.fromName, address: this.fromAddress } : this.fromAddress,
+      to: params.to,
+      replyTo: params.replyTo,
+      subject: params.subject,
+      text: params.text,
+      html: params.html,
+      attachments: params.attachments,
+    });
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      this.logger.log(`Document email preview: ${previewUrl}`);
+    }
+    return info;
+  }
+
   async sendPasswordReset(toEmail: string, rawToken: string) {
     if (!this.transporter) {
       throw new Error('Mailer is not configured/available.');

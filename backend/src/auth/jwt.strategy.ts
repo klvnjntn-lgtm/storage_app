@@ -78,7 +78,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         accessSchedules: {
           select: { dayOfWeek: true, startTime: true, endTime: true },
         },
-        organization: { select: { timezone: true } },
+        organization: { select: { timezone: true, require2faForAdmins: true } },
       },
     });
 
@@ -92,6 +92,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (user.currentSessionId !== payload.sessionId) {
       throw new UnauthorizedException('You have logged in on another device.');
+    }
+
+    // The org requires two-factor sign-in for admins and this one hasn't
+    // set it up: only the /auth routes (profile, logout, 2FA setup) work
+    // until they do. The frontend sends them to the security page.
+    if (
+      user.role === 'ADMIN' &&
+      user.organization.require2faForAdmins &&
+      !user.totpEnabledAt &&
+      !req.path.startsWith('/auth/')
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'TWO_FACTOR_SETUP_REQUIRED',
+        message: 'Your organization requires two-factor sign-in. Set it up to continue.',
+      });
     }
 
     // Device/access-hours restrictions only apply to DRIVER accounts — see

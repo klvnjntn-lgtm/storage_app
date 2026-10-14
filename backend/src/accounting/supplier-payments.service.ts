@@ -73,13 +73,21 @@ export class SupplierPaymentsService {
       totalCredited = lines.reduce((sum: number, l: { credit: unknown }) => sum + Number(l.credit), 0);
     }
 
+    // Goods sent back reduce what's owed by exactly the AP debit their
+    // return posted (PostingRulesService.postPurchaseReturn).
+    const returns = await tx.purchaseReturn.aggregate({
+      where: { organizationId, purchaseOrderId },
+      _sum: { total: true },
+    });
+    const totalReturned = Number(returns._sum.total ?? 0);
+
     const priorPayments = await tx.supplierPayment.aggregate({
       where: { organizationId, purchaseOrderId },
       _sum: { amount: true },
     });
     const totalPaid = Number(priorPayments._sum.amount ?? 0);
 
-    return this.round2(totalCredited - totalPaid);
+    return this.round2(totalCredited - totalReturned - totalPaid);
   }
 
   private round2(n: number) {

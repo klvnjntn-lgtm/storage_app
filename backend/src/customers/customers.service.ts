@@ -11,6 +11,7 @@ import {
   CreateCustomerAddressDto,
   UpdateCustomerAddressDto,
 } from './dto/customer-address.dto';
+import { escapeLike } from '../common/text/escape-like';
 
 @Injectable()
 export class CustomersService {
@@ -26,8 +27,8 @@ export class CustomersService {
         ...(search
           ? {
               OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { phone: { contains: search, mode: 'insensitive' } },
+                { name: { contains: escapeLike(search), mode: 'insensitive' } },
+                { phone: { contains: escapeLike(search), mode: 'insensitive' } },
               ],
             }
           : {}),

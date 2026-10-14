@@ -4,11 +4,21 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Send, XCircle, Printer, Download, Pencil, ClipboardList, PackageCheck } from 'lucide-react';
+import { Send, XCircle, Printer, Download, Pencil, ClipboardList, PackageCheck, Undo2, Mail } from 'lucide-react';
+import { SendDocumentDialog } from '@/app/components/messaging/SendDocumentDialog';
 import { apiFetch } from '@/lib/apifetch';
 import { PurchaseOrderTemplate } from '@/app/components/purchase-orders/templates/PurchaseOrderTemplate';
 import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/purchase-orders/types';
 import { ReceiveGoodsDialog } from '@/app/components/purchase-orders/ReceiveGoodsDialog';
+import { PurchaseReturnDialog } from '@/app/components/purchase-orders/PurchaseReturnDialog';
+import { ThreeWayMatchPanel } from '@/app/components/purchase-orders/ThreeWayMatchPanel';
+import {
+  ApprovalRequiredNotice,
+  isApprovalRequired,
+  type ApprovalRequiredError,
+} from '@/app/components/approvals/ApprovalRequiredNotice';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
 
@@ -47,6 +57,16 @@ function statusDisplayLabel(status: string, t: (key: string) => string) {
   }
 }
 
+type PurchaseReturnRow = {
+  id: string;
+  returnNumber: string | null;
+  createdAt: string;
+  reason: string | null;
+  total: string;
+  location: { name: string } | null;
+  items: { purchaseOrderItemId: string; quantity: number }[];
+};
+
 type GoodsReceiptRow = {
   id: string;
   receiptNumber: string | null;
@@ -69,6 +89,14 @@ export default function PurchaseOrderDetailPage() {
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [receipts, setReceipts] = useState<GoodsReceiptRow[]>([]);
+  const [returns, setReturns] = useState<PurchaseReturnRow[]>([]);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [approvalError, setApprovalError] = useState<ApprovalRequiredError | null>(null);
+  // Bumped after a receipt/return so the match panel re-reads its totals.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { user } = useCurrentUser();
+  const isAdmin = user?.role === 'ADMIN';
 
   async function load() {
     setLoading(true);
@@ -86,12 +114,18 @@ export default function PurchaseOrderDetailPage() {
       const detail: PurchaseOrderDetail = await detailRes.json();
       setPo(detail);
       if (printRes.ok) setPrintView(await printRes.json());
-      if (detail.status === 'PARTIALLY_RECEIVED' || detail.status === 'FULLY_RECEIVED') {
-        const receiptsRes = await apiFetch(`/purchase-orders/${id}/receipts`);
+      if (detail.status === 'PARTIALLY_RECEIVED' || detail.status === 'FULLY_RECEIVED' || detail.status === 'CANCELLED') {
+        const [receiptsRes, returnsRes] = await Promise.all([
+          apiFetch(`/purchase-orders/${id}/receipts`),
+          apiFetch(`/purchase-returns?purchaseOrderId=${id}`),
+        ]);
         if (receiptsRes.ok) setReceipts(await receiptsRes.json());
+        if (returnsRes.ok) setReturns(await returnsRes.json());
       } else {
         setReceipts([]);
+        setReturns([]);
       }
+      setRefreshKey((k) => k + 1);
     } catch {
       setError(t('purchasing.purchaseOrderDetail.serverError'));
     } finally {
@@ -107,9 +141,14 @@ export default function PurchaseOrderDetailPage() {
   async function runAction(action: string, path: string) {
     setActionLoading(action);
     setError(null);
+    setApprovalError(null);
     try {
       const res = await apiFetch(path, { method: 'POST' });
       const body = await res.json().catch(() => null);
+      if (!res.ok && isApprovalRequired(body)) {
+        setApprovalError(body);
+        return;
+      }
       if (!res.ok) {
         setError(body?.message ?? t('purchasing.purchaseOrderDetail.requestFailed', { status: res.status }));
         return;
@@ -236,6 +275,16 @@ export default function PurchaseOrderDetailPage() {
                 </button>
               )}
 
+              {receipts.length > 0 && (
+                <button
+                  onClick={() => setReturnOpen(true)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50"
+                >
+                  <Undo2 size={14} strokeWidth={2} />
+                  {t('purchasing.returns.button')}
+                </button>
+              )}
+
               {(po.status === 'DRAFT' || po.status === 'SENT') && (
                 <button
                   disabled={actionLoading === 'cancel'}
@@ -249,6 +298,13 @@ export default function PurchaseOrderDetailPage() {
 
               {po.status !== 'DRAFT' && (
                 <>
+                  <button
+                    onClick={() => setShareOpen(true)}
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
+                  >
+                    <Mail size={14} strokeWidth={2} />
+                    {t('messaging.sendToSupplier')}
+                  </button>
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
@@ -275,6 +331,31 @@ export default function PurchaseOrderDetailPage() {
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}
+        {approvalError && <ApprovalRequiredNotice error={approvalError} />}
+
+        {isAdmin && po.status !== 'DRAFT' && <ThreeWayMatchPanel purchaseOrderId={po.id} refreshKey={refreshKey} />}
+
+        {returns.length > 0 && (
+          <section className="bg-white border-2 border-gray-200 rounded-md p-3">
+            <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">{t('purchasing.returns.listTitle')}</h2>
+            <ul className="divide-y divide-gray-100 text-sm">
+              {returns.map((r) => (
+                <li key={r.id} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="font-medium">
+                    {r.returnNumber ?? r.id.slice(0, 8)} <span className="text-red-700 tabular-nums">−{formatIDR(Number(r.total))}</span>
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {formatDMY(new Date(r.createdAt))} · {r.location?.name ?? '—'} ·{' '}
+                    {r.items
+                      .map((i) => `${po.items.find((p) => p.id === i.purchaseOrderItemId)?.product?.name ?? '?'} × ${i.quantity}`)
+                      .join(', ')}
+                    {r.reason && ` · ${r.reason}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {receipts.length > 0 && (
           <section className="bg-white border-2 border-gray-200 rounded-md p-3">
@@ -297,6 +378,31 @@ export default function PurchaseOrderDetailPage() {
           </section>
         )}
       </div>
+
+      {shareOpen && (
+        <SendDocumentDialog
+          title={t('messaging.sendPoTitle', { number: po.poNumber ?? '' })}
+          endpoint={`/messaging/purchase-orders/${po.id}/send`}
+          defaultEmail={printView?.supplierEmail}
+          defaultPhone={printView?.supplierPhone}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
+
+      {returnOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50 p-4">
+          <div className="bg-white rounded-md shadow-lg w-full max-w-lg">
+            <PurchaseReturnDialog
+              po={po}
+              onReturned={() => {
+                setReturnOpen(false);
+                load();
+              }}
+              onClose={() => setReturnOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {receiveOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50 p-4">

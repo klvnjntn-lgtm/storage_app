@@ -1,6 +1,6 @@
 // src/invoice/invoice.controller.ts
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Req, Query, BadRequestException, Res, UseGuards,
+  Body, Controller, Delete, Get, Optional, Param, Patch, Post, Req, Query, BadRequestException, Res, UseGuards,
 } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -23,6 +23,7 @@ import type { Response } from 'express';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
+import { WebhooksService } from '../api-access/webhooks.service';
 // Gated to INVOICE_POS only (not listed alongside WORKSHOP_RMS like
 // Customers/Payments) — deliberate: invoices are the INVOICE_POS
 // feature itself, and since WORKSHOP_RMS depends on INVOICE_POS being
@@ -33,7 +34,10 @@ import { VoidInvoiceDto } from './dto/void-invoice.dto';
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('invoices')
 export class InvoiceController {
-  constructor(private invoiceService: InvoiceService) {}
+  constructor(
+    private invoiceService: InvoiceService,
+    @Optional() private webhooks?: WebhooksService,
+  ) {}
 
   @Get()
   async list(@CurrentOrg() organizationId: string, @Query() query: ListInvoicesQueryDto) {
@@ -243,13 +247,20 @@ export class InvoiceController {
   }
 
 @Post(':id/print')
-print(
+async print(
   @CurrentOrg() organizationId: string,
   @Req() req,
   @Param('id') id: string,
   @Body() dto: IssueInvoiceDto,
 ) {
-  return this.invoiceService.issue(organizationId, id, req.user.sub, req.user.role, !!dto?.confirmOversell);
+  const issued = await this.invoiceService.issue(organizationId, id, req.user.sub, req.user.role, !!dto?.confirmOversell);
+  void this.webhooks?.emit(organizationId, 'invoice.issued', {
+    id,
+    invoiceNumber: issued.invoiceNumber,
+    total: issued.total,
+    customerName: issued.customerName,
+  });
+  return issued;
 }
 
   @UseGuards(RolesGuard)
@@ -261,12 +272,14 @@ print(
     @CurrentOrg() organizationId: string,
     @Req() req,
   ) {
-    return this.invoiceService.voidInvoice(
+    const voided = await this.invoiceService.voidInvoice(
       organizationId,
       id,
       dto.reason,
       req.user.sub,
     );
+    void this.webhooks?.emit(organizationId, 'invoice.voided', { id, reason: dto.reason });
+    return voided;
   }
   @Post('from-order/:orderId')
 createFromSalesOrder(

@@ -1,4 +1,4 @@
-import { CostChangeSource, Prisma } from '@prisma/client';
+import { CostChangeSource, Prisma, StockTransferStatus } from '@prisma/client';
 
 // Weighted-average inventory costing.
 //
@@ -27,7 +27,10 @@ function round2(n: number) {
 }
 
 // Locks the product row (so two receipts can't both average against the
-// same starting point) and reads its cost plus the stock on hand.
+// same starting point) and reads its cost plus the stock on hand. Goods on
+// a stock transfer that has left its source but not yet arrived are in no
+// Stock row, but they're still the business's stock at the current cost,
+// so they count as on hand here.
 async function lockCostState(tx: Tx, organizationId: string, productId: string) {
   await tx.$queryRaw`SELECT id FROM "Product" WHERE id = ${productId} FOR UPDATE`;
   const product = await tx.product.findFirst({
@@ -35,13 +38,19 @@ async function lockCostState(tx: Tx, organizationId: string, productId: string) 
     select: { costPrice: true },
   });
   if (!product) return null;
-  const stock = await tx.stock.aggregate({
-    where: { productId, organizationId },
-    _sum: { quantity: true },
-  });
+  const [stock, inTransit] = await Promise.all([
+    tx.stock.aggregate({
+      where: { productId, organizationId },
+      _sum: { quantity: true },
+    }),
+    tx.stockTransferItem.aggregate({
+      where: { productId, transfer: { organizationId, status: StockTransferStatus.IN_TRANSIT } },
+      _sum: { quantity: true },
+    }),
+  ]);
   return {
     previousCost: product.costPrice != null ? Number(product.costPrice) : null,
-    onHand: Number(stock._sum.quantity ?? 0),
+    onHand: Number(stock._sum.quantity ?? 0) + Number(inTransit._sum.quantity ?? 0),
   };
 }
 
@@ -96,6 +105,57 @@ export async function receiveAtCost(
         newCost,
         quantityBefore: onHand,
         quantityIn: quantity,
+        unitCostIn: unitCost,
+        userId: params.userId ?? null,
+      },
+    });
+  }
+  return newCost;
+}
+
+// The reverse of receiveAtCost: units leave at a known cost (goods sent
+// back to the supplier at what they were bought for), and the average of
+// what stays is recomputed without them. Call BEFORE the stock decrease.
+//
+// When nothing would remain, or the remaining value would come out
+// negative (the returned units cost more than everything on hand is
+// worth — possible after overselling), the average is left alone: there
+// is no meaningful remaining value to average.
+export async function issueAtCost(
+  tx: Tx,
+  params: {
+    organizationId: string;
+    productId: string;
+    quantity: number;
+    unitCost: number;
+    source: CostChangeSource;
+    sourceId?: string;
+    userId?: string | null;
+  },
+): Promise<number | null> {
+  const { organizationId, productId, quantity, unitCost } = params;
+  if (!(quantity > 0)) return null;
+  const state = await lockCostState(tx, organizationId, productId);
+  if (!state || state.previousCost == null) return null;
+  const { previousCost, onHand } = state;
+
+  const remaining = onHand - quantity;
+  const remainingValue = onHand * previousCost - quantity * unitCost;
+  if (remaining <= 0 || remainingValue < 0) return previousCost;
+
+  const newCost = round2(remainingValue / remaining);
+  if (newCost !== previousCost) {
+    await tx.product.update({ where: { id: productId }, data: { costPrice: newCost } });
+    await tx.productCostHistory.create({
+      data: {
+        organizationId,
+        productId,
+        source: params.source,
+        sourceId: params.sourceId,
+        previousCost,
+        newCost,
+        quantityBefore: onHand,
+        quantityIn: -quantity,
         unitCostIn: unitCost,
         userId: params.userId ?? null,
       },

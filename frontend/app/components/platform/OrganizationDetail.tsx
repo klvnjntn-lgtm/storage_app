@@ -10,6 +10,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import {
   MODULE_KEYS,
+  PLAN_KEYS,
   formatDate,
   formatDateTime,
   moduleIsOn,
@@ -20,13 +21,14 @@ import {
   type PlatformResult,
 } from './api';
 
-type Billing = { plan: string; seatLimit: string; paidUntil: string; billingNote: string };
+type Billing = { plan: string; seatLimit: string; paidUntil: string; trialEndsAt: string; billingNote: string };
 
 function billingOf(org: PlatformOrgDetail): Billing {
   return {
     plan: org.plan,
     seatLimit: String(org.seatLimit),
     paidUntil: org.paidUntil ? toCalendarDateString(parseCalendarDate(org.paidUntil)) : '',
+    trialEndsAt: org.trialEndsAt ? toCalendarDateString(new Date(org.trialEndsAt)) : '',
     billingNote: org.billingNote ?? '',
   };
 }
@@ -60,6 +62,7 @@ export default function OrganizationDetail({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [wa, setWa] = useState({ amount: '', note: '' });
 
   // Shared handling for every call: a lapsed unlock goes back to the
   // unlock screen; anything else shows the backend's message.
@@ -112,10 +115,21 @@ export default function OrganizationDetail({
     if (billing.plan.trim() !== was.plan) body.plan = billing.plan.trim();
     if (billing.seatLimit !== was.seatLimit) body.seatLimit = Number(billing.seatLimit);
     if (billing.paidUntil !== was.paidUntil) body.paidUntil = billing.paidUntil || null;
+    if (billing.trialEndsAt !== was.trialEndsAt) body.trialEndsAt = billing.trialEndsAt || null;
     if (billing.billingNote.trim() !== was.billingNote) body.billingNote = billing.billingNote.trim() || null;
     if (Object.keys(body).length === 0) return;
     if (await act('billing', `/organizations/${id}`, { method: 'PATCH', body: JSON.stringify(body) })) {
       setSaved(true);
+    }
+  }
+
+  // Goodwill credit or a correction to the org's WhatsApp balance.
+  async function adjustWa(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = Number(wa.amount.replace(/[^\d.-]/g, ''));
+    if (!amount) return;
+    if (await act('wa', `/organizations/${id}/wa-balance`, { method: 'POST', body: JSON.stringify({ amount, note: wa.note.trim() }) })) {
+      setWa({ amount: '', note: '' });
     }
   }
 
@@ -199,13 +213,17 @@ export default function OrganizationDetail({
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block">
                     <span className={label}>{t('platform.detail.plan')}</span>
-                    <input
+                    <select
                       value={billing.plan}
-                      onChange={(e) => setBilling({ ...billing, plan: e.target.value.toLowerCase() })}
-                      pattern="[a-z0-9_\-]{1,32}"
-                      required
+                      onChange={(e) => setBilling({ ...billing, plan: e.target.value })}
                       className={input}
-                    />
+                    >
+                      {PLAN_KEYS.map((p) => (
+                        <option key={p} value={p}>
+                          {t(`billing.plan.${p}`)}
+                        </option>
+                      ))}
+                    </select>
                     <span className="text-[11px] text-gray-500">{t('platform.detail.planHint')}</span>
                   </label>
                   <label className="block">
@@ -250,6 +268,18 @@ export default function OrganizationDetail({
                     </button>
                   </div>
                 </div>
+                {billing.plan === 'trial' && (
+                  <div>
+                    <span className={label}>{t('platform.detail.trialEndsAt')}</span>
+                    <DatePicker
+                      variant="field"
+                      clearable
+                      value={billing.trialEndsAt}
+                      onChange={(v) => setBilling({ ...billing, trialEndsAt: v })}
+                      className="w-44"
+                    />
+                  </div>
+                )}
                 <label className="block">
                   <span className={label}>{t('platform.detail.billingNote')}</span>
                   <textarea
@@ -275,6 +305,26 @@ export default function OrganizationDetail({
                     </span>
                   )}
                 </div>
+              </form>
+
+              <form onSubmit={adjustWa} className={section}>
+                <h3 className="text-sm font-semibold">{t('platform.detail.waTitle')}</h3>
+                <p className="text-sm">
+                  {t('platform.detail.waBalance')}: <span className="font-semibold tabular-nums">Rp {Number(org.waBalance ?? 0).toLocaleString('id-ID')}</span>
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className={label}>{t('platform.detail.waAmount')}</span>
+                    <input inputMode="decimal" required value={wa.amount} onChange={(e) => setWa({ ...wa, amount: e.target.value })} className={input} placeholder="50000 / -10000" />
+                  </label>
+                  <label className="block">
+                    <span className={label}>{t('platform.detail.waNote')}</span>
+                    <input required maxLength={500} value={wa.note} onChange={(e) => setWa({ ...wa, note: e.target.value })} className={input} />
+                  </label>
+                </div>
+                <button disabled={busy === 'wa'} className="text-sm font-semibold bg-blue-600 text-white rounded-md px-3 py-1.5 disabled:opacity-50">
+                  {t('platform.detail.waApply')}
+                </button>
               </form>
 
               <div className={section}>

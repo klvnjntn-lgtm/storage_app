@@ -30,6 +30,7 @@ type EditState = {
   name: string;
   companyName: string;
   phone: string;
+  email: string;
   address: string;
   // DELIVERY_DMS only — see Customer.latitude / deliveryNotes.
   position: { lat: number; lng: number } | null;
@@ -46,6 +47,7 @@ const EMPTY_EDIT: EditState = {
   name: '',
   companyName: '',
   phone: '',
+  email: '',
   address: '',
   position: null,
   originalPosition: null,
@@ -165,6 +167,7 @@ export default function CustomersPage() {
       name: c.name,
       companyName: c.companyName ?? '',
       phone: c.phone ?? '',
+      email: c.email ?? '',
       address: c.address ?? '',
       position: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
       originalPosition: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
@@ -186,6 +189,8 @@ export default function CustomersPage() {
         name: editing.name.trim(),
         companyName: editing.companyName.trim() || undefined,
         phone: editing.phone.trim() || undefined,
+        // '' clears a saved address (the backend stores it as null).
+        email: editing.email.trim(),
         address: editing.address.trim() || undefined,
         // Only orgs that sell (INVOICE_POS) have price levels to pick from.
         ...(priceLevels.length > 1 ? { priceLevelId: editing.priceLevelId || null } : {}),
@@ -539,6 +544,13 @@ export default function CustomersPage() {
                 value={editing.phone}
                 onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
                 placeholder={t('customers.listPage.phonePlaceholder')}
+                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
+              />
+              <input
+                type="email"
+                value={editing.email}
+                onChange={(e) => setEditing({ ...editing, email: e.target.value })}
+                placeholder={t('messaging.customerEmailPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
               <input

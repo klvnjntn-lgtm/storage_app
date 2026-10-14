@@ -1,11 +1,18 @@
+// Must stay the first import: Sentry instruments the modules loaded after it.
+import './instrument';
 import 'dotenv/config';
+import { ConsoleLogger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp } from './configure-app';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // LOG_FORMAT=json: one JSON object per log line, for log collectors
+  // (Loki, CloudWatch, Datadog) that index fields instead of grepping text.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: process.env.LOG_FORMAT === 'json' ? new ConsoleLogger({ json: true }) : undefined,
+  });
   configureApp(app);
 
   // Large GDB file uploads (400-500MB+) can take longer than Node's

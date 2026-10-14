@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
+import { escapeLike } from '../common/text/escape-like';
 
 @Injectable()
 export class SupplierService {
@@ -40,9 +41,9 @@ export class SupplierService {
       ...(searchTerm
         ? {
             OR: [
-              { name: { contains: searchTerm, mode: 'insensitive' as const } },
-              { phone: { contains: searchTerm, mode: 'insensitive' as const } },
-              { email: { contains: searchTerm, mode: 'insensitive' as const } },
+              { name: { contains: escapeLike(searchTerm), mode: 'insensitive' as const } },
+              { phone: { contains: escapeLike(searchTerm), mode: 'insensitive' as const } },
+              { email: { contains: escapeLike(searchTerm), mode: 'insensitive' as const } },
             ],
           }
         : {}),

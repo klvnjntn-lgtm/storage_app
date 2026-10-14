@@ -361,14 +361,14 @@ describe('Platform console', () => {
         .patch(`/platform/organizations/${customerOrgId}`)
         .set('x-test-user', asOwner())
         .send({
-          plan: 'pro',
+          plan: 'subscription',
           seatLimit: 5,
           paidUntil: '2026-12-31T00:00:00.000Z',
           name: 'Hacked',
           suspendedAt: null,
         })
         .expect(200);
-      expect(res.body).toMatchObject({ plan: 'pro', seatLimit: 5 });
+      expect(res.body).toMatchObject({ plan: 'subscription', seatLimit: 5 });
       const org = await prisma.organization.findUniqueOrThrow({
         where: { id: customerOrgId },
       });
@@ -379,11 +379,11 @@ describe('Platform console', () => {
         orderBy: { createdAt: 'desc' },
       });
       expect(audit.before).toMatchObject({
-        plan: 'free',
+        plan: 'custom',
         seatLimit: 1,
         paidUntil: null,
       });
-      expect(audit.after).toMatchObject({ plan: 'pro', seatLimit: 5 });
+      expect(audit.after).toMatchObject({ plan: 'subscription', seatLimit: 5 });
       expect(audit.actorEmail).toBe(owner.email);
     });
 

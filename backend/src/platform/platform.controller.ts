@@ -42,6 +42,7 @@ import {
 import { writeAudit } from './platform-audit';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AdjustWaBalanceDto,
   AuditLogQueryDto,
   SetModuleDto,
   SuspendOrganizationDto,
@@ -127,6 +128,16 @@ export class PlatformController {
     @Body() dto: SuspendOrganizationDto,
   ) {
     return this.platform.suspend(auditContext(req), id, dto.reason);
+  }
+
+  @HttpCode(200)
+  @Post('organizations/:id/wa-balance')
+  adjustWaBalance(
+    @Req() req: PlatformRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdjustWaBalanceDto,
+  ) {
+    return this.platform.adjustWaBalance(auditContext(req), id, dto.amount, dto.note);
   }
 
   @HttpCode(200)

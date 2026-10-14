@@ -18,6 +18,9 @@ import { isWithinAccessWindow } from './access-schedule.util';
 import { LoginLockout } from './login-lockout';
 import { platformOwnerEmails } from '../platform/platform-owner.guard';
 import { ModuleKey } from '@prisma/client';
+import { BillingService } from '../billing/billing.service';
+import { TwoFactorService } from './two-factor.service';
+import { PlanLimitsService } from '../billing/plan-limits.service';
 
 // The desktop app (desktop/) runs its own backend for a single business,
 // with no platform owner to grant modules — it sets this to the modules
@@ -48,6 +51,9 @@ export class AuthService {
     private mailer: MailerService,
     private devices: DevicesService,
     private license: LicenseService,
+    private billing: BillingService,
+    private planLimits: PlanLimitsService,
+    private twoFactor: TwoFactorService,
   ) {}
 
   async login(
@@ -111,6 +117,29 @@ export class AuthService {
       }
     }
 
+    // Second factor: the password was right, but the session only comes
+    // from completeTwoFactorLogin() with a code.
+    if (user.totpEnabledAt) {
+      return { mfaRequired: true as const, mfaToken: this.twoFactor.createChallenge(user.id) };
+    }
+
+    return this.issueToken(user.id, user.email, user.role, user.organizationId);
+  }
+
+  async completeTwoFactorLogin(mfaToken: string, code: string) {
+    const userId = this.twoFactor.readChallenge(mfaToken);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) throw new UnauthorizedException('Invalid credentials');
+    // Same per-account lockout as passwords: a challenge token is good for
+    // five minutes, which is plenty of guesses otherwise.
+    this.loginLockout.assertNotLocked(user.email);
+    try {
+      await this.twoFactor.verifyCode(user.id, code);
+    } catch (err) {
+      this.loginLockout.recordFailure(user.email);
+      throw err;
+    }
+    this.loginLockout.recordSuccess(user.email);
     return this.issueToken(user.id, user.email, user.role, user.organizationId);
   }
 
@@ -169,6 +198,15 @@ export class AuthService {
       include: { users: true },
     });
 
+    // On the self-serve SaaS, signups start a free trial of the plans.
+    // Opt-in per deployment (SELF_SERVE_BILLING=true): licensed installs
+    // and the desktop app keep new orgs on "custom", as before — the
+    // edition alone can't tell them apart, since cloud servers carry a
+    // license key too.
+    if (process.env.SELF_SERVE_BILLING === 'true' && process.env.SINGLE_ORGANIZATION !== 'true') {
+      await this.billing.startTrial(org.id);
+    }
+
     const user = org.users[0];
     return this.issueToken(user.id, user.email, user.role, user.organizationId);
   }
@@ -203,15 +241,7 @@ export class AuthService {
       throw new ForbiddenException('Organization not found');
     }
 
-    const activeCount = await this.prisma.user.count({
-      where: { organizationId: inviterOrgId, active: true, removedAt: null },
-    });
-
-    if (activeCount >= org.seatLimit) {
-      throw new ForbiddenException(
-        `Seat limit reached (${org.seatLimit}). Upgrade your plan to add more users.`,
-      );
-    }
+    await this.planLimits.assertCanAdd(inviterOrgId, 'seats');
 
     const hashed = await bcrypt.hash(password, 10);
 

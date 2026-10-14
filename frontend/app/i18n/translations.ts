@@ -10,6 +10,7 @@ import { delivery } from './modules/delivery';
 import { tour } from './modules/tour';
 import { platform } from './modules/platform';
 import { orgTransfer } from './modules/org-transfer';
+import { saas } from './modules/saas';
 
 export type Locale = 'en' | 'id';
 
@@ -148,6 +149,17 @@ const base = {
         deliveryDrivers: 'Drivers',
         admin: 'Admin',
         settings: 'Settings',
+        billing: 'Billing & plan',
+        whatsapp: 'WhatsApp',
+        integrations: 'API & webhooks',
+        security: 'Security',
+        approvals: 'Approvals',
+        purchaseReturns: 'Purchase returns',
+        supplierBills: 'Supplier bills',
+        transfers: 'Stock transfers',
+        reorder: 'Reorder',
+        batches: 'Batches & expiry',
+        serials: 'Serial numbers',
         mediaLibrary: 'Media Library',
         platform: 'Platform console',
       },
@@ -424,6 +436,17 @@ const base = {
         deliveryDrivers: 'Driver',
         admin: 'Admin',
         settings: 'Pengaturan',
+        billing: 'Tagihan & paket',
+        whatsapp: 'WhatsApp',
+        integrations: 'API & webhook',
+        security: 'Keamanan',
+        approvals: 'Persetujuan',
+        purchaseReturns: 'Retur pembelian',
+        supplierBills: 'Tagihan pemasok',
+        transfers: 'Transfer stok',
+        reorder: 'Pemesanan ulang',
+        batches: 'Batch & kedaluwarsa',
+        serials: 'Nomor seri',
         mediaLibrary: 'Pustaka Media',
         platform: 'Konsol platform',
       },
@@ -593,6 +616,7 @@ export const translations = {
     ...tour.en,
     ...platform.en,
     ...orgTransfer.en,
+    ...saas.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -610,6 +634,7 @@ export const translations = {
     ...tour.id,
     ...platform.id,
     ...orgTransfer.id,
+    ...saas.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

@@ -361,6 +361,12 @@ export default function ImportOrdersPage() {
       });
       const data = await res.json().catch(() => null);
 
+      // 502/504 come from the proxy giving up, not the import failing: the
+      // backend keeps going, so a retry would import everything twice.
+      if (res.status === 502 || res.status === 504) {
+        setConfirmError(t('upload.uploadOrderPage.importMayStillBeRunning'));
+        return;
+      }
       if (!res.ok) {
         setConfirmError(data?.message || t('upload.uploadOrderPage.importFailedWithStatus', { status: res.status }));
         return;

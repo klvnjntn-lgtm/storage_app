@@ -7,6 +7,9 @@ import { PostingRulesService } from '../accounting/posting-rules.service';
 import { PurchaseOrderStatus, EventType, Prisma, CostChangeSource } from '@prisma/client';
 import { receiveAtCost } from '../accounting/inventory-costing';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
+import { BatchesService } from '../batches/batches.service';
+import { parseDateOnly } from '../accounting/business-date';
+import { assertSerialCount, normalizeSerials, receiveSerials } from '../serials/serial-moves';
 
 // Quantities are Decimal(12,2); keep sums on that grid so float drift never
 // blocks receiving the last 0.1 of a line.
@@ -22,11 +25,28 @@ export class GoodsReceiptService {
     private tenantOwnership: TenantOwnershipService,
     private numbering: DocumentNumberingService,
     private postingRules: PostingRulesService,
+    private batches: BatchesService,
   ) {}
 
   async getReceivingSummary(organizationId: string, purchaseOrderId: string) {
     const po = await this.getReceivableOrThrow(organizationId, purchaseOrderId);
     const receivedByItem = await this.receivedQuantitiesByPoItem(purchaseOrderId);
+    const tracked = new Set(
+      (
+        await this.prisma.product.findMany({
+          where: { organizationId, trackBatches: true, id: { in: po.items.map((i) => i.productId).filter((x): x is string => !!x) } },
+          select: { id: true },
+        })
+      ).map((p) => p.id),
+    );
+    const serialTracked = new Set(
+      (
+        await this.prisma.product.findMany({
+          where: { organizationId, trackSerials: true, id: { in: po.items.map((i) => i.productId).filter((x): x is string => !!x) } },
+          select: { id: true },
+        })
+      ).map((p) => p.id),
+    );
 
     return {
       purchaseOrderId: po.id,
@@ -40,6 +60,10 @@ export class GoodsReceiptService {
           ordered,
           previouslyReceived: received,
           remaining: round2(ordered - received),
+          // The receiving form asks for batch number + expiry on these.
+          trackBatches: !!item.productId && tracked.has(item.productId),
+          // …and one serial number per unit on these.
+          trackSerials: !!item.productId && serialTracked.has(item.productId),
         };
       }),
     };
@@ -84,6 +108,40 @@ export class GoodsReceiptService {
 
     assertWithinRemaining(await this.receivedQuantitiesByPoItem(purchaseOrderId));
 
+    // Batch-tracked products can't come in without saying which batch.
+    const productIds = po.items.map((i) => i.productId).filter((id): id is string => !!id);
+    const tracked = new Set(
+      (
+        await this.prisma.product.findMany({
+          where: { id: { in: productIds }, organizationId, trackBatches: true },
+          select: { id: true },
+        })
+      ).map((p) => p.id),
+    );
+    for (const line of dto.items) {
+      const productId = poItemsById.get(line.purchaseOrderItemId)!.productId;
+      if (productId && tracked.has(productId) && !line.batchNumber?.trim()) {
+        throw new BadRequestException('A batch number is required for batch-tracked products');
+      }
+    }
+
+    // Serial-tracked products: one serial per unit received.
+    const serialProducts = new Map(
+      (
+        await this.prisma.product.findMany({
+          where: { id: { in: productIds }, organizationId, trackSerials: true },
+          select: { id: true, name: true },
+        })
+      ).map((p) => [p.id, p.name]),
+    );
+    const serialsByLine = dto.items.map((line) => {
+      const productId = poItemsById.get(line.purchaseOrderItemId)!.productId;
+      if (!productId || !serialProducts.has(productId)) return [];
+      const serials = normalizeSerials(line.serialNumbers);
+      assertSerialCount(serialProducts.get(productId)!, line.quantity, serials);
+      return serials;
+    });
+
     return this.prisma.$transaction(async (tx) => {
       // Lock the PurchaseOrder row so a concurrent receive() against the
       // same PO blocks here until this transaction commits or rolls back —
@@ -103,6 +161,23 @@ export class GoodsReceiptService {
 
       const receiptNumber = await this.numbering.nextSequential(tx, organizationId, 'GOODS_RECEIPT', 'GR');
 
+      const batchIds: (string | null)[] = [];
+      for (const line of dto.items) {
+        const productId = poItemsById.get(line.purchaseOrderItemId)!.productId;
+        if (productId && tracked.has(productId)) {
+          const batch = await this.batches.receiveIntoBatch(tx, {
+            organizationId,
+            productId,
+            batchNumber: line.batchNumber!,
+            expiryDate: line.expiryDate ? parseDateOnly(line.expiryDate, 'expiryDate') : null,
+            quantity: line.quantity,
+          });
+          batchIds.push(batch.id);
+        } else {
+          batchIds.push(null);
+        }
+      }
+
       const receipt = await tx.goodsReceipt.create({
         data: {
           organizationId,
@@ -112,10 +187,12 @@ export class GoodsReceiptService {
           notes: dto.notes,
           receiptNumber,
           items: {
-            create: dto.items.map((line) => ({
+            create: dto.items.map((line, i) => ({
               purchaseOrderItemId: line.purchaseOrderItemId,
               productId: poItemsById.get(line.purchaseOrderItemId)!.productId,
               quantity: line.quantity,
+              batchId: batchIds[i],
+              serialNumbers: serialsByLine[i],
             })),
           },
         },
@@ -129,9 +206,16 @@ export class GoodsReceiptService {
       const poSubtotal = Number(po.subtotal);
       const netFactor = poSubtotal > 0 ? 1 - Number(po.discountAmount) / poSubtotal : 1;
 
-      for (const line of dto.items) {
+      for (const [i, line] of dto.items.entries()) {
         const poItem = poItemsById.get(line.purchaseOrderItemId)!;
         if (!poItem.productId) continue;
+        await receiveSerials(tx, {
+          organizationId,
+          productId: poItem.productId,
+          locationId: dto.locationId,
+          serials: serialsByLine[i],
+          goodsReceiptId: receipt.id,
+        });
         // Before the stock increase: the average is taken against what was
         // on hand before these units arrived.
         await receiveAtCost(tx, {

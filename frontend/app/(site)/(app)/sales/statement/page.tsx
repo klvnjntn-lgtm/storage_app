@@ -3,7 +3,8 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FileText, Printer, Calendar, Info } from 'lucide-react';
+import { FileText, Printer, Calendar, Info, Send } from 'lucide-react';
+import { SendDocumentDialog } from '@/app/components/messaging/SendDocumentDialog';
 import { apiFetch } from '@/lib/apifetch';
 import { CustomerStatement } from '@/app/components/invoices/types';
 import { toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
@@ -54,6 +55,7 @@ function InvoiceStatementPageInner() {
   const [to, setTo] = useState(searchParams.get('to') ?? toDateInput(new Date()));
 
   const [statement, setStatement] = useState<CustomerStatement | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,6 +127,15 @@ function InvoiceStatementPageInner() {
               </div>
             </div>
 
+            <div className="flex gap-2">
+            <button
+              onClick={() => setSendOpen(true)}
+              disabled={!statement}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-gray-300 font-semibold hover:bg-gray-100 disabled:opacity-50"
+            >
+              <Send size={16} strokeWidth={2} />
+              {t('messaging.sendStatement')}
+            </button>
             <button
               onClick={() => window.print()}
               disabled={!statement}
@@ -133,7 +144,18 @@ function InvoiceStatementPageInner() {
               <Printer size={16} strokeWidth={2} />
               {t('sales.statement.printSaveAsPdf')}
             </button>
+            </div>
           </div>
+          {sendOpen && statement && customerId && (
+            <SendDocumentDialog
+              title={t('messaging.sendStatementTitle')}
+              endpoint="/messaging/statements/send"
+              defaultEmail={statement.customer.email}
+              defaultPhone={statement.customer.phone}
+              extraBody={{ customerId, periodFrom: from, periodTo: to }}
+              onClose={() => setSendOpen(false)}
+            />
+          )}
 
           <div className="flex flex-wrap items-end gap-3 mt-4">
             <div className="flex flex-col gap-1">

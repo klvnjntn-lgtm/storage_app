@@ -64,14 +64,15 @@ type ModelPlan = {
 
 // Global tables, and per-org rows that only mean something on the install
 // that made them: module grants (set by the platform console, or by the
-// desktop app's license) and browser push subscriptions (tied to that
-// server's VAPID keys).
+// desktop app's license), browser push subscriptions (tied to that
+// server's VAPID keys) and payments made to that install's billing.
 const SKIPPED_MODELS = new Set([
   'Installation',
   'License',
   'PlatformAuditLog',
   'OrganizationModule',
   'PushSubscription',
+  'BillingPayment',
 ]);
 
 // Columns left out of an export: what belongs to the source install
@@ -82,6 +83,7 @@ export const STRIPPED_FIELDS: Record<string, string[]> = {
     'plan',
     'seatLimit',
     'paidUntil',
+    'trialEndsAt',
     'billingNote',
     'suspendedAt',
     'suspendedReason',

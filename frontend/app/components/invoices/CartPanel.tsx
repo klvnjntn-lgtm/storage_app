@@ -1,6 +1,7 @@
 'use client';
 
 import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound } from 'lucide-react';
+import { SerialButton } from '@/app/components/shared/SerialPicker';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
@@ -49,6 +50,7 @@ export function CartPanel({
   changeQty,
   changeUnitPrice,
   onChangePriceLevel,
+  onPickSerials,
   removeFromCart,
   stockAtLineLocation,
   posModeEnabled,
@@ -124,6 +126,8 @@ export function CartPanel({
   changeUnitPrice: (key: string, rawValue: string) => void;
   // Re-levels one line (Retail → Wholesale …); the price follows.
   onChangePriceLevel?: (key: string, levelId: string) => void;
+  // Serial-tracked lines: open the serial picker for this line.
+  onPickSerials?: (key: string) => void;
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
   posModeEnabled: boolean;
@@ -519,6 +523,15 @@ export function CartPanel({
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
                     <span className="truncate">{line.locationName}</span>
                   </div>
+                  {line.product.trackSerials && onPickSerials && (
+                    <div className="mt-1">
+                      <SerialButton
+                        count={line.serialNumbers?.length ?? 0}
+                        quantity={line.quantity}
+                        onClick={() => onPickSerials(line.key)}
+                      />
+                    </div>
+                  )}
                   {onChangePriceLevel && (
                     <div className="mt-1">
                       <PriceLevelSelect

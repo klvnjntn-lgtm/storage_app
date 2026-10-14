@@ -25,6 +25,7 @@ import { StockService, ImportMode } from '../stock/stock.service';
 import { ChartOfAccountsSeedService } from '../accounting/chart-of-accounts-seed.service';
 import { PayrollModule } from '../accounting/payroll.module';
 import { PayrollService } from '../accounting/payroll.service';
+import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 
 // InvoiceService imports puppeteer (ESM-only) for PDF rendering.
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -326,6 +327,58 @@ describe('Invoice flows across documents', () => {
       expect(second.id).not.toBe(first.id);
       // Still only one live run per period.
       await expect(payroll.create(orgId, run)).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // Runs last: it switches this org off the default INV-YYYY-NNNNN scheme.
+  describe('invoice numbering', () => {
+    const numberOf = async (id: string) =>
+      (await prisma.invoice.findUniqueOrThrow({ where: { id }, select: { invoiceNumber: true } })).invoiceNumber!;
+    const config = () => module.get(DocumentNumberingService);
+    const save = (input: { format: string; nextNumber?: number }) =>
+      prisma.$transaction((tx) => config().setConfig(orgId, 'INVOICE', input, tx));
+
+    it('keeps the running number across format changes', async () => {
+      const p = await product({ [rackA]: 10 });
+      const before = await config().getConfig(orgId, 'INVOICE', 'INV', prisma);
+      expect(before.isDefault).toBe(true);
+      expect(before.format).toBe('INV-{YYYY}-{SEQ:5}');
+      const n = before.nextNumber;
+
+      // Switching carries over the default scheme's count.
+      await save({ format: 'ATL-{SEQ:5}' });
+      const first = await issuedInvoice([{ productId: p, locationId: rackA, quantity: 1 }]);
+      expect(await numberOf(first)).toBe(`ATL-${String(n).padStart(5, '0')}`);
+
+      await save({ format: 'TOKO/{SEQ}' });
+      const second = await issuedInvoice([{ productId: p, locationId: rackA, quantity: 1 }]);
+      expect(await numberOf(second)).toBe(`TOKO/${n + 1}`);
+    });
+
+    it('only lets the next number move forward', async () => {
+      const { nextNumber } = await config().getConfig(orgId, 'INVOICE', 'INV', prisma);
+      await expect(save({ format: 'ATL-{SEQ}', nextNumber: nextNumber - 1 })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await save({ format: 'ATL-{SEQ}', nextNumber: 59887 });
+      const p = await product({ [rackA]: 10 });
+      const id = await issuedInvoice([{ productId: p, locationId: rackA, quantity: 1 }]);
+      expect(await numberOf(id)).toBe('ATL-59887');
+    });
+
+    it('skips a number an older format already used', async () => {
+      const { nextNumber } = await config().getConfig(orgId, 'INVOICE', 'INV', prisma);
+      // An imported invoice already holds the next number in this format.
+      await prisma.invoice.create({
+        data: { organizationId: orgId, invoiceNumber: `ATL-${nextNumber}`, format: InvoiceFormat.A4 },
+      });
+      const p = await product({ [rackA]: 10 });
+      const id = await issuedInvoice([{ productId: p, locationId: rackA, quantity: 1 }]);
+      expect(await numberOf(id)).toBe(`ATL-${nextNumber + 1}`);
+    });
+
+    it('rejects a format without exactly one {SEQ}', async () => {
+      await expect(save({ format: 'ATL-' })).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

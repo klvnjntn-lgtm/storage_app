@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Optional, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { WebhooksService } from '../api-access/webhooks.service';
 import type { Response } from 'express';
 import { PurchaseOrderStatus, ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -13,7 +14,10 @@ import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto } from './dto/purchase-o
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('purchase-orders')
 export class PurchaseOrderController {
-  constructor(private purchaseOrderService: PurchaseOrderService) {}
+  constructor(
+    private purchaseOrderService: PurchaseOrderService,
+    @Optional() private webhooks?: WebhooksService,
+  ) {}
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreatePurchaseOrderDto) {
@@ -65,8 +69,15 @@ export class PurchaseOrderController {
   }
 
   @Post(':id/send')
-  send(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
-    return this.purchaseOrderService.send(organizationId, id, req.user.sub);
+  async send(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
+    const sent = await this.purchaseOrderService.send(organizationId, id, req.user.sub, req.user.role);
+    void this.webhooks?.emit(organizationId, 'purchase_order.sent', {
+      id,
+      poNumber: sent.poNumber,
+      supplierId: sent.supplierId,
+      total: Number(sent.total),
+    });
+    return sent;
   }
 
   @Post(':id/cancel')

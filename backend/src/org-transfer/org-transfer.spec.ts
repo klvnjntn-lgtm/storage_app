@@ -210,7 +210,7 @@ describe('Organization export / import', () => {
       where: { id: orgId },
     });
     expect(org.seatLimit).toBe(1);
-    expect(org.plan).toBe('free');
+    expect(org.plan).toBe('custom');
     expect(
       await prisma.user.findFirst({
         where: { organizationId: orgId, currentSessionId: { not: null } },

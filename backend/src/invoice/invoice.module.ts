@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InvoiceController } from './invoice.controller';
 import { InvoicePrintController } from './invoice-print.controller';
+import { InvoiceNumberingController } from './invoice-numbering.controller';
 import { InvoiceService } from './invoice.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { GuardsModule } from '../auth/guards/guards.module';
@@ -12,6 +13,8 @@ import { SalesQuotationModule } from 'src/sales-quotation/sales-quotation.module
 import { PrintModule } from 'src/common/print/print.module';
 import { BankAccountResolverService } from 'src/bank-accounts/bank-account-resolver.service';
 import { AccountingModule } from 'src/accounting/accounting.module';
+import { PlanLimitsModule } from '../billing/plan-limits.module';
+import { ApprovalsModule } from '../approvals/approvals.module';
 
 @Module({
   imports: [
@@ -24,8 +27,10 @@ import { AccountingModule } from 'src/accounting/accounting.module';
     OrganizationModulesModule,
     SessionsModule,
     PrintModule,
+    PlanLimitsModule,
+    ApprovalsModule,
   ],
-  controllers: [InvoiceController, InvoicePrintController],
+  controllers: [InvoiceController, InvoicePrintController, InvoiceNumberingController],
   providers: [InvoiceService, BankAccountResolverService],
   exports: [InvoiceService],
 })

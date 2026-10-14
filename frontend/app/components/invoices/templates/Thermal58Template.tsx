@@ -69,6 +69,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
           <p className="leading-tight">
             {item.productName}
           </p>
+          {item.serialNumbers && item.serialNumbers.length > 0 && <p className="font-mono leading-tight">S/N: {item.serialNumbers.join(', ')}</p>}
 
           <div className="flex justify-between">
             <span>

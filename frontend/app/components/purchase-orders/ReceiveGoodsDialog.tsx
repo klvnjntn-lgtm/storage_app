@@ -12,6 +12,8 @@ type SummaryItem = {
   ordered: number;
   previouslyReceived: number;
   remaining: number;
+  trackBatches?: boolean;
+  trackSerials?: boolean;
 };
 
 // Receives stock against a sent PO: adds it at the chosen location, moves the
@@ -30,6 +32,11 @@ export function ReceiveGoodsDialog({
   const { t } = useLanguage();
   const [items, setItems] = useState<SummaryItem[] | null>(null);
   const [qty, setQty] = useState<Record<string, string>>({});
+  // Batch-tracked lines only: batch number + expiry (YYYY-MM-DD).
+  const [batch, setBatch] = useState<Record<string, { number: string; expiry: string }>>({});
+  // Serial-tracked lines: serial numbers, one per line of the textarea
+  // (what a barcode scanner produces).
+  const [serials, setSerials] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
   const [locationId, setLocationId] = useState(po.locationId ?? '');
   const [notes, setNotes] = useState('');
@@ -69,7 +76,13 @@ export function ReceiveGoodsDialog({
       setError(t('purchasing.purchaseOrderDetail.chooseLocation'));
       return;
     }
-    const lines: { purchaseOrderItemId: string; quantity: number }[] = [];
+    const lines: {
+      purchaseOrderItemId: string;
+      quantity: number;
+      batchNumber?: string;
+      expiryDate?: string;
+      serialNumbers?: string[];
+    }[] = [];
     for (const [idx, item] of items.entries()) {
       const raw = (qty[item.purchaseOrderItemId] ?? '').trim().replace(',', '.');
       const n = raw === '' ? 0 : Number(raw);
@@ -81,7 +94,23 @@ export function ReceiveGoodsDialog({
         setError(t('purchasing.purchaseOrderDetail.receiveTooMuch', { line: idx + 1, remaining: item.remaining }));
         return;
       }
-      if (n > 0) lines.push({ purchaseOrderItemId: item.purchaseOrderItemId, quantity: Math.round(n * 100) / 100 });
+      const b = batch[item.purchaseOrderItemId];
+      if (n > 0 && item.trackBatches && !b?.number.trim()) {
+        setError(t('purchasing.batches.batchRequired', { line: idx + 1 }));
+        return;
+      }
+      const serialList = (serials[item.purchaseOrderItemId] ?? '').split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
+      if (n > 0 && item.trackSerials && serialList.length !== n) {
+        setError(t('serials.receiveCountMismatch', { line: idx + 1, n, got: serialList.length }));
+        return;
+      }
+      if (n > 0)
+        lines.push({
+          purchaseOrderItemId: item.purchaseOrderItemId,
+          quantity: Math.round(n * 100) / 100,
+          ...(item.trackBatches && { batchNumber: b!.number.trim(), expiryDate: b!.expiry || undefined }),
+          ...(item.trackSerials && { serialNumbers: serialList }),
+        });
     }
     if (lines.length === 0) {
       setError(t('purchasing.purchaseOrderDetail.nothingToReceive'));
@@ -160,6 +189,42 @@ export function ReceiveGoodsDialog({
                           received: item.previouslyReceived,
                           ordered: item.ordered,
                         })}
+                      </div>
+                    )}
+                    {item.trackSerials && (
+                      <textarea
+                        rows={2}
+                        placeholder={t('serials.onePerLine')}
+                        value={serials[item.purchaseOrderItemId] ?? ''}
+                        onChange={(e) => setSerials((prev) => ({ ...prev, [item.purchaseOrderItemId]: e.target.value }))}
+                        className="mt-1 w-full border-2 border-gray-300 rounded-md px-2 py-1 text-xs font-mono outline-none focus:border-blue-500"
+                      />
+                    )}
+                    {item.trackBatches && (
+                      <div className="mt-1 flex gap-1.5">
+                        <input
+                          placeholder={t('purchasing.batches.batchNumber')}
+                          value={batch[item.purchaseOrderItemId]?.number ?? ''}
+                          onChange={(e) =>
+                            setBatch((prev) => ({
+                              ...prev,
+                              [item.purchaseOrderItemId]: { expiry: prev[item.purchaseOrderItemId]?.expiry ?? '', number: e.target.value },
+                            }))
+                          }
+                          className="w-28 border-2 border-gray-300 rounded-md px-2 py-0.5 text-xs outline-none focus:border-blue-500"
+                        />
+                        <input
+                          type="date"
+                          aria-label={t('purchasing.batches.expiryDate')}
+                          value={batch[item.purchaseOrderItemId]?.expiry ?? ''}
+                          onChange={(e) =>
+                            setBatch((prev) => ({
+                              ...prev,
+                              [item.purchaseOrderItemId]: { number: prev[item.purchaseOrderItemId]?.number ?? '', expiry: e.target.value },
+                            }))
+                          }
+                          className="border-2 border-gray-300 rounded-md px-1.5 py-0.5 text-xs outline-none focus:border-blue-500"
+                        />
                       </div>
                     )}
                   </td>

@@ -6,12 +6,16 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { PlanLimitsService } from '../billing/plan-limits.service';
 
 const MAX_NAME_LENGTH = 100;
 
 @Injectable()
 export class LocationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   async findAll(organizationId: string) {
     const rows = await this.prisma.location.findMany({
@@ -60,6 +64,8 @@ export class LocationService {
         'An archived location already has this name. Restore it instead of creating a new one, or choose a different name.',
       );
     }
+
+    await this.planLimits.assertCanAdd(organizationId, 'locations');
 
     return this.prisma.location.create({
       data: { id, name: normalized, organizationId },

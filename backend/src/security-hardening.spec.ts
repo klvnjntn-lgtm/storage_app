@@ -6,6 +6,7 @@ import { LoginLockout } from './auth/login-lockout';
 import { redactCostFields } from './common/interceptors/redact-cost.interceptor';
 import { isPushServiceEndpoint } from './notifications/dto/push-subscription.dto';
 import { withPdfRenderSlot } from './common/print/pdf-render-limiter';
+import { PlanLimitsService } from './billing/plan-limits.service';
 import { UsersService } from './users/users.service';
 import { DevicesService } from './auth/devices.service';
 import type { NotificationsService } from './notifications/notifications.service';
@@ -112,7 +113,7 @@ describe('member and device guards (database)', () => {
     create: jest.fn(),
     notifyOrgStaff: jest.fn(),
   } as unknown as NotificationsService;
-  const users = new UsersService(prisma, notifications);
+  const users = new UsersService(prisma, notifications, new PlanLimitsService(prisma));
   const devices = new DevicesService(prisma, notifications);
 
   let orgId: string;

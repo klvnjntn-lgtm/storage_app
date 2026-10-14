@@ -33,6 +33,7 @@ import { AdminKeyGuard } from './guards/admin-key.guard';
 import { AllowSuspendedOrg } from './decorators/allow-suspended-org.decorator';
 import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.decorator';
 import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
+import { TwoFactorLoginDto } from './dto/two-factor.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -84,18 +85,39 @@ export class AuthController {
     const deviceId =
       (typeof headerDeviceId === 'string' ? headerDeviceId : undefined) ??
       dto.deviceId;
-    const { accessToken } = await this.authService.login(
+    const result = await this.authService.login(
       dto.email,
       dto.password,
       deviceId,
       req.headers['user-agent'],
     );
+    if ('mfaRequired' in result) {
+      return { mfaRequired: true, mfaToken: result.mfaToken };
+    }
+    setSessionCookie(req, res, result.accessToken);
+    return { ok: true };
+  }
+
+  // Second step of a login with two-factor sign-in on.
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Public()
+  @SkipLicenseCheck()
+  @Post('login/2fa')
+  async loginTwoFactor(
+    @Body() dto: TwoFactorLoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken } = await this.authService.completeTwoFactorLogin(dto.mfaToken, dto.code);
     setSessionCookie(req, res, accessToken);
     return { ok: true };
   }
 
   // Every role, DRIVER included — see DriverScopeGuard. Still answers for
   // a suspended org, so the app can show why everything else is blocked.
+  // Asked on every page load by every signed-in user; the global 100/min
+  // per IP is too tight for a shop where all staff share one public IP.
+  @Throttle({ default: { limit: 1000, ttl: 60000 } })
   @Roles('ADMIN', 'USER', 'DRIVER')
   @AllowSuspendedOrg()
   @Get('me')

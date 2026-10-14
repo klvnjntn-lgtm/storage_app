@@ -186,7 +186,9 @@ export type APAgingReport = {
   lines: APAgingLine[]; // ONE PAGE (after optional bucket/supplier filters)
   pagination: Pagination;
   totals: APAgingByBucket; // ALL open POs, regardless of page or filters
-  reconciliation: { apLedgerBalance: number; sumOfOutstandingPOs: number; matches: boolean };
+  // supplierCredits: what suppliers owe back on POs where returns
+  // brought the balance below zero after payment.
+  reconciliation: { apLedgerBalance: number; sumOfOutstandingPOs: number; supplierCredits: number; matches: boolean };
 };
 
 // Reports are read-only aggregations over JournalEntryLine — no new write
@@ -653,6 +655,8 @@ async getARAging(
         createdAt: true,
         supplier: { select: { name: true } },
         goodsReceipts: { select: { id: true } },
+        // The supplier's own bill sets the real due date when there is one.
+        supplierBills: { where: { voidedAt: null }, select: { dueDate: true } },
       },
     });
 
@@ -687,6 +691,34 @@ async getARAging(
       }
     }
 
+    // 1b) Goods returned to the supplier as of `asOf`: the AP debits their
+    // returns posted.
+    const returnedByPo = new Map<string, number>();
+    const returnRows = await this.prisma.purchaseReturn.findMany({
+      where: { organizationId, purchaseOrderId: { in: purchaseOrders.map((p) => p.id) } },
+      select: { id: true, purchaseOrderId: true },
+    });
+    if (returnRows.length > 0) {
+      const returnToPo = new Map(returnRows.map((r) => [r.id, r.purchaseOrderId]));
+      const debitLines = await this.prisma.journalEntryLine.findMany({
+        where: {
+          accountId: apAccountId,
+          journalEntry: {
+            organizationId,
+            status: JournalEntryStatus.POSTED,
+            sourceType: JournalSourceType.PURCHASE_RETURN,
+            sourceId: { in: [...returnToPo.keys()] },
+            entryDate: { lte: asOf },
+          },
+        },
+        select: { debit: true, journalEntry: { select: { sourceId: true } } },
+      });
+      for (const l of debitLines) {
+        const poId = l.journalEntry.sourceId ? returnToPo.get(l.journalEntry.sourceId) : undefined;
+        if (poId) returnedByPo.set(poId, (returnedByPo.get(poId) ?? 0) + Number(l.debit));
+      }
+    }
+
     // 2) Supplier payments as of `asOf`, grouped per PO.
     const paidRows = await this.prisma.supplierPayment.groupBy({
       by: ['purchaseOrderId'],
@@ -698,16 +730,21 @@ async getARAging(
     );
 
     const allLines: APAgingLine[] = [];
+    let supplierCredits = 0;
     for (const po of purchaseOrders) {
-      const totalOwed = this.round2(owedByPo.get(po.id) ?? 0);
-      if (totalOwed <= 0) continue;
-
+      const totalOwed = this.round2((owedByPo.get(po.id) ?? 0) - (returnedByPo.get(po.id) ?? 0));
       const amountPaid = paidByPo.get(po.id) ?? 0;
       const outstanding = this.round2(totalOwed - amountPaid);
-      if (outstanding <= 0) continue; // fully paid as of this date
+      if (outstanding < 0) supplierCredits = this.round2(supplierCredits - outstanding);
+      if (totalOwed <= 0 || outstanding <= 0) continue; // fully paid (or returned) as of this date
 
-      // Fallback chain only matters for POs created before dueDate existed.
-      const effectiveDueDate = po.dueDate ?? po.expectedDate ?? po.orderDate ?? po.createdAt;
+      // The latest due date on the supplier's bills wins; the fallback chain
+      // after PO.dueDate only matters for POs created before it existed.
+      const billDue = po.supplierBills
+        .map((b) => b.dueDate)
+        .filter((d): d is Date => !!d)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      const effectiveDueDate = billDue ?? po.dueDate ?? po.expectedDate ?? po.orderDate ?? po.createdAt;
       const daysOverdue = Math.floor((asOf.getTime() - effectiveDueDate.getTime()) / 86_400_000);
 
       allLines.push({
@@ -745,7 +782,8 @@ async getARAging(
     const reconciliation = {
       apLedgerBalance,
       sumOfOutstandingPOs: totals.total,
-      matches: Math.abs(apLedgerBalance - totals.total) < EPS,
+      supplierCredits,
+      matches: Math.abs(apLedgerBalance - (totals.total - supplierCredits)) < EPS,
     };
     if (!reconciliation.matches) {
       this.logger.error(

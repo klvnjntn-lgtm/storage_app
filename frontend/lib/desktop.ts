@@ -37,7 +37,8 @@ const DESKTOP_ROUTES = [
   '/admin',
 ];
 
-const DESKTOP_HIDDEN_ROUTES = ['/sales/quotations', '/sales/orders', '/sales/delivery-orders'];
+// Self-serve billing is a cloud thing: the desktop app is licensed per install.
+const DESKTOP_HIDDEN_ROUTES = ['/sales/quotations', '/sales/orders', '/sales/delivery-orders', '/settings/billing', '/settings/whatsapp'];
 
 const under = (pathname: string, route: string) => pathname === route || pathname.startsWith(`${route}/`);
 

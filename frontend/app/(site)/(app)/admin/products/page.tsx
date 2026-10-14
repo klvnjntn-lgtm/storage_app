@@ -2,16 +2,16 @@
 'use client';
 
 import ProductLevelPricesDialog from '@/app/components/admin/ProductLevelPricesDialog';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Package, AlertTriangle, CheckCircle2, Archive, Pencil, Check, X, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import Pagination from '@/app/components/shared/Pagination';
-import { useSortableData } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
+import ComboBox from '@/app/components/shared/ComboBox';
 
 
 type Product = {
@@ -89,135 +89,6 @@ function rowFieldClass(err?: string) {
   return `${rowInputBase} ${err ? inputBad : inputOk}`;
 }
 
-/**
- * Searchable combobox for category/brand: filters existing options as you
- * type, lets you pick one with the mouse or keyboard, and offers to use
- * whatever you typed as a brand-new value if there's no exact match.
- */
-function ComboBox({
-  value,
-  onChange,
-  options,
-  placeholder,
-  className,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: Option[];
-  placeholder: string;
-  className?: string;
-}) {
-  const { t } = useLanguage();
-  const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.name.toLowerCase().includes(q));
-  }, [value, options]);
-
-  const exactMatch = options.some((o) => o.name.toLowerCase() === value.trim().toLowerCase());
-  const showCreate = value.trim().length > 0 && !exactMatch;
-  const listLength = filtered.length + (showCreate ? 1 : 0);
-
-  useEffect(() => {
-    setHighlight(0);
-  }, [value, open]);
-
-  function selectOption(name: string) {
-    onChange(name);
-    setOpen(false);
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (!open) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') setOpen(true);
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setHighlight((h) => Math.min(h + 1, Math.max(listLength - 1, 0)));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlight((h) => Math.max(h - 1, 0));
-    } else if (e.key === 'Enter') {
-      if (listLength === 0) return;
-      e.preventDefault();
-      if (highlight < filtered.length) {
-        selectOption(filtered[highlight].name);
-      } else if (showCreate) {
-        setOpen(false);
-      }
-    } else if (e.key === 'Escape') {
-      setOpen(false);
-    }
-  }
-
-  return (
-    <div className="relative w-full min-w-0" ref={containerRef}>
-      <input
-        value={value}
-        onChange={(e) => {
-          onChange(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        role="combobox"
-        aria-expanded={open}
-        autoComplete="off"
-        className={className}
-      />
-      {open && (filtered.length > 0 || showCreate) && (
-        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border-2 border-blue-500/20 rounded-md shadow-lg text-sm">
-          {filtered.length > 0 ? (
-            filtered.map((opt, i) => (
-              <button
-                key={opt.id}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onMouseEnter={() => setHighlight(i)}
-                onClick={() => selectOption(opt.name)}
-                className={`w-full text-left px-3 py-2 ${i === highlight ? 'bg-blue-50' : ''}`}
-              >
-                {opt.name}
-              </button>
-            ))
-          ) : (
-            <div className="px-3 py-2 text-gray-400">{t('admin.products.noMatches')}</div>
-          )}
-          {showCreate && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setHighlight(filtered.length)}
-              onClick={() => selectOption(value.trim())}
-              className={`w-full text-left px-3 py-2 border-t border-blue-500/10 text-gray-600 ${
-                highlight === filtered.length ? 'bg-blue-50' : ''
-              }`}
-            >
-              {t('admin.products.createOption', { value: value.trim() })}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Truncates long display text with an ellipsis instead of letting it force
 // the (fixed-width) column wider and triggering horizontal scroll. Full
 // text is still available on hover via the native title tooltip.
@@ -250,11 +121,30 @@ function StockBadge({ stock }: { stock: number | undefined }) {
   return <span>{stock}</span>;
 }
 
+function useSkuTaken(sku: string, excludeId: string | undefined, onResult: (taken: boolean) => void) {
+  useEffect(() => {
+    const trimmed = sku.trim();
+    const timer = setTimeout(async () => {
+      if (!trimmed) return onResult(false);
+      const params = new URLSearchParams({ sku: trimmed, ...(excludeId && { excludeId }) });
+      const res = await apiFetch(`/products/sku-taken?${params}`).catch(() => null);
+      if (res?.ok) onResult((await res.json()).taken);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [sku, excludeId, onResult]);
+}
+
 export default function ProductsPage() {
     const { authorized, loading: authLoading } = useRequireAdmin();
   const { t } = useLanguage();
 
+  // One page of the catalog, searched and sorted on the server
+  // (GET /products?page=…) — the full list no longer comes down.
   const [products, setProducts] = useState<Product[]>([]);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' } | null>(null);
   const [stockByProduct, setStockByProduct] = useState<Record<string, StockSummary>>({});
   const [categories, setCategories] = useState<Option[]>([]);
   const [brands, setBrands] = useState<Option[]>([]);
@@ -306,9 +196,22 @@ export default function ProductsPage() {
   const [levelPricesFor, setLevelPricesFor] = useState<Product | null>(null);
 
   async function loadProducts() {
-    const res = await apiFetch('/products', { headers: authHeaders(false) });
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim());
+    if (sort) {
+      params.set('sort', sort.key);
+      params.set('dir', sort.direction);
+    }
+    const res = await apiFetch(`/products?${params}`, { headers: authHeaders(false) });
     const data = await res.json();
-    setProducts(Array.isArray(data) ? data : []);
+    setProducts(Array.isArray(data?.data) ? data.data : []);
+    setTotalProducts(Number(data?.total ?? 0));
+  }
+
+  // Same asc -> desc -> off cycle the client-side hook had.
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s?.key !== key ? { key, direction: 'asc' } : s.direction === 'asc' ? { key, direction: 'desc' } : null));
+    setPage(1);
   }
 
   // Stock totals come from the same aggregated-by-location summary the
@@ -358,41 +261,34 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    loadProducts();
     loadStockSummary();
     loadCategories();
     loadBrands();
     loadLocations();
   }, []);
 
-  // Sorting applies across the full catalog — the whole list is loaded
-  // client-side already (same as Stock), so this reorders everything, not
-  // just the current page. Stock's accessor reads the same stockByProduct
-  // map the StockBadge cells render from, so it stays in sync once that
-  // summary loads.
-  const { sorted: sortedProducts, sort, toggleSort } = useSortableData<Product, SortKey>(
-    products,
-    {
-      sku: (p) => p.sku ?? '',
-      name: (p) => p.name,
-      category: (p) => p.category ?? '',
-      brand: (p) => p.brand ?? '',
-      sellingPrice: (p) => p.sellingPrice,
-      costPrice: (p) => p.costPrice,
-      stock: (p) => stockByProduct[p.id]?.totalStock ?? -1,
-    },
-  );
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize));
+  useEffect(() => {
+    // loadProducts() only sets state after its fetch resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, debouncedQuery, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(totalProducts / pageSize));
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const paginatedProducts = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return sortedProducts.slice(start, start + pageSize);
-  }, [sortedProducts, page, pageSize]);
+  const paginatedProducts = products;
 
   function cellHighlight(key: SortKey) {
     return sort?.key === key ? 'bg-blue-50/70' : '';
@@ -408,23 +304,13 @@ export default function ProductsPage() {
     return n;
   }
 
-  // Live duplicate-SKU check against what's already loaded, so the admin
-  // gets a heads-up before hitting submit (server remains the source of truth).
-  const duplicateSku = useMemo(() => {
-    const trimmed = sku.trim().toLowerCase();
-    if (!trimmed) return false;
-    return products.some((p) => (p.sku ?? '').trim().toLowerCase() === trimmed);
-  }, [sku, products]);
-
-  // Same check for the inline row editor — excludes the product being edited.
-  const editDuplicateSku = useMemo(() => {
-    if (!editingId) return false;
-    const trimmed = editSku.trim().toLowerCase();
-    if (!trimmed) return false;
-    return products.some(
-      (p) => p.id !== editingId && (p.sku ?? '').trim().toLowerCase() === trimmed
-    );
-  }, [editSku, products, editingId]);
+  // Live duplicate-SKU hint before submit (the server stays the source of
+  // truth on create/save). Asked of the server, since only one page of
+  // the catalog is loaded.
+  const [duplicateSku, setDuplicateSku] = useState(false);
+  const [editDuplicateSku, setEditDuplicateSku] = useState(false);
+  useSkuTaken(sku, undefined, setDuplicateSku);
+  useSkuTaken(editingId ? editSku : '', editingId ?? undefined, setEditDuplicateSku);
 
   // Live margin preview while creating a product.
   const marginPreview = useMemo(() => {
@@ -871,6 +757,9 @@ export default function ProductsPage() {
                   </div>
                   <div>
                     <ComboBox
+                noMatchesLabel={t('admin.products.noMatches')}
+                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
+
                       value={categoryInput}
                       onChange={(v) => {
                         setCategoryInput(v);
@@ -888,6 +777,9 @@ export default function ProductsPage() {
                   </div>
                   <div>
                     <ComboBox
+                noMatchesLabel={t('admin.products.noMatches')}
+                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
+
                       value={brandInput}
                       onChange={setBrandInput}
                       options={brands}
@@ -992,8 +884,17 @@ export default function ProductsPage() {
 
         {/* Product Table */}
         <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
-          <div className="px-4 py-3 border-b border-blue-500/15 bg-blue-50/60">
-            <h2 className="text-sm font-semibold">{t('admin.products.productCatalog')}</h2>
+          <div className="px-4 py-3 border-b border-blue-500/15 bg-blue-50/60 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">
+              {t('admin.products.productCatalog')} <span className="font-normal text-gray-500">({totalProducts})</span>
+            </h2>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('admin.products.searchPlaceholder')}
+              className="w-full sm:w-72 border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white outline-none focus:border-blue-500"
+            />
           </div>
 
           {products.length === 0 ? (
@@ -1143,6 +1044,9 @@ export default function ProductsPage() {
                             {isEditing ? (
                               <div>
                                 <ComboBox
+                noMatchesLabel={t('admin.products.noMatches')}
+                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
+
                                   value={editCategory}
                                   onChange={(v) => {
                                     setEditCategory(v);
@@ -1166,6 +1070,9 @@ export default function ProductsPage() {
                             {isEditing ? (
                               <div>
                                 <ComboBox
+                noMatchesLabel={t('admin.products.noMatches')}
+                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
+
                                   value={editBrand}
                                   onChange={setEditBrand}
                                   options={brands}
@@ -1387,12 +1294,12 @@ export default function ProductsPage() {
           {/* Pagination — shared component (same as Stock, Customers,
               Vehicles, Reference Data) instead of a hand-rolled Prev/Next
               row, now inside the card so it visually belongs to the table. */}
-          {products.length > 0 && (
+          {totalProducts > 0 && (
             <div className="px-4 py-3 border-t border-blue-500/15">
               <Pagination
                 page={page}
                 pageSize={pageSize}
-                totalItems={sortedProducts.length}
+                totalItems={totalProducts}
                 onPageChange={setPage}
                 onPageSizeChange={(size) => {
                   setPageSize(size);

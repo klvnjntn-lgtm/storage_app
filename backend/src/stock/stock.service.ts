@@ -75,7 +75,17 @@ type InvoiceReturnContext = {
   metadata?: Prisma.InputJsonObject;
 };
 
+// Movements caused by a purchasing/inventory document of their own (a
+// purchase return, a stock transfer) rather than a sale.
+type DocumentMovementContext = {
+  type: typeof EventType.PURCHASE_RETURN | typeof EventType.TRANSFER_OUT | typeof EventType.TRANSFER_IN;
+  invoiceId?: never;
+  salesOrderId?: never;
+  metadata?: Prisma.InputJsonObject;
+};
+
 export type StockMovementContext =
+  | DocumentMovementContext
   | InvoiceSaleContext
   | SalesOrderSaleContext
   | InvoiceAdjustmentContext

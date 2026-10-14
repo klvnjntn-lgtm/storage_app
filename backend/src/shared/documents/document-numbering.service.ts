@@ -1,9 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { DocumentType, Prisma } from '@prisma/client';
 import { resolveTimezone, toBusinessDate } from '../../accounting/business-date';
+import { renderNumberFormat, validateNumberFormat } from './document-number-format.util';
 
-// Format is always PREFIX-YYYY-NNNNN, atomically sequenced per
-// (organizationId, documentType, year) — see nextSequential below.
+export type NumberingConfig = {
+  // Always a template — the legacy shapes are expressed as one, so the
+  // settings page has a single thing to show and edit.
+  format: string;
+  // True until an admin saves a format (or the importer seeds one).
+  isDefault: boolean;
+  nextNumber: number;
+  preview: string;
+};
+
+// Default format is PREFIX-YYYY-NNNNN, atomically sequenced per
+// (organizationId, documentType, year) — see nextSequential below. Orgs
+// with a DocumentSequence row (imported, or a format saved in Settings)
+// use nextForOrganization instead.
 //
 // Call inside the same $transaction that writes the row, same as
 // nextInvoiceNumber was called inside issue()'s transaction — numbering
@@ -80,6 +93,105 @@ export class DocumentNumberingService {
       data: { lastNumber: { increment: 1 } },
     });
 
-    return `${updated.prefix}${updated.lastNumber}`;
+    if (!updated.format) return `${updated.prefix}${updated.lastNumber}`;
+    return renderNumberFormat(updated.format, updated.lastNumber, await this.businessToday(tx, organizationId));
+  }
+
+  // ---------------------------------------------------------------------
+  // Settings → document numbering. An org starts on one of two legacy
+  // schemes: nextSequential's PREFIX-YYYY-NNNNN (counter resets every
+  // year) or an imported prefix + number. Saving a format moves it onto a
+  // DocumentSequence row with that format, and from then on one running
+  // number is shared by every future format — it never resets, so a
+  // format change continues the count instead of restarting it.
+  // ---------------------------------------------------------------------
+  async getConfig(
+    organizationId: string,
+    documentType: DocumentType,
+    defaultPrefix: string,
+    db: Prisma.TransactionClient,
+  ): Promise<NumberingConfig> {
+    const today = await this.businessToday(db, organizationId);
+    const seq = await db.documentSequence.findUnique({
+      where: { organizationId_documentType: { organizationId, documentType } },
+    });
+
+    let format: string;
+    let lastNumber: number;
+    if (seq) {
+      // Braces can't appear in an imported prefix's literal text without
+      // reading as tokens, so drop them.
+      format = seq.format ?? `${seq.prefix.replace(/[{}]/g, '')}{SEQ}`;
+      lastNumber = seq.lastNumber;
+    } else {
+      format = `${defaultPrefix}-{YYYY}-{SEQ:5}`;
+      const counter = await db.documentCounter.findUnique({
+        where: {
+          organizationId_documentType_year: { organizationId, documentType, year: today.getUTCFullYear() },
+        },
+      });
+      lastNumber = counter?.lastNumber ?? 0;
+    }
+
+    return {
+      format,
+      isDefault: !seq,
+      nextNumber: lastNumber + 1,
+      preview: renderNumberFormat(format, lastNumber + 1, today),
+    };
+  }
+
+  // nextNumber is optional and forward-only: going back could hand out a
+  // number that's already on an issued document.
+  async setConfig(
+    organizationId: string,
+    documentType: DocumentType,
+    input: { format: string; nextNumber?: number },
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
+    const format = input.format.trim();
+    const error = validateNumberFormat(format);
+    if (error) throw new BadRequestException(error);
+
+    const seq = await tx.documentSequence.findUnique({
+      where: { organizationId_documentType: { organizationId, documentType } },
+    });
+    // First save on a nextSequential org: carry over the latest year's
+    // counter so the count continues rather than starting at 1.
+    const lastNumber =
+      seq?.lastNumber ??
+      (
+        await tx.documentCounter.findFirst({
+          where: { organizationId, documentType },
+          orderBy: { year: 'desc' },
+        })
+      )?.lastNumber ??
+      0;
+
+    let newLast = lastNumber;
+    if (input.nextNumber !== undefined) {
+      if (!Number.isInteger(input.nextNumber) || input.nextNumber < 1) {
+        throw new BadRequestException('Next number must be a whole number of at least 1');
+      }
+      if (input.nextNumber <= lastNumber) {
+        throw new BadRequestException(
+          `Next number can't go below ${lastNumber + 1} — lower numbers may already be in use`,
+        );
+      }
+      newLast = input.nextNumber - 1;
+    }
+
+    if (seq) {
+      await tx.documentSequence.update({ where: { id: seq.id }, data: { format, lastNumber: newLast } });
+    } else {
+      await tx.documentSequence.create({
+        data: { organizationId, documentType, prefix: '', format, lastNumber: newLast },
+      });
+    }
+  }
+
+  private async businessToday(db: Prisma.TransactionClient, organizationId: string): Promise<Date> {
+    const org = await db.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+    return toBusinessDate(new Date(), resolveTimezone(org));
   }
 }

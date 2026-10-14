@@ -65,8 +65,29 @@ function colorMixRgbaFallback() {
 }
 colorMixRgbaFallback.postcss = true;
 
+// Same class of old browser again, for gradients: Tailwind writes every
+// bg-gradient-to-* direction as e.g. `to bottom right in oklab` (srgb after
+// the rewrite above). Interpolation hints inside linear-gradient() only
+// shipped in Chrome 111 / Safari 16.2 / Firefox 127; anything older rejects
+// the whole background-image, leaving gradient cards (the /home module
+// tiles) with no fill — just white text on the light page. sRGB is the
+// spec's default interpolation anyway, so dropping the hint renders the
+// same everywhere. A bare `in srgb` (radial/conic with no shape) is left
+// alone: stripping it would leave an empty first argument.
+function gradientInterpolationFallback() {
+  return {
+    postcssPlugin: "gradient-interpolation-fallback",
+    Declaration(decl) {
+      if (decl.prop !== "--tw-gradient-position") return;
+      const stripped = decl.value.replace(/\s+in\s+(srgb|oklab|oklch)$/, "");
+      if (stripped && stripped !== decl.value) decl.value = stripped;
+    },
+  };
+}
+gradientInterpolationFallback.postcss = true;
+
 const config = {
-  plugins: ["@tailwindcss/postcss", srgbColorMix(), colorMixRgbaFallback()],
+  plugins: ["@tailwindcss/postcss", srgbColorMix(), colorMixRgbaFallback(), gradientInterpolationFallback()],
 };
 
 export default config;

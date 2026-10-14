@@ -117,6 +117,7 @@ export const adminSettingsShared = {
         createProduct: 'Create Product',
         shortcutHint: '⌘/Ctrl + Enter to submit',
         productCatalog: 'Product Catalog',
+        searchPlaceholder: 'Search name, SKU, OEM or barcode…',
         noProductsFound: 'No products found',
         categoryColumn: 'Category',
         brandColumn: 'Brand',
@@ -167,6 +168,23 @@ export const adminSettingsShared = {
       },
     },
     settings: {
+      invoiceNumbering: {
+        heading: 'Invoice numbering',
+        description: 'The number printed on each new invoice. Drafts get their number when they are issued.',
+        formatLabel: 'Format',
+        nextNumberLabel: 'Next number',
+        insert: 'Insert:',
+        tokenSeqPadded: 'running number with leading zeros to 5 digits (00042)',
+        tokenSeq: 'running number as-is (42)',
+        tokenDate: 'year, 2-digit year, month, day of the invoice date',
+        preview: 'Next invoice:',
+        invalidFormat: 'The format needs {SEQ} exactly once, and only the tokens listed above.',
+        numberTooLow: 'Next number can\'t be lower than {min}; lower numbers may already be in use.',
+        defaultNote: 'Right now the number restarts every year (INV-2026-00001). Once you save a format, invoices use one running number that never restarts, not at the new year and not when you change the format later.',
+        continuousNote: 'The running number never restarts, not at the new year and not when you change the format. A new format continues from the next number.',
+        saved: 'Saved',
+        saveFailed: 'Could not save invoice numbering',
+      },
       priceLevels: {
         heading: 'Price levels',
         description: 'Named prices every product can have, like Retail, Wholesale or Member. Set each product\'s prices on the Products page and a customer\'s level on the customer. The default level\'s price is the product\'s selling price.',
@@ -352,6 +370,8 @@ export const adminSettingsShared = {
         couldNotReachServer: 'Could not reach the server — check the console for details.',
         importFailedWithStatus: 'Import failed (status {status})',
         noPoDataPickDifferent: 'This file has no purchase order data — pick a different import option.',
+        importMayStillBeRunning:
+          'The import is taking a long time and the connection timed out, but it is probably still running on the server. Wait a few minutes and check your products and invoices before importing this file again.',
         fields: {
           externalRef: 'Invoice / Order Number',
           sku: 'SKU',
@@ -652,6 +672,7 @@ export const adminSettingsShared = {
         createProduct: 'Buat Produk',
         shortcutHint: '⌘/Ctrl + Enter untuk kirim',
         productCatalog: 'Katalog Produk',
+        searchPlaceholder: 'Cari nama, SKU, OEM, atau barcode…',
         noProductsFound: 'Tidak ada produk ditemukan',
         categoryColumn: 'Kategori',
         brandColumn: 'Merek',
@@ -702,6 +723,23 @@ export const adminSettingsShared = {
       },
     },
     settings: {
+      invoiceNumbering: {
+        heading: 'Penomoran invoice',
+        description: 'Nomor yang dicetak di setiap invoice baru. Draf mendapat nomor saat diterbitkan.',
+        formatLabel: 'Format',
+        nextNumberLabel: 'Nomor berikutnya',
+        insert: 'Sisipkan:',
+        tokenSeqPadded: 'nomor urut dengan nol di depan hingga 5 digit (00042)',
+        tokenSeq: 'nomor urut apa adanya (42)',
+        tokenDate: 'tahun, tahun 2 digit, bulan, tanggal dari tanggal invoice',
+        preview: 'Invoice berikutnya:',
+        invalidFormat: 'Format harus berisi {SEQ} tepat satu kali, dan hanya token di atas.',
+        numberTooLow: 'Nomor berikutnya tidak boleh di bawah {min}; nomor yang lebih kecil mungkin sudah terpakai.',
+        defaultNote: 'Saat ini nomor dimulai ulang setiap tahun (INV-2026-00001). Setelah format disimpan, invoice memakai satu nomor urut yang tidak pernah dimulai ulang, baik saat ganti tahun maupun saat format diubah nanti.',
+        continuousNote: 'Nomor urut tidak pernah dimulai ulang, baik saat ganti tahun maupun saat format diubah. Format baru melanjutkan dari nomor berikutnya.',
+        saved: 'Tersimpan',
+        saveFailed: 'Gagal menyimpan penomoran invoice',
+      },
       priceLevels: {
         heading: 'Level harga',
         description: 'Harga bernama yang bisa dimiliki setiap produk, misalnya Eceran, Grosir, atau Member. Atur harga tiap produk di halaman Produk dan level pelanggan di data pelanggan. Harga level default adalah harga jual produk.',
@@ -887,6 +925,8 @@ export const adminSettingsShared = {
         couldNotReachServer: 'Tidak dapat menghubungi server — periksa konsol untuk detailnya.',
         importFailedWithStatus: 'Impor gagal (status {status})',
         noPoDataPickDifferent: 'File ini tidak memiliki data pesanan pembelian — pilih opsi impor lain.',
+        importMayStillBeRunning:
+          'Impor memakan waktu lama dan koneksi terputus, tetapi kemungkinan masih berjalan di server. Tunggu beberapa menit dan periksa produk serta faktur Anda sebelum mengimpor file ini lagi.',
         fields: {
           externalRef: 'Nomor Faktur / Pesanan',
           sku: 'SKU',

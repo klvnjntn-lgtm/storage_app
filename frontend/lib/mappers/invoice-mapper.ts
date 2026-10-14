@@ -31,6 +31,7 @@ export type InvoicePrintView = {
   customerAddress: string | null;
   billingAddress: string | null;
   customerPhone: string | null;
+  customerEmail?: string | null;
   customerNpwp: string | null;
   customerPoNumber: string | null; // NEW — was entirely absent from this type; backend has always returned it (Option 2 policy: optional/reference on Invoice)
 
@@ -61,6 +62,7 @@ export type InvoicePrintView = {
     id: string;
     productName: string;
     sku: string | null;
+    serialNumbers?: string[];
     quantity: number;
     unit: string | null;
     unitPrice: number;
@@ -116,6 +118,7 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
     items: invoice.items.map((item) => ({
       id: item.id,
       productName: item.productName ?? '',
+      serialNumbers: item.serialNumbers ?? [],
       quantity: item.quantity,
       unit: item.unit ?? null,
       unitPrice: Number(item.unitPrice),

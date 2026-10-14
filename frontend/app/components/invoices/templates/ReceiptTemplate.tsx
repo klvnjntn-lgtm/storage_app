@@ -67,6 +67,7 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
       {invoice.items.map((item) => (
         <div key={item.id} className="mb-1.5">
           <p>{item.productName}</p>
+          {item.serialNumbers && item.serialNumbers.length > 0 && <p className="font-mono">S/N: {item.serialNumbers.join(', ')}</p>}
 
           <div className="flex justify-between">
             <span>

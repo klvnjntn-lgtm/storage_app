@@ -11,6 +11,8 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 
+// Optimize button is hidden for now; set to true to show it again.
+const SHOW_OPTIMIZE = false;
 
 type RouteStatus = 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
@@ -330,13 +332,16 @@ function DeliveryRoutesPageInner() {
                 </button>
               </>
             )}
-            <button data-tour="dlv-routes-plan"
-              onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
-              className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-100"
-            >
-              <Sparkles size={14} />
-              {t('delivery.plan.openButton')}
-            </button>
+            {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
+            {SHOW_OPTIMIZE && (
+              <button data-tour="dlv-routes-plan"
+                onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
+                className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-100"
+              >
+                <Sparkles size={14} />
+                {t('delivery.plan.openButton')}
+              </button>
+            )}
             <button data-tour="dlv-routes-new"
               onClick={() => setShowNewRoute((v) => !v)}
               className="order-first sm:order-none flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700"

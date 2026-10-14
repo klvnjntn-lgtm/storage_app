@@ -16,3 +16,6 @@ if (!dbName.endsWith('_test')) {
 // existing variable, so backend/.env's DATABASE_URL is ignored under jest.
 process.env.DATABASE_URL = url;
 process.env.JWT_SECRET ??= 'test-jwt-secret';
+// Specs exercise the fake gateway and the log WhatsApp provider.
+process.env.ONLINE_PAYMENTS_ENABLED ??= 'true';
+process.env.WHATSAPP_ENABLED ??= 'true';

@@ -1,5 +1,6 @@
 // payments/payments.controller.ts
-import { Body, Controller, Delete, Get, Param, Post, UseGuards, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Optional, Param, Post, UseGuards, Req } from '@nestjs/common';
+import { WebhooksService } from '../api-access/webhooks.service';
 import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -22,16 +23,25 @@ import { ApplyCreditDto } from './dto/apply-credit.dto';
 @RequireModule(ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS)
 @Controller('invoices/:invoiceId/payments')
 export class PaymentController {
-  constructor(private payments: PaymentService) {}
+  constructor(
+    private payments: PaymentService,
+    @Optional() private webhooks?: WebhooksService,
+  ) {}
 
   @Post()
-  record(
+  async record(
     @CurrentOrg() organizationId: string,
     @Param('invoiceId') invoiceId: string,
     @Body() dto: RecordPaymentDto,
     @Req() req,
   ) {
-    return this.payments.recordPayment(organizationId, invoiceId, dto, req.user?.sub);
+    const result = await this.payments.recordPayment(organizationId, invoiceId, dto, req.user?.sub);
+    void this.webhooks?.emit(organizationId, 'payment.recorded', {
+      invoiceId,
+      amount: dto.amount,
+      method: dto.method,
+    });
+    return result;
   }
 
   // Customer credit held on this invoice, credit the customer holds on

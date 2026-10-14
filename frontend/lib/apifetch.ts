@@ -1,5 +1,7 @@
 import { CSRF_HEADERS, clearSession } from "./session";
 
+export const PLAN_LIMIT_EVENT = "waresys:plan-limit";
+
 let redirectingToLogin = false;
 let redirectingToSuspended = false;
 
@@ -77,14 +79,23 @@ export async function apiFetch(
   // The platform owner suspended this organization (backend OrgGuard).
   // Every call fails from now on, so move to the page that explains why.
   if (res.status === 403 && typeof window !== "undefined" && !redirectingToSuspended) {
-    const code = await res
+    const body = await res
       .clone()
       .json()
-      .then((b) => b?.code)
       .catch(() => null);
-    if (code === "ORG_SUSPENDED" && window.location.pathname !== "/suspended") {
+    if (body?.code === "ORG_SUSPENDED" && window.location.pathname !== "/suspended") {
       redirectingToSuspended = true;
       window.location.href = "/suspended";
+    }
+    // The org requires two-factor sign-in and this admin hasn't set it up
+    // (backend JwtStrategy): everything but /auth is refused until they do.
+    if (body?.code === "TWO_FACTOR_SETUP_REQUIRED" && window.location.pathname !== "/settings/security") {
+      window.location.assign("/settings/security?required=1");
+    }
+    // A plan limit (backend PlanLimitsService). The page still gets the
+    // 403 and shows its own error; PlanLimitToast adds the upgrade link.
+    if (body?.error === "PlanLimitReached") {
+      window.dispatchEvent(new CustomEvent(PLAN_LIMIT_EVENT, { detail: body }));
     }
   }
 

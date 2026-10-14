@@ -373,6 +373,42 @@ export class PostingRulesService {
     );
   }
 
+  // Purchase Return → AP (debit, what these units added to the debt) +
+  // Inventory (credit, net cost) + Input VAT Receivable (credit, its tax).
+  // The mirror of postGoodsReceipt for goods sent back; the amounts were
+  // allocated the same proportional way when the return was created, so
+  // they're read straight off the PurchaseReturn row.
+  async postPurchaseReturn(organizationId: string, purchaseReturnId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const ret = await db.purchaseReturn.findFirstOrThrow({ where: { id: purchaseReturnId, organizationId } });
+    const subtotal = Number(ret.subtotal);
+    const tax = Number(ret.taxAmount);
+    const total = Number(ret.total);
+    if (total <= 0) throw new BadRequestException('Purchase return has no value to post');
+
+    const [inventory, ap, inputVat] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.INVENTORY, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_PAYABLE, db),
+      tax > 0 ? this.accounts.resolve(organizationId, SystemAccountKey.PURCHASE_TAX_RECEIVABLE, db) : Promise.resolve(null),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: ret.createdAt,
+        memo: `Purchase return ${ret.returnNumber ?? ret.id}`,
+        sourceType: JournalSourceType.PURCHASE_RETURN,
+        sourceId: ret.id,
+        lines: [
+          { accountId: ap, debit: total, description: 'Owed to supplier reduced by returned goods' },
+          { accountId: inventory, credit: subtotal, description: 'Inventory returned to supplier', locationId: ret.locationId },
+          ...(inputVat && tax > 0 ? [{ accountId: inputVat, credit: tax, description: 'Input VAT on returned goods' }] : []),
+        ],
+      },
+      tx,
+    );
+  }
+
   // Supplier Payment → AP (debit) + Cash/Bank (credit)
   async postSupplierPayment(organizationId: string, supplierPaymentId: string, tx?: Prisma.TransactionClient) {
     const db = this.db(tx);

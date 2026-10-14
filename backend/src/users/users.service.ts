@@ -1,17 +1,18 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PlanLimitsService } from '../billing/plan-limits.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private planLimits: PlanLimitsService,
   ) {}
 
   async listDrivers(organizationId: string) {
@@ -79,11 +80,8 @@ export class UsersService {
   // All current (non-removed) members plus seat usage. Seats are held by
   // active members only — locked or removed users free theirs.
   async listMembers(organizationId: string) {
-    const [org, members] = await Promise.all([
-      this.prisma.organization.findUniqueOrThrow({
-        where: { id: organizationId },
-        select: { seatLimit: true },
-      }),
+    const [seatLimit, members] = await Promise.all([
+      this.planLimits.seatLimit(organizationId),
       this.prisma.user.findMany({
         where: { organizationId, removedAt: null },
         select: {
@@ -100,27 +98,15 @@ export class UsersService {
       }),
     ]);
     return {
-      seatLimit: org.seatLimit,
+      // null = unlimited (a plan with no seat cap).
+      seatLimit,
       seatsUsed: members.filter((m) => m.active).length,
       members,
     };
   }
 
   async assertSeatAvailable(organizationId: string) {
-    const [org, used] = await Promise.all([
-      this.prisma.organization.findUniqueOrThrow({
-        where: { id: organizationId },
-        select: { seatLimit: true },
-      }),
-      this.prisma.user.count({
-        where: { organizationId, active: true, removedAt: null },
-      }),
-    ]);
-    if (used >= org.seatLimit) {
-      throw new ForbiddenException(
-        `Seat limit reached (${org.seatLimit}). Upgrade your plan to add more users.`,
-      );
-    }
+    await this.planLimits.assertCanAdd(organizationId, 'seats');
   }
 
   // Soft removal — see User.removedAt. Ends the session immediately (same

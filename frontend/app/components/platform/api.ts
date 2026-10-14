@@ -6,6 +6,9 @@ import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 export type ModuleKey = 'INVOICE_POS' | 'WAREHOUSE_OPS' | 'WORKSHOP_RMS' | 'DELIVERY_DMS';
 export const MODULE_KEYS: ModuleKey[] = ['INVOICE_POS', 'WAREHOUSE_OPS', 'WORKSHOP_RMS', 'DELIVERY_DMS'];
 
+// Mirrors backend src/billing/plans.ts.
+export const PLAN_KEYS = ['custom', 'trial', 'subscription', 'free'] as const;
+
 export type PlatformSession = { email: string; unlocked: boolean; unlockedUntil: string | null };
 
 export type PlatformOrg = {
@@ -18,8 +21,15 @@ export type PlatformOrg = {
   suspendedAt: string | null;
   suspendedReason: string | null;
   paidUntil: string | null;
+  trialEndsAt: string | null;
+  // Prepaid WhatsApp balance (IDR, Decimal as string).
+  waBalance?: string;
   billingNote: string | null;
   lastActiveAt: string | null;
+  // The plan whose limits apply now (a lapsed trial/paid plan reads "free").
+  effectivePlan?: string;
+  // Metered on the list endpoint only.
+  usage?: { products: number; invoices30d: number; mediaBytes: number };
   modules: { module: ModuleKey; enabled: boolean; expiresAt: string | null }[];
 };
 

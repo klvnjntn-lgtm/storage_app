@@ -3,13 +3,18 @@ import { Injectable, BadRequestException, ConflictException, NotFoundException, 
 import { PrismaService } from '../prisma/prisma.service';
 import { EventType, Prisma } from '@prisma/client';
 import { applyOpeningCost, recordManualCost } from '../accounting/inventory-costing';
+import { PlanLimitsService } from '../billing/plan-limits.service';
+import { escapeLike } from '../common/text/escape-like';
 
 type Tx = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class ProductService {
   private readonly logger = new Logger(ProductService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private planLimits: PlanLimitsService,
+  ) {}
 
   async findOne(organizationId: string, id: string) {
     const product = await this.prisma.product.findFirst({
@@ -41,6 +46,111 @@ export class ProductService {
       ...(includeCost && { costPrice: product.costPrice != null ? Number(product.costPrice) : null }),
       prices: this.mapPrices(product.prices),
     }));
+  }
+
+  // One page of the product list, searched and sorted in the database —
+  // findAll() above sends the whole catalog, which stops being workable
+  // in the tens of thousands of products. Same row shape as findAll().
+  // Sorting by stock needs the per-product total, so that one ordering
+  // runs as SQL over a grouped Stock subquery; every other key is a plain
+  // Prisma orderBy.
+  async findPage(
+    organizationId: string,
+    opts: { page: number; pageSize: number; q?: string; sort?: string; dir?: 'asc' | 'desc'; includeCost: boolean },
+  ) {
+    const page = Math.max(1, opts.page);
+    const pageSize = Math.min(Math.max(1, opts.pageSize), 200);
+    const dir = opts.dir === 'desc' ? 'desc' : 'asc';
+    const q = opts.q?.trim();
+    const where: Prisma.ProductWhereInput = {
+      organizationId,
+      ...(q && {
+        OR: [
+          { name: { contains: escapeLike(q), mode: 'insensitive' } },
+          { sku: { contains: escapeLike(q), mode: 'insensitive' } },
+          { oem: { contains: escapeLike(q), mode: 'insensitive' } },
+          { barcode: { contains: escapeLike(q), mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    let ids: string[];
+    const total = await this.prisma.product.count({ where });
+    if (opts.sort === 'stock') {
+      const like = q ? `%${escapeLike(q)}%` : null;
+      const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT p.id
+        FROM "Product" p
+        LEFT JOIN (
+          SELECT "productId", SUM(quantity) AS qty FROM "Stock"
+          WHERE "organizationId" = ${organizationId} GROUP BY "productId"
+        ) s ON s."productId" = p.id
+        WHERE p."organizationId" = ${organizationId}
+          ${like ? Prisma.sql`AND (p.name ILIKE ${like} OR p.sku ILIKE ${like} OR p.oem ILIKE ${like} OR p.barcode ILIKE ${like})` : Prisma.empty}
+        ORDER BY COALESCE(s.qty, 0) ${dir === 'desc' ? Prisma.sql`DESC` : Prisma.sql`ASC`}, p.name ASC
+        LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
+      ids = rows.map((r) => r.id);
+    } else {
+      const orderBy: Prisma.ProductOrderByWithRelationInput =
+        opts.sort === 'sku' ? { sku: dir }
+        : opts.sort === 'category' ? { category: { name: dir } }
+        : opts.sort === 'brand' ? { brand: { name: dir } }
+        : opts.sort === 'sellingPrice' ? { sellingPrice: { sort: dir, nulls: 'last' } }
+        : opts.sort === 'costPrice' && opts.includeCost ? { costPrice: { sort: dir, nulls: 'last' } }
+        : { name: dir };
+      ids = (
+        await this.prisma.product.findMany({
+          where,
+          orderBy: [orderBy, { id: 'asc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: { id: true },
+        })
+      ).map((p) => p.id);
+    }
+
+    const [products, stock] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { id: { in: ids } },
+        include: { category: true, brand: true, prices: true },
+      }),
+      this.prisma.stock.groupBy({
+        by: ['productId'],
+        where: { organizationId, productId: { in: ids } },
+        _sum: { quantity: true },
+      }),
+    ]);
+    const stockBy = new Map(stock.map((s) => [s.productId, Number(s._sum.quantity ?? 0)]));
+    const byId = new Map(products.map((p) => [p.id, p]));
+    const data = ids
+      .map((id) => byId.get(id)!)
+      .map((product) => ({
+        id: product.id,
+        sku: product.sku,
+        oem: product.oem,
+        name: product.name,
+        category: product.category.name,
+        brand: product.brand?.name ?? null,
+        totalStock: stockBy.get(product.id) ?? 0,
+        active: product.active,
+        image: product.image,
+        sellingPrice: product.sellingPrice != null ? Number(product.sellingPrice) : null,
+        ...(opts.includeCost && { costPrice: product.costPrice != null ? Number(product.costPrice) : null }),
+        prices: this.mapPrices(product.prices),
+      }));
+    return { data, total, page, pageSize };
+  }
+
+  // For the "this SKU already exists" hint while typing, now that the
+  // client no longer holds the whole catalog to check against.
+  async isSkuTaken(organizationId: string, sku: string, excludeId?: string) {
+    const trimmed = sku.trim();
+    if (!trimmed) return { taken: false };
+    const hit = await this.prisma.product.findFirst({
+      where: { organizationId, sku: { equals: trimmed, mode: 'insensitive' }, ...(excludeId && { id: { not: excludeId } }) },
+      select: { id: true },
+    });
+    return { taken: !!hit };
   }
 
   private mapPrices(prices: { priceLevelId: string; price: Prisma.Decimal }[]) {
@@ -210,6 +320,8 @@ async create(
 
   this.validateLengths({ name, sku, oem, category: categoryName, brand: brandName, barcode });
 
+  await this.planLimits.assertCanAdd(organizationId, 'products', 1, tx);
+
   const category = await this.findOrCreateCategory(organizationId, categoryName, tx);
   const brand = brandName ? await this.findOrCreateBrand(organizationId, brandName, tx) : null;
 
@@ -262,9 +374,9 @@ async create(
           organizationId,
           active: true,
           OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { sku: { contains: q, mode: 'insensitive' } },
-            { oem: { contains: q, mode: 'insensitive' } },
+            { name: { contains: escapeLike(q), mode: 'insensitive' } },
+            { sku: { contains: escapeLike(q), mode: 'insensitive' } },
+            { oem: { contains: escapeLike(q), mode: 'insensitive' } },
           ],
         },
         // Explicit select — this endpoint is ungated and readable by every
@@ -274,6 +386,8 @@ async create(
           id: true,
           sku: true,
           name: true,
+          unit: true,
+          trackSerials: true,
           category: { select: { id: true, name: true } },
           brand: { select: { id: true, name: true } },
         },
@@ -284,9 +398,9 @@ async create(
         where: {
           organizationId,
           OR: [
-            { location: { name: { contains: q, mode: 'insensitive' } } },
-            { product: { name: { contains: q, mode: 'insensitive' } } },
-            { product: { sku: { contains: q, mode: 'insensitive' } } },
+            { location: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
+            { product: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
+            { product: { sku: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         },
         select: {
@@ -303,7 +417,7 @@ async create(
       this.prisma.location.findMany({
         where: {
           organizationId,
-          name: { contains: q, mode: 'insensitive' },
+          name: { contains: escapeLike(q), mode: 'insensitive' },
         },
         select: { id: true, name: true },
         take: 20,
@@ -313,7 +427,7 @@ async create(
         where: {
           organizationId,
           OR: [
-            { product: { name: { contains: q, mode: 'insensitive' } } },
+            { product: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
             ...(eventType ? [{ type: eventType }] : []),
           ],
         },
@@ -363,9 +477,9 @@ async create(
         ...(q
           ? {
               OR: [
-                { name: { contains: q, mode: 'insensitive' } },
-                { sku: { contains: q, mode: 'insensitive' } },
-                { oem: { contains: q, mode: 'insensitive' } },
+                { name: { contains: escapeLike(q), mode: 'insensitive' } },
+                { sku: { contains: escapeLike(q), mode: 'insensitive' } },
+                { oem: { contains: escapeLike(q), mode: 'insensitive' } },
               ],
             }
           : {}),
@@ -396,6 +510,8 @@ async create(
       sellingPrice: p.sellingPrice != null ? Number(p.sellingPrice) : null,
       // Non-default levels only; the default level's price is sellingPrice.
       prices: this.mapPrices(p.prices),
+      // The cart asks for one serial number per unit on these.
+      trackSerials: p.trackSerials,
       stockByLocation: p.stocks.map((s) => ({
         locationId: s.locationId,
         locationName: s.location.name,
@@ -530,6 +646,7 @@ async update(
 
   async restore(organizationId: string, id: string) {
     await this.assertProductOwnership(organizationId, id);
+    await this.planLimits.assertCanAdd(organizationId, 'products');
     return this.prisma.product.update({
       where: { id },
       data: { active: true },
@@ -640,6 +757,7 @@ async update(
     });
 
     if (!product) {
+      await this.planLimits.assertCanAdd(organizationId, 'products', 1, tx);
       product = await tx.product.create({
         data: {
           name,

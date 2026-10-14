@@ -42,6 +42,7 @@ describe('session cookie (e2e)', () => {
     if (orgId) {
       await prisma.user.deleteMany({ where: { organizationId: orgId } });
       await prisma.priceLevel.deleteMany({ where: { organizationId: orgId } });
+      await prisma.organizationModule.deleteMany({ where: { organizationId: orgId } });
       await prisma.organization.delete({ where: { id: orgId } });
     }
     await app.close();
@@ -124,7 +125,12 @@ describe('session cookie (e2e)', () => {
   });
 
   it('gates finance and destructive routes from staff (USER role)', async () => {
-    await prisma.organizationModule.create({ data: { organizationId: orgId!, module: 'INVOICE_POS', enabled: true } });
+    // Registration started a trial, which already granted INVOICE_POS (with an expiry).
+    await prisma.organizationModule.upsert({
+      where: { organizationId_module: { organizationId: orgId!, module: 'INVOICE_POS' } },
+      update: { enabled: true, expiresAt: null },
+      create: { organizationId: orgId!, module: 'INVOICE_POS', enabled: true },
+    });
     const userEmail = `staff-${randomUUID()}@example.com`;
     await prisma.user.create({
       data: { email: userEmail, password: await bcrypt.hash(password, 4), role: 'USER', organizationId: orgId! },

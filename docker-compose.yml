@@ -215,6 +215,34 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
 
+      # Self-serve billing & WhatsApp top-ups (src/billing). Without a key
+      # in production, online checkout is simply unavailable.
+      # SELF_SERVE_BILLING=true: new signups start a 14-day trial of the
+      # plans; off = new orgs are hand-managed ("custom") as before.
+      SELF_SERVE_BILLING: ${SELF_SERVE_BILLING:-false}
+      ONLINE_PAYMENTS_ENABLED: ${ONLINE_PAYMENTS_ENABLED:-false}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_CALLBACK_TOKEN: ${XENDIT_CALLBACK_TOKEN:-}
+
+      # WhatsApp Cloud API (src/messaging).
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WA_PHONE_NUMBER_ID: ${WA_PHONE_NUMBER_ID:-}
+      WA_ACCESS_TOKEN: ${WA_ACCESS_TOKEN:-}
+      WA_PRICE_PER_MESSAGE: ${WA_PRICE_PER_MESSAGE:-500}
+      WA_TEMPLATE_LANGUAGE: ${WA_TEMPLATE_LANGUAGE:-id}
+      WA_TEMPLATE_INVOICE: ${WA_TEMPLATE_INVOICE:-waresys_invoice}
+      WA_TEMPLATE_PURCHASE_ORDER: ${WA_TEMPLATE_PURCHASE_ORDER:-waresys_purchase_order}
+      WA_TEMPLATE_REMINDER: ${WA_TEMPLATE_REMINDER:-waresys_payment_reminder}
+      WA_TEMPLATE_STATEMENT: ${WA_TEMPLATE_STATEMENT:-waresys_statement}
+      MESSAGE_LANGUAGE: ${MESSAGE_LANGUAGE:-id}
+
+      # Encrypts 2FA secrets at rest; falls back to one derived from JWT_SECRET.
+      SECRET_BOX_KEY: ${SECRET_BOX_KEY:-}
+
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      LOG_FORMAT: ${LOG_FORMAT:-}
+
     volumes:
       - backend_data:/app/data
       - backend_uploads:/app/uploads
@@ -235,6 +263,7 @@ services:
         BACKEND_URL: http://backend:3000
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
 
     environment:
       INTERNAL_API_URL: ${INTERNAL_API_URL}

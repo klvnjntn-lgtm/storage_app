@@ -14,6 +14,7 @@ import {
   FILE_STORAGE,
   type FileStorage,
 } from '../storage/file-storage.interface';
+import { escapeLike } from '../common/text/escape-like';
 
 // Library files live under this storage key prefix, served publicly at
 // /uploads/media/<filename> (see main.ts).
@@ -123,7 +124,7 @@ export class MediaService {
       ...(params.q?.trim()
         ? {
             originalName: {
-              contains: params.q.trim(),
+              contains: escapeLike(params.q.trim()),
               mode: 'insensitive' as const,
             },
           }

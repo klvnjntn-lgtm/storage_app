@@ -22,7 +22,8 @@ type Member = {
   team: { id: string; name: string } | null;
 };
 
-type MembersResponse = { seatLimit: number; seatsUsed: number; members: Member[] };
+// seatLimit null = the plan has no seat cap.
+type MembersResponse = { seatLimit: number | null; seatsUsed: number; members: Member[] };
 
 const ROLES: Role[] = ['ADMIN', 'USER', 'DRIVER'];
 
@@ -83,7 +84,7 @@ export default function MembersPage() {
     );
   }, [data, query, roleFilter]);
 
-  const seatsFull = !!data && data.seatsUsed >= data.seatLimit;
+  const seatsFull = !!data && data.seatLimit !== null && data.seatsUsed >= data.seatLimit;
 
   async function run(memberId: string, path: string, init: RequestInit) {
     setBusyId(memberId);
@@ -152,7 +153,7 @@ export default function MembersPage() {
     return <p className="text-sm text-gray-500 p-6">{t('common.loading')}</p>;
   }
 
-  const pct = data ? Math.min(100, (data.seatsUsed / Math.max(1, data.seatLimit)) * 100) : 0;
+  const pct = data && data.seatLimit !== null ? Math.min(100, (data.seatsUsed / Math.max(1, data.seatLimit)) * 100) : 0;
 
   return (
     <main
@@ -198,7 +199,7 @@ export default function MembersPage() {
               <p className="text-sm font-semibold">{t('admin.members.seatsTitle')}</p>
               <p className="text-sm tabular-nums">
                 <span className={`text-lg font-bold ${seatsFull ? 'text-red-600' : 'text-gray-900'}`}>{data.seatsUsed}</span>
-                <span className="text-gray-500"> / {data.seatLimit}</span>
+                <span className="text-gray-500"> / {data.seatLimit ?? '∞'}</span>
               </p>
             </div>
             <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
@@ -211,7 +212,8 @@ export default function MembersPage() {
             {seatsFull && (
               <p className="mt-2 flex items-start gap-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
                 <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                {t('admin.members.seatsFull')}
+                {t('admin.members.seatsFull')}{' '}
+                <a href="/settings/billing" className="font-semibold underline">{t('billing.upgradeLink')}</a>
               </p>
             )}
           </div>

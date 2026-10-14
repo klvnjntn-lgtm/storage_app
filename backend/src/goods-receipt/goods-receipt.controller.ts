@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Optional, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { WebhooksService } from '../api-access/webhooks.service';
 import { ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -12,7 +13,10 @@ import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('purchase-orders/:purchaseOrderId')
 export class GoodsReceiptController {
-  constructor(private goodsReceiptService: GoodsReceiptService) {}
+  constructor(
+    private goodsReceiptService: GoodsReceiptService,
+    @Optional() private webhooks?: WebhooksService,
+  ) {}
 
   @Get('receiving-summary')
   getReceivingSummary(@CurrentOrg() organizationId: string, @Param('purchaseOrderId') purchaseOrderId: string) {
@@ -20,13 +24,22 @@ export class GoodsReceiptController {
   }
 
   @Post('receive')
-  receive(
+  async receive(
     @CurrentOrg() organizationId: string,
     @Req() req,
     @Param('purchaseOrderId') purchaseOrderId: string,
     @Body() dto: ReceiveGoodsDto,
   ) {
-    return this.goodsReceiptService.receive(organizationId, req.user.sub, purchaseOrderId, dto);
+    const receipt = await this.goodsReceiptService.receive(organizationId, req.user.sub, purchaseOrderId, dto);
+    void this.webhooks?.emit(organizationId, 'goods_receipt.created', {
+      id: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      purchaseOrderId,
+      locationId: dto.locationId,
+      items: receipt.items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity) })),
+      purchaseOrderStatus: receipt.purchaseOrderStatus,
+    });
+    return receipt;
   }
 
   @Get('receipts')

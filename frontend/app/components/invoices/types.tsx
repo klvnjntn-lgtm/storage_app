@@ -12,6 +12,8 @@ export type ProductSearchResult = {
   prices?: { priceLevelId: string; price: number }[];
   unit: string | null;
   stockByLocation: StockAtLocation[];
+  // Sold by serial number: the line must name one serial per unit.
+  trackSerials?: boolean;
 };
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
@@ -28,6 +30,8 @@ export type CartLine = {
   taxRateIds: string[];
   discountType: DiscountType | null;
   discountValue: number | null;
+  // Serial-tracked products: the units this line sells.
+  serialNumbers?: string[];
   // Price level picked for this line (null = default). The server
   // resolves the actual price from it — see lib/price-levels.ts.
   priceLevelId?: string | null;
@@ -45,6 +49,7 @@ export type Customer = {
   name: string;
   companyName: string | null;
   phone: string | null;
+  email?: string | null;
   address: string | null;
   npwp?: string | null;
   // DELIVERY_DMS — default delivery pin + directions for drivers.
@@ -135,6 +140,8 @@ export type InvoiceView = {
   items: {
     id: string;
     productName: string;
+    // Serial-tracked products: the units sold, printed under the name.
+    serialNumbers?: string[];
     quantity: number;
     unit: string | null;
     unitPrice: number;
@@ -218,6 +225,7 @@ export type CustomerStatement = {
     name: string;
     address: string | null;
     phone: string | null;
+    email?: string | null;
     npwp: string | null;
   };
   organization: {

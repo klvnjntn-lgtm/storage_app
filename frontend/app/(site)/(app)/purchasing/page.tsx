@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ClipboardList, Building2 } from 'lucide-react';
+import { ClipboardList, Building2, PackageSearch, Undo2, FileCheck2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 
@@ -26,6 +26,27 @@ export default function PurchasingHome() {
       icon: Building2,
       // hex, not slate/gray-*: the grays invert in dark mode (theme.css)
       gradient: 'from-[#94a3b8] to-[#4b5563]',
+    },
+    {
+      title: t('purchasing.overview.reorderCardTitle'),
+      description: t('purchasing.overview.reorderCardDescription'),
+      href: '/purchasing/reorder',
+      icon: PackageSearch,
+      gradient: 'from-emerald-400 to-teal-600',
+    },
+    {
+      title: t('purchasing.overview.returnsCardTitle'),
+      description: t('purchasing.overview.returnsCardDescription'),
+      href: '/purchasing/returns',
+      icon: Undo2,
+      gradient: 'from-rose-400 to-red-600',
+    },
+    {
+      title: t('purchasing.overview.billsCardTitle'),
+      description: t('purchasing.overview.billsCardDescription'),
+      href: '/purchasing/bills',
+      icon: FileCheck2,
+      gradient: 'from-sky-400 to-indigo-600',
     },
   ];
 

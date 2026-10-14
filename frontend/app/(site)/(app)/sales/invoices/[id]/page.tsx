@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, AlertCircle, Ban, Lock } from 'lucide-react';
+import { Receipt, Printer, Wallet, Bell, X, Download, Pencil, Truck, History, AlertCircle, Ban, Lock, Send } from 'lucide-react';
+import { SendDocumentDialog } from '@/app/components/messaging/SendDocumentDialog';
 import { apiFetch } from '@/lib/apifetch';
 
 import { useHasModule } from '@/lib/hooks/useHasModule';
@@ -230,6 +231,7 @@ export default function InvoiceDetailPage() {
   const [printFormat, setPrintFormat] = useState<InvoiceFormat>('RECEIPT');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [voidingPaymentId, setVoidingPaymentId] = useState<string | null>(null);
 
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -547,6 +549,15 @@ export default function InvoiceDetailPage() {
                   {t('sales.invoiceDetail.recordPayment')}
                 </button>
               )}
+              {invoice.status === 'ISSUED' && !desktopApp && (
+                <button
+                  onClick={() => setSendOpen(true)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 h-fit transition-colors"
+                >
+                  <Send size={16} strokeWidth={2} />
+                  {t('messaging.sendInvoice')}
+                </button>
+              )}
               <button
                 onClick={handleDownloadPdf}
                 disabled={pdfGenerating}
@@ -566,6 +577,16 @@ export default function InvoiceDetailPage() {
           )}
         </div>
       </div>
+
+      {sendOpen && invoice && (
+        <SendDocumentDialog
+          title={t('messaging.sendInvoiceTitle', { number: invoice.invoiceNumber ?? '' })}
+          endpoint={`/messaging/invoices/${invoice.id}/send`}
+          defaultEmail={invoice.customerEmail}
+          defaultPhone={invoice.customerPhone}
+          onClose={() => setSendOpen(false)}
+        />
+      )}
 
       <div className="max-w-5xl mx-auto p-6 print:hidden">
         {loading && <p className="text-sm text-gray-500">{t('common.loading')}</p>}

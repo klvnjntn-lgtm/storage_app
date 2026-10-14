@@ -24,7 +24,7 @@ import {
   SessionType,
   StockPolicy,
 } from '@prisma/client';
-import { PaymentKind, PaymentStatus } from '@prisma/client';
+import { ApprovalDocumentType, PaymentKind, PaymentStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
@@ -35,6 +35,10 @@ import { JournalService } from '../accounting/journal.service';
 import { businessDayBounds, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 import { deriveStatus } from '../payments/payment-status.util';
 import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
+import { PlanLimitsService } from '../billing/plan-limits.service';
+import { ApprovalsService } from '../approvals/approvals.service';
+import { assertSerialCount, normalizeSerials, restoreInvoiceSerials, takeSerials } from '../serials/serial-moves';
+import { escapeLike } from '../common/text/escape-like';
 
 const MM_TO_PX = 96 / 25.4;
 
@@ -84,6 +88,9 @@ export type InvoicePrintView = {
   customerAddress: string | null;
   billingAddress: string | null;
   customerPhone: string | null;
+  // The customer's saved email (live, not a snapshot) — the default
+  // recipient when the invoice is emailed.
+  customerEmail: string | null;
   customerNpwp: string | null;
   discountType: string | null;
   discountValue: number | null;
@@ -111,6 +118,8 @@ export type InvoicePrintView = {
     id: string;
     productName: string;
     sku: string | null;
+    // Units sold on the line (serial-tracked products); printed for warranty.
+    serialNumbers: string[];
     quantity: number;
     unit: string | null;
 
@@ -177,6 +186,8 @@ constructor(
   private bankAccounts: BankAccountResolverService,
   private postingRules: PostingRulesService,
   private journal: JournalService,
+  private planLimits: PlanLimitsService,
+  private approvals: ApprovalsService,
 ) {}
 
   // ---- draft cart -------------------------------------------------
@@ -199,6 +210,7 @@ constructor(
 
         const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
 
+        await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -225,11 +237,13 @@ constructor(
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
             items: {
-              create: lines.map((l) => ({
+              create: lines.map((l, i) => ({
                 productId: l.productId,
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
+                // priceLines() keeps lines 1:1 with the request's items.
+                serialNumbers: normalizeSerials(dto.items![i]?.serialNumbers),
                 unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unitCost: l.unitCost,
                 lineTotal: l.lineTotal,
@@ -390,11 +404,13 @@ constructor(
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
             items: {
-              create: lines.map((l) => ({
+              create: lines.map((l, i) => ({
                 productId: l.productId,
                 description: l.description,
                 locationId: l.locationId,
                 quantity: l.quantity,
+                // priceLines() keeps lines 1:1 with the request's items.
+                serialNumbers: normalizeSerials(dto.items![i]?.serialNumbers),
                 unitPrice: l.unitPrice, priceLevelId: l.priceLevelId,
                 unit: l.unit,
                 unitCost: l.unitCost,
@@ -456,6 +472,9 @@ async issue(
   if (draft.items.length === 0) {
     throw new BadRequestException('Cannot print an empty invoice');
   }
+  // A discount above the org's approval limit needs an admin's approval
+  // (for at least this percentage) when a non-admin issues it.
+  await this.approvals.assertApproved(organizationId, ApprovalDocumentType.INVOICE, invoiceId, issuedByUserRole);
 
   const [org, enabledModules] = await Promise.all([
     this.prisma.organization.findUniqueOrThrow({
@@ -525,6 +544,7 @@ async issue(
       if (claim.count === 0) {
         throw new BadRequestException('Invoice is no longer a draft — it may have already been issued');
       }
+      await this.sellSerials(tx, organizationId, invoice.id, invoice.items, decreasesStockHere);
       const costedLines: {
         productId: string;
         quantity: number;
@@ -952,9 +972,9 @@ async issue(
     const searchCondition: Prisma.InvoiceWhereInput | undefined = searchTerm
       ? {
           OR: [
-            { invoiceNumber: { contains: searchTerm, mode: 'insensitive' } },
-            { customerName: { contains: searchTerm, mode: 'insensitive' } },
-            { customer: { name: { contains: searchTerm, mode: 'insensitive' } } },
+            { invoiceNumber: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(searchTerm), mode: 'insensitive' } } },
           ],
         }
       : undefined;
@@ -1037,6 +1057,45 @@ async issue(
     }
   }
 
+  // Marks the serial-numbered units on an invoice as sold. Lines of a
+  // serial-tracked product must name one serial per unit whenever this
+  // invoice takes the stock itself (`required`); when stock leaves later
+  // (warehouse picking, delivery orders) naming them is optional, but any
+  // that are named must be in stock at the line's location.
+  private async sellSerials(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    invoiceId: string,
+    items: { productId: string | null; locationId: string | null; quantity: Prisma.Decimal | number; serialNumbers: string[] }[],
+    required: boolean,
+  ) {
+    const productIds = [...new Set(items.map((i) => i.productId).filter((x): x is string => !!x))];
+    if (productIds.length === 0) return;
+    const tracked = new Map(
+      (
+        await tx.product.findMany({
+          where: { id: { in: productIds }, organizationId, trackSerials: true },
+          select: { id: true, name: true },
+        })
+      ).map((p) => [p.id, p.name]),
+    );
+    for (const item of items) {
+      if (!item.productId || !tracked.has(item.productId)) continue;
+      const serials = normalizeSerials(item.serialNumbers);
+      if (!required && serials.length === 0) continue;
+      assertSerialCount(tracked.get(item.productId)!, Number(item.quantity), serials);
+      if (!item.locationId) continue;
+      await takeSerials(tx, {
+        organizationId,
+        productId: item.productId,
+        locationId: item.locationId,
+        serials,
+        to: 'SOLD',
+        refs: { invoiceId },
+      });
+    }
+  }
+
   verifyPrintToken(token: string, invoiceId: string) {
     return this.printTokenService.verifyDocumentToken(token, 'invoice', invoiceId);
   }
@@ -1106,6 +1165,7 @@ async issue(
       billingAddress:
         invoice.customerBillingAddress ?? invoice.customer?.billingAddress ?? invoice.customer?.address ?? null,
       customerPhone: invoice.customerPhone ?? invoice.customer?.phone ?? null,
+      customerEmail: invoice.customer?.email ?? null,
       customerNpwp: invoice.customerNpwp ?? invoice.customer?.npwp ?? null,
 
       subtotal: toNumber(invoice.subtotal),
@@ -1129,6 +1189,7 @@ async issue(
         id: String(item.id),
         productName: item.productName ?? item.product?.name ?? item.description ?? '',
         sku: item.sku ?? item.product?.sku ?? null,
+        serialNumbers: item.serialNumbers ?? [],
         quantity: Number(item.quantity),
         unit: item.unit,
 
@@ -1232,14 +1293,22 @@ async issue(
   }
 
   private async nextInvoiceNumber(tx: Prisma.TransactionClient, organizationId: string) {
-    const fromImportedSequence = await this.numbering.nextForOrganization(
-      tx,
-      organizationId,
-      DocumentType.INVOICE,
+    // An admin can change the format at any time, so a new format can in
+    // principle render a number an older one already printed (e.g. going
+    // back to a past prefix). Skip ahead past any taken number rather than
+    // failing the issue on the unique constraint.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const fromSequence = await this.numbering.nextForOrganization(tx, organizationId, DocumentType.INVOICE);
+      if (!fromSequence) return this.numbering.nextSequential(tx, organizationId, 'INVOICE', 'INV');
+      const taken = await tx.invoice.findFirst({
+        where: { organizationId, invoiceNumber: fromSequence },
+        select: { id: true },
+      });
+      if (!taken) return fromSequence;
+    }
+    throw new BadRequestException(
+      'Could not find a free invoice number — check the numbering format in Settings',
     );
-    if (fromImportedSequence) return fromImportedSequence;
-
-    return this.numbering.nextSequential(tx, organizationId, 'INVOICE', 'INV');
   }
 
   async getDraftDetail(organizationId: string, id: string) {
@@ -1278,7 +1347,7 @@ async getCustomerStatement(
 ) {
   const customer = await this.prisma.customer.findFirst({
     where: { id: customerId, organizationId },
-    select: { id: true, name: true, address: true, phone: true, npwp: true },
+    select: { id: true, name: true, address: true, phone: true, email: true, npwp: true },
   });
   if (!customer) throw new NotFoundException('Customer not found');
 
@@ -1464,6 +1533,15 @@ async editIssuedInvoice(
   dto: EditIssuedInvoiceDto,
   userId: string,
 ) {
+  // Which serial-numbered units a changed line sold can't be worked out
+  // from a quantity change, so those invoices are voided and re-issued.
+  const soldSerials = await this.prisma.productSerial.count({ where: { organizationId, invoiceId } });
+  if (soldSerials > 0) {
+    throw new BadRequestException(
+      'This invoice sold serial-numbered items — void it and issue a new one to change it',
+    );
+  }
+
   const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
   const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
@@ -2032,6 +2110,8 @@ async voidInvoice(
         'Cannot void an invoice with payments recorded. Void the payment(s) first.',
       );
     }
+    // Serial-numbered units sold on it go back to stock where they were.
+    await restoreInvoiceSerials(tx, organizationId, invoice.id);
 
     // ---- Block on anything physically shipped ------------------------
     // A SalesOrder-sourced DeliveryOrder never sets deliveryOrder.invoiceId
@@ -2272,6 +2352,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             forcedPriceLevelIdByIndex,
             allowArchivedTaxRates: true,
           });
+        await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -2394,6 +2475,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             allowArchivedTaxRates: true,
           });
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
+        await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
         const invoice = await tx.invoice.create({
           data: {
             organizationId,

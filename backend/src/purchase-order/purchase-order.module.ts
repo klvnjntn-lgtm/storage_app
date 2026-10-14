@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApprovalsModule } from '../approvals/approvals.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SharedDocumentsModule } from '../shared/documents/shared-documents.module';
 import { PurchaseOrderService } from './purchase-order.service';
@@ -9,7 +10,7 @@ import { ProductModule } from 'src/product/product.module';
 import { AccountingModule } from 'src/accounting/accounting.module';
 
 @Module({
-  imports: [PrismaModule, AccountingModule, SharedDocumentsModule, PrintModule, ProductModule],
+  imports: [PrismaModule, AccountingModule, SharedDocumentsModule, PrintModule, ProductModule, ApprovalsModule],
   controllers: [PurchaseOrderController, PurchaseOrderPrintController],
   providers: [PurchaseOrderService],
   exports: [PurchaseOrderService],

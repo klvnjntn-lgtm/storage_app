@@ -32,12 +32,19 @@ export class KeygenService {
 
     const json = await res.json();
 
-    this.logger.log(`KEYGEN RESPONSE ${JSON.stringify(json)}`);
+    // Never the whole body: it carries the license key itself.
+    this.logger.debug(
+      `Keygen responded ${res.status} (${json?.meta?.code ?? 'no code'})`,
+    );
 
     return json;
   }
 
-  async activateMachine(licenseKey: string, licenseId: string, fingerprint: string) {
+  async activateMachine(
+    licenseKey: string,
+    licenseId: string,
+    fingerprint: string,
+  ) {
     const res = await fetch(`${this.baseUrl()}/machines`, {
       method: 'POST',
       headers: {
@@ -63,4 +70,3 @@ export class KeygenService {
   // be distributed. Run license creation from a separate internal tool
   // that you control and never ship.
 }
-

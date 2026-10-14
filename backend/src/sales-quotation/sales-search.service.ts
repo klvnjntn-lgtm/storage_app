@@ -9,6 +9,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { escapeLike } from '../common/text/escape-like';
 
 // Per-type fetch cap before merging/sorting/paginating — bounded so the
 // query stays cheap, generous enough that real pagination (not just a
@@ -67,9 +68,9 @@ export class SalesSearchService {
         where: {
           organizationId,
           OR: [
-            { quotationNumber: { contains: q, mode: 'insensitive' } },
-            { customerName: { contains: q, mode: 'insensitive' } },
-            { customer: { name: { contains: q, mode: 'insensitive' } } },
+            { quotationNumber: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         },
         select: {
@@ -88,9 +89,9 @@ export class SalesSearchService {
         where: {
           organizationId,
           OR: [
-            { orderNumber: { contains: q, mode: 'insensitive' } },
-            { customerName: { contains: q, mode: 'insensitive' } },
-            { customer: { name: { contains: q, mode: 'insensitive' } } },
+            { orderNumber: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         },
         select: {
@@ -109,9 +110,9 @@ export class SalesSearchService {
         where: {
           organizationId,
           OR: [
-            { invoiceNumber: { contains: q, mode: 'insensitive' } },
-            { customerName: { contains: q, mode: 'insensitive' } },
-            { customer: { name: { contains: q, mode: 'insensitive' } } },
+            { invoiceNumber: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         },
         select: {
@@ -130,9 +131,9 @@ export class SalesSearchService {
         where: {
           organizationId,
           OR: [
-            { doNumber: { contains: q, mode: 'insensitive' } },
-            { customerName: { contains: q, mode: 'insensitive' } },
-            { customer: { name: { contains: q, mode: 'insensitive' } } },
+            { doNumber: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         },
         select: {

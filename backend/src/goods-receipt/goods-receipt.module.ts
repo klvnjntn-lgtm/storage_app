@@ -5,12 +5,13 @@ import { SharedDocumentsModule } from '../shared/documents/shared-documents.modu
 import { AccountingModule } from '../accounting/accounting.module';
 import { GoodsReceiptController } from './goods-receipt.controller';
 import { GoodsReceiptService } from './goods-receipt.service';
+import { BatchesModule } from '../batches/batches.module';
 
 // Receiving stock against a purchase order: adds the stock, moves the PO to
 // PARTIALLY/FULLY_RECEIVED, and posts Inventory/AP — the AP that supplier
 // payments are then made against.
 @Module({
-  imports: [PrismaModule, StockModule, SharedDocumentsModule, AccountingModule],
+  imports: [PrismaModule, StockModule, SharedDocumentsModule, AccountingModule, BatchesModule],
   controllers: [GoodsReceiptController],
   providers: [GoodsReceiptService],
   exports: [GoodsReceiptService],

@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { AuditContext, writeAudit } from './platform-audit';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import { effectivePlan } from '../billing/plans';
+import { adjustWaBalance } from '../messaging/wa-wallet';
 
 const ORG_FIELDS = {
   id: true,
@@ -19,7 +21,10 @@ const ORG_FIELDS = {
   suspendedAt: true,
   suspendedReason: true,
   paidUntil: true,
+  trialEndsAt: true,
   billingNote: true,
+  onboardingCompletedAt: true,
+  waBalance: true,
   modules: { select: { module: true, enabled: true, expiresAt: true } },
 } satisfies Prisma.OrganizationSelect;
 
@@ -27,6 +32,7 @@ const BILLING_FIELDS = [
   'plan',
   'seatLimit',
   'paidUntil',
+  'trialEndsAt',
   'billingNote',
 ] as const;
 
@@ -37,8 +43,11 @@ export class PlatformService {
     private readonly modules: OrganizationModulesService,
   ) {}
 
+  // Usage per tenant (products, invoices in the last 30 days, media
+  // storage) is metered with one groupBy each, not a query per org.
   async listOrganizations() {
-    const [orgs, seats, logins] = await Promise.all([
+    const since = new Date(Date.now() - 30 * 86_400_000);
+    const [orgs, seats, logins, products, invoices, media] = await Promise.all([
       this.prisma.organization.findMany({
         select: ORG_FIELDS,
         orderBy: { createdAt: 'desc' },
@@ -52,7 +61,26 @@ export class PlatformService {
         by: ['organizationId'],
         _max: { lastActiveAt: true },
       }),
+      this.prisma.product.groupBy({
+        by: ['organizationId'],
+        where: { active: true },
+        _count: { _all: true },
+      }),
+      this.prisma.invoice.groupBy({
+        by: ['organizationId'],
+        where: { createdAt: { gte: since } },
+        _count: { _all: true },
+      }),
+      this.prisma.mediaAsset.groupBy({
+        by: ['organizationId'],
+        _sum: { sizeBytes: true },
+      }),
     ]);
+    const countBy = (rows: { organizationId: string; _count: { _all: number } }[]) =>
+      new Map(rows.map((r) => [r.organizationId, r._count._all]));
+    const productCount = countBy(products);
+    const invoiceCount = countBy(invoices);
+    const mediaBytes = new Map(media.map((m) => [m.organizationId, m._sum.sizeBytes ?? 0]));
     const seatsUsed = new Map(
       seats.map((s) => [s.organizationId, s._count._all]),
     );
@@ -61,8 +89,14 @@ export class PlatformService {
     );
     return orgs.map((o) => ({
       ...o,
+      effectivePlan: effectivePlan(o),
       seatsUsed: seatsUsed.get(o.id) ?? 0,
       lastActiveAt: lastActive.get(o.id) ?? null,
+      usage: {
+        products: productCount.get(o.id) ?? 0,
+        invoices30d: invoiceCount.get(o.id) ?? 0,
+        mediaBytes: mediaBytes.get(o.id) ?? 0,
+      },
     }));
   }
 
@@ -109,6 +143,9 @@ export class PlatformService {
     if (dto.seatLimit !== undefined) data.seatLimit = dto.seatLimit;
     if (dto.paidUntil !== undefined)
       data.paidUntil = dto.paidUntil === null ? null : new Date(dto.paidUntil);
+    if (dto.trialEndsAt !== undefined)
+      data.trialEndsAt =
+        dto.trialEndsAt === null ? null : new Date(dto.trialEndsAt);
     if (dto.billingNote !== undefined)
       data.billingNote = dto.billingNote?.trim() || null;
     if (Object.keys(data).length === 0)
@@ -121,6 +158,7 @@ export class PlatformService {
           plan: true,
           seatLimit: true,
           paidUntil: true,
+          trialEndsAt: true,
           billingNote: true,
         },
       });
@@ -132,6 +170,7 @@ export class PlatformService {
           plan: true,
           seatLimit: true,
           paidUntil: true,
+          trialEndsAt: true,
           billingNote: true,
         },
       });
@@ -142,6 +181,20 @@ export class PlatformService {
         after: pick(after, changed),
       });
       return after;
+    });
+  }
+
+  async adjustWaBalance(ctx: AuditContext, id: string, amount: number, note: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.organization.findUnique({ where: { id }, select: { waBalance: true } });
+      if (!before) throw new NotFoundException('Organization not found');
+      const entry = await adjustWaBalance(tx, id, amount, note.trim(), ctx.actor.id);
+      await writeAudit(tx, ctx, 'organization.waBalance', {
+        organizationId: id,
+        before: { waBalance: Number(before.waBalance) },
+        after: { waBalance: Number(entry.balanceAfter), note: note.trim() },
+      });
+      return { waBalance: Number(entry.balanceAfter) };
     });
   }
 

@@ -12,22 +12,34 @@ import { applyPriceLevel, resolveLinePrice, restoredLevelFields, toLevelPrices, 
 import { CartPanel } from '@/app/components/invoices/CartPanel';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
 import {
-  BankAccount,
   CartLine,
   Customer,
   DiscountType,
-  Employee,
   InvoiceFormat,
   InvoiceView,
   LocationOption,
   ProductSearchResult,
   ServiceLine,
-  TaxRate,
 } from '@/app/components/invoices/types';
 import { PAGE_CSS } from '@/lib/mappers/invoice-format';
-import { toCalendarDateString } from '@/lib/dates';
+import * as cartOps from '@/lib/invoice-cart';
+import { SerialPicker } from '@/app/components/shared/SerialPicker';
+import { useStagedReminder } from '@/app/components/invoices/hooks/useStagedReminder';
+import { useInvoiceReferenceData } from '@/app/components/invoices/hooks/useInvoiceReferenceData';
+import {
+  confirmStockOversell,
+  extractErrorMessage,
+  hasSaveableContent,
+  NO_BANK_ACCOUNT,
+  stockAtLineLocation,
+} from '@/lib/invoice-cart';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
+import {
+  ApprovalRequiredNotice,
+  isApprovalRequired,
+  type ApprovalRequiredError,
+} from '@/app/components/approvals/ApprovalRequiredNotice';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -41,66 +53,7 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 // draft has been loaded from the server, its bankAccountId is already a
 // resolved value (a real id or null), so '' never reappears for a loaded
 // draft — see loadDraftById below.
-const NO_BANK_ACCOUNT = '__none__';
 
-type RawTaxRate = TaxRate & { archivedAt: string | null };
-type RawBankAccount = BankAccount & { archivedAt: string | null };
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function lineDiscountAmount(
-  lineSubtotal: number,
-  discountType: DiscountType | null,
-  discountValue: number | null,
-): number {
-  if (discountType === 'PERCENTAGE') return round2(lineSubtotal * ((discountValue ?? 0) / 100));
-  if (discountType === 'FIXED') return round2(Math.min(discountValue ?? 0, lineSubtotal));
-  return 0;
-}
-
-// Also true for a bare customer selection with an empty cart — exiting
-// the page (tab close, refresh, navigating away) should still leave a
-// draft behind so that pick isn't lost, not just once there's a line item.
-function hasSaveableContent(
-  cart: Record<string, CartLine>,
-  services: ServiceLine[],
-  hasWorkshopRms: boolean,
-  customer: Customer | null,
-  customerName: string,
-): boolean {
-  return (
-    Object.keys(cart).length > 0 ||
-    (hasWorkshopRms && services.some((s) => s.description.trim() && s.unitPrice !== null)) ||
-    !!customer ||
-    !!customerName.trim()
-  );
-}
-
-async function extractErrorMessage(res: Response, t: (key: string, vars?: Record<string, string | number>) => string): Promise<string> {
-  try {
-    const data = await res.json();
-    return data?.message || JSON.stringify(data);
-  } catch {
-    return res.statusText || t('sales.invoicesNew.requestFailed', { status: res.status });
-  }
-}
-
-// A 409 from POST /invoices/:id/print under StockPolicy.WARN — the backend
-// refused to oversell without confirmation. Ask, then the caller resubmits
-// with confirmOversell: true. Not a generic error: this is the one 409 the
-// print endpoint uses for this specific reason (see
-// StockConfirmationRequiredException on the backend).
-async function confirmStockOversell(res: Response): Promise<boolean> {
-  try {
-    const data = await res.json();
-    if (data?.error !== 'STOCK_CONFIRMATION_REQUIRED') return false;
-    return window.confirm(data.message as string);
-  } catch {
-    return false;
-  }
-}
 
 // FIX — NewInvoicePage uses useSearchParams(), which requires a Suspense
 // boundary for static prerendering, or `next build` fails outright. See
@@ -140,6 +93,9 @@ function NewInvoicePage() {
 
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState('');
+  // Issue refused for an over-limit discount: the draft is saved, and the
+  // notice lets the cashier ask an admin to approve it.
+  const [approvalError, setApprovalError] = useState<ApprovalRequiredError | null>(null);
   const [printData, setPrintData] = useState<InvoiceView | null>(null);
 
   const [posPricingEnabled, setPosPricingEnabled] = useState(false);
@@ -158,17 +114,14 @@ function NewInvoicePage() {
     !!stockPolicy?.allowNegative &&
     !(stockPolicy.requiresConfirmation && stockPolicy.overrideRequiresAdmin && profile?.role !== 'ADMIN');
 
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
   // Bank account picker. '' = untouched (backend uses org default),
   // NO_BANK_ACCOUNT = explicit "no bank details", otherwise a real
   // OrganizationBankAccount id.
-  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [bankAccountId, setBankAccountId] = useState<string>('');
 
   // Employee (sales/cashier) picker. '' means unset — omitted from the
   // payload, so the invoice carries no employee.
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<string>('');
 
   // The current draft's id — a ref, not state, because it's read after
@@ -182,7 +135,7 @@ function NewInvoicePage() {
 
   const loadedDraftIdRef = useRef<string | null | undefined>(undefined);
 
-  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const { locations, taxRates, bankAccounts, employees } = useInvoiceReferenceData();
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -202,13 +155,7 @@ function NewInvoicePage() {
   const [services, setServices] = useState<ServiceLine[]>([]);
   const serviceCounterRef = useRef(0);
 
-  const [reminderOpen, setReminderOpen] = useState(false);
-  const [reminderNote, setReminderNote] = useState('');
-  const [reminderDueDate, setReminderDueDate] = useState('');
-  const [reminderStaged, setReminderStaged] = useState(false);
-  const [reminderSaving, setReminderSaving] = useState(false);
-  const [reminderSaved, setReminderSaved] = useState(false);
-  const [reminderError, setReminderError] = useState('');
+  const reminder = useStagedReminder(vehicleId);
 
   const cartPanelRef = useRef<HTMLDivElement>(null);
   function scrollToCart() {
@@ -245,59 +192,6 @@ function NewInvoicePage() {
       const res = await apiFetch('/invoices/stock-policy');
       if (res.ok) setStockPolicy(await res.json());
     })();
-  }, []);
-
-  useEffect(() => {
-    async function loadLocations() {
-      const res = await apiFetch('/locations');
-      if (!res.ok) return;
-      const data: LocationOption[] = await res.json();
-      setLocations(data);
-    }
-    loadLocations();
-  }, []);
-
-  useEffect(() => {
-    async function loadTaxRates() {
-      const res = await apiFetch('/organization/tax-rates');
-      if (!res.ok) return;
-      const rates: RawTaxRate[] = await res.json();
-      setTaxRates(
-        rates
-          .filter((r) => !r.archivedAt)
-          .map((r) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: r.isDefault })),
-      );
-    }
-    loadTaxRates();
-  }, []);
-
-  useEffect(() => {
-    async function loadBankAccounts() {
-      const res = await apiFetch('/organization/bank-accounts');
-      if (!res.ok) return;
-      const accounts: RawBankAccount[] = await res.json();
-      setBankAccounts(
-        accounts
-          .filter((a) => !a.archivedAt)
-          .map((a) => ({
-            id: a.id,
-            bankName: a.bankName,
-            accountNumber: a.accountNumber,
-            accountName: a.accountName,
-            isDefault: a.isDefault,
-          })),
-      );
-    }
-    loadBankAccounts();
-  }, []);
-
-  useEffect(() => {
-    async function loadEmployees() {
-      const res = await apiFetch('/payroll/employees');
-      if (!res.ok) return;
-      setEmployees(await res.json());
-    }
-    loadEmployees();
   }, []);
 
   useEffect(() => {
@@ -355,12 +249,6 @@ function NewInvoicePage() {
   }, [customerVehicles, vehiclesLoading, customer?.id]);
 
   useEffect(() => {
-    setReminderOpen(false);
-    setReminderNote('');
-    setReminderDueDate('');
-    setReminderStaged(false);
-    setReminderSaved(false);
-    setReminderError('');
     if (!vehicleId) setOdometer('');
   }, [vehicleId]);
 
@@ -431,7 +319,9 @@ function NewInvoicePage() {
           prices: toLevelPrices(item.product?.prices),
           unit: item.product?.unit ?? null,
           stockByLocation: [],
+          trackSerials: !!item.product?.trackSerials,
         },
+        serialNumbers: item.serialNumbers ?? [],
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
         unit: item.unit ?? item.product?.unit ?? null,
@@ -495,14 +385,6 @@ function NewInvoicePage() {
     performSearch(query, loc);
   }
 
-  function cartKey(productId: string, locationId: string) {
-    return `${productId}__${locationId}`;
-  }
-
-  function stockAtLineLocation(line: CartLine): number {
-    return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
-  }
-
   function addToCart(
     product: ProductSearchResult,
     details: {
@@ -515,48 +397,13 @@ function NewInvoicePage() {
     },
   ): boolean {
     setError('');
-    let target: { locationId: string; locationName: string; quantity: number } | undefined;
-    if (locationFilter) {
-      target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
-      if (!target && allowOversell) {
-        target = { locationId: locationFilter.id, locationName: locationFilter.name, quantity: 0 };
-      }
-      if (!target || (!allowOversell && target.quantity <= 0)) {
-        setError(t('sales.invoicesNew.stockNotAtLocation', { name: product.name, location: locationFilter.name }));
-        return false;
-      }
-    } else {
-      target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
-      if (!target) {
-        // Nothing recorded anywhere: overselling still needs a location to
-        // take it from, and guessing one would be wrong.
-        setError(
-          allowOversell
-            ? t('sales.invoicesNew.pickLocationToOversell', { name: product.name })
-            : t('sales.invoicesNew.noStockAnywhere', { name: product.name }),
-        );
-        return false;
-      }
-      if (!allowOversell && target.quantity <= 0) {
-        setError(t('sales.invoicesNew.noStockAnywhere', { name: product.name }));
-        return false;
-      }
-    }
-
-    const resolvedTarget = target;
-    const key = cartKey(product.id, resolvedTarget.locationId);
-    const existing = cart[key];
-    const nextQty = (existing?.quantity ?? 0) + details.quantity;
-    if (!allowOversell && nextQty > resolvedTarget.quantity) {
-      setError(
-        t('sales.invoicesNew.onlyAvailable', {
-          qty: resolvedTarget.quantity,
-          name: product.name,
-          location: resolvedTarget.locationName,
-        }),
-      );
+    const placed = cartOps.resolveCartTarget(cart, product, details.quantity, locationFilter, allowOversell);
+    if (!placed.ok) {
+      setError(t(placed.error, placed.vars));
       return false;
     }
+    const { target: resolvedTarget, key, nextQty } = placed;
+    const existing = cart[key];
 
     setCart((prev) => ({
       ...prev,
@@ -582,339 +429,75 @@ function NewInvoicePage() {
     return true;
   }
 
-  function changeQty(key: string, delta: number) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      const nextQty = Math.round((line.quantity + delta) * 100) / 100;
-      if (nextQty <= 0) {
-        const { [key]: _removed, ...rest } = prev;
-        return rest;
-      }
-      // Same rule as addToCart() and CartPanel's "+" stepper: past stock
-      // only when the org's stock policy allows overselling.
-      const available = stockAtLineLocation(line);
-      if (!allowOversell && nextQty > available) return prev;
-      return { ...prev, [key]: { ...line, quantity: nextQty } };
-    });
-  }
-
-  function changeUnitPrice(key: string, rawValue: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      const parsed = Number(rawValue);
-      const nextPrice = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-      return { ...prev, [key]: { ...line, unitPrice: nextPrice, priceCustom: true } };
-    });
-  }
-
-  // Picking a level by hand pins the line to it and drops any typed price.
-  function changePriceLevel(key: string, levelId: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      return { ...prev, [key]: { ...line, priceLevelId: levelId, priceLevelOverridden: true, priceCustom: false } };
-    });
-  }
-
-  function removeFromCart(key: string) {
-    setCart((prev) => {
-      const { [key]: _removed, ...rest } = prev;
-      return rest;
-    });
-  }
-
-  function toggleLineTaxRate(key: string, taxRateId: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      const has = line.taxRateIds.includes(taxRateId);
-      return {
-        ...prev,
-        [key]: {
-          ...line,
-          taxRateIds: has
-            ? line.taxRateIds.filter((id) => id !== taxRateId)
-            : [...line.taxRateIds, taxRateId],
-        },
-      };
-    });
-  }
-
-  // FIX — PERCENTAGE was unclamped above 100, letting a mistyped
-  // discount (e.g. 500) drive netAmount negative and submit a negative
-  // line/document total with no client-side rejection.
-  function changeLineDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      if (discountType === null) return { ...prev, [key]: { ...line, discountType: null, discountValue: null } };
-      const parsed = Number(rawValue);
-      const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
-      const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (line.discountValue ?? 0);
-      return { ...prev, [key]: { ...line, discountType, discountValue: nextValue } };
-    });
-  }
-
-  function changeServiceDiscount(key: string, discountType: DiscountType | null, rawValue?: string) {
-    setServices((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s;
-        if (discountType === null) return { ...s, discountType: null, discountValue: null };
-        const parsed = Number(rawValue);
-        const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
-        const nextValue = Number.isFinite(clamped) && clamped >= 0 ? clamped : (s.discountValue ?? 0);
-        return { ...s, discountType, discountValue: nextValue };
-      }),
-    );
-  }
+  // Line edits — the transforms themselves live in lib/invoice-cart.ts.
+  const changeQty = (key: string, delta: number) => setCart((prev) => cartOps.changeQty(prev, key, delta, allowOversell));
+  const changeUnitPrice = (key: string, raw: string) => setCart((prev) => cartOps.setUnitPrice(prev, key, raw));
+  const changePriceLevel = (key: string, levelId: string) => setCart((prev) => cartOps.setPriceLevel(prev, key, levelId));
+  const removeFromCart = (key: string) => setCart((prev) => cartOps.removeLine(prev, key));
+  // The line whose serial numbers are being picked (SerialPicker).
+  const [serialKey, setSerialKey] = useState<string | null>(null);
+  const toggleLineTaxRate = (key: string, taxRateId: string) => setCart((prev) => cartOps.toggleLineTax(prev, key, taxRateId));
+  const changeLineDiscount = (key: string, type: DiscountType | null, raw?: string) =>
+    setCart((prev) => cartOps.setLineDiscount(prev, key, type, raw));
+  const changeServiceDiscount = (key: string, type: DiscountType | null, raw?: string) =>
+    setServices((prev) => cartOps.setServiceDiscount(prev, key, type, raw));
 
   function applyTaxToAllLines(taxRateId: string, checked: boolean) {
-    setCart((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        const line = next[key];
-        const has = line.taxRateIds.includes(taxRateId);
-        if (checked && !has) next[key] = { ...line, taxRateIds: [...line.taxRateIds, taxRateId] };
-        if (!checked && has) next[key] = { ...line, taxRateIds: line.taxRateIds.filter((id) => id !== taxRateId) };
-      }
-      return next;
-    });
-    setServices((prev) =>
-      prev.map((s) => {
-        const has = s.taxRateIds.includes(taxRateId);
-        if (checked && !has) return { ...s, taxRateIds: [...s.taxRateIds, taxRateId] };
-        if (!checked && has) return { ...s, taxRateIds: s.taxRateIds.filter((id) => id !== taxRateId) };
-        return s;
-      }),
-    );
+    setCart((prev) => cartOps.applyTaxToAllLines(prev, taxRateId, checked));
+    setServices((prev) => cartOps.applyTaxToAllServices(prev, taxRateId, checked));
   }
 
   function applyDiscountToAllLines(discountType: DiscountType | null, value: number) {
-    setCart((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        next[key] = { ...next[key], discountType, discountValue: discountType ? value : null };
-      }
-      return next;
-    });
-    setServices((prev) => prev.map((s) => ({ ...s, discountType, discountValue: discountType ? value : null })));
+    setCart((prev) => cartOps.applyDiscountToAllLines(prev, discountType, value));
+    setServices((prev) => cartOps.applyDiscountToAllServices(prev, discountType, value));
   }
 
   function addService() {
     serviceCounterRef.current += 1;
     const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
-    const defaultRate = taxRates.find((r) => r.isDefault);
-    setServices((prev) => [
-      ...prev,
-      {
-        key,
-        description: '',
-        unitPrice: null,
-        unit: null,
-        taxRateIds: defaultRate ? [defaultRate.id] : [],
-        discountType: null,
-        discountValue: null,
-      },
-    ]);
+    setServices((prev) => [...prev, cartOps.newServiceLine(key, taxRates.find((r) => r.isDefault)?.id)]);
   }
 
-  function changeServiceUnit(key: string, value: string) {
-    setServices((prev) =>
-      prev.map((s) => (s.key === key ? { ...s, unit: value.trim() || null } : s)),
-    );
-  }
-
-  function changeServiceDescription(key: string, value: string) {
-    setServices((prev) => prev.map((s) => (s.key === key ? { ...s, description: value } : s)));
-  }
-
-  function changeServicePrice(key: string, raw: string) {
-    setServices((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s;
-        if (raw.trim() === '') return { ...s, unitPrice: null };
-        const parsed = Number(raw);
-        return { ...s, unitPrice: Number.isFinite(parsed) && parsed >= 0 ? parsed : s.unitPrice };
-      }),
-    );
-  }
-
-  function removeService(key: string) {
-    setServices((prev) => prev.filter((s) => s.key !== key));
-  }
-
-  function toggleServiceTaxRate(key: string, taxRateId: string) {
-    setServices((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s;
-        const has = s.taxRateIds.includes(taxRateId);
-        return {
-          ...s,
-          taxRateIds: has ? s.taxRateIds.filter((id) => id !== taxRateId) : [...s.taxRateIds, taxRateId],
-        };
-      }),
-    );
-  }
+  const changeServiceUnit = (key: string, value: string) => setServices((prev) => cartOps.setServiceUnit(prev, key, value));
+  const changeServiceDescription = (key: string, value: string) =>
+    setServices((prev) => cartOps.setServiceDescription(prev, key, value));
+  const changeServicePrice = (key: string, raw: string) => setServices((prev) => cartOps.setServicePrice(prev, key, raw));
+  const removeService = (key: string) => setServices((prev) => prev.filter((s) => s.key !== key));
+  const toggleServiceTaxRate = (key: string, taxRateId: string) =>
+    setServices((prev) => cartOps.toggleServiceTax(prev, key, taxRateId));
 
   // FIX — was d.toISOString().slice(0, 10), which converts to UTC first
   // and rolls the date back one day in a timezone ahead of UTC.
-  function pickReminderPreset(months: number) {
-    const d = new Date();
-    d.setMonth(d.getMonth() + months);
-    setReminderDueDate(toCalendarDateString(d));
-    setReminderSaved(false);
-  }
-
-  function stageReminder() {
-    if (!vehicleId || !reminderNote.trim() || !reminderDueDate) return;
-    setReminderStaged(true);
-    setReminderError('');
-  }
-
-  async function submitStagedReminder() {
-    if (!vehicleId || !reminderStaged || !reminderNote.trim() || !reminderDueDate) return;
-    setReminderSaving(true);
-    setReminderError('');
-    try {
-      const res = await apiFetch(`/vehicles/${vehicleId}/reminders`, {
-        method: 'POST',
-        body: JSON.stringify({
-          note: reminderNote.trim(),
-          dueDate: new Date(reminderDueDate).toISOString(),
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.message || `Failed to save reminder (${res.status})`);
-      }
-      setReminderSaved(true);
-    } catch (e: any) {
-      console.error('Reminder submit failed', e);
-    } finally {
-      setReminderSaving(false);
-    }
-  }
-
-  const cartLines = Object.entries(cart).map(([key, rawLine]) => {
-    const line = applyPriceLevel(rawLine, basePriceLevelId, defaultLevelId, activeLevelIds);
-    const lineSubtotal = line.unitPrice * line.quantity;
-    const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
-    const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => line.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(
-      lineRates.reduce((sum, rate) => sum + netAmount * (rate.percentage / 100), 0),
-    );
-    return {
-      key,
-      ...line,
-      lineSubtotal,
-      lineDiscountAmount: discAmt,
-      netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
-    };
-  });
+  const {
+    cartLines,
+    serviceLines: serviceLinesWithTotals,
+    subtotal,
+    discount,
+    taxAmount,
+    total,
+  } = cartOps.computeTotals(
+    Object.entries(cart).map(([key, line]) => ({ key, ...applyPriceLevel(line, basePriceLevelId, defaultLevelId, activeLevelIds) })),
+    services,
+    taxRates,
+  );
   const distinctLocationNames = Array.from(new Set(cartLines.map((l) => l.locationName)));
-
-  const serviceLinesWithTotals = services.map((s) => {
-    const lineSubtotal = s.unitPrice ?? 0;
-    const discAmt = lineDiscountAmount(lineSubtotal, s.discountType, s.discountValue);
-    const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => s.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(
-      lineRates.reduce((sum, rate) => sum + netAmount * (rate.percentage / 100), 0),
-    );
-    return {
-      ...s,
-      lineSubtotal,
-      lineDiscountAmount: discAmt,
-      netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
-    };
-  });
-
-  const subtotal =
-    cartLines.reduce((sum, line) => sum + line.lineSubtotal, 0) +
-    serviceLinesWithTotals.reduce((sum, s) => sum + s.lineSubtotal, 0);
-  const discount = round2(
-    cartLines.reduce((sum, line) => sum + line.lineDiscountAmount, 0) +
-      serviceLinesWithTotals.reduce((sum, s) => sum + s.lineDiscountAmount, 0),
-  );
-  const taxAmount = round2(
-    cartLines.reduce((sum, line) => sum + line.lineTaxAmount, 0) +
-      serviceLinesWithTotals.reduce((sum, s) => sum + s.lineTaxAmount, 0),
-  );
-  const total = round2(subtotal - discount + taxAmount);
   const totalLineCount = cartLines.length + serviceLinesWithTotals.length;
 
-  function buildItemsPayload() {
-    const productItems = cartLines.map((line) => ({
-      productId: line.product.id,
-      quantity: line.quantity,
-      unit: line.unit ?? undefined,
-      locationId: line.locationId,
-      unitPrice: line.unitPrice,
-      // A typed (custom) price comes from no level.
-      priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
-      taxRateIds: line.taxRateIds,
-      discountType: line.discountType ?? undefined,
-      discountValue: line.discountValue ?? undefined,
-    }));
-    const serviceItems = hasWorkshopRms
-      ? services
-          .filter((s) => s.description.trim() && s.unitPrice !== null)
-          .map((s) => ({
-            description: s.description.trim(),
-            quantity: 1,
-            unitPrice: s.unitPrice as number,
-            unit: s.unit ?? undefined,
-            taxRateIds: s.taxRateIds,
-            discountType: s.discountType ?? undefined,
-            discountValue: s.discountValue ?? undefined,
-          }))
-      : [];
-    return [...productItems, ...serviceItems];
-  }
-
-  // Explicit nulls, not undefined: undefined is dropped from the JSON and
-  // the backend keeps the draft's old value, so switching to receipt format
-  // (or removing the customer/vehicle) never actually cleared them.
-  function buildCustomerFields() {
-    return format === 'A5' || format === 'A4'
-      ? { customerId: customer?.id ?? null, customerName: null, vehicleId: vehicleId ?? null }
-      : { customerId: null, customerName: customerName.trim() || null, vehicleId: null };
-  }
-
-  function buildInvoiceInfoFields() {
-    if (!customerNameRequired) return {};
-    return {
-      customerPoNumber: customerPoNumber.trim() || undefined,
-      paymentTerms: paymentTerms.trim() || undefined,
-      notes: notes.trim() || undefined,
-    };
-  }
-
-  function buildOdometerField() {
-    if (!hasWorkshopRms || (format !== 'A5' && format !== 'A4') || !vehicleId || !odometer.trim()) return {};
-    const parsed = Number(odometer);
-    return Number.isFinite(parsed) ? { odometer: parsed } : {};
-  }
-
-  // '' (untouched) omits the field entirely, letting the backend resolve
-  // to the org's current default. NO_BANK_ACCOUNT sends an explicit null
-  // (no bank details on this document). Anything else is a chosen
-  // account id.
-  function buildBankAccountField() {
-    if (bankAccountId === '') return {};
-    return { bankAccountId: bankAccountId === NO_BANK_ACCOUNT ? null : bankAccountId };
-  }
-
-  function buildEmployeeField() {
-    return { employeeId: employeeId || null };
-  }
+  const buildItemsPayload = () => cartOps.buildInvoiceItems(cartLines, services, hasWorkshopRms);
+  const buildHeader = () =>
+    cartOps.buildInvoiceHeader({
+      format,
+      customer,
+      customerName,
+      vehicleId,
+      customerPoNumber,
+      paymentTerms,
+      notes,
+      odometer,
+      hasWorkshopRms,
+      bankAccountId,
+      employeeId,
+    });
 
   function adoptDraftId(id: string) {
     loadedDraftIdRef.current = id;
@@ -950,11 +533,7 @@ function NewInvoicePage() {
           keepalive: useKeepalive,
           body: JSON.stringify({
             format,
-            ...buildCustomerFields(),
-            ...buildOdometerField(),
-            ...buildInvoiceInfoFields(),
-            ...buildBankAccountField(),
-            ...buildEmployeeField(),
+            ...buildHeader(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -967,11 +546,7 @@ function NewInvoicePage() {
           body: JSON.stringify({
             locationId: cartLines[0]?.locationId,
             format,
-            ...buildCustomerFields(),
-            ...buildOdometerField(),
-            ...buildInvoiceInfoFields(),
-            ...buildBankAccountField(),
-            ...buildEmployeeField(),
+            ...buildHeader(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -1070,11 +645,7 @@ function NewInvoicePage() {
           method: 'PATCH',
           body: JSON.stringify({
             format,
-            ...buildCustomerFields(),
-            ...buildOdometerField(),
-            ...buildInvoiceInfoFields(),
-            ...buildBankAccountField(),
-            ...buildEmployeeField(),
+            ...buildHeader(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -1089,11 +660,7 @@ function NewInvoicePage() {
           body: JSON.stringify({
             locationId: cartLines[0]?.locationId,
             format,
-            ...buildCustomerFields(),
-            ...buildOdometerField(),
-            ...buildInvoiceInfoFields(),
-            ...buildBankAccountField(),
-            ...buildEmployeeField(),
+            ...buildHeader(),
             items: itemsPayload,
             dueDate: dueDate || undefined,
             invoiceDate: invoiceDate || undefined,
@@ -1120,12 +687,21 @@ function NewInvoicePage() {
           body: JSON.stringify({ confirmOversell: true }),
         });
       }
+      if (printRes.status === 403) {
+        const body = await printRes.clone().json().catch(() => null);
+        if (isApprovalRequired(body)) {
+          setApprovalError(body);
+          setPrinting(false);
+          return;
+        }
+      }
       if (!printRes.ok) {
         throw new Error(await extractErrorMessage(printRes, t));
       }
+      setApprovalError(null);
       const issued = await printRes.json();
 
-      await submitStagedReminder();
+      await reminder.submit();
 
       if (format !== 'RECEIPT' && format !== 'THERMAL_58') {
         router.push(`/sales/invoices/${invoiceId}`);
@@ -1219,12 +795,7 @@ function NewInvoicePage() {
       setServices([]);
       setBankAccountId('');
       setEmployeeId('');
-      setReminderOpen(false);
-      setReminderNote('');
-      setReminderDueDate('');
-      setReminderStaged(false);
-      setReminderSaved(false);
-      setReminderError('');
+      reminder.reset();
       draftIdRef.current = null;
       loadedDraftIdRef.current = null;
       router.replace('/sales/invoices/new', { scroll: false });
@@ -1363,6 +934,7 @@ function NewInvoicePage() {
             changeUnitPrice={changeUnitPrice}
             onChangePriceLevel={changePriceLevel}
             removeFromCart={removeFromCart}
+            onPickSerials={setSerialKey}
             stockAtLineLocation={stockAtLineLocation}
             posModeEnabled={posModeEnabled}
             allowOversell={allowOversell}
@@ -1389,18 +961,18 @@ function NewInvoicePage() {
             onChangeOdometer={setOdometer}
             invoiceDate={invoiceDate}
             onChangeInvoiceDate={setInvoiceDate}
-            reminderOpen={reminderOpen}
-            onToggleReminderOpen={() => setReminderOpen((v) => !v)}
-            reminderNote={reminderNote}
-            onChangeReminderNote={setReminderNote}
-            reminderDueDate={reminderDueDate}
-            onChangeReminderDueDate={setReminderDueDate}
-            onPickReminderPreset={pickReminderPreset}
-            onSaveReminder={stageReminder}
-            reminderStaged={reminderStaged}
-            reminderSaving={reminderSaving}
-            reminderSaved={reminderSaved}
-            reminderError={reminderError}
+            reminderOpen={reminder.open}
+            onToggleReminderOpen={reminder.toggleOpen}
+            reminderNote={reminder.note}
+            onChangeReminderNote={reminder.setNote}
+            reminderDueDate={reminder.dueDate}
+            onChangeReminderDueDate={reminder.setDueDate}
+            onPickReminderPreset={reminder.pickPreset}
+            onSaveReminder={reminder.stage}
+            reminderStaged={reminder.staged}
+            reminderSaving={reminder.saving}
+            reminderSaved={reminder.saved}
+            reminderError={reminder.error}
             services={serviceLinesWithTotals}
             onChangeServiceUnit={changeServiceUnit}
             onAddService={addService}
@@ -1435,6 +1007,22 @@ function NewInvoicePage() {
       )}
 
       {printData && <InvoicePrintArea format={format} invoice={printData} />}
+      {serialKey && cart[serialKey] && (
+        <SerialPicker
+          productId={cart[serialKey].product.id}
+          productName={cart[serialKey].product.name}
+          locationId={cart[serialKey].locationId}
+          quantity={Math.floor(cart[serialKey].quantity)}
+          value={cart[serialKey].serialNumbers ?? []}
+          onChange={(serials) => setCart((prev) => cartOps.setLineSerials(prev, serialKey, serials))}
+          onClose={() => setSerialKey(null)}
+        />
+      )}
+      {approvalError && (
+        <div className="fixed bottom-24 md:bottom-6 left-4 right-4 md:left-auto md:w-[28rem] z-50 shadow-lg">
+          <ApprovalRequiredNotice error={approvalError} />
+        </div>
+      )}
     </main>
   );
 }

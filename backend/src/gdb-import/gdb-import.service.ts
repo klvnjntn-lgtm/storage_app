@@ -1340,7 +1340,9 @@ private async importStock(
   // KNOWN APPROXIMATIONS (surfaced in the return value, not hidden):
   //  - total copies ARINV.INVOICEAMOUNT directly.
   //  - taxAmount = TAX1AMOUNT + TAX2AMOUNT.
-  //  - subtotal = TAXABLEAMOUNT1 + TAXABLEAMOUNT2 + TAXABLEAMOUNT3 (approximate).
+  //  - subtotal = INVOICEAMOUNT - taxAmount, so subtotal - discount + tax
+  //    equals total like a native invoice. (TAXABLEAMOUNT1-3 only cover
+  //    taxed lines — they're 0 on a non-PPN invoice, which zeroed subtotal.)
   //  - lineTotal = quantity * unitPrice — does NOT apply ITEMDISCPC (per-line
   //    discount %); lines with a non-zero ITEMDISCPC are reported separately.
   //  - discount is left at 0 (TERMDISCOUNT/CASHDISCOUNT already reflected in
@@ -1369,9 +1371,6 @@ private async importStock(
       PAIDAMOUNT: number | null;
       TAX1AMOUNT: number | null;
       TAX2AMOUNT: number | null;
-      TAXABLEAMOUNT1: number | null;
-      TAXABLEAMOUNT2: number | null;
-      TAXABLEAMOUNT3: number | null;
     }>(
       fbDb,
       `
@@ -1385,10 +1384,7 @@ private async importStock(
         inv.INVOICEAMOUNT AS INVOICEAMOUNT,
         inv.PAIDAMOUNT AS PAIDAMOUNT,
         inv.TAX1AMOUNT AS TAX1AMOUNT,
-        inv.TAX2AMOUNT AS TAX2AMOUNT,
-        inv.TAXABLEAMOUNT1 AS TAXABLEAMOUNT1,
-        inv.TAXABLEAMOUNT2 AS TAXABLEAMOUNT2,
-        inv.TAXABLEAMOUNT3 AS TAXABLEAMOUNT3
+        inv.TAX2AMOUNT AS TAX2AMOUNT
       FROM ARINV inv
       LEFT JOIN PERSONDATA cust ON cust.ID = inv.CUSTOMERID
       ORDER BY inv.ARINVOICEID
@@ -1614,7 +1610,7 @@ private async importStock(
       const invoiceAmount = num(header.INVOICEAMOUNT);
       const paidAmount = Math.round(num(header.PAIDAMOUNT));
       const taxAmount = num(header.TAX1AMOUNT) + num(header.TAX2AMOUNT);
-      const subtotal = num(header.TAXABLEAMOUNT1) + num(header.TAXABLEAMOUNT2) + num(header.TAXABLEAMOUNT3);
+      const subtotal = Math.round((invoiceAmount - taxAmount) * 100) / 100;
       const paymentStatus: PaymentStatus =
         paidAmount <= 0
           ? PaymentStatus.UNPAID

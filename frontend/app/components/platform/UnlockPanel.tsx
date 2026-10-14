@@ -63,27 +63,27 @@ export default function UnlockPanel({
     onUnlocked({ email, unlocked: true, unlockedUntil: r.data.unlockedUntil });
   }
 
-  const label = 'block font-mono text-[11px] uppercase tracking-wider text-[#94a3b8] mb-1.5';
+  const label = 'block font-mono text-[11px] uppercase tracking-wider text-(--c-muted) mb-1.5';
   const input =
-    'w-full rounded-lg border border-white/10 bg-[#060a13] px-3 py-2.5 text-base sm:text-sm text-[#e2e8f0] outline-none transition-colors focus:border-sky-400/60 focus:shadow-[0_0_0_3px_rgba(56,189,248,0.15)]';
+    'w-full rounded-lg border border-(--c-line) bg-(--c-input) px-3 py-2.5 text-base sm:text-sm text-(--c-text) outline-none transition-colors focus:border-(--c-sky)/60 focus:shadow-[0_0_0_3px_rgba(56,189,248,0.15)]';
   const primary =
-    'w-full rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(56,189,248,0.6)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 disabled:opacity-40 disabled:shadow-none cursor-pointer disabled:cursor-not-allowed';
+    'w-full rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(56,189,248,0.6)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--c-sky)/60 disabled:opacity-40 disabled:shadow-none cursor-pointer disabled:cursor-not-allowed';
 
   return (
-    <div className="relative max-w-md mx-auto rounded-2xl border border-white/10 bg-[#0b1220]/80 backdrop-blur-xl p-6 space-y-5 shadow-[0_0_0_1px_rgba(56,189,248,0.06),0_30px_80px_-30px_rgba(56,189,248,0.35)]">
-      <span className="absolute inset-x-8 -top-px h-px bg-gradient-to-r from-transparent via-sky-400/70 to-transparent" aria-hidden />
+    <div className="relative max-w-md mx-auto rounded-2xl border border-(--c-line) bg-(--c-surface) backdrop-blur-xl p-6 space-y-5 shadow-[0_0_0_1px_rgba(56,189,248,0.06),0_30px_80px_-30px_rgba(56,189,248,0.35)]">
+      <span className="absolute inset-x-8 -top-px h-px bg-gradient-to-r from-transparent via-(--c-sky)/70 to-transparent" aria-hidden />
       <div className="flex items-start gap-3">
-        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400/25 to-blue-600/10 border border-sky-400/30 shadow-[0_0_24px_-4px_rgba(56,189,248,0.45)] shrink-0">
-          <KeyRound size={18} className="text-sky-400" aria-hidden />
+        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-(--c-sky)/25 to-blue-600/10 border border-(--c-sky)/30 shadow-[0_0_24px_-4px_rgba(56,189,248,0.45)] shrink-0">
+          <KeyRound size={18} className="text-(--c-sky)" aria-hidden />
         </span>
         <div>
-          <h2 className="font-semibold text-[#f8fafc]">{t('platform.lockedTitle')}</h2>
-          <p className="text-sm text-[#94a3b8] mt-1 leading-relaxed">{t('platform.lockedHint', { email })}</p>
+          <h2 className="font-semibold text-(--c-ink)">{t('platform.lockedTitle')}</h2>
+          <p className="text-sm text-(--c-muted) mt-1 leading-relaxed">{t('platform.lockedHint', { email })}</p>
         </div>
       </div>
 
       {error && (
-        <div role="alert" className="border border-red-400/30 bg-red-500/10 text-[#fca5a5] text-sm rounded-lg px-3 py-2">
+        <div role="alert" className="border border-(--c-red)/30 bg-(--c-red)/10 text-(--c-red) text-sm rounded-lg px-3 py-2">
           {error}
         </div>
       )}
@@ -112,7 +112,7 @@ export default function UnlockPanel({
         </form>
       ) : (
         <form onSubmit={confirm} className="space-y-3">
-          <p className="text-sm text-[#cbd5e1]">{t('platform.codeSent', { email })}</p>
+          <p className="text-sm text-(--c-sub)">{t('platform.codeSent', { email })}</p>
           <label className="block">
             <span className={label}>{t('platform.codeLabel')}</span>
             <input
@@ -138,7 +138,7 @@ export default function UnlockPanel({
               setStep('password');
               setError(null);
             }}
-            className="w-full text-sm text-sky-400 hover:text-[#7dd3fc] hover:underline cursor-pointer"
+            className="w-full text-sm text-(--c-sky) hover:opacity-80 hover:underline cursor-pointer"
           >
             {t('platform.resend')}
           </button>

@@ -4,11 +4,13 @@ import { TenantOwnershipService } from '../shared/documents/tenant-ownership.ser
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { PrintTokenService } from '../common/print/print-token.service';
 import { ProductService } from '../product/product.service';
-import { Prisma, PurchaseOrderStatus, PurchaseOrderActivityEventType } from '@prisma/client';
+import { ApprovalsService } from '../approvals/approvals.service';
+import { ApprovalDocumentType, Prisma, PurchaseOrderStatus, PurchaseOrderActivityEventType } from '@prisma/client';
 import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, NewProductDto } from './dto/purchase-order.dto';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { escapeLike } from '../common/text/escape-like';
 
 export type PurchaseOrderPrintView = {
   id: string;
@@ -27,6 +29,7 @@ export type PurchaseOrderPrintView = {
   supplierName: string | null;
   supplierAddress: string | null;
   supplierPhone: string | null;
+  supplierEmail: string | null;
   supplierNpwp: string | null;
 
   orderDate: Date;
@@ -64,6 +67,7 @@ export class PurchaseOrderService {
     private numbering: DocumentNumberingService,
     private printTokenService: PrintTokenService,
     private productService: ProductService,
+    private approvals: ApprovalsService,
   ) {}
 
   private round2(n: number) {
@@ -347,9 +351,12 @@ export class PurchaseOrderService {
     });
   }
 
-  async send(organizationId: string, id: string, userId: string) {
+  async send(organizationId: string, id: string, userId: string, role?: string) {
     const po = await this.getDraftOrThrow(organizationId, id);
     if (po.items.length === 0) throw new BadRequestException('Cannot send an empty purchase order');
+    // Over the org's approval limit, a non-admin needs an admin's approval
+    // for (at least) this total before the PO goes out.
+    await this.approvals.assertApproved(organizationId, ApprovalDocumentType.PURCHASE_ORDER, id, role);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -442,8 +449,8 @@ export class PurchaseOrderService {
     if (filters.search?.trim()) {
       const term = filters.search.trim();
       where.OR = [
-        { poNumber: { contains: term, mode: 'insensitive' } },
-        { supplier: { name: { contains: term, mode: 'insensitive' } } },
+        { poNumber: { contains: escapeLike(term), mode: 'insensitive' } },
+        { supplier: { name: { contains: escapeLike(term), mode: 'insensitive' } } },
       ];
     }
 
@@ -546,6 +553,7 @@ export class PurchaseOrderService {
       supplierName: po.supplier?.name ?? null,
       supplierAddress: po.supplier?.address ?? null,
       supplierPhone: po.supplier?.phone ?? null,
+      supplierEmail: po.supplier?.email ?? null,
       supplierNpwp: po.supplier?.npwp ?? null,
 
       orderDate: po.createdAt,

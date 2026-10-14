@@ -22,6 +22,8 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
 import { formatDMY, formatDMYTime } from '@/lib/dates';
 
+// Optimize button is hidden for now; set to true to show it again.
+const SHOW_OPTIMIZE = false;
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -690,15 +692,18 @@ export default function DeliveryRouteDetailPage() {
                 className="w-full sm:w-auto"
               />
             </div>
-            <button data-tour="dlv-route-optimize"
-              disabled={optimizing || !route.startLatitude || route.stops.every((s) => s.status !== 'PENDING')}
-              onClick={handleOptimize}
-              title={!route.startLatitude ? t('delivery.routeDetail.setStart') : undefined}
-              className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
-            >
-              <Navigation size={14} />
-              {optimizing ? t('delivery.routeDetail.optimizing') : t('delivery.routeDetail.optimizeRoute')}
-            </button>
+            {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
+            {SHOW_OPTIMIZE && (
+              <button data-tour="dlv-route-optimize"
+                disabled={optimizing || !route.startLatitude || route.stops.every((s) => s.status !== 'PENDING')}
+                onClick={handleOptimize}
+                title={!route.startLatitude ? t('delivery.routeDetail.setStart') : undefined}
+                className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Navigation size={14} />
+                {optimizing ? t('delivery.routeDetail.optimizing') : t('delivery.routeDetail.optimizeRoute')}
+              </button>
+            )}
           </div>
         )}
 

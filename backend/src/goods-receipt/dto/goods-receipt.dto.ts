@@ -7,6 +7,8 @@ import {
   IsPositive,
   IsString,
   IsUUID,
+  Matches,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -23,6 +25,23 @@ export class ReceiveGoodsItemDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   quantity: number;
+
+  // Required for products that track batches (Product.trackBatches).
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  batchNumber?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'expiryDate must be YYYY-MM-DD' })
+  expiryDate?: string;
+
+  // Required for products that track serial numbers — one per unit.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  serialNumbers?: string[];
 }
 
 export class ReceiveGoodsDto {

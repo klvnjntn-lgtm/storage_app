@@ -11,6 +11,7 @@ import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { escapeLike } from '../common/text/escape-like';
 
 // bank* fields removed from organization.select — SalesQuotation now
 // carries its own snapshot columns (bankAccountId/bankName/
@@ -720,9 +721,9 @@ export class SalesQuotationService {
     const searchCondition: Prisma.SalesQuotationWhereInput | undefined = searchTerm
       ? {
           OR: [
-            { quotationNumber: { contains: searchTerm, mode: 'insensitive' } },
-            { customerName: { contains: searchTerm, mode: 'insensitive' } },
-            { customer: { name: { contains: searchTerm, mode: 'insensitive' } } },
+            { quotationNumber: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
+            { customerName: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
+            { customer: { name: { contains: escapeLike(searchTerm), mode: 'insensitive' } } },
           ],
         }
       : undefined;

@@ -6,6 +6,8 @@ import { Receipt, ShoppingCart, Inbox, Wrench, Calculator, Truck } from 'lucide-
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { HubAccent, HubCard, HubGrid, HubPage, HubSection, hubMono as mono } from '@/app/components/shared/Hub';
+import { OnboardingChecklist } from '@/app/components/onboarding/OnboardingChecklist';
+import { DashboardKpis } from '@/app/components/dashboard/DashboardKpis';
 
 type LicenseStatus = {
   edition: 'desktop' | 'cloud';
@@ -180,6 +182,20 @@ export default function Home() {
       }
       subtitle={t('home.subtitle')}
     >
+      {/* GETTING STARTED — new self-serve orgs only; renders nothing otherwise */}
+      {profile?.role === 'ADMIN' && (
+        <div className="mb-6">
+          <OnboardingChecklist />
+        </div>
+      )}
+
+      {/* TODAY — KPIs and things waiting on someone (drivers have neither) */}
+      {profile && profile.role !== 'DRIVER' && (
+        <div className="mb-6">
+          <DashboardKpis />
+        </div>
+      )}
+
       {/* STATUS STRIP */}
       <HubSection index="01" label={t('home.system')}>
         <div

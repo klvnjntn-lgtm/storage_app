@@ -10,6 +10,10 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy, getJwtSecret } from './jwt.strategy';
 import { MailerModule } from './mailer/mailer.module';
 import { DevicesService } from './devices.service';
+import { TwoFactorService } from './two-factor.service';
+import { TwoFactorController } from './two-factor.controller';
+import { BillingModule } from '../billing/billing.module';
+import { PlanLimitsModule } from '../billing/plan-limits.module';
 
 @Module({
   imports: [
@@ -18,6 +22,8 @@ import { DevicesService } from './devices.service';
     MailerModule,
     NotificationsModule,
     LicenseModule,
+    BillingModule,
+    PlanLimitsModule,
     // FIX — was `process.env.JWT_SECRET ?? 'dev-secret-change-me'`, a
     // hardcoded, publicly-known fallback that let any client forge a
     // valid JWT for any user if JWT_SECRET was ever unset. Reuses
@@ -28,8 +34,8 @@ import { DevicesService } from './devices.service';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, DevicesService],
+  controllers: [AuthController, TwoFactorController],
+  providers: [AuthService, JwtStrategy, DevicesService, TwoFactorService],
   // DevicesService is exported so DevicesModule's admin-facing controller
   // can reuse this exact instance (see devices/devices.module.ts) rather
   // than duplicating device-approval logic in a second module.

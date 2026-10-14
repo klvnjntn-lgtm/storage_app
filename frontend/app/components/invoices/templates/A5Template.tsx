@@ -115,6 +115,9 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
             <tr key={item.id}>
               <td className="border-b border-gray-100 py-1 pr-2 text-black break-words">
                 {item.productName}
+                {item.serialNumbers && item.serialNumbers.length > 0 && (
+                  <span className="block text-[9px] font-mono text-gray-600">S/N: {item.serialNumbers.join(', ')}</span>
+                )}
               </td>
 
               <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">

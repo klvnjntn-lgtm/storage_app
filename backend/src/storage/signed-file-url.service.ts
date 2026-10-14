@@ -8,6 +8,8 @@ export const PRIVATE_KEY_PREFIXES = [
   'delivery-proofs/',
   'stop-proofs/',
   'customer-locations/',
+  // PDFs linked from WhatsApp messages (src/messaging), deleted after a week.
+  'outbound-docs/',
 ];
 
 export const isPrivateKey = (key: string) =>

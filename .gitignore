@@ -8,3 +8,10 @@ osrm-data/
 # Local backups and credentials (see ops/backup/README.md)
 /backups/
 /secrets/
+
+# Local scratch files that were committed by accident
+*.save
+/test.pdf
+# Playwright output
+frontend/test-results/
+frontend/playwright-report/

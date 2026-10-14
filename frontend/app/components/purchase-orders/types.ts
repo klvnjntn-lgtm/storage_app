@@ -97,6 +97,7 @@ export type PurchaseOrderPrintView = {
   supplierName: string | null;
   supplierAddress: string | null;
   supplierPhone: string | null;
+  supplierEmail?: string | null;
   supplierNpwp: string | null;
   orderDate: string;
   expectedDate: string | null;

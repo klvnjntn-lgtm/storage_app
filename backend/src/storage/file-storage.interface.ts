@@ -53,6 +53,8 @@ export function contentTypeForKey(key: string): string {
       return 'image/jpeg';
     case 'svg':
       return 'image/svg+xml';
+    case 'pdf':
+      return 'application/pdf';
     default:
       return 'application/octet-stream';
   }

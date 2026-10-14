@@ -106,6 +106,12 @@ export class InvoiceLineInput {
   @IsNumber()
   @Min(0)
   discountValue?: number;
+
+  // Serial-tracked products: the units being sold, one per quantity.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serialNumbers?: string[];
 }
 
 export class IssueInvoiceDto {

@@ -33,6 +33,11 @@ function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  // Two-factor sign-in: set when the password was right and the backend
+  // wants an authenticator (or recovery) code before issuing the session.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resetSuccess, setResetSuccess] = useState(false);
@@ -79,35 +84,68 @@ function LoginForm() {
         throw new Error(reason ? t(`auth.login.reason.${reason}`) : loginData?.message || t('auth.login.loginFailed'));
       }
 
-      // The backend set the session as an httpOnly cookie on this response;
-      // only a "signed in" marker is kept client-side (lib/session.ts).
-      markSignedIn();
-
-      const meRes = await fetch('/api/auth/me', { credentials: 'same-origin' });
-
-      if (!meRes.ok) {
-        throw new Error(t('auth.login.profileLoadFailed'));
+      if (loginData?.mfaRequired) {
+        setMfaToken(loginData.mfaToken);
+        return;
       }
 
-      // FIX — was `localStorage.setItem('user', JSON.stringify(await
-      // meRes.json()))`. Nothing anywhere reads localStorage['user'] —
-      // AuthContext always fetches a fresh /auth/me on load instead —
-      // so this just persisted profile data (email, role, org name)
-      // with no functional purpose. The meRes request itself stays: it
-      // still validates the freshly-issued token actually works before
-      // redirecting into the app.
-      //
-      // A DRIVER account has no use for the admin AppShell — it lands on
-      // the dedicated /driver route instead (own minimal layout, no
-      // sidebar). Every other role keeps the existing /home redirect.
-      const meData = await meRes.json();
-      router.replace(meData?.role === 'DRIVER' ? '/driver' : '/home');
+      await finishLogin();
     } catch (err: any) {
       console.error(err);
       setError(err.message || t('auth.login.loginFailed'));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleMfa() {
+    if (!mfaToken || !code.trim()) return;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId(), ...CSRF_HEADERS },
+        body: JSON.stringify({ mfaToken, code: code.trim() }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // An expired challenge means starting again from the password.
+        if (String(body?.message ?? '').includes('expired')) setMfaToken(null);
+        throw new Error(body?.message || t('auth.login.loginFailed'));
+      }
+      await finishLogin();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('auth.login.loginFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function finishLogin() {
+    // The backend set the session as an httpOnly cookie on this response;
+    // only a "signed in" marker is kept client-side (lib/session.ts).
+    markSignedIn();
+
+    const meRes = await fetch('/api/auth/me', { credentials: 'same-origin' });
+
+    if (!meRes.ok) {
+      throw new Error(t('auth.login.profileLoadFailed'));
+    }
+
+    // FIX — was `localStorage.setItem('user', JSON.stringify(await
+    // meRes.json()))`. Nothing anywhere reads localStorage['user'] —
+    // AuthContext always fetches a fresh /auth/me on load instead —
+    // so this just persisted profile data (email, role, org name)
+    // with no functional purpose. The meRes request itself stays: it
+    // still validates the freshly-issued token actually works before
+    // redirecting into the app.
+    //
+    // A DRIVER account has no use for the admin AppShell — it lands on
+    // the dedicated /driver route instead (own minimal layout, no
+    // sidebar). Every other role keeps the existing /home redirect.
+    const meData = await meRes.json();
+    router.replace(meData?.role === 'DRIVER' ? '/driver' : '/home');
   }
 
   return (
@@ -157,6 +195,38 @@ function LoginForm() {
           </div>
         )}
 
+        {mfaToken ? (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">{t('security.loginPrompt')}</p>
+            <input
+              autoFocus
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleMfa()}
+              className="w-full border-2 border-gray-300 rounded-md px-3 py-2 text-lg tracking-[0.3em] text-center outline-none focus:border-blue-500 bg-white"
+              placeholder="123456"
+            />
+            <p className="text-xs text-gray-500">{t('security.loginRecoveryHint')}</p>
+            <button
+              onClick={handleMfa}
+              disabled={loading || !code.trim()}
+              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40"
+            >
+              {loading ? t('auth.login.signingIn') : t('security.verify')}
+            </button>
+            <button
+              onClick={() => {
+                setMfaToken(null);
+                setCode('');
+              }}
+              className="w-full text-sm text-gray-500 hover:text-gray-700"
+            >
+              {t('common.back')}
+            </button>
+          </div>
+        ) : (
         <div className="space-y-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-gray-600">{t('auth.login.email')}</label>
@@ -200,6 +270,7 @@ function LoginForm() {
             {loading ? t('auth.login.signingIn') : t('auth.login.signIn')}
           </button>
         </div>
+        )}
 
         <p className="text-center text-sm text-gray-500">{t('auth.login.needAccess')}</p>
       </div>

@@ -49,9 +49,34 @@ export class ProductController {
   }
 
   // Cost price is admin-only data; everyone else gets the list without it.
+  // With ?page=… it's one searched, sorted page ({ data, total, page,
+  // pageSize }); without, the whole catalog as before.
   @Get()
-  findAll(@CurrentOrg() organizationId: string, @Req() req) {
-    return this.productService.findAll(organizationId, req.user?.role === 'ADMIN');
+  findAll(
+    @CurrentOrg() organizationId: string,
+    @Req() req,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('q') q?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+  ) {
+    const includeCost = req.user?.role === 'ADMIN';
+    if (page === undefined) return this.productService.findAll(organizationId, includeCost);
+    return this.productService.findPage(organizationId, {
+      page: Number(page) || 1,
+      pageSize: Number(pageSize) || 20,
+      q,
+      sort,
+      dir: dir === 'desc' ? 'desc' : 'asc',
+      includeCost,
+    });
+  }
+
+  // Must come before @Get(':id').
+  @Get('sku-taken')
+  skuTaken(@CurrentOrg() organizationId: string, @Query('sku') sku = '', @Query('excludeId') excludeId?: string) {
+    return this.productService.isSkuTaken(organizationId, sku, excludeId);
   }
 
   @UseGuards(RolesGuard)

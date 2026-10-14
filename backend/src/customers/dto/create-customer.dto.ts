@@ -1,4 +1,5 @@
-import { IsLatitude, IsLongitude, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsLatitude, IsLongitude, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -15,6 +16,15 @@ export class CreateCustomerDto {
   @IsString()
   @MaxLength(50)
   phone?: string;
+
+  // Where invoices, statements and payment reminders are emailed. An
+  // empty string clears it.
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() || null : value))
+  @ValidateIf((o: CreateCustomerDto) => o.email !== null)
+  @IsEmail()
+  @MaxLength(200)
+  email?: string | null;
 
   @IsOptional()
   @IsString()

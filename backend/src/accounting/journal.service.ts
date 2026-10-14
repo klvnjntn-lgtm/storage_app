@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, ConflictException, NotFoundException }
 import { Prisma, FiscalPeriodStatus, JournalEntryStatus, JournalSourceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toBusinessDate, resolveTimezone } from './business-date';
+import { escapeLike } from '../common/text/escape-like';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -79,8 +80,8 @@ export class JournalService {
       }),
       ...(search && {
         OR: [
-          { entryNumber: { contains: search, mode: 'insensitive' as const } },
-          { memo: { contains: search, mode: 'insensitive' as const } },
+          { entryNumber: { contains: escapeLike(search), mode: 'insensitive' as const } },
+          { memo: { contains: escapeLike(search), mode: 'insensitive' as const } },
         ],
       }),
     };

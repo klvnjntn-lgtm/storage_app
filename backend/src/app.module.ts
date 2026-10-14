@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -61,6 +62,19 @@ import { DevicesModule } from './devices/devices.module';
 import { AccessControlModule } from './access-control/access-control.module';
 import { PlatformModule } from './platform/platform.module';
 import { OrgTransferModule } from './org-transfer/org-transfer.module';
+import { PlanLimitsModule } from './billing/plan-limits.module';
+import { BillingModule } from './billing/billing.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { PurchaseReturnModule } from './purchase-return/purchase-return.module';
+import { SupplierBillModule } from './supplier-bill/supplier-bill.module';
+import { StockTransferModule } from './stock-transfer/stock-transfer.module';
+import { ApprovalsModule } from './approvals/approvals.module';
+import { ReorderModule } from './reorder/reorder.module';
+import { BatchesModule } from './batches/batches.module';
+import { MessagingModule } from './messaging/messaging.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { ApiAccessModule } from './api-access/api-access.module';
+import { SerialsModule } from './serials/serials.module';
 @Module({
   imports: [
     // FIX — @nestjs/throttler was a listed dependency and @Throttle()
@@ -71,6 +85,8 @@ import { OrgTransferModule } from './org-transfer/org-transfer.module';
     // default (100 req/min per IP+route); tighter per-route limits via
     // @Throttle() override it.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 100 }]),
+    // Error tracking; inert unless SENTRY_DSN is set (see instrument.ts).
+    SentryModule.forRoot(),
     PrismaModule,
     StorageModule,
     WarehouseModule,
@@ -116,10 +132,29 @@ import { OrgTransferModule } from './org-transfer/org-transfer.module';
     AccessControlModule,
     PlatformModule,
     OrgTransferModule,
+    PlanLimitsModule,
+    BillingModule,
+    OnboardingModule,
+    PurchaseReturnModule,
+    SupplierBillModule,
+    StockTransferModule,
+    ApprovalsModule,
+    ReorderModule,
+    BatchesModule,
+    MessagingModule,
+    DashboardModule,
+    ApiAccessModule,
+    SerialsModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      // Reports unexpected errors (not 4xx HttpExceptions) to Sentry, then
+      // responds exactly as Nest's default filter would.
+      provide: APP_FILTER,
+      useClass: SentryGlobalFilter,
+    },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard, // 0. rate-limit before doing any auth/license work

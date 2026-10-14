@@ -22,6 +22,58 @@
   --chart-surface: #ffffff;
 }
 
+/* Platform console (/platform) and Sales Insights. Own tokens rather than the stock
+   palette: accents are a step darker in light mode so they still read on
+   white, and the dark variant is tuned for the console's deeper surface. */
+.console {
+  --c-bg: #f4f7fb;
+  --c-grid: rgba(15, 23, 42, 0.05);
+  --c-glow: rgba(14, 165, 233, 0.14);
+  --c-header: rgba(244, 247, 251, 0.8);
+  --c-surface: rgba(255, 255, 255, 0.85);
+  --c-surface-hover: #ffffff;
+  --c-input: #ffffff;
+  --c-ink: #0f172a;
+  --c-text: #1e293b;
+  --c-sub: #334155;
+  --c-muted: #475569;
+  --c-faint: #64748b;
+  --c-line: rgba(15, 23, 42, 0.1);
+  --c-line-strong: rgba(15, 23, 42, 0.2);
+  --c-fill: rgba(15, 23, 42, 0.04);
+  --c-fill-strong: rgba(15, 23, 42, 0.08);
+  --c-shadow: rgba(15, 23, 42, 0.15);
+  --c-sky: #0369a1;
+  --c-emerald: #047857;
+  --c-amber: #b45309;
+  --c-red: #dc2626;
+  --c-yellow: #a16207;
+}
+html[data-theme='dark'] .console {
+  --c-bg: #060a13;
+  --c-grid: rgba(148, 163, 184, 0.05);
+  --c-glow: rgba(56, 189, 248, 0.14);
+  --c-header: rgba(6, 10, 19, 0.75);
+  --c-surface: rgba(11, 18, 32, 0.7);
+  --c-surface-hover: rgba(14, 22, 40, 0.8);
+  --c-input: #060a13;
+  --c-ink: #f8fafc;
+  --c-text: #e2e8f0;
+  --c-sub: #cbd5e1;
+  --c-muted: #94a3b8;
+  --c-faint: #64748b;
+  --c-line: rgba(255, 255, 255, 0.08);
+  --c-line-strong: rgba(255, 255, 255, 0.18);
+  --c-fill: rgba(255, 255, 255, 0.04);
+  --c-fill-strong: rgba(255, 255, 255, 0.08);
+  --c-shadow: rgba(0, 0, 0, 0.8);
+  --c-sky: #38bdf8;
+  --c-emerald: #34d399;
+  --c-amber: #fbbf24;
+  --c-red: #f87171;
+  --c-yellow: #facc15;
+}
+
 /* the toggle renders both icons; show the one for the theme you'd switch to */
 .theme-icon-sun {
   display: none;
@@ -33,12 +85,9 @@ html[data-theme='dark'] .theme-icon-moon {
   display: none;
 }
 
-/* ─── App: dark ─────────────────────────────────────────────────────
-   .console-dark gets the same palette on any theme: the platform console
-   is designed dark, so everything inside it (unlock form, drawer, panels)
-   follows without its own dark classes. */
+/* ─── App: dark ───────────────────────────────────────────────────── */
 @media screen {
-  :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
+  html[data-theme='dark']:not(:has(.landing)) {
     --background: #0b0f17;
     --foreground: #e8edf4;
     --page-bg: #0b0f17;
@@ -103,7 +152,7 @@ html[data-theme='dark'] .theme-icon-moon {
 
   /* text-white always sits on a coloured fill (buttons, badges, gradient
      icons), so it stays white even though --color-white is now dark… */
-  :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
+  html[data-theme='dark']:not(:has(.landing)) {
     & .text-white,
     & .hover\:text-white:hover {
       color: #fff;
@@ -140,7 +189,7 @@ html[data-theme='dark'] .theme-icon-moon {
    options a surface; in the base layer so bg-* utilities still win. */
 @layer base {
   @media screen {
-    :is(html[data-theme='dark']:not(:has(.landing)), .console-dark) {
+    html[data-theme='dark']:not(:has(.landing)) {
       & select {
         background-color: var(--color-white);
         color: var(--color-gray-900);
