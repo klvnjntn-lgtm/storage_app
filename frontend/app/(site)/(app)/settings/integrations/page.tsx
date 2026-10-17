@@ -7,6 +7,7 @@ import { formatDMYTime } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, Switch, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type ApiKey = {
   id: string;
@@ -23,6 +24,7 @@ type Endpoint = { id: string; url: string; secret: string; events: string[]; act
 type Delivery = { id: string; event: string; status: string; attempts: number; lastStatusCode: number | null; lastError: string | null; createdAt: string };
 
 export default function IntegrationsPage() {
+  const dialog = useDialog();
   const { authorized } = useRequireAdmin();
   const { t } = useLanguage();
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -75,7 +77,7 @@ export default function IntegrationsPage() {
   }
 
   async function revoke(k: ApiKey) {
-    if (!confirm(t('integrations.revokeConfirm', { name: k.name }))) return;
+    if (!(await dialog.confirm(t('integrations.revokeConfirm', { name: k.name }), { danger: true }))) return;
     if (await call(`/integrations-api/keys/${k.id}`, { method: 'DELETE' })) load();
   }
 
@@ -92,7 +94,7 @@ export default function IntegrationsPage() {
   }
 
   async function removeHook(ep: Endpoint) {
-    if (!confirm(t('integrations.removeHookConfirm'))) return;
+    if (!(await dialog.confirm(t('integrations.removeHookConfirm'), { danger: true }))) return;
     if (await call(`/integrations-api/webhooks/${ep.id}`, { method: 'DELETE' })) load();
   }
 

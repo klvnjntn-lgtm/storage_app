@@ -11,6 +11,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 type FixedAsset = {
@@ -52,6 +53,7 @@ const STATUS_META: Record<FixedAsset['status'], { labelKey: string; color: strin
 };
 
 export default function FixedAssetsPage() {
+  const dialog = useDialog();
   const { t, language } = useLanguage();
   const [locations, setLocations] = useState<Location[] | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[] | null>(null);
@@ -304,7 +306,7 @@ export default function FixedAssetsPage() {
   }
 
   async function handleDelete(asset: FixedAsset) {
-    if (!confirm(t('accounting.fixedAssets.deleteConfirm', { name: asset.name }))) return;
+    if (!(await dialog.confirm(t('accounting.fixedAssets.deleteConfirm', { name: asset.name }), { danger: true }))) return;
     setDeletingId(asset.id);
     setError(null);
     try {

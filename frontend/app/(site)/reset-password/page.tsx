@@ -6,6 +6,7 @@ import { KeyRound, AlertTriangle } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
+import { errorMessage } from '@/lib/api-error';
 
 // FIX — useSearchParams() requires a Suspense boundary for static
 // prerendering, or `next build` fails outright. See login/page.tsx.
@@ -52,8 +53,8 @@ function ResetPasswordForm() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || t('auth.resetPassword.resetFailed'));
       router.replace('/login?reset=success');
-    } catch (err: any) {
-      setError(err.message || t('auth.resetPassword.resetFailed'));
+    } catch (err) {
+      setError(errorMessage(err) || t('auth.resetPassword.resetFailed'));
     } finally {
       setLoading(false);
     }

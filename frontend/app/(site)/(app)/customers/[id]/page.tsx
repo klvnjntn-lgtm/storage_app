@@ -1,6 +1,7 @@
 // app/(app)/customers/[id]/page.tsx
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -19,6 +20,8 @@ import CustomerAddressesSection from '@/app/components/delivery/CustomerAddresse
 import CustomerDriverInfoSection from '@/app/components/delivery/CustomerDriverInfoSection';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 import { formatDMYTime } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 type CustomerInvoice = {
@@ -38,7 +41,10 @@ type CustomerDetail = {
   companyName: string | null;
   phone: string | null;
   address: string | null;
+  // The latest invoices only; invoiceCount/invoiceTotals cover all of them.
   invoices: CustomerInvoice[];
+  invoiceCount: number;
+  invoiceTotals: { total: number; paid: number; outstanding: number };
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
   latitude: string | null;
   longitude: string | null;
@@ -59,6 +65,7 @@ type NewVehicleState = {
 const EMPTY_VEHICLE: NewVehicleState = { plateNumber: '', vehicleModel: '', vin: '', odometer: '' };
 
 export default function CustomerDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
@@ -155,8 +162,8 @@ export default function CustomerDetailPage() {
       setAddingVehicle(false);
       setNewVehicle({ ...EMPTY_VEHICLE });
       loadVehicles();
-    } catch (e: any) {
-      setVehicleError(e.message || t('customers.detailPage.saveVehicleFailed'));
+    } catch (e) {
+      setVehicleError(errorMessage(e) || t('customers.detailPage.saveVehicleFailed'));
     } finally {
       setVehicleSaving(false);
     }
@@ -196,7 +203,7 @@ export default function CustomerDetailPage() {
   // Admin only: removes the pin and its lock, so the next delivery's driver
   // GPS sets a fresh one.
   async function clearLocation() {
-    if (!customer || !confirm(t('delivery.pin.clearConfirm', { name: customer.name }))) return;
+    if (!customer || !(await dialog.confirm(t('delivery.pin.clearConfirm', { name: customer.name }), { danger: true }))) return;
     setSavingLocation(true);
     setLocationError('');
     try {
@@ -237,25 +244,15 @@ export default function CustomerDetailPage() {
     try {
       await putLocation(pickedPosition);
       setPickingLocation(false);
-    } catch (e: any) {
-      setLocationError(e.message || t('customers.detailPage.saveLocationFailed'));
+    } catch (e) {
+      setLocationError(errorMessage(e) || t('customers.detailPage.saveLocationFailed'));
     } finally {
       setSavingLocation(false);
     }
   }
 
-  const totals = customer?.invoices.reduce(
-    (acc, inv) => {
-      if (inv.status === 'VOID') return acc;
-      const total = Number(inv.total);
-      const paid = Number(inv.amountPaid);
-      acc.total += total;
-      acc.paid += paid;
-      acc.outstanding += Math.max(total - paid, 0);
-      return acc;
-    },
-    { total: 0, paid: 0, outstanding: 0 },
-  );
+  const totals = customer?.invoiceTotals;
+
 
   return (
     <main
@@ -481,6 +478,20 @@ export default function CustomerDetailPage() {
 
             {customer.invoices.length === 0 && (
               <p className="text-sm text-gray-400">{t('customers.detailPage.noInvoices')}</p>
+            )}
+            {customer.invoiceCount > customer.invoices.length && (
+              <p className="text-xs text-gray-500 mb-2">
+                {t('customers.detailPage.showingRecentInvoices', {
+                  shown: customer.invoices.length,
+                  total: customer.invoiceCount,
+                })}{' '}
+                <Link
+                  href={`/sales/invoices?${new URLSearchParams({ customerId: customer.id, customerName: customer.name })}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {t('customers.detailPage.viewAllInvoices')}
+                </Link>
+              </p>
             )}
 
             <div className="flex flex-col gap-2">

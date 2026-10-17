@@ -13,6 +13,30 @@ import {
 } from './dto/customer-address.dto';
 import { escapeLike } from '../common/text/escape-like';
 
+export const CUSTOMER_RECENT_INVOICES = 100;
+
+// Mirrors pinStatus() in the frontend's PinStatus.tsx.
+export const WEAK_PIN_ACCURACY_M = 50;
+function pinFilter(pin?: string): Prisma.CustomerWhereInput {
+  const pinned = { latitude: { not: null }, longitude: { not: null } };
+  switch (pin) {
+    case 'NONE':
+      return { OR: [{ latitude: null }, { longitude: null }] };
+    case 'MANUAL':
+      return { ...pinned, OR: [{ pinSource: null }, { pinSource: { not: 'GPS' } }] };
+    case 'GPS':
+      return {
+        ...pinned,
+        pinSource: 'GPS',
+        OR: [{ pinAccuracy: null }, { pinAccuracy: { lte: WEAK_PIN_ACCURACY_M } }],
+      };
+    case 'WEAK_GPS':
+      return { ...pinned, pinSource: 'GPS', pinAccuracy: { gt: WEAK_PIN_ACCURACY_M } };
+    default:
+      return {};
+  }
+}
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -20,21 +44,61 @@ export class CustomersService {
     private locations: CustomerLocationService,
   ) {}
 
-  async list(organizationId: string, search?: string) {
-    return this.prisma.customer.findMany({
-      where: {
-        organizationId,
-        ...(search
+  // Without `page` this keeps the original plain-array response (the public
+  // API returns it), optionally capped by `limit` for type-to-search
+  // pickers. With `page` it returns { data, total, page, pageSize }.
+  async list(
+    organizationId: string,
+    search?: string,
+    opts: {
+      page?: number;
+      pageSize?: number;
+      limit?: number;
+      pin?: string;
+      sort?: string;
+      dir?: string;
+    } = {},
+  ) {
+    // AND, because the pin filter and the search each use their own OR.
+    const where: Prisma.CustomerWhereInput = {
+      organizationId,
+      AND: [
+        pinFilter(opts.pin),
+        search
           ? {
               OR: [
                 { name: { contains: escapeLike(search), mode: 'insensitive' } },
                 { phone: { contains: escapeLike(search), mode: 'insensitive' } },
               ],
             }
-          : {}),
-      },
-      orderBy: { name: 'asc' },
-    });
+          : {},
+      ],
+    };
+    const dir: Prisma.SortOrder = opts.dir === 'desc' ? 'desc' : 'asc';
+    // Empty phones sort last either way, like the table's client-side sort did.
+    const orderBy: Prisma.CustomerOrderByWithRelationInput[] =
+      opts.sort === 'phone'
+        ? [{ phone: { sort: dir, nulls: 'last' } }, { name: 'asc' }]
+        : [{ name: dir }];
+    if (opts.page === undefined) {
+      return this.prisma.customer.findMany({
+        where,
+        orderBy,
+        ...(opts.limit && opts.limit > 0 && { take: Math.min(opts.limit, 200) }),
+      });
+    }
+    const page = opts.page > 0 ? opts.page : 1;
+    const pageSize = opts.pageSize && opts.pageSize > 0 ? Math.min(opts.pageSize, 200) : 20;
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.customer.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.customer.count({ where }),
+    ]);
+    return { data, total, page, pageSize };
   }
 
   async get(organizationId: string, id: string) {
@@ -50,9 +114,12 @@ export class CustomersService {
       where: { id, organizationId },
       include: {
         addresses: { orderBy: { label: 'asc' } },
+        // Long-standing customers can have thousands of invoices; the page
+        // shows the latest ones and links to the invoice list for the rest.
         invoices: {
           where: { organizationId },
           orderBy: { createdAt: 'desc' },
+          take: CUSTOMER_RECENT_INVOICES,
           select: {
             id: true,
             invoiceNumber: true,
@@ -67,7 +134,27 @@ export class CustomersService {
       },
     });
     if (!customer) throw new NotFoundException('Customer not found');
-    return customer;
+    // Totals cover every invoice, not just the recent ones returned above.
+    // Same rules the page used to apply client-side: VOID excluded, and an
+    // overpaid invoice never makes the outstanding figure go negative.
+    const [agg] = await this.prisma.$queryRaw<
+      { count: bigint; total: Prisma.Decimal | null; paid: Prisma.Decimal | null; outstanding: Prisma.Decimal | null }[]
+    >`
+      SELECT COUNT(*) AS count,
+             SUM(CASE WHEN status <> 'VOID' THEN total END) AS total,
+             SUM(CASE WHEN status <> 'VOID' THEN "amountPaid" END) AS paid,
+             SUM(CASE WHEN status <> 'VOID' THEN GREATEST(total - "amountPaid", 0) END) AS outstanding
+      FROM "Invoice"
+      WHERE "organizationId" = ${organizationId} AND "customerId" = ${id}`;
+    return {
+      ...customer,
+      invoiceCount: Number(agg?.count ?? 0),
+      invoiceTotals: {
+        total: Number(agg?.total ?? 0),
+        paid: Number(agg?.paid ?? 0),
+        outstanding: Number(agg?.outstanding ?? 0),
+      },
+    };
   }
 
 // src/customers/customers.service.ts — only create() and update() changed from last version

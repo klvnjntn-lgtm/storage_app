@@ -506,5 +506,35 @@ describe('Purchasing flows (database)', () => {
       expect(by.get('L-1')).toMatchObject({ received: 8, remaining: 0 });
       expect(by.get('L-2')).toMatchObject({ received: 12, remaining: 10 });
     });
+
+    it('refuses to return more from a batch than it holds, and changes nothing', async () => {
+      const p = await product({ trackBatches: true });
+      const po = await sentPo(p.id, 20, 1_000);
+      for (const [quantity, batchNumber] of [[5, 'R-1'], [15, 'R-2']] as const) {
+        await receipts.receive(orgId, adminId, po.id, {
+          locationId,
+          items: [{ purchaseOrderItemId: po.items[0].id, quantity, batchNumber, expiryDate: '2027-01-01' }],
+        });
+      }
+      const r1 = await prisma.productBatch.findFirstOrThrow({ where: { productId: p.id, batchNumber: 'R-1' } });
+
+      // 6 is within what the PO line can return (20) but more than R-1 holds.
+      await expect(
+        returns.create(orgId, adminId, po.id, {
+          locationId,
+          items: [{ purchaseOrderItemId: po.items[0].id, quantity: 6, batchId: r1.id }],
+        }),
+      ).rejects.toThrow(/not have enough quantity/);
+      expect(Number((await prisma.productBatch.findUniqueOrThrow({ where: { id: r1.id } })).quantity)).toBe(5);
+      expect(await onHand(p.id)).toBe(20);
+      expect(await prisma.purchaseReturn.count({ where: { purchaseOrderId: po.id } })).toBe(0);
+
+      await returns.create(orgId, adminId, po.id, {
+        locationId,
+        items: [{ purchaseOrderItemId: po.items[0].id, quantity: 5, batchId: r1.id }],
+      });
+      expect(Number((await prisma.productBatch.findUniqueOrThrow({ where: { id: r1.id } })).quantity)).toBe(0);
+      expect(await onHand(p.id)).toBe(15);
+    });
   });
 });

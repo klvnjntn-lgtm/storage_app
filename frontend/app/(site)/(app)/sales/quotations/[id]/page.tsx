@@ -9,6 +9,8 @@ import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
 import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 type QuotationDetail = {
@@ -27,6 +29,7 @@ type QuotationDetail = {
 };
 
 export default function QuotationDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -103,7 +106,7 @@ export default function QuotationDetailPage() {
     if (await runAction('reject', `/sales-quotations/${id}/reject`)) load();
   }
   async function handleDiscard() {
-    if (!confirm(t('sales.quotationDetail.confirmDiscardDraft'))) return;
+    if (!(await dialog.confirm(t('sales.quotationDetail.confirmDiscardDraft'), { danger: true }))) return;
     const res = await apiFetch(`/sales-quotations/${id}`, { method: 'DELETE' });
     if (res.ok) router.push('/sales/quotations');
   }
@@ -148,8 +151,8 @@ export default function QuotationDetailPage() {
       a.download = `${quotation.quotationNumber ?? 'quotation'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || t('sales.quotationDetail.couldNotGeneratePdf'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.quotationDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }

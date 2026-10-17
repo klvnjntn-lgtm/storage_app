@@ -20,6 +20,7 @@ import {
   TaxRate,
 } from '@/app/components/quotations/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import type { BankAccountRow, TaxRateRow } from '@/lib/api-types';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -149,8 +150,8 @@ function QuotationFormPageInner() {
         const rates = await taxRes.json();
         setTaxRates(
           rates
-            .filter((r: any) => !r.archivedAt)
-            .map((r: any) => ({
+            .filter((r: TaxRateRow) => !r.archivedAt)
+            .map((r: TaxRateRow) => ({
               id: r.id,
               name: r.name,
               percentage: r.percentage,
@@ -166,8 +167,8 @@ function QuotationFormPageInner() {
         const accounts = await bankRes.json();
         setBankAccounts(
           accounts
-            .filter((a: any) => !a.archivedAt)
-            .map((a: any) => ({
+            .filter((a: BankAccountRow) => !a.archivedAt)
+            .map((a: BankAccountRow) => ({
               id: a.id,
               bankName: a.bankName,
               accountNumber: a.accountNumber,

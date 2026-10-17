@@ -41,8 +41,25 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  list(@CurrentOrg() organizationId: string, @Query('q') q?: string) {
-    return this.customersService.list(organizationId, q);
+  list(
+    @CurrentOrg() organizationId: string,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
+    @Query('pin') pin?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
+  ) {
+    const num = (v?: string) => (v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined);
+    return this.customersService.list(organizationId, q, {
+      page: page !== undefined ? (num(page) ?? 1) : undefined,
+      pageSize: num(pageSize),
+      limit: num(limit),
+      pin,
+      sort,
+      dir,
+    });
   }
 
   @Get(':id')

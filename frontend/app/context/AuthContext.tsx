@@ -15,7 +15,7 @@ type Profile = {
   };
   // Shows the platform console link; the console's routes re-check.
   platformOwner?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 };
 
 type AuthContextValue = {

@@ -9,6 +9,7 @@ import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { PinStatusBadge } from '@/app/components/delivery/PinStatus';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type LatLng = { lat: number; lng: number };
 // original = the pin as loaded; the location is only sent when it changed,
@@ -26,6 +27,7 @@ export default function CustomerAddressesSection({
   addresses: CustomerAddress[];
   onChange: (addresses: CustomerAddress[]) => void;
 }) {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -83,7 +85,7 @@ export default function CustomerAddressesSection({
   }
 
   async function remove(a: CustomerAddress) {
-    if (!confirm(t('delivery.addresses.confirmDelete', { label: a.label }))) return;
+    if (!(await dialog.confirm(t('delivery.addresses.confirmDelete', { label: a.label }), { danger: true }))) return;
     setDeletingId(a.id);
     try {
       const res = await apiFetch(`/customers/${customerId}/addresses/${a.id}`, { method: 'DELETE' });

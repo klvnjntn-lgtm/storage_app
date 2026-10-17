@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { AlertCircle, Ban, Lock, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { errorMessage } from '@/lib/api-error';
 
 export function VoidInvoiceDialog({
   invoiceId,
@@ -45,8 +46,8 @@ export function VoidInvoiceDialog({
         throw new Error(body?.message ?? t('sales.voidInvoice.failedToVoid', { status: res.status }));
       }
       onVoided();
-    } catch (e: any) {
-      setError(e.message || t('sales.voidInvoice.couldNotVoid'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.voidInvoice.couldNotVoid'));
     } finally {
       setSaving(false);
     }

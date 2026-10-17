@@ -273,7 +273,7 @@ function InvoiceStatementPageInner() {
             )}
 
             {statement.lines.length > 0 && (
-              <div className="border-2 border-gray-300 rounded-md overflow-hidden mb-2">
+              <div className="border-2 border-gray-300 rounded-md overflow-x-auto mb-2">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b-2 border-gray-300">
                     <tr>
@@ -334,29 +334,31 @@ function InvoiceStatementPageInner() {
             {(statement.creditActivity?.length ?? 0) > 0 && (
               <div className="mt-6">
                 <p className="text-sm font-semibold text-black mb-2">{t('sales.statement.creditActivity')}</p>
-                <table className="w-full text-sm text-black border-collapse">
-                  <thead>
-                    <tr className="border-b-2 border-gray-300 text-left">
-                      <th className="py-1.5 pr-2">{t('sales.statement.colDate')}</th>
-                      <th className="py-1.5 pr-2">{t('sales.statement.colInvoice')}</th>
-                      <th className="py-1.5 pr-2">{t('sales.statement.colCreditType')}</th>
-                      <th className="py-1.5 text-right">{t('sales.statement.colAmount')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statement.creditActivity!.map((a) => (
-                      <tr key={a.id} className="border-b border-gray-200">
-                        <td className="py-1.5 pr-2">{formatDMY(new Date(a.date))}</td>
-                        <td className="py-1.5 pr-2">{a.invoiceNumber ?? '—'}</td>
-                        <td className="py-1.5 pr-2">
-                          {t(`sales.statement.creditKind.${a.kind}`)}
-                          {a.note ? <span className="text-gray-500"> · {a.note}</span> : null}
-                        </td>
-                        <td className="py-1.5 text-right">{formatIDR(a.amount)}</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-black border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-gray-300 text-left">
+                        <th className="py-1.5 pr-2">{t('sales.statement.colDate')}</th>
+                        <th className="py-1.5 pr-2">{t('sales.statement.colInvoice')}</th>
+                        <th className="py-1.5 pr-2">{t('sales.statement.colCreditType')}</th>
+                        <th className="py-1.5 text-right">{t('sales.statement.colAmount')}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {statement.creditActivity!.map((a) => (
+                        <tr key={a.id} className="border-b border-gray-200">
+                          <td className="py-1.5 pr-2">{formatDMY(new Date(a.date))}</td>
+                          <td className="py-1.5 pr-2">{a.invoiceNumber ?? '—'}</td>
+                          <td className="py-1.5 pr-2">
+                            {t(`sales.statement.creditKind.${a.kind}`)}
+                            {a.note ? <span className="text-gray-500"> · {a.note}</span> : null}
+                          </td>
+                          <td className="py-1.5 text-right">{formatIDR(a.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 

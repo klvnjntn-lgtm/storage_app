@@ -10,6 +10,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, btnDanger, inputCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, useLocations, type PickedProduct } from '@/app/components/shared/ProductPicker';
 import { SerialButton, SerialPicker } from '@/app/components/shared/SerialPicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type Status = 'DRAFT' | 'IN_TRANSIT' | 'RECEIVED' | 'CANCELLED';
 type Transfer = {
@@ -54,6 +55,7 @@ const STATUS_STYLE: Record<Status, string> = {
 // One page for every move between locations: a quick move lands at once
 // (within a site), ship & receive is a document that travels.
 export default function TransfersPage() {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const router = useRouter();
   const locations = useLocations();
@@ -162,7 +164,7 @@ export default function TransfersPage() {
   }
 
   async function act(tr: Transfer, action: 'ship' | 'receive' | 'cancel') {
-    if (action === 'cancel' && !confirm(t('transfers.cancelConfirm'))) return;
+    if (action === 'cancel' && !(await dialog.confirm(t('transfers.cancelConfirm'), { danger: true }))) return;
     setBusy(tr.id);
     setError(null);
     const counted = counting[tr.id];
@@ -384,64 +386,66 @@ export default function TransfersPage() {
               )}
             </div>
 
-            <table className="w-full text-sm mt-2">
-              <tbody>
-                {tr.items.map((it) => (
-                  <tr key={it.id} className="border-t border-gray-100">
-                    <td className="py-1.5">{it.product.name}</td>
-                    <td className="py-1.5 text-right tabular-nums">
-                      {it.quantity} {it.product.unit ?? ''}
-                      {it.receivedQuantity != null && it.receivedQuantity < it.quantity && (
-                        <span className="ml-2 text-red-700">{t('transfers.short', { n: it.quantity - it.receivedQuantity })}</span>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm mt-2">
+                <tbody>
+                  {tr.items.map((it) => (
+                    <tr key={it.id} className="border-t border-gray-100">
+                      <td className="py-1.5">{it.product.name}</td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {it.quantity} {it.product.unit ?? ''}
+                        {it.receivedQuantity != null && it.receivedQuantity < it.quantity && (
+                          <span className="ml-2 text-red-700">{t('transfers.short', { n: it.quantity - it.receivedQuantity })}</span>
+                        )}
+                      </td>
+                      {tr.status === 'IN_TRANSIT' && it.serialNumbers.length > 0 && Number(counting[tr.id]?.[it.id] ?? it.quantity) < it.quantity && (
+                        <td className="py-1.5 pl-2">
+                          <span className="block text-[11px] text-gray-500">{t('serials.whichMissing')}</span>
+                          <span className="flex flex-wrap gap-1">
+                            {it.serialNumbers.map((sn) => {
+                              const isMissing = (missing[it.id] ?? []).includes(sn);
+                              return (
+                                <button
+                                  key={sn}
+                                  type="button"
+                                  aria-pressed={isMissing}
+                                  onClick={() =>
+                                    setMissing((m) => ({
+                                      ...m,
+                                      [it.id]: isMissing ? (m[it.id] ?? []).filter((x) => x !== sn) : [...(m[it.id] ?? []), sn],
+                                    }))
+                                  }
+                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-mono transition-colors ${
+                                    isMissing ? 'border-red-400 bg-red-50 text-red-700' : 'border-gray-300 bg-white text-gray-700 hover:border-red-300'
+                                  }`}
+                                >
+                                  {isMissing ? <XCircle size={11} /> : <Check size={11} />}
+                                  {sn}
+                                </button>
+                              );
+                            })}
+                          </span>
+                        </td>
                       )}
-                    </td>
-                    {tr.status === 'IN_TRANSIT' && it.serialNumbers.length > 0 && Number(counting[tr.id]?.[it.id] ?? it.quantity) < it.quantity && (
-                      <td className="py-1.5 pl-2">
-                        <span className="block text-[11px] text-gray-500">{t('serials.whichMissing')}</span>
-                        <span className="flex flex-wrap gap-1">
-                          {it.serialNumbers.map((sn) => {
-                            const isMissing = (missing[it.id] ?? []).includes(sn);
-                            return (
-                              <button
-                                key={sn}
-                                type="button"
-                                aria-pressed={isMissing}
-                                onClick={() =>
-                                  setMissing((m) => ({
-                                    ...m,
-                                    [it.id]: isMissing ? (m[it.id] ?? []).filter((x) => x !== sn) : [...(m[it.id] ?? []), sn],
-                                  }))
-                                }
-                                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-mono transition-colors ${
-                                  isMissing ? 'border-red-400 bg-red-50 text-red-700' : 'border-gray-300 bg-white text-gray-700 hover:border-red-300'
-                                }`}
-                              >
-                                {isMissing ? <XCircle size={11} /> : <Check size={11} />}
-                                {sn}
-                              </button>
-                            );
-                          })}
-                        </span>
-                      </td>
-                    )}
-                    {tr.status === 'IN_TRANSIT' && (
-                      <td className="py-1.5 pl-2 w-28">
-                        <input
-                          inputMode="decimal"
-                          placeholder={String(it.quantity)}
-                          aria-label={t('transfers.countedQty')}
-                          value={counting[tr.id]?.[it.id] ?? ''}
-                          onChange={(e) =>
-                            setCounting((c) => ({ ...c, [tr.id]: { ...(c[tr.id] ?? {}), [it.id]: e.target.value } }))
-                          }
-                          className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm text-right"
-                        />
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      {tr.status === 'IN_TRANSIT' && (
+                        <td className="py-1.5 pl-2 w-28">
+                          <input
+                            inputMode="decimal"
+                            placeholder={String(it.quantity)}
+                            aria-label={t('transfers.countedQty')}
+                            value={counting[tr.id]?.[it.id] ?? ''}
+                            onChange={(e) =>
+                              setCounting((c) => ({ ...c, [tr.id]: { ...(c[tr.id] ?? {}), [it.id]: e.target.value } }))
+                            }
+                            className="w-24 border border-gray-300 rounded-md px-2 py-1 text-sm text-right"
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {tr.status === 'IN_TRANSIT' && <p className="text-xs text-gray-500 mt-1">{t('transfers.countHint')}</p>}
 
             <div className="mt-3 flex flex-wrap gap-2">

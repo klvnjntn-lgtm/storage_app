@@ -10,6 +10,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 function formatIDR(amount: number): string {
@@ -729,6 +730,7 @@ function RunsTab() {
 // ----------------------------------------------------------- Employees ----
 
 function EmployeesTab() {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [components, setComponents] = useState<SalaryComponent[] | null>(null);
@@ -874,7 +876,7 @@ function EmployeesTab() {
   // historical PayrollItem rows still reference this employee and must
   // keep displaying their name correctly.
   async function handleArchive(emp: Employee) {
-    if (!confirm(t('accounting.payroll.archiveConfirm', { name: emp.name }))) return;
+    if (!(await dialog.confirm(t('accounting.payroll.archiveConfirm', { name: emp.name }), { danger: true }))) return;
     setArchivingId(emp.id);
     setError(null);
     try {

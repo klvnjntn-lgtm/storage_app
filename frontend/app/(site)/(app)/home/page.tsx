@@ -84,7 +84,7 @@ function useModuleItems(t: (key: string) => string, enabledModules: string[], is
 export default function Home() {
   const router = useRouter();
   const { t } = useLanguage();
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<{ email?: string; role?: string } | null>(null);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [enabledModules, setEnabledModules] = useState<string[]>([]);
   const [openSessions, setOpenSessions] = useState<number | null>(null);
@@ -145,7 +145,7 @@ export default function Home() {
         if (!res.ok) return;
         const json = await res.json();
         const list = Array.isArray(json) ? json : (json.data ?? []);
-        const open = list.filter((s: any) => s.status === 'OPEN' || s.status === 'IN_PROGRESS').length;
+        const open = list.filter((s: { status: string }) => s.status === 'OPEN' || s.status === 'IN_PROGRESS').length;
         setOpenSessions(open);
       } catch (err) {
         console.error('Sessions fetch failed:', err);

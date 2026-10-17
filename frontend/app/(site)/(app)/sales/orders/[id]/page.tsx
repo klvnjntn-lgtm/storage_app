@@ -10,6 +10,8 @@ import { SalesOrderA4Template } from '@/app/components/sales-orders/templates/Sa
 import { SalesOrderPrintView, toSalesOrderView } from '@/lib/mappers/sales-order-mapper';
 import { DeliveryOrdersPanel } from '@/app/components/sales-orders/DeliveryOrdersPanel';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 type SalesOrderStatus = 'DRAFT' | 'CONFIRMED' | 'PARTIALLY_DELIVERED' | 'FULLY_DELIVERED' | 'CANCELLED';
@@ -70,6 +72,7 @@ function statusStyle(status: SalesOrderStatus) {
 const CAN_INVOICE_NO_WAREHOUSE_OPS: SalesOrderStatus[] = ['CONFIRMED', 'PARTIALLY_DELIVERED', 'FULLY_DELIVERED'];
 
 export default function SalesOrderDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
   const params = useParams<{ id: string }>();
@@ -157,7 +160,7 @@ export default function SalesOrderDetailPage() {
   }
 
   async function handleCancel() {
-    const reason = window.prompt(t('sales.orderDetail.cancelReasonPrompt'));
+    const reason = await dialog.prompt(t('sales.orderDetail.cancelReasonPrompt'));
     if (reason === null) return;
     if (!reason.trim()) {
       setError(t('sales.orderDetail.cancelReasonRequired'));
@@ -204,8 +207,8 @@ export default function SalesOrderDetailPage() {
       a.download = `${order.orderNumber ?? 'sales-order'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || t('sales.orderDetail.couldNotGeneratePdf'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.orderDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }

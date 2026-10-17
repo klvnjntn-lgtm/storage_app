@@ -170,7 +170,7 @@ export function ReceiveGoodsDialog({
       )}
 
       {items && (
-        <div className="border-2 border-gray-200 rounded-md mb-3 max-h-72 overflow-y-auto">
+        <div className="border-2 border-gray-200 rounded-md mb-3 max-h-72 overflow-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>

@@ -14,6 +14,9 @@ async function bootstrap() {
     logger: process.env.LOG_FORMAT === 'json' ? new ConsoleLogger({ json: true }) : undefined,
   });
   configureApp(app);
+  // Runs onModuleDestroy hooks on SIGTERM/SIGINT (e.g. `docker stop`), so
+  // the Prisma pool closes cleanly instead of being dropped mid-query.
+  app.enableShutdownHooks();
 
   // Large GDB file uploads (400-500MB+) can take longer than Node's
   // default 5-minute requestTimeout, which aborts the connection mid-upload.

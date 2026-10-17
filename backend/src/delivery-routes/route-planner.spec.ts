@@ -93,6 +93,7 @@ describe('RoutePlannerService — optimize all teams', () => {
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
     await prisma.team.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
+    await prisma.$disconnect();
   });
 
   const makeDo = (name: string, lat: number | null, extra: object = {}) =>

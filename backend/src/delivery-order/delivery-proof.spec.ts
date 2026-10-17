@@ -111,6 +111,7 @@ describe('Delivery proof photos', () => {
     await prisma.organization.delete({ where: { id: orgId } });
     rmSync(root, { recursive: true, force: true });
     delete process.env.UPLOADS_DIR;
+    await prisma.$disconnect();
   });
 
   const shippedDo = async (onRouteOf?: string) => {

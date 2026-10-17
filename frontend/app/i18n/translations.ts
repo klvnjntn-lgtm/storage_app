@@ -28,6 +28,11 @@ const base = {
     common: {
       hubMenu: 'Menu',
       hubSearch: 'Search',
+      errorTitle: 'Something went wrong',
+      errorBody: 'This page hit an unexpected error. Your saved data is safe — try again, or go back to the home page.',
+      tryAgain: 'Try again',
+      goHome: 'Go to home',
+      ok: 'OK',
       save: 'Save',
       saving: 'Saving...',
       cancel: 'Cancel',
@@ -324,6 +329,11 @@ const base = {
     common: {
       hubMenu: 'Menu',
       hubSearch: 'Cari',
+      errorTitle: 'Terjadi kesalahan',
+      errorBody: 'Halaman ini mengalami kesalahan tak terduga. Data yang sudah tersimpan aman — coba lagi, atau kembali ke beranda.',
+      tryAgain: 'Coba lagi',
+      goHome: 'Ke beranda',
+      ok: 'OK',
       save: 'Simpan',
       saving: 'Menyimpan...',
       cancel: 'Batal',

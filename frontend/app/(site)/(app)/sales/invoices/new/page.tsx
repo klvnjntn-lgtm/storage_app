@@ -40,6 +40,7 @@ import {
   isApprovalRequired,
   type ApprovalRequiredError,
 } from '@/app/components/approvals/ApprovalRequiredNotice';
+import { errorMessage } from '@/lib/api-error';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -58,6 +59,20 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 // FIX — NewInvoicePage uses useSearchParams(), which requires a Suspense
 // boundary for static prerendering, or `next build` fails outright. See
 // login/page.tsx's identical fix.
+// An issued invoice's line as the API returns it (Decimals as strings).
+type IssuedItemRow = {
+  id: string;
+  productName?: string | null;
+  quantity: number;
+  unit?: string | null;
+  unitPrice: number | string;
+  itemDiscount?: number | string | null;
+  itemTaxAmount?: number | string | null;
+  itemTotal?: number | string | null;
+  lineTotal: number | string;
+  locationName?: string | null;
+};
+
 export default function NewInvoicePageWrapper() {
   return (
     <Suspense fallback={null}>
@@ -730,7 +745,7 @@ function NewInvoicePage() {
         employeeId: issued.employeeId ?? null,
         employeeName: issued.employeeName ?? null,
 
-        items: issued.items.map((item: any) => ({
+        items: issued.items.map((item: IssuedItemRow) => ({
           id: item.id,
           productName: item.productName ?? '',
           quantity: item.quantity,
@@ -745,7 +760,7 @@ function NewInvoicePage() {
         subtotal: Number(issued.subtotal),
         discount: Number(issued.discount),
         taxAmount: Number(issued.taxAmount ?? 0),
-        taxes: (issued.taxes ?? []).map((t: any) => ({
+        taxes: (issued.taxes ?? []).map((t: { name: string; percentage: number | string; amount: number | string }) => ({
           name: t.name,
           percentage: Number(t.percentage),
           amount: Number(t.amount),
@@ -768,9 +783,9 @@ function NewInvoicePage() {
         paymentTerms: issued.paymentTerms ?? null,
         notes: issued.notes ?? null,
       } as InvoiceView);
-    } catch (e: any) {
+    } catch (e) {
       console.error(e);
-      setError(e.message || t('sales.invoicesNew.couldNotCreateInvoice'));
+      setError(errorMessage(e) || t('sales.invoicesNew.couldNotCreateInvoice'));
     } finally {
       setPrinting(false);
     }

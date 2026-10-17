@@ -6,6 +6,7 @@ import { Mail, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
+import { errorMessage } from '@/lib/api-error';
 
 export default function ForgotPasswordPage() {
   const { t } = useLanguage();
@@ -30,8 +31,8 @@ export default function ForgotPasswordPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || t('auth.forgotPassword.genericError'));
       setSent(true);
-    } catch (err: any) {
-      setError(err.message || t('auth.forgotPassword.genericError'));
+    } catch (err) {
+      setError(errorMessage(err) || t('auth.forgotPassword.genericError'));
     } finally {
       setLoading(false);
     }

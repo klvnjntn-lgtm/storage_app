@@ -47,6 +47,7 @@ export function POProductSearch({ onAddProduct }: Props) {
       setResults([]);
       return;
     }
+    let cancelled = false; // set when a newer query supersedes this one
     const timeout = setTimeout(async () => {
       setSearching(true);
       try {
@@ -54,10 +55,11 @@ export function POProductSearch({ onAddProduct }: Props) {
         // NOTE: reusing the invoice product search endpoint — there's no
         // purchase-specific one. We only use id/name/sku/barcode from it.
         const res = await apiFetch(`/products/search-for-invoice?${params.toString()}`);
-        if (!res.ok) return;
+        if (!res.ok || cancelled) return;
         const data = await res.json();
+        if (cancelled) return;
         setResults(
-          data.map((p: any) => ({
+          data.map((p: { id: string; name: string; sku?: string | null; barcode?: string | null; image?: string | null }) => ({
             id: p.id,
             name: p.name,
             sku: p.sku ?? null,
@@ -66,10 +68,13 @@ export function POProductSearch({ onAddProduct }: Props) {
           })),
         );
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, [query]);
 
   return (

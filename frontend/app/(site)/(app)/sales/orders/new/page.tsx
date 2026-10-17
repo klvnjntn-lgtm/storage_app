@@ -19,6 +19,7 @@ import {
   ServiceLine,
   TaxRate,
 } from '@/app/components/sales-orders/types';
+import type { TaxRateRow } from '@/lib/api-types';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -136,7 +137,7 @@ function SalesOrderFormPageInner() {
       if (taxRes.ok) {
         const rates = await taxRes.json();
         setTaxRates(
-          rates.map((r: any) => ({
+          rates.map((r: TaxRateRow) => ({
             id: r.id,
             name: r.name,
             percentage: r.percentage,

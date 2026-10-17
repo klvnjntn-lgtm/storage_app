@@ -144,6 +144,15 @@ export class WorkOrdersService {
       dto.items !== undefined ? await this.estimate(organizationId, dto.items, wo.customerId, userId) : undefined;
 
     await this.prisma.$transaction(async (tx) => {
+      // Same lock InvoiceService.createDraft() takes: an edit racing an
+      // invoice must not change the lines after the invoice copied them.
+      await tx.$queryRaw`SELECT id FROM "WorkOrder" WHERE id = ${id} FOR UPDATE`;
+      const invoiced = await tx.invoice.count({
+        where: { workOrderId: id, status: { not: InvoiceStatus.VOID } },
+      });
+      if (invoiced > 0) {
+        throw new BadRequestException('This work order has been invoiced — void the invoice to change it');
+      }
       if (dto.odometer != null && dto.odometer !== wo.odometer) {
         await this.applyOdometer(tx, organizationId, wo.vehicleId, dto.odometer);
       }

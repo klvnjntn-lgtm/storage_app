@@ -511,6 +511,7 @@ model SupplierPayment {
   recordedBy      User?                    @relation(fields: [recordedById], references: [id])
 
   @@index([purchaseOrderId])
+  @@index([organizationId, paidAt])
 }
 
 enum DocumentType {
@@ -785,6 +786,7 @@ model IntegrationConnection {
   externalOrders          ExternalOrder[]
   externalProductMappings ExternalProductMapping[]
   organization            Organization             @relation(fields: [organizationId], references: [id])
+  @@index([organizationId])
 }
 
 model ExternalProductMapping {
@@ -813,6 +815,7 @@ model ExternalOrder {
   items          ExternalOrderItem[]
 
   @@unique([connectionId, externalRef])
+  @@index([organizationId, status, createdAt])
 }
 
 model ExternalOrderItem {
@@ -1114,6 +1117,8 @@ model SalesOrderActivityEvent {
   metadata       Json?
   salesOrder     SalesOrder @relation(fields: [salesOrderId], references: [id])
   user           User       @relation(fields: [userId], references: [id])
+  @@index([salesOrderId])
+  @@index([organizationId, createdAt])
 }
 
 // ---- Delivery Order --------------------------------------------------
@@ -1705,6 +1710,7 @@ model InvoiceActivityEvent {
   user           User?                    @relation(fields: [userId], references: [id])
 
   @@index([invoiceId])
+  @@index([organizationId, createdAt])
   @@map("InvoiceEditEvent") // keeps the physical table name — this is a rename+extend, not a new table, so existing history rows survive untouched
 }
 

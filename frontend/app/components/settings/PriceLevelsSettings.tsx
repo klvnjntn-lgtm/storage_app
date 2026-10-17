@@ -7,11 +7,13 @@ import { readErrorMessage } from '@/lib/api-error';
 import { invalidatePriceLevels, PriceLevel } from '@/lib/price-levels';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { ToggleRow } from '@/app/components/shared/PageFrame';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 // Settings → Price levels: the org-wide list (Retail, Wholesale, …) plus
 // who may change a sales line's level. Each product's price per level is
 // set on the Products page; each customer's level on the customer.
 export default function PriceLevelsSettings() {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const [levels, setLevels] = useState<PriceLevel[] | null>(null);
   const [newName, setNewName] = useState('');
@@ -86,7 +88,7 @@ export default function PriceLevelsSettings() {
   }
 
   async function archive(level: PriceLevel) {
-    if (!confirm(t('settings.priceLevels.archiveConfirm', { name: level.name }))) return;
+    if (!(await dialog.confirm(t('settings.priceLevels.archiveConfirm', { name: level.name }), { danger: true }))) return;
     await run(() => apiFetch(`/organization/price-levels/${level.id}`, json('PATCH', { archived: true })));
   }
 

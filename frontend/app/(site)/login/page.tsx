@@ -10,6 +10,7 @@ import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { authReason, getDeviceId } from '@/lib/apifetch';
 import { CSRF_HEADERS, markSignedIn } from '@/lib/session';
+import { errorMessage } from '@/lib/api-error';
 
 
 // FIX — useSearchParams() (below, in LoginForm) requires a Suspense
@@ -90,9 +91,9 @@ function LoginForm() {
       }
 
       await finishLogin();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('auth.login.loginFailed'));
+      setError(errorMessage(err) || t('auth.login.loginFailed'));
     } finally {
       setLoading(false);
     }

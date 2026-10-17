@@ -1,7 +1,7 @@
 // app/(app)/reminders/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Bell, Check, Clock, Trash2, Car } from 'lucide-react';
@@ -10,6 +10,7 @@ import { Reminder } from '@/app/components/invoices/types';
 import { toCalendarDateString, formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 const DUE_SOON_DAYS = 7;
@@ -64,6 +65,7 @@ function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
 }
 
 export default function RemindersPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
 
@@ -133,7 +135,7 @@ export default function RemindersPage() {
   }
 
   async function remove(id: string) {
-    if (!confirm(t('workshop.reminders.deleteConfirm'))) return;
+    if (!(await dialog.confirm(t('workshop.reminders.deleteConfirm'), { danger: true }))) return;
     setBusyId(id);
     try {
       const res = await apiFetch(`/reminders/${id}`, { method: 'DELETE' });
@@ -153,7 +155,10 @@ export default function RemindersPage() {
   });
   const upcoming = pending.filter((r) => daysBetween(new Date(r.dueDate), new Date()) > DUE_SOON_DAYS);
 
-  function ReminderRow({ r }: { r: Reminder }) {
+  // Plain render helpers, not components: defined inside the page, a
+  // component would be a new type every render and remount — closing the
+  // snooze DatePicker as soon as a date was picked.
+  function renderReminderRow(r: Reminder) {
     const due = formatDue(r.dueDate, r.status, t);
     const isSnoozing = snoozingId === r.id;
 
@@ -245,7 +250,7 @@ export default function RemindersPage() {
     );
   }
 
-  function Section({ title, items, emptyText }: { title: string; items: Reminder[]; emptyText: string }) {
+  function renderSection(title: string, items: Reminder[]) {
     if (items.length === 0) return null;
     return (
       <div className="mb-6">
@@ -254,7 +259,7 @@ export default function RemindersPage() {
         </h2>
         <div className="flex flex-col gap-2">
           {items.map((r) => (
-            <ReminderRow key={r.id} r={r} />
+            <Fragment key={r.id}>{renderReminderRow(r)}</Fragment>
           ))}
         </div>
       </div>
@@ -299,10 +304,10 @@ export default function RemindersPage() {
           </p>
         )}
 
-        <Section title={t('workshop.reminders.overdueSection')} items={overdue} emptyText="" />
-        <Section title={t('workshop.reminders.dueSoonSection')} items={dueSoon} emptyText="" />
-        <Section title={t('workshop.reminders.upcomingSection')} items={upcoming} emptyText="" />
-        <Section title={t('workshop.reminders.completedSection')} items={completed} emptyText="" />
+        {renderSection(t('workshop.reminders.overdueSection'), overdue)}
+        {renderSection(t('workshop.reminders.dueSoonSection'), dueSoon)}
+        {renderSection(t('workshop.reminders.upcomingSection'), upcoming)}
+        {renderSection(t('workshop.reminders.completedSection'), completed)}
       </div>
     </main>
   );

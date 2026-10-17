@@ -23,6 +23,8 @@ import {
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 type RawTaxRate = TaxRate & { archivedAt: string | null };
 
@@ -45,6 +47,7 @@ function lineDiscountAmount(
 }
 
 export default function EditIssuedInvoicePage() {
+  const dialog = useDialog();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
@@ -600,7 +603,7 @@ function changeServiceUnit(key: string, value: string) {
       if (res.status === 409) {
         const body = await res.json().catch(() => null);
         const confirmed =
-          body?.error === 'STOCK_CONFIRMATION_REQUIRED' && window.confirm(body.message as string);
+          body?.error === 'STOCK_CONFIRMATION_REQUIRED' && (await dialog.confirm(body.message as string));
         if (!confirmed) {
           setSaving(false);
           return;
@@ -615,8 +618,8 @@ function changeServiceUnit(key: string, value: string) {
         throw new Error(text || t('sales.invoiceEdit.failedToSaveChanges', { status: res.status }));
       }
       router.push(`/sales/invoices/${params.id}`);
-    } catch (e: any) {
-      setError(e.message || t('sales.invoiceEdit.couldNotSaveChanges'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.invoiceEdit.couldNotSaveChanges'));
     } finally {
       setSaving(false);
     }

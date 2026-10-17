@@ -14,6 +14,8 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
 import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 function statusStyle(status: string) {
@@ -30,6 +32,7 @@ function statusStyle(status: string) {
 }
 
 export default function DeliveryOrderDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
   const params = useParams<{ id: string }>();
@@ -119,7 +122,7 @@ export default function DeliveryOrderDetailPage() {
   }
 
   async function handleCancel() {
-    if (!confirm(t('sales.deliveryOrderDetail.confirmCancel'))) return;
+    if (!(await dialog.confirm(t('sales.deliveryOrderDetail.confirmCancel'), { danger: true }))) return;
     if (await runAction('cancel', `/delivery-orders/${id}/cancel`)) load();
   }
 
@@ -182,8 +185,8 @@ export default function DeliveryOrderDetailPage() {
       a.download = `${order.doNumber ?? 'delivery-order'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || t('sales.deliveryOrderDetail.couldNotGeneratePdf'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.deliveryOrderDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }

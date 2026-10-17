@@ -5,6 +5,7 @@ import { Camera, Check, StickyNote, Trash2 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { CSRF_HEADERS } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 // Must match CustomerLocationService.MAX_LOCATION_PHOTOS.
 const MAX_PHOTOS = 2;
@@ -23,6 +24,7 @@ export default function CustomerDriverInfoSection({
   deliveryNotes: string | null;
   onNotesSaved: (notes: string) => void;
 }) {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const [notes, setNotes] = useState(deliveryNotes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -86,7 +88,7 @@ export default function CustomerDriverInfoSection({
   }
 
   async function remove(photoId: string) {
-    if (!confirm(t('customers.driverInfo.confirmDeletePhoto'))) return;
+    if (!(await dialog.confirm(t('customers.driverInfo.confirmDeletePhoto'), { danger: true }))) return;
     setError('');
     const res = await apiFetch(`/customers/${customerId}/location-photos/${photoId}`, { method: 'DELETE' });
     const body = await res.json().catch(() => null);

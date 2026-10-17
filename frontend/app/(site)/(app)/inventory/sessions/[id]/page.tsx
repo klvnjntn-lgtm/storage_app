@@ -23,6 +23,7 @@ import { readErrorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { formatDMYTime } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type SessionItem = {
   id: number;
@@ -127,6 +128,7 @@ const fmt = (d: string, locale: string) =>
   });
 
 export default function SessionPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { t, language } = useLanguage();
@@ -256,7 +258,7 @@ export default function SessionPage() {
     // Receiving: completing with differences is allowed (they're a record
     // of what arrived), but make it a conscious choice.
     const differences = (session.receiveCheck ?? []).filter((r) => r.difference !== 0).length;
-    if (differences > 0 && !window.confirm(t('inventory.sessionDetail.confirmCompleteWithDifferences', { count: differences }))) {
+    if (differences > 0 && !(await dialog.confirm(t('inventory.sessionDetail.confirmCompleteWithDifferences', { count: differences })))) {
       return;
     }
     setCompleting(true);
@@ -837,7 +839,7 @@ export default function SessionPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">{t('inventory.sessionDetail.sessionItems')}</h2>
 
-          <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
+          <div className="border border-blue-500/15 rounded-xl overflow-x-auto bg-white shadow-sm">
             <table className="w-full text-sm">
               <thead className="bg-blue-50/60 border-b border-blue-500/15">
                 <tr>

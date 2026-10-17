@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, CalendarClock, Store, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
@@ -21,6 +22,7 @@ import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressP
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
 import { formatDMY, formatDMYTime } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -128,6 +130,7 @@ function statusBadge(status: StopStatus, label: string) {
 }
 
 export default function DeliveryRouteDetailPage() {
+  const dialog = useDialog();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { t } = useLanguage();
@@ -221,12 +224,10 @@ export default function DeliveryRouteDetailPage() {
   }
 
   async function loadAvailableOrders() {
-    const [packedRes, shippedRes] = await Promise.all([
-      apiFetch('/delivery-orders?status=PACKED&pageSize=100'),
-      apiFetch('/delivery-orders?status=SHIPPED&pageSize=100'),
+    const [packed, shipped] = await Promise.all([
+      fetchAllPages<AvailableOrder>('/delivery-orders?status=PACKED').catch(() => []),
+      fetchAllPages<AvailableOrder>('/delivery-orders?status=SHIPPED').catch(() => []),
     ]);
-    const packed = packedRes.ok ? (await packedRes.json()).data : [];
-    const shipped = shippedRes.ok ? (await shippedRes.json()).data : [];
     setAvailableOrders([...packed, ...shipped]);
   }
 
@@ -307,7 +308,7 @@ export default function DeliveryRouteDetailPage() {
   }
 
   async function handleRemove(stop: Stop) {
-    if (!confirm(t('delivery.routeDetail.confirmRemove'))) return;
+    if (!(await dialog.confirm(t('delivery.routeDetail.confirmRemove'), { danger: true }))) return;
     setBusy(stop.id);
     setError(null);
     try {
@@ -554,7 +555,7 @@ export default function DeliveryRouteDetailPage() {
       return;
     }
     const next = teams.find((x) => x.id === teamId);
-    if (next && !confirm(t('delivery.routeDetail.confirmChangeTeam', { name: teamLabel(next, t('delivery.teams.noDriver')) }))) return;
+    if (next && !(await dialog.confirm(t('delivery.routeDetail.confirmChangeTeam', { name: teamLabel(next, t('delivery.teams.noDriver')) })))) return;
     setSavingTeam(true);
     setError(null);
     try {

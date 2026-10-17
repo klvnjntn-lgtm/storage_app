@@ -13,6 +13,8 @@ import { Supplier } from '@/app/components/suppliers/types';
 import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from '@/app/components/purchase-orders/types';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { errorMessage } from '@/lib/api-error';
+import type { TaxRateRow } from '@/lib/api-types';
 
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -99,8 +101,8 @@ function PurchaseOrderFormPageInner() {
         const rates = await taxRes.json();
         setTaxRates(
           rates
-            .filter((r: any) => !r.archivedAt)
-            .map((r: any) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: !!r.isDefault })),
+            .filter((r: TaxRateRow) => !r.archivedAt)
+            .map((r: TaxRateRow) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: !!r.isDefault })),
         );
       }
     })();
@@ -387,8 +389,8 @@ function PurchaseOrderFormPageInner() {
     let payload;
     try {
       payload = buildPayload();
-    } catch (e: any) {
-      setError(e.message ?? t('purchasing.purchaseOrderNew.checkNewProductRows'));
+    } catch (e) {
+      setError(errorMessage(e) ?? t('purchasing.purchaseOrderNew.checkNewProductRows'));
       return;
     }
     setSaving(true);
@@ -466,7 +468,7 @@ function PurchaseOrderFormPageInner() {
           {cartLines.length === 0 && newProductLineTotals.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">{t('purchasing.purchaseOrderNew.noItemsYet')}</p>
           ) : (
-            <div className="border-2 border-gray-200 rounded-md overflow-hidden bg-white">
+            <div className="border-2 border-gray-200 rounded-md overflow-x-auto bg-white">
               <table className="w-full text-sm">
                 <thead className="bg-blue-50/60 border-b-2 border-gray-200">
                   <tr>

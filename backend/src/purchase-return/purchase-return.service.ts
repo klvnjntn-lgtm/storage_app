@@ -187,11 +187,13 @@ export class PurchaseReturnService {
 
       for (const { line, poItem } of lines) {
         if (line.batchId) {
+          if (!poItem.productId)
+            throw new BadRequestException('Batch not found for this product');
           const batch = await tx.productBatch.findFirst({
             where: {
               id: line.batchId,
               organizationId,
-              productId: poItem.productId ?? undefined,
+              productId: poItem.productId,
             },
           });
           if (!batch)
@@ -264,10 +266,16 @@ export class PurchaseReturnService {
           tx,
         );
         if (line.batchId) {
-          await tx.productBatch.update({
-            where: { id: line.batchId },
+          // Guarded so a batch can't go negative — also covers two lines (or
+          // two concurrent returns) drawing on the same batch.
+          const taken = await tx.productBatch.updateMany({
+            where: { id: line.batchId, quantity: { gte: line.quantity } },
             data: { quantity: { decrement: line.quantity } },
           });
+          if (taken.count === 0)
+            throw new BadRequestException(
+              'This batch does not have enough quantity left to return',
+            );
         }
       }
 

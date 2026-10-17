@@ -1,7 +1,7 @@
 // app/(app)/customers/page.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet, MapPinOff } from 'lucide-react';
@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
-import { useSortableData } from '@/lib/hooks/useSortableData';
+import type { SortState } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
@@ -17,7 +17,9 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { usePriceLevels } from '@/lib/price-levels';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
-import { PinStatusBadge, pinStatus, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
+import { PinStatusBadge, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 // Columns the (desktop) table can be sorted by. Address is deliberately
@@ -56,6 +58,7 @@ const EMPTY_EDIT: EditState = {
 };
 
 export default function CustomersPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
   const { profile } = useAuth();
@@ -65,6 +68,7 @@ export default function CustomersPage() {
   const { levels: priceLevels, defaultLevelId } = usePriceLevels();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
   // Seeded from the URL so pressing the browser's Back button from a
   // customer's detail page restores the same search/page instead of
@@ -86,37 +90,23 @@ export default function CustomersPage() {
     pageSize: pageSize !== 20 ? pageSize : null,
   });
 
-  // FIX — was missing a stale-response guard entirely. Fast typing could
-  // let an earlier request's response arrive after a later one and
-  // overwrite the list with stale results.
-  const requestIdRef = useRef(0);
-
-  async function load(q?: string) {
-    setLoading(true);
-    const thisRequest = ++requestIdRef.current;
-    try {
-      const params = q ? `?q=${encodeURIComponent(q)}` : '';
-      const res = await apiFetch(`/customers${params}`);
-      if (thisRequest !== requestIdRef.current) return; // stale response, a newer request is in flight
-      if (res.ok) setCustomers(await res.json());
-    } finally {
-      if (thisRequest === requestIdRef.current) setLoading(false);
-    }
+  // Search, pin filter, sort and paging all run on the server — an org
+  // imported from GDB can have thousands of customers.
+  const [sort, setSort] = useState<SortState<SortKey> | null>(null);
+  function toggleSort(key: SortKey) {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, direction: 'asc' };
+      if (prev.direction === 'asc') return { key, direction: 'desc' };
+      return null;
+    });
+    setPage(1);
   }
 
-  // FIX — was a separate mount-only effect calling load() immediately,
-  // PLUS this debounce effect also firing on mount (query starts at ''),
-  // which called load(undefined) again ~300ms later — a redundant
-  // duplicate fetch on every page load. Skipping the debounce delay on
-  // the very first run covers the initial load without the second one.
-  const isFirstLoadRef = useRef(true);
+  // Debounced copy of the search box, so typing doesn't fire a request
+  // per keystroke. Seeded with the URL value so the first load uses it.
+  const [debouncedQuery, setDebouncedQuery] = useState(() => query.trim());
   useEffect(() => {
-    if (isFirstLoadRef.current) {
-      isFirstLoadRef.current = false;
-      load(query.trim() || undefined);
-      return;
-    }
-    const timeout = setTimeout(() => load(query.trim() || undefined), 300);
+    const timeout = setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => clearTimeout(timeout);
   }, [query]);
 
@@ -130,24 +120,37 @@ export default function CustomersPage() {
       return;
     }
     setPage(1);
-  }, [query, pinFilter]);
+  }, [debouncedQuery, pinFilter]);
 
-  // The whole result set is loaded client-side (no server pagination here,
-  // unlike Purchase Orders), so — same as Stock — sorting applies across
-  // the full list, not just the current page, and pagination slices the
-  // already-sorted array below.
-  // Pin filter is client-side too, like sorting.
-  const filteredCustomers = hasDelivery && pinFilter ? customers.filter((c) => pinStatus(c) === pinFilter) : customers;
-  const { sorted: sortedCustomers, sort, toggleSort } = useSortableData<Customer, SortKey>(
-    filteredCustomers,
-    {
-      name: (c) => c.name,
-      phone: (c) => c.phone ?? '',
-    },
-  );
+  const effectivePin = hasDelivery ? pinFilter : '';
+  const requestIdRef = useRef(0);
+  const load = useCallback(async () => {
+    const thisRequest = ++requestIdRef.current;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (debouncedQuery) params.set('q', debouncedQuery);
+      if (effectivePin) params.set('pin', effectivePin);
+      if (sort) {
+        params.set('sort', sort.key);
+        params.set('dir', sort.direction);
+      }
+      const res = await apiFetch(`/customers?${params}`);
+      if (thisRequest !== requestIdRef.current) return; // stale response, a newer request is in flight
+      if (res.ok) {
+        const body: { data: Customer[]; total: number } = await res.json();
+        if (thisRequest !== requestIdRef.current) return;
+        setCustomers(body.data);
+        setTotalItems(body.total);
+      }
+    } finally {
+      if (thisRequest === requestIdRef.current) setLoading(false);
+    }
+  }, [page, pageSize, debouncedQuery, effectivePin, sort]);
 
-  const totalItems = sortedCustomers.length;
-  const pagedCustomers = sortedCustomers.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   function cellHighlight(key: SortKey) {
     return sort?.key === key ? 'bg-blue-50/70' : '';
@@ -217,9 +220,9 @@ export default function CustomersPage() {
       }
 
       setEditing(null);
-      load(query.trim() || undefined);
-    } catch (e: any) {
-      setError(e.message || t('customers.listPage.saveFailed'));
+      load();
+    } catch (e) {
+      setError(errorMessage(e) || t('customers.listPage.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -228,7 +231,7 @@ export default function CustomersPage() {
   // Admin only: removes the pin and its lock, so the next delivery's driver
   // GPS sets a fresh one.
   async function clearLocation(c: Customer) {
-    if (!confirm(t('delivery.pin.clearConfirm', { name: c.name }))) return;
+    if (!(await dialog.confirm(t('delivery.pin.clearConfirm', { name: c.name }), { danger: true }))) return;
     const res = await apiFetch(`/customers/${c.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ latitude: null, longitude: null }),
@@ -236,19 +239,21 @@ export default function CustomersPage() {
     const body = await res.json().catch(() => null);
     if (res.ok) {
       setCustomers((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...body } : x)));
+      // Its pin status changed, so it may no longer match the filter.
+      if (effectivePin) load();
     } else {
-      alert(body?.message || t('delivery.pin.clearFailed', { status: res.status }));
+      await dialog.alert(body?.message || t('delivery.pin.clearFailed', { status: res.status }));
     }
   }
 
   async function remove(c: Customer) {
-    if (!confirm(t('customers.listPage.deleteConfirm', { name: c.name }))) return;
+    if (!(await dialog.confirm(t('customers.listPage.deleteConfirm', { name: c.name }), { danger: true }))) return;
     const res = await apiFetch(`/customers/${c.id}`, { method: 'DELETE' });
     if (res.ok) {
       load();
     } else {
       const err = await res.json().catch(() => null);
-      alert(err?.message || t('customers.listPage.deleteFailed', { status: res.status }));
+      await dialog.alert(err?.message || t('customers.listPage.deleteFailed', { status: res.status }));
     }
   }
 
@@ -337,7 +342,7 @@ export default function CustomersPage() {
             — the cards reflect whatever sort was last set on the desktop
             table, defaulting to server order. */}
         <div className="sm:hidden flex flex-col gap-2">
-          {pagedCustomers.map((c) => (
+          {customers.map((c) => (
             <div
               key={c.id}
               onClick={() => router.push(`/customers/${c.id}`)}
@@ -389,7 +394,7 @@ export default function CustomersPage() {
             </div>
           ))}
 
-          {!loading && filteredCustomers.length === 0 && (
+          {!loading && customers.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500 border-2 border-gray-300 rounded-md bg-white">
               {t('customers.listPage.noCustomersFound')}
             </div>
@@ -402,7 +407,7 @@ export default function CustomersPage() {
         </div>
 
         {/* Tablet/desktop: original table, now with sortable Name/Phone columns */}
-        <div className="hidden sm:block border-2 border-gray-300 rounded-md overflow-hidden bg-white">
+        <div className="hidden sm:block border-2 border-gray-300 rounded-md overflow-x-auto bg-white">
           <table className="w-full text-sm">
             <thead className="bg-blue-50/60 border-b-2 border-gray-300">
               <tr>
@@ -426,7 +431,7 @@ export default function CustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {pagedCustomers.map((c, idx) => (
+              {customers.map((c, idx) => (
                 <tr
                   key={c.id}
                   onClick={() => router.push(`/customers/${c.id}`)}
@@ -473,13 +478,13 @@ export default function CustomersPage() {
             </tbody>
           </table>
 
-          {!loading && filteredCustomers.length === 0 && (
+          {!loading && customers.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500">{t('customers.listPage.noCustomersFound')}</div>
           )}
           {loading && <div className="p-8 text-center text-sm text-gray-500">{t('common.loading')}</div>}
         </div>
 
-        {!loading && customers.length > 0 && (
+        {!loading && totalItems > 0 && (
           <div className="mt-4">
             <Pagination
               page={page}

@@ -10,6 +10,7 @@ import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { markSignedIn } from '@/lib/session';
 import { useIsDesktopApp } from '@/lib/desktop';
+import { errorMessage } from '@/lib/api-error';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -51,9 +52,9 @@ export default function RegisterPage() {
       // there instead of being routed into the app and had to click
       // "Login" again despite already having a valid token.
       router.replace('/home');
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('auth.register.registrationFailed'));
+      setError(errorMessage(err) || t('auth.register.registrationFailed'));
     } finally {
       setLoading(false);
     }

@@ -12,6 +12,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ComboBox from '@/app/components/shared/ComboBox';
+import { errorMessage } from '@/lib/api-error';
 
 
 type Product = {
@@ -397,9 +398,9 @@ export default function ProductsPage() {
       setPage(1);
 
       await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.products.createFailed'));
+      setError(errorMessage(err) || t('admin.products.createFailed'));
     } finally {
       setLoading(false);
     }
@@ -438,9 +439,9 @@ export default function ProductsPage() {
       }
       setSuccessMsg(t('admin.products.archivedSuccess', { name: product?.name ?? t('admin.products.productFallback') }));
       await loadProducts();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.products.archiveFailed'));
+      setError(errorMessage(err) || t('admin.products.archiveFailed'));
     } finally {
       setPendingArchiveId(null);
     }
@@ -462,9 +463,9 @@ export default function ProductsPage() {
       }
       setSuccessMsg(t('admin.products.restoredSuccess', { name: product?.name ?? t('admin.products.productFallback') }));
       await loadProducts();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.products.restoreFailed'));
+      setError(errorMessage(err) || t('admin.products.restoreFailed'));
     }
   }
 
@@ -585,9 +586,9 @@ export default function ProductsPage() {
       setSuccessMsg(t('admin.products.updatedSuccess', { name: editName.trim() || product?.name || '' }));
       setEditingId(null);
       await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.products.updateFailed'));
+      setError(errorMessage(err) || t('admin.products.updateFailed'));
     } finally {
       setSavingEdit(false);
     }

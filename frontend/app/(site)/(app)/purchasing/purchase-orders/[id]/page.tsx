@@ -21,6 +21,8 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 function statusBadgeClasses(status: string) {
@@ -76,6 +78,7 @@ type GoodsReceiptRow = {
 };
 
 export default function PurchaseOrderDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -165,7 +168,7 @@ export default function PurchaseOrderDetailPage() {
     if (await runAction('send', `/purchase-orders/${id}/send`)) load();
   }
   async function handleCancel() {
-    if (!confirm(t('purchasing.purchaseOrderDetail.cancelConfirm'))) return;
+    if (!(await dialog.confirm(t('purchasing.purchaseOrderDetail.cancelConfirm'), { danger: true }))) return;
     if (await runAction('cancel', `/purchase-orders/${id}/cancel`)) load();
   }
 
@@ -189,8 +192,8 @@ export default function PurchaseOrderDetailPage() {
       a.download = `${po.poNumber ?? 'purchase-order'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || t('purchasing.purchaseOrderDetail.pdfErrorGeneric'));
+    } catch (e) {
+      setError(errorMessage(e) || t('purchasing.purchaseOrderDetail.pdfErrorGeneric'));
     } finally {
       setPdfGenerating(false);
     }

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ScanLine, CheckCircle2, AlertCircle, MapPin, Camera, VideoOff, Loader2, History } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { apiFetch } from '@/lib/apifetch';
-import { readErrorMessage } from '@/lib/api-error';
+import { readErrorMessage, errorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { SerialPicker } from '@/app/components/shared/SerialPicker';
 
@@ -58,6 +58,15 @@ type ScanLogEntry = {
 // prerendering, or `next build` fails outright ("useSearchParams()
 // should be wrapped in a suspense boundary"). See login/page.tsx's
 // identical fix.
+// The fields of GET /sessions/:id this page reads.
+type ScanSession = {
+  type: string;
+  stage?: string | null;
+  stages?: string[];
+  returnInvoice?: { id: string; invoiceNumber: string | null; customerName: string | null } | null;
+  importBatch?: { createdAt: string } | null;
+};
+
 export default function ScanPage() {
   return (
     <Suspense fallback={null}>
@@ -72,7 +81,7 @@ function ScanPageInner() {
   const sessionId = searchParams.get('sessionId');
   const { t, language } = useLanguage();
 
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<ScanSession | null>(null);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [fromLocationId, setFromLocationId] = useState('');
   const [toLocationId, setToLocationId] = useState('');
@@ -218,9 +227,9 @@ function ScanPageInner() {
       setStatus('idle');
       pushLog({ barcode, productName: qty === 1 ? product.name : `${product.name} × ${qty}`, ok: true });
       setScanQty('1');
-    } catch (e: any) {
+    } catch (e) {
       console.error(e);
-      const msg = e.message || t('scan.scanFailed');
+      const msg = errorMessage(e) || t('scan.scanFailed');
       setStatus('error');
       setErrorMsg(msg);
       errorFeedback();

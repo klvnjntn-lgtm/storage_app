@@ -76,12 +76,15 @@ export default function WorkshopHome() {
       return;
     }
 
+    let cancelled = false; // set when a newer keystroke supersedes this search
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await apiFetch(`/vehicles/search?q=${encodeURIComponent(trimmed)}`);
+        if (cancelled) return;
         if (res.ok) {
           const data: SearchResult[] = await res.json();
+          if (cancelled) return;
           setResults(data);
           setDropdownOpen(data.length > 0);
           setHighlightIndex(0);
@@ -89,11 +92,12 @@ export default function WorkshopHome() {
       } catch {
         // Stay quiet on transient search errors — the user can just keep typing.
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, DEBOUNCE_MS);
 
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [quickPlate]);

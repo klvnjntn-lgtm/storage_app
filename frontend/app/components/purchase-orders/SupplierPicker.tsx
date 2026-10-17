@@ -6,6 +6,7 @@ import { Search, UserPlus, X, Check, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Supplier } from '@/app/components/suppliers/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { errorMessage } from '@/lib/api-error';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -112,8 +113,8 @@ export function SupplierPicker({
       setOpen(false);
       setQuickAddOpen(false);
       setQuery('');
-    } catch (e: any) {
-      setSaveError(e.message || t('purchasing.supplierPicker.createFailedGeneric'));
+    } catch (e) {
+      setSaveError(errorMessage(e) || t('purchasing.supplierPicker.createFailedGeneric'));
     } finally {
       setSaving(false);
     }

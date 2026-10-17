@@ -11,3 +11,9 @@ export async function readErrorMessage(res: Response): Promise<string> {
   }
   return text;
 }
+
+// The message of something caught in a `catch`, which TypeScript types as
+// unknown — '' when it isn't an Error, so `errorMessage(e) || fallback` works.
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : '';
+}

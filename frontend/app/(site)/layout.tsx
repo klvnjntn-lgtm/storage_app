@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import AuthGuard from "../components/shared/AuthGuard";
 import { LanguageProvider } from "../context/LanguageContext";
+import { DialogProvider } from "../components/shared/DialogProvider";
 import { ThemeProvider, themeInitScript } from "../context/ThemeContext";
 
 const geistSans = Geist({
@@ -42,7 +43,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <LanguageProvider>
-            <AuthGuard>{children}</AuthGuard>
+            <DialogProvider>
+              <AuthGuard>{children}</AuthGuard>
+            </DialogProvider>
           </LanguageProvider>
         </ThemeProvider>
       </body>

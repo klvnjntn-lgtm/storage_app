@@ -11,6 +11,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 type ExpenseCategory = {
@@ -56,6 +57,7 @@ const STATUS_META: Record<Expense['status'], { labelKey: string; color: string; 
 };
 
 export default function ExpensesPage() {
+  const dialog = useDialog();
   const { t, language } = useLanguage();
   const [categories, setCategories] = useState<ExpenseCategory[] | null>(null);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -286,7 +288,7 @@ export default function ExpensesPage() {
   // has real cash movement behind it and needs a manual adjusting entry
   // instead, not a takeback.
   async function handleVoidExpense(exp: Expense) {
-    if (!confirm(t('accounting.expenses.voidConfirm', { category: exp.category.name }))) return;
+    if (!(await dialog.confirm(t('accounting.expenses.voidConfirm', { category: exp.category.name }), { danger: true }))) return;
     setVoidingId(exp.id);
     setError(null);
     try {

@@ -8,6 +8,7 @@ import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { UserAvatar, userLabel } from '@/app/components/shared/UserAvatar';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type Role = 'ADMIN' | 'USER' | 'DRIVER';
 
@@ -34,6 +35,7 @@ const ROLE_STYLE: Record<Role, string> = {
 };
 
 export default function MembersPage() {
+  const dialog = useDialog();
   const { authorized, loading: authLoading } = useRequireAdmin();
   const { user: me } = useCurrentUser();
   const { t } = useLanguage();
@@ -106,14 +108,14 @@ export default function MembersPage() {
     }
   }
 
-  function toggleActive(m: Member) {
-    if (m.active && !confirm(t('admin.members.confirmLock', { name: userLabel(m) }))) return;
+  async function toggleActive(m: Member) {
+    if (m.active && !(await dialog.confirm(t('admin.members.confirmLock', { name: userLabel(m) }), { danger: true }))) return;
     run(m.id, `/users/${m.id}/active`, { method: 'PATCH', body: JSON.stringify({ active: !m.active }) });
   }
 
-  function changeRole(m: Member, role: Role) {
+  async function changeRole(m: Member, role: Role) {
     if (role === m.role) return;
-    if (!confirm(t('admin.members.confirmRoleChange', { name: userLabel(m), role: t(`admin.members.role.${role}`) }))) return;
+    if (!(await dialog.confirm(t('admin.members.confirmRoleChange', { name: userLabel(m), role: t(`admin.members.role.${role}`) })))) return;
     run(m.id, `/users/${m.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
   }
 

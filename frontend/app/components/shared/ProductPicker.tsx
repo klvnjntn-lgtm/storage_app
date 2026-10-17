@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 export type PickedProduct = { id: string; name: string; sku: string | null; unit?: string | null; trackSerials?: boolean };
@@ -92,17 +93,13 @@ export function useLocations() {
   return locations;
 }
 
-// Active suppliers for a select (the list endpoint is paginated; one big
-// page is plenty for a picker).
+// Every active supplier, for a select (the list endpoint is paginated).
 export function useSuppliers() {
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    (async () => {
-      const res = await apiFetch('/suppliers?isActive=true&pageSize=200').catch(() => null);
-      if (!res?.ok) return;
-      const body = await res.json();
-      setSuppliers(Array.isArray(body) ? body : (body.data ?? body.items ?? []));
-    })();
+    fetchAllPages<{ id: string; name: string }>('/suppliers?isActive=true')
+      .then(setSuppliers)
+      .catch(() => {});
   }, []);
   return suppliers;
 }

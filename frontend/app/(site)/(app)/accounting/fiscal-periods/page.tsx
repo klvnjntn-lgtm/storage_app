@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 const MONTH_NAMES_EN = [
@@ -46,6 +47,7 @@ function now() {
 }
 
 export default function FiscalPeriodsPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t, language } = useLanguage();
   const MONTH_NAMES = language === 'id' ? MONTH_NAMES_ID : MONTH_NAMES_EN;
@@ -103,7 +105,7 @@ export default function FiscalPeriodsPage() {
 
   async function handleClose(year: number, month: number) {
     const label = `${MONTH_NAMES[month - 1]} ${year}`;
-    if (!confirm(t('accounting.fiscalPeriods.closeConfirm', { label }))) {
+    if (!(await dialog.confirm(t('accounting.fiscalPeriods.closeConfirm', { label })))) {
       return;
     }
     setActionError(null);
@@ -125,7 +127,7 @@ export default function FiscalPeriodsPage() {
 
   async function handleReopen(year: number, month: number) {
     const label = `${MONTH_NAMES[month - 1]} ${year}`;
-    if (!confirm(t('accounting.fiscalPeriods.reopenConfirm', { label }))) {
+    if (!(await dialog.confirm(t('accounting.fiscalPeriods.reopenConfirm', { label })))) {
       return;
     }
     setActionError(null);

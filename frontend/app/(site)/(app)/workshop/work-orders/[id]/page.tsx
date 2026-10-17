@@ -18,6 +18,7 @@ import {
   type WorkOrderStatus,
 } from '@/app/components/workshop/workOrders';
 import { lineProblem } from '@/app/components/workshop/lineProblem';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 function toForm(wo: WorkOrder): WorkOrderFormValue {
   return {
@@ -35,6 +36,7 @@ function errorText(body: { message?: string | string[] } | null, fallback: strin
 }
 
 export default function WorkOrderDetailPage() {
+  const dialog = useDialog();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { t } = useLanguage();
@@ -92,7 +94,7 @@ export default function WorkOrderDetailPage() {
   }
 
   async function setStatus(status: WorkOrderStatus) {
-    if (status === 'CANCELLED' && !confirm(t('workshop.workOrders.cancelConfirm'))) return;
+    if (status === 'CANCELLED' && !(await dialog.confirm(t('workshop.workOrders.cancelConfirm'), { danger: true }))) return;
     const next = await call(`/work-orders/${params.id}/status`, 'PATCH', { status });
     if (next) apply(next);
   }

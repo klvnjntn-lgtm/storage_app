@@ -20,6 +20,8 @@ import { parseCalendarDate, toCalendarDateString, formatDMY, formatDMYTime } fro
 import { PAGE_CSS, MARGIN_MM } from '@/lib/mappers/invoice-format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
@@ -201,6 +203,7 @@ function doStatusStyle(status: string) {
 }
 
 export default function InvoiceDetailPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
@@ -305,8 +308,8 @@ export default function InvoiceDetailPage() {
       setReminderSaved(true);
       setReminderNote('');
       setReminderDueDate('');
-    } catch (e: any) {
-      setReminderError(e.message || t('sales.invoiceDetail.reminderSaveFailed'));
+    } catch (e) {
+      setReminderError(errorMessage(e) || t('sales.invoiceDetail.reminderSaveFailed'));
     } finally {
       setReminderSaving(false);
     }
@@ -342,7 +345,7 @@ export default function InvoiceDetailPage() {
   }
   async function handleVoidPayment(paymentId: string, amount: number) {
     if (!invoice) return;
-    const reason = window.prompt(t('sales.invoiceDetail.voidPaymentPrompt', { amount: formatIDR(amount) }));
+    const reason = await dialog.prompt(t('sales.invoiceDetail.voidPaymentPrompt', { amount: formatIDR(amount) }));
     if (reason === null) return; // cancelled
     setVoidingPaymentId(paymentId);
     setError(null);
@@ -404,8 +407,8 @@ export default function InvoiceDetailPage() {
       a.download = `${invoice.invoiceNumber ?? 'invoice'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || t('sales.invoiceDetail.couldNotGeneratePdf'));
+    } catch (e) {
+      setError(errorMessage(e) || t('sales.invoiceDetail.couldNotGeneratePdf'));
     } finally {
       setPdfGenerating(false);
     }

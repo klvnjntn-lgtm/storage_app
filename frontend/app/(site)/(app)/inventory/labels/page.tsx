@@ -17,6 +17,7 @@ import {
   DEFAULT_PRINTER_SETTINGS, LABEL_LAYOUTS, getLayout, labelsPerPage,
   type LabelLayout, type PrinterSettings,
 } from '@/lib/labels/layouts';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 const SETTINGS_STORAGE_KEY = 'label-printer-settings';
 const MAX_LABELS_PER_PRINT = 2000;
@@ -149,6 +150,7 @@ export default function LabelsPage() {
 }
 
 function LabelsPageInner() {
+  const dialog = useDialog();
   const { t, language } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -281,14 +283,14 @@ function LabelsPageInner() {
     startAtRef.current = startAt;
   }, [quantities, settings, format, startAt]);
 
-  const print = useCallback((source: LabelItem[]) => {
+  const print = useCallback(async (source: LabelItem[]) => {
     const list = source.flatMap((item) => Array.from({ length: quantitiesRef.current[item.sku] ?? 1 }, () => item));
     if (list.length === 0) return;
-    if (list.length > MAX_LABELS_PER_PRINT && !window.confirm(t('inventory.labelsPage.confirmLargePrint', { count: list.length }))) {
+    if (list.length > MAX_LABELS_PER_PRINT && !(await dialog.confirm(t('inventory.labelsPage.confirmLargePrint', { count: list.length })))) {
       return;
     }
     setJob({ items: list, format: formatRef.current, settings: settingsRef.current, startAt: startAtRef.current });
-  }, [t]);
+  }, [t, dialog]);
 
   const printOne = useCallback((item: LabelItem) => print([item]), [print]);
   const printTest = () => {

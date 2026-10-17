@@ -20,6 +20,7 @@ import {
   type PlatformOrgDetail,
   type PlatformResult,
 } from './api';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type Billing = { plan: string; seatLimit: string; paidUntil: string; trialEndsAt: string; billingNote: string };
 
@@ -55,6 +56,7 @@ export default function OrganizationDetail({
   onChanged: () => void;
   onLocked: () => void;
 }) {
+  const dialog = useDialog();
   const { t, language } = useLanguage();
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null);
   const [billing, setBilling] = useState<Billing | null>(null);
@@ -163,7 +165,7 @@ export default function OrganizationDetail({
 
   async function suspend() {
     if (!org || !reason.trim()) return;
-    if (!confirm(t('platform.detail.confirmSuspend', { name: org.name }))) return;
+    if (!(await dialog.confirm(t('platform.detail.confirmSuspend', { name: org.name }), { danger: true }))) return;
     if (
       await act('suspend', `/organizations/${id}/suspend`, {
         method: 'POST',

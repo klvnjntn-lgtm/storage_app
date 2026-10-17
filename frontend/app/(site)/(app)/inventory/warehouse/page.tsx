@@ -20,15 +20,25 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { ReceiveBatchPicker, ReturnInvoicePicker } from '@/app/components/warehouse/SessionStartPickers';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type Mode = 'RECEIVE' | 'RETURNS' | 'MOVE' | 'FULFILLMENT';
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
 
+type Named = { id: string; name: string };
 type SearchResult = {
-  products: any[];
-  stocks: any[];
-  locations: any[];
-  events: any[];
+  products: (Named & { sku: string | null })[];
+  stocks: { id: string; productId: string; quantity: number | string; product?: Named | null; location?: Named | null }[];
+  locations: Named[];
+  events: { id: string; type: string; productId: string; sessionId: string | null; product?: Named | null }[];
+};
+
+type RecentSession = {
+  id: string;
+  type: string;
+  status: string;
+  stage?: string | null;
+  totalItems?: number;
 };
 
 const statusStyle = (status: string) => {
@@ -43,9 +53,10 @@ const statusStyle = (status: string) => {
 };
 
 export default function Warehouse() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<RecentSession[]>([]);
   const [query, setQuery] = useState('');
   const [data, setData] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -152,7 +163,7 @@ export default function Warehouse() {
     // /inventory/sessions/undefined with zero error feedback — this is
     // the primary "start a session" action on this page.
     if (!res.ok) {
-      alert(session?.message || t('inventory.warehousePage.startSessionFailed', { status: res.status }));
+      await dialog.alert(session?.message || t('inventory.warehousePage.startSessionFailed', { status: res.status }));
       return;
     }
     router.push(`/inventory/sessions/${session.id}`);
@@ -296,7 +307,7 @@ export default function Warehouse() {
                   {data.products?.length > 0 && (
                     <div className="p-2">
                       <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><Package size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsProducts')}</p>
-                      {data.products.map((p: any) => (
+                      {data.products.map((p) => (
                         <div
                           key={p.id}
                           className="p-2 hover:bg-blue-50 rounded cursor-pointer"
@@ -312,7 +323,7 @@ export default function Warehouse() {
                   {data.stocks?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
                       <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><Boxes size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsStock')}</p>
-                      {data.stocks.map((s: any) => (
+                      {data.stocks.map((s) => (
                         <div
                           key={s.id}
                           className="p-2 hover:bg-blue-50 rounded cursor-pointer"
@@ -328,7 +339,7 @@ export default function Warehouse() {
                   {data.locations?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
                       <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><MapPin size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsLocations')}</p>
-                      {data.locations.map((l: any) => (
+                      {data.locations.map((l) => (
                         // Opens the stock page filtered to what's at this location.
                         <div
                           key={l.id}
@@ -344,7 +355,7 @@ export default function Warehouse() {
                   {data.events?.length > 0 && (
                     <div className="p-2 border-t border-gray-200">
                       <p className="flex items-center gap-1.5 text-[11px] text-blue-900/50 font-semibold mb-1 px-1 uppercase tracking-wider"><History size={12} aria-hidden="true" />{t('inventory.warehousePage.resultsEvents')}</p>
-                      {data.events.map((e: any) => (
+                      {data.events.map((e) => (
                         <div
                           key={e.id}
                           className="p-2 text-xs text-gray-700 hover:bg-blue-50 rounded cursor-pointer"

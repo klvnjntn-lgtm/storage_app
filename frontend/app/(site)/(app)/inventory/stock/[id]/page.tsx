@@ -12,6 +12,8 @@ import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibr
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { CostHistoryPanel } from '@/app/components/inventory/CostHistoryPanel';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 
 
 type StockRow = {
@@ -56,6 +58,7 @@ type Product = {
 type OrgLocation = { id: string; name: string };
 
 export default function ProductPage() {
+  const dialog = useDialog();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { t, language } = useLanguage();
@@ -131,9 +134,9 @@ const eventColor = (type: string) => {
 
       setImageLoadFailed(false);
       setProduct((p) => (p ? { ...p, image: asset.url } : p));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setImageError(err.message || t('inventory.stockDetail.imageUploadFailed'));
+      setImageError(errorMessage(err) || t('inventory.stockDetail.imageUploadFailed'));
     } finally {
       setImageUploading(false);
     }
@@ -155,9 +158,9 @@ const eventColor = (type: string) => {
       }
 
       setProduct((p) => (p ? { ...p, image: null } : p));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setImageError(err.message || t('inventory.stockDetail.imageRemoveFailed'));
+      setImageError(errorMessage(err) || t('inventory.stockDetail.imageRemoveFailed'));
     } finally {
       setImageUploading(false);
     }
@@ -449,10 +452,9 @@ const eventColor = (type: string) => {
                 const data = await res.json().catch(() => null);
 
                 console.log('STATUS:', res.status);
-                console.log('RESPONSE:', data);
 
                 if (!res.ok) {
-                  alert(data?.message || t('inventory.stockDetail.adjustFailed'));
+                  await dialog.alert(data?.message || t('inventory.stockDetail.adjustFailed'));
                   return;
                 }
 
@@ -484,7 +486,7 @@ const eventColor = (type: string) => {
             </span>
           </h2>
 
-          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
+          <div className="border-2 border-gray-300 rounded-md overflow-x-auto bg-white">
             <table className="w-full text-base">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300 text-left">
                 <tr>
@@ -519,7 +521,7 @@ const eventColor = (type: string) => {
         <section>
           <h2 className="text-lg font-bold mb-3">{t('inventory.stockDetail.eventHistory')}</h2>
 
-          <div className="border-2 border-gray-300 rounded-md overflow-hidden bg-white">
+          <div className="border-2 border-gray-300 rounded-md overflow-x-auto bg-white">
             <table className="w-full text-sm">
               <thead className="bg-blue-50/60 border-b-2 border-gray-300 text-left">
                 <tr>

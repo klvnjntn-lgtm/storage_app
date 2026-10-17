@@ -149,10 +149,6 @@ export default function ImportOrdersPage() {
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
 
-  useEffect(() => {
-    loadConnections();
-  }, []);
-
   async function loadConnections() {
     setConnectionsLoading(true);
     try {
@@ -166,6 +162,10 @@ export default function ImportOrdersPage() {
       setConnectionsLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadConnections();
+  }, []);
 
   async function handleCreateConnection() {
     if (!newProviderName.trim()) return;
@@ -234,7 +234,7 @@ export default function ImportOrdersPage() {
       const data: CsvPreviewResponse = await res.json();
 
       if (!res.ok) {
-        setUploadError((data as any)?.message || t('upload.uploadOrderPage.couldNotReadFile'));
+        setUploadError((data as { message?: string } | null)?.message || t('upload.uploadOrderPage.couldNotReadFile'));
         return;
       }
 

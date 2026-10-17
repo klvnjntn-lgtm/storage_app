@@ -7,6 +7,7 @@ import { formatIDR } from '@/lib/format';
 import { formatDMY, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 type Bill = { id: string; billNumber: string; billDate: string; dueDate: string | null; amount: string; notes: string | null };
 type Match = {
@@ -29,6 +30,7 @@ export const MATCH_STYLE: Record<Match['status'], string> = {
 // The supplier's bills for this PO and the three-way match: ordered vs
 // received (net of returns) vs billed. Admin-only, like supplier payments.
 export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOrderId: string; refreshKey: number }) {
+  const dialog = useDialog();
   const { t } = useLanguage();
   const [match, setMatch] = useState<Match | null>(null);
   const [adding, setAdding] = useState(false);
@@ -71,7 +73,7 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
   }
 
   async function voidBill(id: string) {
-    if (!confirm(t('purchasing.bills.voidConfirm'))) return;
+    if (!(await dialog.confirm(t('purchasing.bills.voidConfirm'), { danger: true }))) return;
     const res = await apiFetch(`/supplier-bills/${id}/void`, { method: 'POST' });
     if (res.ok) load();
   }
@@ -103,26 +105,28 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
         <p className="text-xs text-red-700 mb-2">{t('purchasing.bills.difference', { amount: formatIDR(match.difference) })}</p>
       )}
 
-      <table className="w-full text-xs mb-3">
-        <thead className="text-gray-500">
-          <tr>
-            <th className="text-left font-semibold py-1">{t('purchasing.purchaseOrderDetail.colItem')}</th>
-            <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyOrdered')}</th>
-            <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyReceived')}</th>
-            <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyReturned')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {match.lines.map((l) => (
-            <tr key={l.purchaseOrderItemId} className="border-t border-gray-100">
-              <td className="py-1">{l.description ?? '—'}</td>
-              <td className={`py-1 text-right ${l.received < l.ordered ? 'text-amber-700' : ''}`}>{l.ordered}</td>
-              <td className="py-1 text-right">{l.received}</td>
-              <td className="py-1 text-right">{l.returned || '—'}</td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs mb-3">
+          <thead className="text-gray-500">
+            <tr>
+              <th className="text-left font-semibold py-1">{t('purchasing.purchaseOrderDetail.colItem')}</th>
+              <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyOrdered')}</th>
+              <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyReceived')}</th>
+              <th className="text-right font-semibold py-1">{t('purchasing.bills.qtyReturned')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {match.lines.map((l) => (
+              <tr key={l.purchaseOrderItemId} className="border-t border-gray-100">
+                <td className="py-1">{l.description ?? '—'}</td>
+                <td className={`py-1 text-right ${l.received < l.ordered ? 'text-amber-700' : ''}`}>{l.ordered}</td>
+                <td className="py-1 text-right">{l.received}</td>
+                <td className="py-1 text-right">{l.returned || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {match.bills.length > 0 && (
         <ul className="divide-y divide-gray-100 text-sm mb-2">

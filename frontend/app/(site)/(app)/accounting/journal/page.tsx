@@ -13,6 +13,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -72,6 +73,7 @@ function todayISO() {
 type ManualLine = { accountId: string; side: 'debit' | 'credit'; amount: string; description: string };
 
 export default function JournalPage() {
+  const dialog = useDialog();
     const { t } = useLanguage();
     const { profile } = useAuth();
   const isAdmin = profile?.role === 'ADMIN';
@@ -163,7 +165,7 @@ export default function JournalPage() {
   }, [filtersKey, page, pageSize]);
 
   async function handleVoid(entry: JournalEntry) {
-    const reason = prompt(t('accounting.journal.voidPrompt', { entryNumber: entry.entryNumber ?? entry.id }));
+    const reason = await dialog.prompt(t('accounting.journal.voidPrompt', { entryNumber: entry.entryNumber ?? entry.id }));
     if (reason === null) return; // cancelled
     if (!reason.trim()) {
       setVoidError(t('accounting.journal.voidReasonRequired'));

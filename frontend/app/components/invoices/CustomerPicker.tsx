@@ -5,6 +5,7 @@ import { Search, UserPlus, X, Check, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from './types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { errorMessage } from '@/lib/api-error';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -47,13 +48,21 @@ export function CustomerPicker({
 
   useEffect(() => {
     if (!open || quickAddOpen) return;
+    let cancelled = false;
     const timeout = setTimeout(async () => {
       setSearching(true);
       setSearchError('');
       try {
         const q = query.trim();
-        const res = await apiFetch(q ? `/customers?q=${encodeURIComponent(q)}` : '/customers');
-        if (res.ok) setResults(await res.json());
+        // Capped: with no search this would otherwise pull every customer.
+        const params = new URLSearchParams({ limit: '50' });
+        if (q) params.set('q', q);
+        const res = await apiFetch(`/customers?${params}`);
+        if (cancelled) return; // a newer search replaced this one
+        if (res.ok) {
+          const list = await res.json();
+          if (!cancelled) setResults(list);
+        }
       } catch {
         // FIX — was missing entirely. apiFetch throws on a network
         // failure or an expired session (its own 401 handler), which
@@ -61,13 +70,17 @@ export function CustomerPicker({
         // the picker just silently fell back to stale/empty results.
         // This component is reused across every invoice/quotation/
         // sales-order creation flow, so the blast radius was broad.
+        if (cancelled) return;
         setResults([]);
         setSearchError(t('sales.customerPicker.searchFailed'));
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, open, quickAddOpen]);
 
@@ -106,8 +119,8 @@ export function CustomerPicker({
       setOpen(false);
       setQuickAddOpen(false);
       setQuery('');
-    } catch (e: any) {
-      setSaveError(e.message || t('sales.customerPicker.couldNotCreateCustomer'));
+    } catch (e) {
+      setSaveError(errorMessage(e) || t('sales.customerPicker.couldNotCreateCustomer'));
     } finally {
       setSaving(false);
     }

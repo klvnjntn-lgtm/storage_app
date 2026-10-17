@@ -19,7 +19,30 @@ import type {
 
 // ---- inbound: raw delivery order -> list row / detail view ---------------
 
-export function mapDeliveryOrderToListItem(raw: any): DeliveryOrderListItem {
+// A delivery order as the API sends it: the always-present fields, plus the
+// rest of the detail shape optionally (list rows carry fewer fields).
+type RawDeliveryOrder = Pick<DeliveryOrderDetail, 'id' | 'doNumber' | 'status' | 'createdAt'> &
+  Partial<
+    Omit<
+      DeliveryOrderDetail,
+      'id' | 'doNumber' | 'status' | 'createdAt' | 'hasProofPhoto' | 'salesOrder' | 'invoice' | 'location' | 'items'
+    >
+  > & {
+    proofPhotoKey?: string | null;
+    proofPhotoUrl?: string | null;
+    salesOrder?: { orderNumber: string | null; customerName?: string | null } | null;
+    invoice?: { invoiceNumber: string | null } | null;
+    location?: { name: string } | null;
+    items?: {
+      id: string;
+      productId?: string | null;
+      productName: string;
+      quantity: number | string;
+      unit?: string | null;
+    }[];
+  };
+
+export function mapDeliveryOrderToListItem(raw: RawDeliveryOrder): DeliveryOrderListItem {
   return {
     id: raw.id,
     doNumber: raw.doNumber,
@@ -28,19 +51,19 @@ export function mapDeliveryOrderToListItem(raw: any): DeliveryOrderListItem {
     createdAt: raw.createdAt,
     shippedAt: raw.shippedAt ?? null,
     salesOrder: raw.salesOrder
-      ? { orderNumber: raw.salesOrder.orderNumber, customerName: raw.salesOrder.customerName }
+      ? { orderNumber: raw.salesOrder.orderNumber, customerName: raw.salesOrder.customerName ?? null }
       : null,
     items: raw.items ?? [],
   };
 }
 
-export function mapDeliveryOrderToDetail(raw: any): DeliveryOrderDetail {
+export function mapDeliveryOrderToDetail(raw: RawDeliveryOrder): DeliveryOrderDetail {
   return {
     id: raw.id,
     doNumber: raw.doNumber,
     status: raw.status,
-    salesOrderId: raw.salesOrderId,
-        invoiceId: raw.invoiceId ?? null, // NEW
+    salesOrderId: raw.salesOrderId ?? null,
+    invoiceId: raw.invoiceId ?? null,
 
     customerName: raw.customerName ?? null,
     customerAddress: raw.customerAddress ?? null,
@@ -60,15 +83,14 @@ export function mapDeliveryOrderToDetail(raw: any): DeliveryOrderDetail {
     completedLatitude: raw.completedLatitude ?? null,
     completedLongitude: raw.completedLongitude ?? null,
     completedAccuracy: raw.completedAccuracy ?? null,
-        invoice: raw.invoice ? { invoiceNumber: raw.invoice.invoiceNumber } : null, // NEW
-
+    invoice: raw.invoice ? { invoiceNumber: raw.invoice.invoiceNumber } : null,
     salesOrder: raw.salesOrder ? { orderNumber: raw.salesOrder.orderNumber } : null,
     location: raw.location ? { name: raw.location.name } : null,
     // Needed so the detail page can hide "Convert to Invoice" once this
     // delivery order has already been invoiced — same guard the quotation
     // detail page uses against its own `invoices` relation.
     invoices: raw.invoices ?? [],
-    items: (raw.items ?? []).map((item: any) => ({
+    items: (raw.items ?? []).map((item) => ({
       id: item.id,
       productId: item.productId ?? null,
       productName: item.productName,

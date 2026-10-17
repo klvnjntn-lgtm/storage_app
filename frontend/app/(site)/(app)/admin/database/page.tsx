@@ -7,6 +7,8 @@ import { MapPin, Layers, Award, Search, GitMerge, AlertTriangle, CheckCircle2, D
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { errorMessage } from '@/lib/api-error';
 type EntityType = 'location' | 'category' | 'brand';
 
 type ReferenceItem = {
@@ -36,6 +38,7 @@ function authHeaders(json = true): Record<string, string> {
 }
 
 export default function ReferenceDataPage() {
+  const dialog = useDialog();
     const { authorized, loading: authLoading } = useRequireAdmin();
   const { t } = useLanguage();
 
@@ -101,9 +104,9 @@ export default function ReferenceDataPage() {
       const list = Array.isArray(data) ? data : [];
       setItems(list);
       setDrafts(Object.fromEntries(list.map((i: ReferenceItem) => [i.id, i.name])));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.database.couldNotLoad', { plural: config.plural.toLowerCase() }));
+      setError(errorMessage(err) || t('admin.database.couldNotLoad', { plural: config.plural.toLowerCase() }));
       setItems([]);
       setDrafts({});
     } finally {
@@ -179,9 +182,9 @@ export default function ReferenceDataPage() {
 
       setItems((prev) => prev.map((i) => (i.id === id ? { ...i, name: trimmed } : i)));
       setDrafts((prev) => ({ ...prev, [id]: trimmed }));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.database.renameFailedCheckConsole'));
+      setError(errorMessage(err) || t('admin.database.renameFailedCheckConsole'));
       // Snap the field back to the last saved name so the UI doesn't
       // show an edit that was actually rejected by the server.
       setDrafts((prev) => ({ ...prev, [id]: current.name }));
@@ -201,7 +204,7 @@ export default function ReferenceDataPage() {
     // -deleted — they stay resolvable for historical records (e.g. past
     // stock events) but drop out of normal lists. "Permanently deletes"
     // overstated what actually happens here.
-    const confirmed = window.confirm(
+    const confirmed = await dialog.confirm(
       t('admin.database.mergeConfirm', {
         losers: losers.map((l) => l.name).join(', '),
         survivor: survivor?.name ?? '',
@@ -228,9 +231,9 @@ export default function ReferenceDataPage() {
       setSelected(new Set());
       setSurvivorId(null);
       await loadItems();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || t('admin.database.mergeFailedCheckConsole'));
+      setError(errorMessage(err) || t('admin.database.mergeFailedCheckConsole'));
     } finally {
       setMerging(false);
     }
@@ -349,7 +352,7 @@ export default function ReferenceDataPage() {
     )}
 
     {!loading && filtered.length > 0 && (
-      <div className="border-2 border-gray-300 rounded-md overflow-hidden">
+      <div className="border-2 border-gray-300 rounded-md overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-100 border-b-2 border-gray-300">
             <tr>

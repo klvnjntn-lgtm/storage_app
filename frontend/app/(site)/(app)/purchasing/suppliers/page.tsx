@@ -11,6 +11,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -18,6 +19,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 type StatusFilter = 'active' | 'inactive' | 'all';
 
 export default function SuppliersListPage() {
+  const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
   const { profile } = useAuth();
@@ -118,7 +120,7 @@ async function toggleActive(supplier: Supplier) {
   }
 }
   async function handleDelete(supplier: Supplier) {
-    if (!confirm(t('purchasing.suppliersList.deleteConfirm', { name: supplier.name }))) return;
+    if (!(await dialog.confirm(t('purchasing.suppliersList.deleteConfirm', { name: supplier.name }), { danger: true }))) return;
     setActionId(supplier.id);
     setError('');
     try {

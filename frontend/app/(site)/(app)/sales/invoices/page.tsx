@@ -115,19 +115,30 @@ function CustomerFilterPicker({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     const timeout = setTimeout(async () => {
       setSearching(true);
       try {
         const q = query.trim();
-        const res = await apiFetch(q ? `/customers?q=${encodeURIComponent(q)}` : '/customers');
-        if (res.ok) setResults(await res.json());
+        // Capped: with no search this would otherwise pull every customer.
+        const params = new URLSearchParams({ limit: '50' });
+        if (q) params.set('q', q);
+        const res = await apiFetch(`/customers?${params}`);
+        if (cancelled) return; // a newer search replaced this one
+        if (res.ok) {
+          const list = await res.json();
+          if (!cancelled) setResults(list);
+        }
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, 250);
-    return () => clearTimeout(timeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, [query, open]);
 
   if (customerId) {
