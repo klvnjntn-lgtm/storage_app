@@ -18,9 +18,10 @@ import { chmodSync, mkdirSync } from 'fs';
 import { chmod, unlink } from 'fs/promises';
 import { Request } from 'express';
 import { GdbImportService } from './gdb-import.service';
-import { InvoiceFormat } from '@prisma/client';
+import { InvoiceFormat, ModuleKey } from '@prisma/client';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 // JwtAuthGuard is registered globally in AppModule (APP_GUARD), so
 // req.user.organizationId is already populated on every route by the time
@@ -61,6 +62,7 @@ const VALID_TARGETS: GdbImportTarget[] = [
 // purchase orders (and their ledger entries) into the organization.
 @UseGuards(RolesGuard)
 @Roles('ADMIN')
+@RequireModule(ModuleKey.INVOICE_POS)
 @Controller('integrations/accurate-gdb')
 export class GdbImportController {
   private readonly logger = new Logger(GdbImportController.name);

@@ -11,6 +11,7 @@ import { BankAccountGLLinkService } from './bank-account-gl-link.service';
 import { AccountingReportsService } from './accounting-reports.service';
 import { AccountingController } from './accounting.controller';
 import { CashFlowService } from './cash-flow.service';
+import { CashStatementService } from './cash-statement.service';
 
 @Module({
   imports: [PrismaModule, GuardsModule, OrganizationModulesModule],
@@ -19,6 +20,7 @@ import { CashFlowService } from './cash-flow.service';
     AccountResolverService,
     JournalService,
     CashFlowService,
+    CashStatementService,
     PostingRulesService,
     ChartOfAccountsSeedService,
     ChartOfAccountsService,

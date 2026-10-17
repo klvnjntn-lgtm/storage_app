@@ -43,12 +43,15 @@ export class StockTransferController {
   }
 
   @Post()
-  create(
+  async create(
     @CurrentOrg() organizationId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateStockTransferDto,
   ) {
-    return this.transfers.create(organizationId, user.sub, dto);
+    const transfer = await this.transfers.create(organizationId, user.sub, dto);
+    // A quick move arrives as it's saved.
+    if (transfer.quickMove) this.emitReceived(organizationId, transfer);
+    return transfer;
   }
 
   @Post(':id/ship')
@@ -73,9 +76,18 @@ export class StockTransferController {
       user.sub,
       dto,
     );
+    this.emitReceived(organizationId, transfer);
+    return transfer;
+  }
+
+  private emitReceived(
+    organizationId: string,
+    transfer: Awaited<ReturnType<StockTransferService['receive']>>,
+  ) {
     void this.webhooks?.emit(organizationId, 'stock_transfer.received', {
-      id,
+      id: transfer.id,
       transferNumber: transfer.transferNumber,
+      quickMove: transfer.quickMove,
       fromLocationId: transfer.fromLocationId,
       toLocationId: transfer.toLocationId,
       items: transfer.items.map((i) => ({
@@ -84,7 +96,6 @@ export class StockTransferController {
         received: Number(i.receivedQuantity),
       })),
     });
-    return transfer;
   }
 
   @Post(':id/cancel')

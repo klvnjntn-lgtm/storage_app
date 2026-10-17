@@ -3,6 +3,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { ReceiveService } from '../receive/receive.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
+import { assertSerialCount, normalizeSerials, relocateSerials } from '../serials/serial-moves';
 
 @Injectable()
 export class WarehouseService {
@@ -40,6 +41,7 @@ export class WarehouseService {
     fromLocationId: string,
     toLocationId: string,
     userId?: string,
+    serialNumbers?: string[],
   ) {
     if (fromLocationId === toLocationId) {
       throw new BadRequestException(
@@ -53,7 +55,7 @@ export class WarehouseService {
 
     const product = await this.prisma.product.findFirst({
       where: { id: productId, organizationId },
-      select: { id: true, active: true },
+      select: { id: true, name: true, active: true, trackSerials: true },
     });
     if (!product) throw new BadRequestException('Product not found');
     if (!product.active) {
@@ -61,6 +63,8 @@ export class WarehouseService {
         'Product is archived — restore it before recording stock movements',
       );
     }
+    const serials = product.trackSerials ? normalizeSerials(serialNumbers) : [];
+    if (product.trackSerials) assertSerialCount(product.name, qty, serials);
 
     const fromLocation = await this.prisma.location.findFirst({
       where: { id: fromLocationId, organizationId },
@@ -110,6 +114,8 @@ export class WarehouseService {
           organizationId,
         },
       });
+
+      await relocateSerials(tx, { organizationId, productId, fromLocationId, toLocationId, serials });
 
       await tx.event.create({
         data: {

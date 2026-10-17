@@ -7,6 +7,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { apiFetch } from '@/lib/apifetch';
 import { readErrorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { SerialPicker } from '@/app/components/shared/SerialPicker';
 
 const CAMERA_REGION_ID = 'scan-camera-region';
 
@@ -43,6 +44,7 @@ const CAMERA_FORMATS = [
 const RETURN_REASONS = ['DAMAGED', 'WRONG_ITEM', 'CHANGED_MIND', 'DEFECTIVE', 'OTHER'] as const;
 
 type LocationOption = { id: string; name: string };
+type ScannedProduct = { id: string; name: string; trackSerials?: boolean };
 type ScanLogEntry = {
   id: string;
   barcode: string;
@@ -81,6 +83,10 @@ function ScanPageInner() {
   const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [log, setLog] = useState<ScanLogEntry[]>([]);
+  // A serial-tracked product scanned in a move: which units, before it's added.
+  const [serialPrompt, setSerialPrompt] = useState<{ barcode: string; product: ScannedProduct; qty: number } | null>(null);
+  const serialPromptRef = useRef(serialPrompt);
+  useEffect(() => { serialPromptRef.current = serialPrompt; }, [serialPrompt]);
 
   // Camera: when each code was last seen in a frame (see CAMERA_REARM_MS).
   const cameraSeenRef = useRef(new Map<string, number>());
@@ -126,6 +132,8 @@ function ScanPageInner() {
   const readyToScan = !missingFrom && !missingTo && !missingReason && !!sessionId;
 
   async function handleScan(barcode: string) {
+    // The serial picker is reading the scanner now.
+    if (serialPromptRef.current) return;
     if (missingFrom || missingTo || missingReason) {
       const msg = missingFrom
         ? t('scan.selectBeforeScanning', { label: fromLabel() })
@@ -165,9 +173,29 @@ function ScanPageInner() {
         throw new Error(t('scan.lookupFailed', { status: productRes.status }));
       }
 
-      const product = await productRes.json();
+      const product: ScannedProduct = await productRes.json();
 
-      // Step 2: add item to session
+      // Serial-tracked units move one by one: ask which before adding.
+      if (type === 'MOVE' && product.trackSerials) {
+        setStatus('idle');
+        setSerialPrompt({ barcode, product, qty });
+        return;
+      }
+
+      await submitItem(barcode, product, qty);
+    } catch (e) {
+      console.error(e);
+      const msg = (e instanceof Error && e.message) || t('scan.scanFailed');
+      setStatus('error');
+      setErrorMsg(msg);
+      errorFeedback();
+      pushLog({ barcode, productName: '', ok: false, message: msg });
+    }
+  }
+
+  async function submitItem(barcode: string, product: ScannedProduct, qty: number, serialNumbers?: string[]) {
+    setStatus('submitting');
+    try {
       const itemRes = await apiFetch(`/sessions/${sessionId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -177,6 +205,7 @@ function ScanPageInner() {
           fromLocationId: fromLocationRef.current || undefined,
           toLocationId: toLocationRef.current || undefined,
           reason: requiresReason ? returnReason : undefined,
+          serialNumbers,
         }),
       });
 
@@ -324,7 +353,7 @@ function ScanPageInner() {
 
     function refocusGunInput(e?: MouseEvent) {
       const target = e?.target as HTMLElement | undefined;
-      if (target && (target.closest('select') || target.closest('button') || (target.closest('input') && target !== gunInputRef.current))) return;
+      if (target && (target.closest('[role="dialog"]') || target.closest('select') || target.closest('button') || (target.closest('input') && target !== gunInputRef.current))) return;
       if (!readyToScan || cameraActive) return;
       gunInputRef.current?.focus();
     }
@@ -662,6 +691,21 @@ function ScanPageInner() {
           </section>
         )}
       </div>
+
+      {serialPrompt && (
+        <SerialPicker
+          productId={serialPrompt.product.id}
+          productName={serialPrompt.product.name}
+          // Picking takes units from the source; put-away chooses among
+          // the ones this session picked.
+          locationId={effectiveType === 'PICK' ? fromLocationId : undefined}
+          sessionId={effectiveType === 'PICK' ? undefined : sessionId ?? undefined}
+          quantity={Math.floor(serialPrompt.qty)}
+          value={[]}
+          onChange={(serials) => submitItem(serialPrompt.barcode, serialPrompt.product, serialPrompt.qty, serials)}
+          onClose={() => setSerialPrompt(null)}
+        />
+      )}
     </main>
   );
 }

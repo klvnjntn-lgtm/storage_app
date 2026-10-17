@@ -160,6 +160,37 @@ describe('Warehouse sessions', () => {
       await expect(add(session.id, productId, 2, { from: locA })).rejects.toThrow(/Insufficient stock/);
       expect(await qty(productId, locA)).toBe(1);
     });
+
+    it('moves serial-tracked units by serial number: picked ones travel with the session, put-away lands them', async () => {
+      const productId = await makeProduct({ stockA: 3 });
+      await prisma.product.update({ where: { id: productId }, data: { trackSerials: true } });
+      await prisma.productSerial.createMany({
+        data: ['S1', 'S2', 'S3'].map((serialNumber) => ({ organizationId: orgId, productId, serialNumber, locationId: locA })),
+      });
+      const session = await sessions.create(orgId, SessionType.MOVE);
+      const scan = (n: number, extra: { from?: string; to?: string }, serials?: string[]) =>
+        sessions.addItem(orgId, session.id, productId, n, extra.from, extra.to, undefined, userId, serials);
+
+      await expect(scan(2, { from: locA })).rejects.toThrow(/serial number/);
+      await scan(2, { from: locA }, ['S1', 'S2']);
+      expect((await sessions.pickedSerials(orgId, session.id, productId)).map((x) => x.serialNumber)).toEqual(['S1', 'S2']);
+
+      await sessions.advanceStage(orgId, session.id);
+      // S3 was never picked, so it can't be put away.
+      await expect(scan(1, { to: locB }, ['S3'])).rejects.toThrow(/Not picked in this move/);
+      await scan(1, { to: locB }, ['S2']);
+      await scan(1, { to: locA }, ['S1']);
+      await sessions.complete(orgId, session.id);
+
+      const serials = await prisma.productSerial.findMany({ where: { productId }, orderBy: { serialNumber: 'asc' } });
+      expect(serials.map((x) => [x.serialNumber, x.status, x.locationId, x.sessionId])).toEqual([
+        ['S1', 'IN_STOCK', locA, null],
+        ['S2', 'IN_STOCK', locB, null],
+        ['S3', 'IN_STOCK', locA, null],
+      ]);
+      expect(await qty(productId, locA)).toBe(2);
+      expect(await qty(productId, locB)).toBe(1);
+    });
   });
 
   // ---- RECEIVE ----------------------------------------------------------

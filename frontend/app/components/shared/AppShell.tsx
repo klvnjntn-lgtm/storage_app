@@ -31,6 +31,7 @@ import {
   Contact,
   Car,
   Bell,
+  Wrench,
   Search,
   ShoppingCart,
   ClipboardList,
@@ -44,6 +45,7 @@ import {
   Calculator,
   BookText,
   Landmark,
+  ScrollText,
   CalendarClock,
   Rows3,
   Scale,
@@ -69,6 +71,7 @@ import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibr
 import { TourProvider } from '@/app/components/tour/TourProvider';
 import TourHelpMenu from '@/app/components/tour/TourHelpMenu';
 import { useAuth } from '@/app/context/AuthContext';
+import { WORK_ORDERS_CHANGED } from '@/app/components/workshop/workOrders';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 type LicenseStatus = {
@@ -160,6 +163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showProfile, setShowProfile] = useState(false);
   const [hasInvoicePos, setHasInvoicePos] = useState(false);
   const [hasWorkshopRms, setHasWorkshopRms] = useState(false);
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
   const [hasWarehouseOps, setHasWarehouseOps] = useState(false);
   const [hasDelivery, setHasDelivery] = useState(false);
   const [showAvatarLibrary, setShowAvatarLibrary] = useState(false);
@@ -358,6 +362,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
+  // Work orders are an org setting on top of WORKSHOP_RMS. Settings fires
+  // WORK_ORDERS_CHANGED when an admin flips it, so the nav follows without
+  // a reload.
+  useEffect(() => {
+    if (!hasWorkshopRms) return;
+    const load = () =>
+      apiFetch('/work-orders/config')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body) => setWorkOrdersEnabled(!!body?.enabled))
+        .catch(() => {});
+    load();
+    window.addEventListener(WORK_ORDERS_CHANGED, load);
+    return () => window.removeEventListener(WORK_ORDERS_CHANGED, load);
+  }, [hasWorkshopRms]);
+
   // Only prompt office/admin users for push permission when the org
   // actually has a notification-producing module enabled — no point
   // asking for a permission that would never fire a notification.
@@ -387,8 +406,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // A group the user hasn't toggled is open when they're on one of its
   // routes; once toggled, their choice sticks across navigation.
-  const isGroupOpen = (groups: Record<string, boolean>, href: string) =>
-    groups[href] ?? pathname.startsWith(href);
+  const onPage = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const inGroup = (item: NavItem) => onPage(item.href) || !!item.children?.some((c) => onPage(c.href));
+  const isGroupOpen = (groups: Record<string, boolean>, item: NavItem) =>
+    groups[item.href] ?? inGroup(item);
 
   const salesChildren: NavItem[] = [
     { href: '/sales', label: t('nav.items.salesHome'), icon: Home },
@@ -442,6 +463,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/cash-flow', label: t('nav.items.cashFlow'), icon: Banknote },
     { href: '/accounting/ar-aging', label: t('nav.items.arAging'), icon: Wallet },
     { href: '/accounting/ap-aging', label: t('nav.items.apAging'), icon: ShoppingCart },
+    { href: '/accounting/cash-statement/new', label: t('nav.items.cashStatement'), icon: ScrollText },
+    { href: '/accounting/tax-export', label: t('nav.items.taxExport'), icon: FileSpreadsheet },
     { href: '/accounting/ledger', label: t('nav.items.accountLedger'), icon: BookOpen },
     { href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 },
   ];
@@ -453,96 +476,120 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: accountingChildren,
   };
 
+  // Each module is one collapsible row, so the sidebar stays a short list
+  // however many pages a module grows; a group opens itself when you're on
+  // one of its pages.
+  const inventoryItem: NavItem = {
+    href: '/inventory',
+    label: t('nav.items.inventory'),
+    icon: Inbox,
+    children: [
+      { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Home },
+      { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
+      { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
+      { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
+      { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
+      ...(hasWarehouseOps
+        ? [
+            { href: '/inventory/warehouse', label: t('nav.items.warehouse'), icon: Warehouse },
+            { href: '/inventory/sessions', label: t('nav.items.sessions'), icon: ClipboardList },
+            { href: '/inventory/labels', label: t('nav.items.labels'), icon: Tag, tourId: 'nav-labels' },
+          ]
+        : []),
+    ],
+  };
+
+  const salesWithExtras: NavItem = {
+    ...salesItem,
+    children: [
+      ...salesChildren,
+      { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
+      { href: '/customers', label: t('nav.items.customers'), icon: Users, tourId: 'nav-customers' },
+    ],
+  };
+
+  const workshopItem: NavItem = {
+    href: '/workshop',
+    label: t('nav.items.workshop'),
+    icon: Car,
+    children: [
+      { href: '/workshop', label: t('nav.items.workshopHome'), icon: Home },
+      ...(workOrdersEnabled
+        ? [{ href: '/workshop/work-orders', label: t('nav.items.workOrders'), icon: ClipboardList }]
+        : []),
+      { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
+      { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
+      { href: '/workshop/parts', label: t('nav.items.partsCatalog'), icon: Wrench },
+      { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
+    ],
+  };
+
+  const deliveryItem: NavItem = {
+    href: '/delivery',
+    label: t('nav.items.delivery'),
+    icon: Truck,
+    children: [
+      { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Home },
+      { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
+      ...(profile?.role === 'ADMIN'
+        ? [{ href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 }]
+        : []),
+      { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
+      // Stops are picked from customers; with INVOICE_POS the link
+      // already lives under Sales.
+      ...(!hasInvoicePos ? [{ href: '/customers', label: t('nav.items.customers'), icon: Contact }] : []),
+      ...(profile?.role === 'ADMIN'
+        ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
+        : []),
+    ],
+  };
+
+  const settingsItem: NavItem = {
+    href: '/settings',
+    label: t('nav.items.settings'),
+    icon: Settings,
+    children: [
+      { href: '/settings', label: t('nav.items.settingsGeneral'), icon: Settings },
+      { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
+      { href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard },
+      { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },
+      { href: '/settings/security', label: t('nav.items.security'), icon: ShieldAlert },
+      { href: '/settings/integrations', label: t('nav.items.integrations'), icon: KeyRound },
+      { href: '/media-library', label: t('nav.items.mediaLibrary'), icon: Images },
+    ],
+  };
+
   const allNavGroups: { label: string; items: NavItem[] }[] = [
     {
-      label: t('nav.groups.overview'),
+      label: t('nav.groups.modules'),
       items: [
         { href: '/home', label: t('nav.items.home'), icon: Home },
-        { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
-        { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
-        { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
-        { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
-        { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
+        inventoryItem,
+        ...(hasInvoicePos ? [salesWithExtras, purchasingItem] : []),
+        // The books are admin-only (backend enforces it too); staff keep
+        // Sales Insights, which reads invoice reports, not the ledger.
+        ...(!hasInvoicePos
+          ? []
+          : profile?.role === 'ADMIN'
+            ? [accountingItem]
+            : [{ href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 }]),
+        ...(hasWorkshopRms ? [workshopItem] : []),
+        ...(hasDelivery ? [deliveryItem] : []),
       ],
     },
-{
-  label: t('nav.groups.operations'),
-  items: [
-    ...(hasWarehouseOps
-      ? [
-          { href: '/inventory/warehouse', label: t('nav.items.warehouse'), icon: Warehouse },
-          { href: '/inventory/sessions', label: t('nav.items.sessions'), icon: ClipboardList },
-          { href: '/inventory/labels', label: t('nav.items.labels'), icon: Tag, tourId: 'nav-labels' },
-        ]
-      : []),
-    { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
-    { href: '/upload-order', label: t('nav.items.uploadOrder'), icon: PlugZap },
-  ],
-},
     {
-      label: t('nav.groups.sales'),
-      items: hasInvoicePos
-        ? [
-            salesItem,
-            { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
-            { href: '/customers', label: t('nav.items.customers'), icon: Users, tourId: 'nav-customers' },
-          ]
-        : [],
-    },
-    {
-      label: t('nav.groups.purchasing'),
-      items: hasInvoicePos ? [purchasingItem] : [],
-    },
-    {
-      label: t('nav.groups.accounting'),
-      // The books are admin-only (backend enforces it too); staff keep
-      // Sales Insights, which reads invoice reports, not the ledger.
-      items: !hasInvoicePos
-        ? []
-        : profile?.role === 'ADMIN'
-          ? [accountingItem]
-          : [{ href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 }],
-    },
-    {
-      label: t('nav.groups.workshop'),
-      items: hasWorkshopRms
-        ? [
-            { href: '/workshop', label: t('nav.items.workshopHome'), icon: Home },
-            { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
-            { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
-            { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
-          ]
-        : [],
-    },
-    {
-      label: t('nav.groups.delivery'),
-      items: hasDelivery
-        ? [
-            { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Truck },
-            { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
-            { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
-            { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
-            // Stops are picked from customers; with INVOICE_POS the link
-            // already lives under Sales.
-            ...(!hasInvoicePos ? [{ href: '/customers', label: t('nav.items.customers'), icon: Contact }] : []),
-            ...(profile?.role === 'ADMIN'
-              ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
-              : []),
-          ]
-        : [],
+      label: t('nav.groups.operations'),
+      items: [
+        { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
+        { href: '/upload-order', label: t('nav.items.uploadOrder'), icon: PlugZap },
+      ],
     },
     {
       label: t('nav.groups.system'),
       items:
         profile?.role === 'ADMIN'
           ? [
-              { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
-              { href: '/settings', label: t('nav.items.settings'), icon: Settings },
-              { href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard },
-              { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },
-              { href: '/settings/security', label: t('nav.items.security'), icon: ShieldAlert },
-              { href: '/settings/integrations', label: t('nav.items.integrations'), icon: KeyRound },
-              { href: '/media-library', label: t('nav.items.mediaLibrary'), icon: Images },
+              settingsItem,
               ...(profile?.platformOwner
                 ? [{ href: '/platform', label: t('nav.items.platform'), icon: Building2 }]
                 : []),
@@ -553,11 +600,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const navGroups = desktopApp
     ? allNavGroups.map((group) => ({
         ...group,
-        items: group.items
-          .filter((item) => isDesktopRoute(item.href))
-          .map((item) =>
-            item.children ? { ...item, children: item.children.filter((c) => isDesktopRoute(c.href)) } : item,
-          ),
+        // A group survives if any of its pages does; one left over (e.g.
+        // just Stock under Inventory) shows as a plain link.
+        items: group.items.flatMap((item): NavItem[] => {
+          if (!item.children) return isDesktopRoute(item.href) ? [item] : [];
+          const children = item.children.filter((c) => isDesktopRoute(c.href));
+          if (children.length === 0) return [];
+          if (children.length === 1 && !isDesktopRoute(item.href)) return children;
+          return [{ ...item, children }];
+        }),
       }))
     : allNavGroups;
   // Mobile bottom bar: the first four destinations this org actually has,
@@ -586,9 +637,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // nav item and drops keyboard focus when a group is toggled.
   const renderNavLink = (item: NavItem) => {
     const { href, label, icon: Icon, children, tourId } = item;
-    const active = children
-      ? pathname.startsWith(href)
-      : pathname === href;
+    const active = children ? inGroup(item) : pathname === href;
     const focusRing =
       'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600';
 
@@ -601,7 +650,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     // Parent item with children renders as an expand/collapse row
     // followed by indented child links.
     if (children) {
-      const isOpen = isGroupOpen(openGroups, href);
+      const isOpen = isGroupOpen(openGroups, item);
       const groupId = `nav-group-${href.slice(1)}`;
       return (
         <div key={href}>

@@ -76,6 +76,17 @@ summary(
     return this.sessionsService.findOne(organizationId, id);
   }
 
+  // MOVE sessions: serial-numbered units picked but not yet put away, for
+  // the put-away scan to choose from.
+  @Get(':id/serials')
+  pickedSerials(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Query('productId') productId: string,
+  ) {
+    return this.sessionsService.pickedSerials(organizationId, id, productId);
+  }
+
 @UseGuards(ModuleGuard)
 @RequireModule(ModuleKey.WAREHOUSE_OPS)
 @Post(':id/notes')
@@ -146,6 +157,7 @@ addNote(
     return this.sessionsService.addItem(
       organizationId, id, body.productId, body.qty,
       body.fromLocationId, body.toLocationId, body.reason, user.sub,
+      body.serialNumbers,
     );
   }
 }

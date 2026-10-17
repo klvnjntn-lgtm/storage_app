@@ -7,8 +7,15 @@ import { CurrentOrg } from 'src/auth/decorators/current-org.decorator';
 import { OrgGuard } from 'src/auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuleKey } from '@prisma/client';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
+@RequireModule(
+  ModuleKey.WAREHOUSE_OPS,
+  ModuleKey.INVOICE_POS,
+  ModuleKey.WORKSHOP_RMS,
+)
 @Controller('stock')
 export class StockController {
   constructor(private readonly stockService: StockService) {}

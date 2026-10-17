@@ -19,7 +19,7 @@ import type { TopReport } from '@/app/components/reports/types';
 const FULL_REPORT_LIMIT = 10;
 
 // Colours come from the .console tokens in theme.css (light + dark), shared
-// with the platform console.
+// with the platform console; .insights swaps in the app's blue and backdrop.
 const CARD = 'rounded-2xl border border-(--c-line) bg-(--c-surface) backdrop-blur shadow-[0_20px_50px_-30px_var(--c-shadow)]';
 
 type VehicleSearchResult = {
@@ -44,7 +44,7 @@ function defaultTo(): string {
 const ALL_TIME_FROM = '2000-01-01';
 
 export default function SalesInsightsPage() {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
 
   const [from, setFrom] = useState(() => getInitialParam('from', defaultFrom()));
@@ -134,30 +134,23 @@ export default function SalesInsightsPage() {
     setShowVehicleResults(false);
   }
 
-  const dateFmt = new Intl.DateTimeFormat(language === 'id' ? 'id-ID' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const rangeLabel =
-    from === ALL_TIME_FROM ? null : `${dateFmt.format(new Date(`${from}T00:00`))} – ${dateFmt.format(new Date(`${to}T00:00`))}`;
-
   const topCustomer = report?.topCustomers[0];
   const topItem = report?.topProducts[0];
   const topVehicle = report?.topVehicles[0];
 
   return (
     <main
-      className="console min-h-screen text-(--c-text) bg-(--c-bg)"
+      className="console insights min-h-screen text-(--c-text) bg-(--c-bg)"
       style={{
-        backgroundImage:
-          'radial-gradient(ellipse 80% 40% at 50% -5%, var(--c-glow), transparent 70%),' +
-          'linear-gradient(var(--c-grid) 1px, transparent 1px),' +
-          'linear-gradient(90deg, var(--c-grid) 1px, transparent 1px)',
-        backgroundSize: '100% 100%, 32px 32px, 32px 32px',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
       }}
     >
-      <div className="sticky top-0 z-10 bg-(--c-header) backdrop-blur-xl px-4 sm:px-6 py-4 border-b border-(--c-line)">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-10 bg-(--c-header) backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-(--c-sky)/25 to-blue-600/10 border border-(--c-sky)/30 shadow-[0_0_24px_-6px_rgba(56,189,248,0.5)] shrink-0">
-              <BarChart3 size={18} strokeWidth={2} className="text-(--c-sky)" aria-hidden />
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <BarChart3 size={18} strokeWidth={2} className="text-blue-700" aria-hidden />
             </span>
             <div className="min-w-0">
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate text-(--c-ink)`}>
@@ -166,35 +159,35 @@ export default function SalesInsightsPage() {
               <p className="text-sm text-(--c-muted) truncate">{t('accounting.salesInsights.subtitle')}</p>
             </div>
           </div>
-          {rangeLabel && (
-            <span className="hidden sm:flex items-center gap-1.5 shrink-0 rounded-full border border-(--c-sky)/25 bg-(--c-sky)/8 px-3 py-1.5 text-xs font-medium text-(--c-sky) tabular-nums">
-              <CalendarRange size={13} aria-hidden />
-              {rangeLabel}
-            </span>
-          )}
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         {/* Filters */}
-        <section className={`${CARD} p-4 sm:p-5 relative z-[5]`}>
+        <section className={`${CARD} p-4 sm:p-5 relative z-[5] ${hasWorkshopRms ? '' : 'w-full lg:w-fit'}`}>
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-(--c-muted) mb-3">
             <SlidersHorizontal size={13} aria-hidden />
             {t('accounting.salesInsights.filters')}
           </p>
-          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
-            <DateRangePicker
-              from={from}
-              to={to}
-              onChange={(f, t) => {
-                setFrom(f ?? ALL_TIME_FROM);
-                setTo(t ?? toCalendarDateString(new Date()));
-              }}
-            />
+          <div className="flex flex-col lg:flex-row gap-4">
+            <div>
+              <p className="text-xs font-semibold text-(--c-muted) mb-1.5 flex items-center gap-1">
+                <CalendarRange size={12} strokeWidth={2} aria-hidden />
+                {t('accounting.salesInsights.dateRange')}
+              </p>
+              <DateRangePicker
+                from={from}
+                to={to}
+                onChange={(f, t) => {
+                  setFrom(f ?? ALL_TIME_FROM);
+                  setTo(t ?? toCalendarDateString(new Date()));
+                }}
+              />
+            </div>
 
             {/* Vehicle scope — WORKSHOP_RMS only */}
             {hasWorkshopRms && (
-              <div className="lg:ml-auto w-full lg:w-80">
+              <div className="w-full lg:flex-1 lg:min-w-0">
                 <label htmlFor="insights-vehicle" className="text-xs font-semibold text-(--c-muted) mb-1.5 flex items-center gap-1">
                   <Car size={12} strokeWidth={2} aria-hidden />
                   {t('accounting.salesInsights.vehicleFilter')}
@@ -218,7 +211,7 @@ export default function SalesInsightsPage() {
                   </div>
                 ) : (
                   <div className="relative" ref={vehicleBoxRef}>
-                    <div className="flex items-center gap-2 rounded-xl border border-(--c-line) bg-(--c-input) px-3 transition-colors focus-within:border-(--c-sky)/60 focus-within:shadow-[0_0_0_3px_rgba(56,189,248,0.15)]">
+                    <div className="flex items-center gap-2 rounded-xl border border-(--c-line) bg-(--c-input) px-3 transition-colors focus-within:border-(--c-sky)/60 focus-within:shadow-[0_0_0_3px_rgba(37,99,235,0.15)]">
                       <Search size={15} strokeWidth={2} className="text-(--c-faint) shrink-0" aria-hidden />
                       <input
                         id="insights-vehicle"

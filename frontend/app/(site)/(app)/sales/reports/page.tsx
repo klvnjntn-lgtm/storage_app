@@ -226,7 +226,6 @@ export default function ReportsPage() {
                 {t('sales.reports.from')}
               </label>
               <DatePicker
-                variant="field"
                 value={from}
                 onChange={(v) => setFrom(v)}
                 className="w-full min-w-0 sm:w-auto"
@@ -236,7 +235,6 @@ export default function ReportsPage() {
             <div className="flex flex-col gap-1 min-w-0 sm:flex-none">
               <label className="text-xs font-semibold text-gray-600">{t('sales.reports.to')}</label>
               <DatePicker
-                variant="field"
                 value={to}
                 onChange={(v) => setTo(v)}
                 className="w-full min-w-0 sm:w-auto"

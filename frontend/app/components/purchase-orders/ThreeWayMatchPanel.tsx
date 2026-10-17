@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { FileCheck2, Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { formatDMY } from '@/lib/dates';
+import { formatDMY, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type Bill = { id: string; billNumber: string; billDate: string; dueDate: string | null; amount: string; notes: string | null };
 type Match = {
@@ -31,7 +32,7 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
   const { t } = useLanguage();
   const [match, setMatch] = useState<Match | null>(null);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ billNumber: '', billDate: '', dueDate: '', amount: '' });
+  const [form, setForm] = useState(() => ({ billNumber: '', billDate: toCalendarDateString(new Date()), dueDate: '', amount: '' }));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,7 +66,7 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
       return;
     }
     setAdding(false);
-    setForm({ billNumber: '', billDate: '', dueDate: '', amount: '' });
+    setForm({ billNumber: '', billDate: toCalendarDateString(new Date()), dueDate: '', amount: '' });
     load();
   }
 
@@ -151,11 +152,11 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
           <input required inputMode="decimal" placeholder={t('common.amount')} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} />
           <label className="text-xs text-gray-500">
             {t('purchasing.bills.billDate')}
-            <input required type="date" value={form.billDate} onChange={(e) => setForm({ ...form, billDate: e.target.value })} className={`${input} w-full`} />
+            <DatePicker aria-label={t('purchasing.bills.billDate')} value={form.billDate} onChange={(v) => setForm({ ...form, billDate: v })} />
           </label>
           <label className="text-xs text-gray-500">
             {t('purchasing.bills.dueDate')}
-            <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className={`${input} w-full`} />
+            <DatePicker clearable min={form.billDate || undefined} aria-label={t('purchasing.bills.dueDate')} value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} />
           </label>
           {error && <p className="col-span-2 text-xs text-red-700">{error}</p>}
           <div className="col-span-2 flex gap-2">

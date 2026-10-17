@@ -222,7 +222,7 @@ function SalesSearchPageInner() {
     >
       {/* Header — same outlined/blurred treatment as Workshop + Sales */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-6 py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2.5 mb-4">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Search size={18} strokeWidth={2} className="text-blue-700" />
@@ -280,7 +280,7 @@ function SalesSearchPageInner() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {results && !searching && results.items.length === 0 && (
           <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md p-4 text-center">
             {t('sales.search.notFoundFor', { query: query.trim() })}

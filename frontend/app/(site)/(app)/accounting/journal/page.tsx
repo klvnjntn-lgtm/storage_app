@@ -319,7 +319,7 @@ export default function JournalPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('common.date')}</label>
-                <DatePicker variant="field" value={manualDate} onChange={(v) => setManualDate(v)} />
+                <DatePicker value={manualDate} onChange={(v) => setManualDate(v)} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.journal.memoOptional')}</label>

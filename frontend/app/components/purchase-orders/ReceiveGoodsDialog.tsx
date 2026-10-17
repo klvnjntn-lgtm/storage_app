@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AlertCircle, PackageCheck, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import DatePicker from '@/app/components/shared/DatePicker';
 import { PurchaseOrderDetail } from './types';
 
 type SummaryItem = {
@@ -213,17 +214,19 @@ export function ReceiveGoodsDialog({
                           }
                           className="w-28 border-2 border-gray-300 rounded-md px-2 py-0.5 text-xs outline-none focus:border-blue-500"
                         />
-                        <input
-                          type="date"
+                        <DatePicker
+                          size="sm"
+                          clearable
+                          className="w-36"
                           aria-label={t('purchasing.batches.expiryDate')}
+                          placeholder={t('purchasing.batches.expiryDate')}
                           value={batch[item.purchaseOrderItemId]?.expiry ?? ''}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setBatch((prev) => ({
                               ...prev,
-                              [item.purchaseOrderItemId]: { number: prev[item.purchaseOrderItemId]?.number ?? '', expiry: e.target.value },
+                              [item.purchaseOrderItemId]: { number: prev[item.purchaseOrderItemId]?.number ?? '', expiry: v },
                             }))
                           }
-                          className="border-2 border-gray-300 rounded-md px-1.5 py-0.5 text-xs outline-none focus:border-blue-500"
                         />
                       </div>
                     )}

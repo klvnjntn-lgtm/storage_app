@@ -196,6 +196,9 @@ constructor(
     organizationId: string,
     userId: string,
     dto: CreateDraftInvoiceDto,
+    // Set by WorkOrdersService.createInvoice() — links the draft to the
+    // job card it was made from.
+    opts: { workOrderId?: string } = {},
   ) {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
@@ -204,6 +207,19 @@ constructor(
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        if (opts.workOrderId) {
+          // Same row lock as createDraftFromSalesOrder: two clicks on
+          // "Create invoice" must not both pass the check below.
+          await tx.$queryRaw`SELECT id FROM "WorkOrder" WHERE id = ${opts.workOrderId} FOR UPDATE`;
+          const workOrder = await tx.workOrder.findFirst({
+            where: { id: opts.workOrderId, organizationId },
+            select: { status: true, invoices: { where: { status: { not: InvoiceStatus.VOID } }, select: { id: true } } },
+          });
+          if (!workOrder) throw new NotFoundException('Work order not found');
+          if (workOrder.status === 'CANCELLED') throw new BadRequestException('A cancelled work order cannot be invoiced');
+          if (workOrder.invoices.length > 0) throw new BadRequestException('This work order has already been invoiced');
+        }
+
         if (dto.vehicleId && dto.odometer != null) {
           await this.applyOdometerReading(tx, organizationId, dto.vehicleId, dto.odometer);
         }
@@ -222,6 +238,7 @@ constructor(
             customerId: dto.customerId,
             vehicleId: dto.vehicleId,
             employeeId: dto.employeeId ?? null, // NEW
+            workOrderId: opts.workOrderId ?? null,
             customerPoNumber: dto.customerPoNumber ?? null,
             paymentTerms: dto.paymentTerms ?? null,
             notes: dto.notes ?? null,
@@ -1243,6 +1260,8 @@ async issue(
       await tx.invoiceItem.deleteMany({
         where: { invoiceId: invoice.id },
       });
+      // createDraft() logs a CREATED event; its FK would block the delete.
+      await tx.invoiceActivityEvent.deleteMany({ where: { invoiceId: invoice.id } });
       return tx.invoice.delete({ where: { id: invoice.id } });
     });
   }

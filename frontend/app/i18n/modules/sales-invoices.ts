@@ -295,6 +295,10 @@ export const salesInvoices = {
         noteLabel: 'Note (optional)',
         recording: 'Recording...',
         recordPayment: 'Record payment',
+        splitPayment: 'Split across another method',
+        partLabel: 'Payment {n}',
+        removePart: 'Remove this payment',
+        remaining: 'Remaining: {amount}',
       },
       voidInvoice: {
         title: 'Void invoice',
@@ -630,6 +634,10 @@ export const salesInvoices = {
         noteLabel: 'Catatan (opsional)',
         recording: 'Mencatat...',
         recordPayment: 'Catat pembayaran',
+        splitPayment: 'Bagi ke metode lain',
+        partLabel: 'Pembayaran {n}',
+        removePart: 'Hapus pembayaran ini',
+        remaining: 'Sisa: {amount}',
       },
       voidInvoice: {
         title: 'Batalkan faktur',

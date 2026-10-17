@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { dateFieldClass } from './DatePicker';
 
 type Props = {
   from: string | null;
@@ -117,13 +118,15 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
   const [draftEnd, setDraftEnd] = useState<Date | null>(to ? parseCalendarDate(to) : null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Re-seed drafts from applied props each time the popover opens.
-  useEffect(() => {
-    if (!open) return;
-    setDraftStart(from ? parseCalendarDate(from) : null);
-    setDraftEnd(to ? parseCalendarDate(to) : null);
-    setViewMonth(from ? parseCalendarDate(from) : new Date());
-  }, [open, from, to]);
+  // Re-seed drafts from the applied range each time the popover opens.
+  function toggle() {
+    if (!open) {
+      setDraftStart(from ? parseCalendarDate(from) : null);
+      setDraftEnd(to ? parseCalendarDate(to) : null);
+      setViewMonth(from ? parseCalendarDate(from) : new Date());
+    }
+    setOpen(!open);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -187,6 +190,16 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
         : `${formatShort(parseCalendarDate(from))} – ${formatShort(parseCalendarDate(to))}`
       : t('shared.dateRangePicker.allTime');
 
+  // Which shortcut the applied range came from, so the list can show it.
+  const activePreset = from && to ? PRESETS.find((p) => {
+    const [f, tt] = p.range();
+    return f === from && tt === to;
+  })?.labelKey : null;
+  const presetClass = (active: boolean) =>
+    `text-left text-xs sm:text-sm px-2.5 py-2 rounded-md whitespace-nowrap ${
+      active ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-100'
+    }`;
+
   const cells = monthGrid(viewMonth);
   const rangeStart = draftStart;
   const rangeEnd = draftEnd;
@@ -194,46 +207,35 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
   return (
     <div className="relative" ref={containerRef}>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1.5 text-xs sm:text-sm px-3 py-2.5 sm:py-2 rounded-md border-2 font-semibold whitespace-nowrap ${
-          from || to
-            ? 'bg-black text-white border-black'
-            : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-        }`}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={`${dateFieldClass()} whitespace-nowrap ${open ? 'border-blue-500' : ''} ${from || to ? 'pr-8' : ''}`}
       >
-        <CalendarIcon size={14} strokeWidth={2} />
-        {label}
-        {(from || to) && (
-          <span
-            role="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation();
-              clearAll();
-            }}
-            className="ml-0.5 rounded-full hover:bg-white/20 p-0.5"
-          >
-            <X size={12} strokeWidth={2.5} />
-          </span>
-        )}
+        <CalendarIcon size={15} strokeWidth={2} aria-hidden="true" className="shrink-0 text-blue-600/70" />
+        <span className="text-gray-900">{label}</span>
       </button>
+      {(from || to) && (
+        <button
+          type="button"
+          onClick={clearAll}
+          aria-label={t('shared.dateRangePicker.clear')}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+        >
+          <X size={14} strokeWidth={2.25} aria-hidden="true" />
+        </button>
+      )}
 
       {open && (
-        <div className="absolute z-20 mt-2 left-0 bg-white border-2 border-gray-200 rounded-lg shadow-lg flex flex-col sm:flex-row w-[calc(100vw-2rem)] max-w-[420px] sm:w-auto sm:max-w-none overflow-hidden">
+        <div role="dialog" aria-label={t('shared.dateRangePicker.pickDate')} className="absolute z-50 top-full mt-2 left-0 bg-white border-2 border-gray-200 rounded-lg shadow-lg flex flex-col sm:flex-row w-[calc(100vw-2rem)] max-w-[420px] sm:w-auto sm:max-w-none overflow-hidden">
           {/* Presets */}
           <div className="flex flex-row sm:flex-col gap-1 p-2 sm:w-36 sm:border-r-2 border-gray-100 overflow-x-auto sm:overflow-visible">
-            <button
-              onClick={clearAll}
-              className="text-left text-xs sm:text-sm px-2.5 py-2 rounded-md hover:bg-gray-100 font-semibold text-gray-700 whitespace-nowrap"
-            >
+            <button type="button" onClick={clearAll} className={presetClass(!from && !to)}>
               {t('shared.dateRangePicker.allTime')}
             </button>
             {PRESETS.map((p) => (
-              <button
-                key={p.labelKey}
-                onClick={() => applyPreset(p)}
-                className="text-left text-xs sm:text-sm px-2.5 py-2 rounded-md hover:bg-gray-100 text-gray-700 whitespace-nowrap"
-              >
+              <button key={p.labelKey} type="button" onClick={() => applyPreset(p)} className={presetClass(activePreset === p.labelKey)}>
                 {PRESET_LABELS[p.labelKey]}
               </button>
             ))}
@@ -243,6 +245,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
           <div className="p-3 w-72">
             <div className="flex items-center justify-between mb-2">
               <button
+                type="button"
                 onClick={() => setViewMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
                 className="p-1.5 rounded-md hover:bg-gray-100"
                 aria-label={t('shared.dateRangePicker.previousMonth')}
@@ -251,6 +254,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
               </button>
               <span className="text-sm font-semibold capitalize">{monthLabelFormatter.format(viewMonth)}</span>
               <button
+                type="button"
                 onClick={() => setViewMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
                 className="p-1.5 rounded-md hover:bg-gray-100"
                 aria-label={t('shared.dateRangePicker.nextMonth')}
@@ -275,14 +279,15 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
                 return (
                   <button
                     key={i}
+                    type="button"
                     onClick={() => pickDay(day)}
                     className={`text-xs h-8 w-8 mx-auto rounded-md flex items-center justify-center font-medium transition-colors ${
                       isStart || isEnd
-                        ? 'bg-black text-white'
+                        ? 'bg-blue-600 text-white'
                         : inRange
-                        ? 'bg-gray-200 text-gray-800'
+                        ? 'bg-blue-50 text-blue-900'
                         : isToday
-                        ? 'border border-gray-400 text-gray-800 hover:bg-gray-100'
+                        ? 'border border-blue-500/50 text-gray-800 hover:bg-gray-100'
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
@@ -298,9 +303,10 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
                 {rangeEnd ? formatShort(rangeEnd) : rangeStart ? formatShort(rangeStart) : t('shared.dateRangePicker.end')}
               </span>
               <button
+                type="button"
                 onClick={applyCustom}
                 disabled={!rangeStart}
-                className="text-xs px-3 py-1.5 rounded-md bg-black text-white font-semibold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-800"
+                className="text-xs px-3 py-1.5 rounded-md bg-blue-600 text-white font-semibold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-blue-700"
               >
                 {t('common.apply')}
               </button>

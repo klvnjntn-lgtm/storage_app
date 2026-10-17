@@ -452,7 +452,6 @@ function RunsTab() {
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.documentDate')}</label>
             <DatePicker
-              variant="field"
               value={form.documentDate}
               onChange={(v) => setForm((f) => ({ ...f, documentDate: v }))}
               className="w-full sm:w-1/3"
@@ -659,7 +658,6 @@ function RunsTab() {
                             <div className="flex flex-col gap-1">
                               <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
                               <DatePicker
-                                variant="field"
                                 size="sm"
                                 value={payForm.paidAt}
                                 onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}

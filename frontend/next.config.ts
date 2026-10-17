@@ -16,15 +16,22 @@ const isDesktopBuild = !!process.env.DESKTOP_BUILD;
 // root layout), so this mainly limits where code, frames and form posts
 // can come from, rather than fully preventing injected inline script.
 // No upgrade-insecure-requests: LAN installs are served over plain http.
+// Google Maps (when a key is set) loads its script, tiles, fonts and
+// workers from Google — the sources below are Google's documented CSP
+// allowlist, including 'unsafe-eval'. Without a key, none of it is allowed.
+const googleMaps = !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+const gm = (sources: string) => (googleMaps ? ` ${sources}` : "");
+
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  // Map tiles (OpenStreetMap) and logos saved as absolute URLs.
+  `script-src 'self' 'unsafe-inline'${isDev || googleMaps ? " 'unsafe-eval'" : ""}${gm("blob: https://*.googleapis.com https://*.gstatic.com *.google.com https://*.ggpht.com *.googleusercontent.com")}`,
+  `style-src 'self' 'unsafe-inline'${gm("https://fonts.googleapis.com")}`,
+  // Map tiles and logos saved as absolute URLs.
   "img-src 'self' data: blob: https: http:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "worker-src 'self'",
+  `font-src 'self' data:${gm("https://fonts.gstatic.com")}`,
+  `connect-src 'self'${gm("https://*.googleapis.com *.google.com https://*.gstatic.com data: blob:")}`,
+  `worker-src 'self'${gm("blob:")}`,
+  ...(googleMaps ? ["frame-src *.google.com"] : []),
   "manifest-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",

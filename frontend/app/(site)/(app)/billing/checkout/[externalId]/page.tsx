@@ -55,7 +55,7 @@ export default function FakeCheckoutPage() {
   }
 
   return (
-    <PageFrame icon={FlaskConical} title={t('billing.fakeCheckoutTitle')} subtitle={t('billing.fakeCheckoutSubtitle')} width="max-w-lg">
+    <PageFrame icon={FlaskConical} title={t('billing.fakeCheckoutTitle')} subtitle={t('billing.fakeCheckoutSubtitle')}>
       <ErrorNote message={error} />
       {payment && (
         <Card>

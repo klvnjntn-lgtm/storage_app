@@ -118,13 +118,11 @@ export default function CustomersPage() {
     }
     const timeout = setTimeout(() => load(query.trim() || undefined), 300);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   // Reset to page 1 whenever the result set changes underneath the current
   // page — but not on the very first run, or a `page` restored from the
-  // URL (e.g. via the browser's Back button) would get clobbered back to 1
-  // before the list even finishes loading.
+  // URL (e.g. via the browser's Back button) would get clobbered back to 1.
   const isFirstPageResetRef = useRef(true);
   useEffect(() => {
     if (isFirstPageResetRef.current) {
@@ -247,7 +245,7 @@ export default function CustomersPage() {
     if (!confirm(t('customers.listPage.deleteConfirm', { name: c.name }))) return;
     const res = await apiFetch(`/customers/${c.id}`, { method: 'DELETE' });
     if (res.ok) {
-      setCustomers((prev) => prev.filter((x) => x.id !== c.id));
+      load();
     } else {
       const err = await res.json().catch(() => null);
       alert(err?.message || t('customers.listPage.deleteFailed', { status: res.status }));

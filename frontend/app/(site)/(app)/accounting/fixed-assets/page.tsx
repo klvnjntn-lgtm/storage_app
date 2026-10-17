@@ -471,7 +471,6 @@ export default function FixedAssetsPage() {
                   <Calendar size={11} strokeWidth={2} /> {t('accounting.fixedAssets.acquisitionDate')}
                 </label>
                 <DatePicker
-                  variant="field"
                   value={form.acquisitionDate}
                   onChange={(v) => setForm((f) => ({ ...f, acquisitionDate: v }))}
                 />
@@ -638,7 +637,6 @@ export default function FixedAssetsPage() {
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
                             <DatePicker
-                              variant="field"
                               size="sm"
                               value={payForm.paidAt}
                               onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}
@@ -714,7 +712,6 @@ export default function FixedAssetsPage() {
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.fixedAssets.disposedOnLabel')}</label>
                             <DatePicker
-                              variant="field"
                               size="sm"
                               value={disposeForm.disposedAt}
                               onChange={(v) => setDisposeForm((f) => ({ ...f, disposedAt: v }))}

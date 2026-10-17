@@ -32,8 +32,9 @@ function round2(n: number) {
 }
 
 // Stock moving between the business's own locations as a document, for
-// when it isn't instant (a truck between branches) — WarehouseService.move
-// remains the instant scan-and-move.
+// when it isn't instant (a truck between branches). A quick move is the
+// same document shipped and received in one step, for moves within a site
+// — so every move, instant or not, is listed and carries its serials.
 //
 // No journal entry for the move itself: Inventory is one account for all
 // locations, so its value doesn't change. While IN_TRANSIT the goods are in
@@ -123,12 +124,13 @@ export class StockTransferService {
         'STOCK_TRANSFER',
         'TR',
       );
-      return tx.stockTransfer.create({
+      const created = await tx.stockTransfer.create({
         data: {
           organizationId,
           transferNumber,
           fromLocationId: dto.fromLocationId,
           toLocationId: dto.toLocationId,
+          quickMove: !!dto.quickMove,
           notes: dto.notes?.trim() || null,
           createdById: userId,
           items: {
@@ -141,157 +143,174 @@ export class StockTransferService {
         },
         include: transferInclude,
       });
+      if (!dto.quickMove) return created;
+      await this.shipIn(tx, organizationId, created.id, userId);
+      return this.receiveIn(tx, organizationId, created.id, userId, {});
     });
   }
 
   // The goods leave the source location.
-  async ship(organizationId: string, id: string, userId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const transfer = await this.lockInStatus(tx, organizationId, id, [
-        StockTransferStatus.DRAFT,
-      ]);
-      for (const item of transfer.items) {
-        await takeSerials(tx, {
-          organizationId,
-          productId: item.productId,
-          locationId: transfer.fromLocationId,
-          serials: item.serialNumbers,
-          to: 'IN_TRANSIT',
-          refs: { stockTransferId: id },
-        });
-        await this.stock.decrease(
-          organizationId,
-          item.productId,
-          transfer.fromLocationId,
-          Number(item.quantity),
-          userId,
-          {
-            type: EventType.TRANSFER_OUT,
-            metadata: {
-              stockTransferId: id,
-              toLocationId: transfer.toLocationId,
-            },
-          },
-          tx,
-        );
-      }
-      return tx.stockTransfer.update({
-        where: { id },
-        data: {
-          status: StockTransferStatus.IN_TRANSIT,
-          shippedAt: new Date(),
-          shippedById: userId,
-        },
-        include: transferInclude,
+  ship(organizationId: string, id: string, userId: string) {
+    return this.prisma.$transaction((tx) =>
+      this.shipIn(tx, organizationId, id, userId),
+    );
+  }
+
+  private async shipIn(tx: Tx, organizationId: string, id: string, userId: string) {
+    const transfer = await this.lockInStatus(tx, organizationId, id, [
+      StockTransferStatus.DRAFT,
+    ]);
+    for (const item of transfer.items) {
+      await takeSerials(tx, {
+        organizationId,
+        productId: item.productId,
+        locationId: transfer.fromLocationId,
+        serials: item.serialNumbers,
+        to: 'IN_TRANSIT',
+        refs: { stockTransferId: id },
       });
+      await this.stock.decrease(
+        organizationId,
+        item.productId,
+        transfer.fromLocationId,
+        Number(item.quantity),
+        userId,
+        {
+          type: EventType.TRANSFER_OUT,
+          metadata: {
+            stockTransferId: id,
+            toLocationId: transfer.toLocationId,
+          },
+        },
+        tx,
+      );
+    }
+    return tx.stockTransfer.update({
+      where: { id },
+      data: {
+        status: StockTransferStatus.IN_TRANSIT,
+        shippedAt: new Date(),
+        shippedById: userId,
+      },
+      include: transferInclude,
     });
   }
 
-  async receive(
+  receive(
     organizationId: string,
     id: string,
     userId: string,
     dto: ReceiveStockTransferDto,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      const transfer = await this.lockInStatus(tx, organizationId, id, [
-        StockTransferStatus.IN_TRANSIT,
-      ]);
-      const counted = new Map(
-        (dto.items ?? []).map((l) => [l.itemId, l.receivedQuantity]),
-      );
-      const missingSerials = new Map(
-        (dto.items ?? []).map((l) => [l.itemId, normalizeSerials(l.missingSerials)]),
-      );
-      for (const itemId of counted.keys()) {
-        if (!transfer.items.some((i) => i.id === itemId))
-          throw new BadRequestException(
-            `Item ${itemId} is not on this transfer`,
-          );
-      }
+    return this.prisma.$transaction((tx) =>
+      this.receiveIn(tx, organizationId, id, userId, dto),
+    );
+  }
 
-      for (const item of transfer.items) {
-        const shipped = Number(item.quantity);
-        const received = round2(counted.get(item.id) ?? shipped);
-        if (received > shipped) {
-          throw new BadRequestException(
-            'Received quantity cannot be more than was shipped',
-          );
-        }
-        await tx.stockTransferItem.update({
-          where: { id: item.id },
-          data: { receivedQuantity: received },
-        });
-        if (item.serialNumbers.length) {
-          // Which units didn't arrive has to be said, not guessed.
-          const lost = missingSerials.get(item.id) ?? [];
-          const shortBy = round2(shipped - received);
-          if (lost.length !== shortBy || lost.some((s) => !item.serialNumbers.includes(s))) {
-            throw new BadRequestException(
-              shortBy > 0
-                ? `List the ${shortBy} serial number(s) that did not arrive`
-                : 'Only list missing serial numbers when something is short',
-            );
-          }
-          await landTransferSerials(tx, {
-            organizationId,
-            stockTransferId: id,
-            locationId: transfer.toLocationId,
-            productId: item.productId,
-            lost,
-          });
-        }
-        if (received > 0) {
-          await this.stock.increase(
-            organizationId,
-            item.productId,
-            transfer.toLocationId,
-            received,
-            userId,
-            {
-              type: EventType.TRANSFER_IN,
-              metadata: {
-                stockTransferId: id,
-                fromLocationId: transfer.fromLocationId,
-              },
-            },
-            tx,
-          );
-        }
-        const shortfall = round2(shipped - received);
-        if (shortfall > 0) {
-          const product = await tx.product.findFirst({
-            where: { id: item.productId, organizationId },
-            select: { costPrice: true },
-          });
-          await this.postingRules.postStockAdjustment(
-            organizationId,
-            {
-              sourceId: `stock-transfer:${item.id}`,
-              date: new Date(),
-              memo: `Shortfall on stock transfer ${transfer.transferNumber ?? id}`,
-              qtyDelta: -shortfall,
-              unitCost:
-                product?.costPrice != null ? Number(product.costPrice) : null,
-              locationId: transfer.toLocationId,
-              counter: 'ADJUSTMENT',
-            },
-            tx,
-          );
-        }
-      }
+  private async receiveIn(
+    tx: Tx,
+    organizationId: string,
+    id: string,
+    userId: string,
+    dto: ReceiveStockTransferDto,
+  ) {
+    const transfer = await this.lockInStatus(tx, organizationId, id, [
+      StockTransferStatus.IN_TRANSIT,
+    ]);
+    const counted = new Map(
+      (dto.items ?? []).map((l) => [l.itemId, l.receivedQuantity]),
+    );
+    const missingSerials = new Map(
+      (dto.items ?? []).map((l) => [l.itemId, normalizeSerials(l.missingSerials)]),
+    );
+    for (const itemId of counted.keys()) {
+      if (!transfer.items.some((i) => i.id === itemId))
+        throw new BadRequestException(
+          `Item ${itemId} is not on this transfer`,
+        );
+    }
 
-      // Status last: until it changes, the shortfall's units still count as
-      // in transit for costing, which is what they were at that moment.
-      return tx.stockTransfer.update({
-        where: { id },
-        data: {
-          status: StockTransferStatus.RECEIVED,
-          receivedAt: new Date(),
-          receivedById: userId,
-        },
-        include: transferInclude,
+    for (const item of transfer.items) {
+      const shipped = Number(item.quantity);
+      const received = round2(counted.get(item.id) ?? shipped);
+      if (received > shipped) {
+        throw new BadRequestException(
+          'Received quantity cannot be more than was shipped',
+        );
+      }
+      await tx.stockTransferItem.update({
+        where: { id: item.id },
+        data: { receivedQuantity: received },
       });
+      if (item.serialNumbers.length) {
+        // Which units didn't arrive has to be said, not guessed.
+        const lost = missingSerials.get(item.id) ?? [];
+        const shortBy = round2(shipped - received);
+        if (lost.length !== shortBy || lost.some((s) => !item.serialNumbers.includes(s))) {
+          throw new BadRequestException(
+            shortBy > 0
+              ? `List the ${shortBy} serial number(s) that did not arrive`
+              : 'Only list missing serial numbers when something is short',
+          );
+        }
+        await landTransferSerials(tx, {
+          organizationId,
+          stockTransferId: id,
+          locationId: transfer.toLocationId,
+          productId: item.productId,
+          lost,
+        });
+      }
+      if (received > 0) {
+        await this.stock.increase(
+          organizationId,
+          item.productId,
+          transfer.toLocationId,
+          received,
+          userId,
+          {
+            type: EventType.TRANSFER_IN,
+            metadata: {
+              stockTransferId: id,
+              fromLocationId: transfer.fromLocationId,
+            },
+          },
+          tx,
+        );
+      }
+      const shortfall = round2(shipped - received);
+      if (shortfall > 0) {
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, organizationId },
+          select: { costPrice: true },
+        });
+        await this.postingRules.postStockAdjustment(
+          organizationId,
+          {
+            sourceId: `stock-transfer:${item.id}`,
+            date: new Date(),
+            memo: `Shortfall on stock transfer ${transfer.transferNumber ?? id}`,
+            qtyDelta: -shortfall,
+            unitCost:
+              product?.costPrice != null ? Number(product.costPrice) : null,
+            locationId: transfer.toLocationId,
+            counter: 'ADJUSTMENT',
+          },
+          tx,
+        );
+      }
+    }
+
+    // Status last: until it changes, the shortfall's units still count as
+    // in transit for costing, which is what they were at that moment.
+    return tx.stockTransfer.update({
+      where: { id },
+      data: {
+        status: StockTransferStatus.RECEIVED,
+        receivedAt: new Date(),
+        receivedById: userId,
+      },
+      include: transferInclude,
     });
   }
 

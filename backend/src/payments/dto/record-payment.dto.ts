@@ -1,5 +1,6 @@
 // payments/dto/record-payment.dto.ts
-import { IsInt, IsPositive, IsOptional, IsEnum, IsString, IsUUID, MaxLength, IsNumber } from 'class-validator';
+import { IsPositive, IsOptional, IsEnum, IsString, IsUUID, MaxLength, IsNumber, IsArray, ArrayMinSize, ArrayMaxSize, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
 
 export class RecordPaymentDto {
@@ -23,4 +24,13 @@ amount: number;
   @IsOptional()
   @IsUUID()
   bankAccountId?: string;
+}
+
+export class SplitPaymentDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => RecordPaymentDto)
+  parts: RecordPaymentDto[];
 }

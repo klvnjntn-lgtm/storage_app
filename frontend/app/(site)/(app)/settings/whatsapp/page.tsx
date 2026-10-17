@@ -8,7 +8,7 @@ import { formatIDR } from '@/lib/format';
 import { formatDMYTime } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { Card, ComingSoon, ErrorNote, PageFrame, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { Card, ComingSoon, ErrorNote, PageFrame, ToggleRow, thCls, tdCls } from '@/app/components/shared/PageFrame';
 
 type Overview = {
   balance: number;
@@ -174,20 +174,24 @@ function WhatsAppPageInner() {
                 stages: data.reminderStages.map((s) => (s < 0 ? t('whatsapp.daysBefore', { n: -s }) : t('whatsapp.daysAfter', { n: s }))).join(', '),
               })}
             </p>
-            <label className="flex items-center gap-2 text-sm mb-2">
-              <input type="checkbox" checked={data.settings.reminderEmailEnabled} onChange={(e) => toggle('reminderEmailEnabled', e.target.checked)} />
-              {t('whatsapp.remindByEmail')}
-            </label>
-            <label className={`flex items-center gap-2 text-sm ${live ? '' : 'text-gray-400'}`}>
-              <input
-                type="checkbox"
+            <div className="space-y-2">
+              <ToggleRow
+                title={t('whatsapp.remindByEmail')}
+                checked={data.settings.reminderEmailEnabled}
+                onChange={(v) => toggle('reminderEmailEnabled', v)}
+              />
+              <ToggleRow
+                title={t('whatsapp.remindByWhatsapp')}
                 disabled={!live}
                 checked={live && data.settings.reminderWhatsappEnabled}
-                onChange={(e) => toggle('reminderWhatsappEnabled', e.target.checked)}
+                onChange={(v) => toggle('reminderWhatsappEnabled', v)}
+                badge={
+                  !live && (
+                    <span className="text-[11px] font-medium rounded-full bg-gray-100 text-gray-500 px-2 py-0.5">{t('messaging.comingSoon')}</span>
+                  )
+                }
               />
-              {t('whatsapp.remindByWhatsapp')}
-              {!live && <span className="text-xs">({t('messaging.comingSoon')})</span>}
-            </label>
+            </div>
           </Card>
 
           <Card title={t('whatsapp.historyTitle')}>

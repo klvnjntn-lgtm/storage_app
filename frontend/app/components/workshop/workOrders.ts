@@ -1,0 +1,100 @@
+// Shared by the work order pages, Settings and the nav.
+
+// Fired by Settings when an admin turns work orders on or off, so the nav
+// can show or hide its link without a reload.
+export const WORK_ORDERS_CHANGED = 'waresys:work-orders-changed';
+
+export type WorkOrderStatus = 'QUEUED' | 'IN_PROGRESS' | 'WAITING_PARTS' | 'DONE' | 'CANCELLED';
+
+export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['QUEUED', 'IN_PROGRESS', 'WAITING_PARTS', 'DONE', 'CANCELLED'];
+
+export type WorkOrderItem = {
+  id: string;
+  productId: string | null;
+  description: string | null;
+  locationId: string | null;
+  quantity: string;
+  unitPrice: string | null;
+  product: { id: string; name: string; sku: string | null; sellingPrice: string | null } | null;
+};
+
+export type WorkOrder = {
+  id: string;
+  number: string;
+  status: WorkOrderStatus;
+  customerId: string;
+  vehicleId: string;
+  mechanicId: string | null;
+  odometer: number | null;
+  complaint: string | null;
+  notes: string | null;
+  estimatedTotal: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  customer: { id: string; name: string; phone: string | null };
+  vehicle: { id: string; plateNumber: string; vehicleModel: string; odometer: number | null };
+  mechanic: { id: string; name: string } | null;
+  items: WorkOrderItem[];
+  invoices: { id: string; invoiceNumber: string | null; status: string; total: string; createdAt: string }[];
+  invoicedId: string | null;
+};
+
+export type Mechanic = { id: string; name: string; position: string | null };
+
+// One editable line in the form. A part has product + location; a labour
+// line has a description and its own price.
+export type DraftLine =
+  | { kind: 'part'; key: string; productId: string; name: string; sku: string | null; locationId: string; quantity: number; unitPrice: number | null }
+  | { kind: 'labour'; key: string; description: string; quantity: number; unitPrice: number };
+
+export function toDraftLines(items: WorkOrderItem[]): DraftLine[] {
+  return items.map((i) =>
+    i.productId
+      ? {
+          kind: 'part',
+          key: i.id,
+          productId: i.productId,
+          name: i.product?.name ?? '',
+          sku: i.product?.sku ?? null,
+          locationId: i.locationId ?? '',
+          quantity: Number(i.quantity),
+          unitPrice: i.unitPrice != null ? Number(i.unitPrice) : null,
+        }
+      : {
+          kind: 'labour',
+          key: i.id,
+          description: i.description ?? '',
+          quantity: Number(i.quantity),
+          unitPrice: Number(i.unitPrice ?? 0),
+        },
+  );
+}
+
+export function toPayloadLines(lines: DraftLine[]) {
+  return lines.map((l) =>
+    l.kind === 'part'
+      ? {
+          productId: l.productId,
+          locationId: l.locationId,
+          quantity: l.quantity,
+          ...(l.unitPrice != null && { unitPrice: l.unitPrice }),
+        }
+      : { description: l.description.trim(), quantity: l.quantity, unitPrice: l.unitPrice },
+  );
+}
+
+export function statusStyle(status: WorkOrderStatus): string {
+  switch (status) {
+    case 'QUEUED':
+      return 'bg-gray-50 text-gray-700 border-gray-300';
+    case 'IN_PROGRESS':
+      return 'bg-blue-50 text-blue-700 border-blue-300';
+    case 'WAITING_PARTS':
+      return 'bg-amber-50 text-amber-700 border-amber-300';
+    case 'DONE':
+      return 'bg-green-50 text-green-700 border-green-300';
+    case 'CANCELLED':
+      return 'bg-red-50 text-red-700 border-red-300';
+  }
+}

@@ -5,7 +5,7 @@ import { DocumentNumberingService } from '../shared/documents/document-numbering
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PrintTokenService } from '../common/print/print-token.service';
-import { Prisma, SalesOrderStatus } from '@prisma/client';
+import { DeliveryOrderStatus, InvoiceStatus, Prisma, SalesOrderStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
@@ -639,7 +639,12 @@ async confirm(organizationId: string, id: string, userId: string) {
 
       const fresh = await tx.salesOrder.findFirst({
         where: { id, organizationId },
-        include: { invoices: { select: { id: true } }, deliveryOrders: { select: { id: true } } },
+        // A voided invoice or cancelled delivery no longer counts, same as
+        // createDraftFromSalesOrder.
+        include: {
+          invoices: { where: { status: { not: InvoiceStatus.VOID } }, select: { id: true } },
+          deliveryOrders: { where: { status: { not: DeliveryOrderStatus.CANCELLED } }, select: { id: true } },
+        },
       });
       if (!fresh) throw new NotFoundException('Order not found');
       if (fresh.status !== SalesOrderStatus.DRAFT && fresh.status !== SalesOrderStatus.CONFIRMED) {

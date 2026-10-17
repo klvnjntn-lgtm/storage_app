@@ -1878,8 +1878,73 @@ export class DeliveryRoutesService {
         if (l === 'LATE') counts.late++;
         else if (l === 'AT_RISK') counts.atRisk++;
       }
-      return { routeId: route.id, team: presentTeam(route.team), ...counts };
+      return {
+        routeId: route.id,
+        team: presentTeam(route.team),
+        routeStatus: route.status,
+        ...counts,
+        ...this.whereabouts(route),
+      };
     });
+  }
+
+  // Where the driver most likely is, without live tracking: the spot they
+  // last resolved a stop (the GPS fix taken when they tapped delivered or
+  // failed, else that stop's pin), or the depot if they haven't resolved
+  // one yet. Plus the stop they're presumably heading to. The monitoring
+  // page turns these into "last seen 25 min ago at X, next: Y".
+  private whereabouts(route: {
+    startLatitude: Prisma.Decimal | null;
+    startLongitude: Prisma.Decimal | null;
+    plannedDepartureAt: Date | null;
+    stops: StopRow[];
+  }) {
+    const stops = route.stops.map((stop) => this.presentStop(stop));
+    const resolved = stops
+      .map((stop) => ({ stop, at: stop.signedAt ?? stop.failedAt }))
+      .filter((r): r is { stop: (typeof stops)[number]; at: Date } => r.at != null)
+      .sort((a, b) => b.at.getTime() - a.at.getTime());
+    const last = resolved[0];
+
+    const lastStop = last
+      ? {
+          label: last.stop.label,
+          status: last.stop.status,
+          at: last.at,
+          plannedEta: last.stop.plannedEta,
+          ...latLng(
+            last.stop.status === 'DELIVERED'
+              ? [last.stop.completedLatitude, last.stop.completedLongitude]
+              : [last.stop.failureLatitude, last.stop.failureLongitude],
+            [last.stop.destinationLatitude, last.stop.destinationLongitude],
+          ),
+        }
+      : null;
+
+    const next = stops
+      .filter((stop) => stop.status === 'PENDING')
+      .sort((a, b) => a.sequence - b.sequence)[0];
+    const nextStop = next
+      ? {
+          label: next.label,
+          plannedEta: next.plannedEta,
+          ...latLng([next.destinationLatitude, next.destinationLongitude]),
+        }
+      : null;
+
+    const depot = latLng([route.startLatitude, route.startLongitude]);
+    return {
+      lastStop,
+      nextStop,
+      plannedDepartureAt: route.plannedDepartureAt,
+      // Best guess at the driver's position right now.
+      position:
+        lastStop?.latitude != null
+          ? { latitude: lastStop.latitude, longitude: lastStop.longitude, source: 'LAST_STOP' as const }
+          : depot.latitude != null
+            ? { latitude: depot.latitude, longitude: depot.longitude, source: 'DEPOT' as const }
+            : null,
+    };
   }
 
   // Flattened, org-wide "today's stops" for the monitoring map — every
@@ -1912,4 +1977,19 @@ export class DeliveryRoutesService {
       })
       .filter((s) => s.latitude != null && s.longitude != null);
   }
+}
+
+type DecimalLike = Prisma.Decimal | number | string | null | undefined;
+
+// The first pair with both coordinates set, as plain numbers (Decimal
+// columns otherwise reach the client as strings).
+function latLng(...pairs: [DecimalLike, DecimalLike][]): {
+  latitude: number | null;
+  longitude: number | null;
+} {
+  for (const [lat, lng] of pairs) {
+    if (lat != null && lng != null)
+      return { latitude: Number(lat), longitude: Number(lng) };
+  }
+  return { latitude: null, longitude: null };
 }

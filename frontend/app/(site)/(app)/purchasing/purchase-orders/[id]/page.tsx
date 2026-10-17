@@ -225,7 +225,7 @@ export default function PurchaseOrderDetailPage() {
       `}</style>
 
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2`}>
@@ -327,7 +327,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
         )}

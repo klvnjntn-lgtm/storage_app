@@ -201,7 +201,7 @@ export default function DeliveryReportsPage() {
       }}
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <TrendingUp size={18} strokeWidth={2} className="text-blue-700" aria-hidden="true" />
@@ -224,7 +224,7 @@ export default function DeliveryReportsPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-4">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {error && (
           <div className="flex flex-wrap items-center gap-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
             <CircleAlert size={16} aria-hidden="true" />

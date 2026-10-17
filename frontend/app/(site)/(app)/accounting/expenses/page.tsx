@@ -625,7 +625,6 @@ export default function ExpensesPage() {
                   <Calendar size={11} strokeWidth={2} /> {t('accounting.expenses.expenseDate')}
                 </label>
                 <DatePicker
-                  variant="field"
                   value={expenseForm.expenseDate}
                   onChange={(v) => setExpenseForm((f) => ({ ...f, expenseDate: v }))}
                 />
@@ -633,7 +632,6 @@ export default function ExpensesPage() {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.expenses.dueDateOptional')}</label>
                 <DatePicker
-                  variant="field"
                   clearable
                   value={expenseForm.dueDate}
                   onChange={(v) => setExpenseForm((f) => ({ ...f, dueDate: v }))}
@@ -739,7 +737,6 @@ export default function ExpensesPage() {
                         <div className="flex flex-col gap-1 w-full sm:w-1/2">
                           <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.dueDate')}</label>
                           <DatePicker
-                            variant="field"
                             size="sm"
                             clearable
                             value={editExpenseForm.dueDate}
@@ -797,7 +794,6 @@ export default function ExpensesPage() {
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.paidOn')}</label>
                             <DatePicker
-                              variant="field"
                               size="sm"
                               value={payForm.paidAt}
                               onChange={(v) => setPayForm((f) => ({ ...f, paidAt: v }))}

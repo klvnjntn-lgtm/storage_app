@@ -16,8 +16,15 @@ import { OrgGuard } from 'src/auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from 'src/auth/decorators/current-org.decorator';
+import { ModuleKey } from '@prisma/client';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 @UseGuards(JwtAuthGuard, OrgGuard)
+@RequireModule(
+  ModuleKey.WAREHOUSE_OPS,
+  ModuleKey.INVOICE_POS,
+  ModuleKey.WORKSHOP_RMS,
+)
 @Controller('brands')
 export class BrandController {
   constructor(private readonly brandService: BrandService) {}

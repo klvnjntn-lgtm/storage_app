@@ -84,7 +84,8 @@ export function configureApp(app: NestExpressApplication) {
   // Only the public key prefixes are served straight off disk. Anything
   // else under the uploads root (delivery-proofs/) is private and only
   // reachable through a signed link (storage/files.controller.ts).
-  for (const publicPrefix of ['media', 'logos']) {
+  // part-thumbs/: catalogue thumbnails written by the car-parts scraper (public product photos).
+  for (const publicPrefix of ['media', 'logos', 'part-thumbs']) {
     app.useStaticAssets(join(uploadsRoot(), publicPrefix), {
       prefix: `/uploads/${publicPrefix}/`,
       // These files are served from the app's own origin. If one is ever

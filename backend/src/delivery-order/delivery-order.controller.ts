@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { DeliveryOrderStatus } from '@prisma/client';
+import { DeliveryOrderStatus, ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -18,6 +18,7 @@ import { ApplyDeliveryOrderAddressDto } from './dto/delivery-order-address.dto';
 import { RescheduleDeliveryOrderDto } from './dto/delivery-order-reschedule.dto';
 import type { Response } from 'express';
 import { DeliveryProofService } from './delivery-proof.service';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 // Staff-only by default. There's no global DRIVER restriction, so without
 // this class-level @Roles a DRIVER JWT could list, ship, cancel, return or
@@ -26,6 +27,7 @@ import { DeliveryProofService } from './delivery-proof.service';
 // scopes those to DOs on the driver's own routes.
 @UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
+@RequireModule(ModuleKey.INVOICE_POS, ModuleKey.DELIVERY_DMS)
 @Controller('delivery-orders')
 export class DeliveryOrderController {
   constructor(

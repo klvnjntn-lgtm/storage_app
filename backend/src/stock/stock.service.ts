@@ -6,6 +6,7 @@ import { PostingRulesService } from '../accounting/posting-rules.service'; // NE
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { PlanLimitsService } from '../billing/plan-limits.service';
 
 function slugify(value: string): string {
   return value
@@ -100,6 +101,7 @@ export class StockService {
     private prisma: PrismaService,
     private productService: ProductService,
     private postingRules: PostingRulesService, // NEW
+    private planLimits: PlanLimitsService,
   ) {}
 
   // -----------------------------
@@ -504,6 +506,9 @@ export class StockService {
           });
 
           if (!location) {
+            // A new location here counts against the plan like one made
+            // from the locations page.
+            await this.planLimits.assertCanAdd(orgId, 'locations', 1, tx);
             location = await tx.location.create({
               data: {
                 id: locationId,

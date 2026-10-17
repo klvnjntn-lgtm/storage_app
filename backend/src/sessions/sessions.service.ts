@@ -9,6 +9,7 @@ import { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status.util';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
+import { assertSerialCount, landSessionSerials, normalizeSerials, takeSerials } from '../serials/serial-moves';
 
 const RETURN_REASONS = [
   'DAMAGED',
@@ -738,6 +739,14 @@ async findAll(
     return productCostPrice != null ? Number(productCostPrice) : null;
   }
 
+  pickedSerials(organizationId: string, sessionId: string, productId: string) {
+    return this.prisma.productSerial.findMany({
+      where: { organizationId, sessionId, productId, status: 'IN_TRANSIT' },
+      select: { id: true, serialNumber: true },
+      orderBy: { serialNumber: 'asc' },
+    });
+  }
+
   // Per-product quantity picked in a MOVE session that hasn't been put
   // away at a destination yet. PICK already decremented the source, and
   // only the MOVE stage increments the destination, so anything left here
@@ -782,6 +791,7 @@ async findAll(
     toLocationId?: string,
     reason?: string,
     userId?: string,
+    serialNumbers?: string[],
   ) {
     if (qty == null || qty <= 0) {
       throw new BadRequestException('Invalid quantity');
@@ -816,6 +826,16 @@ async findAll(
 
     if (!isStaged && !Object.values(EventType).includes(effectiveType)) {
       throw new BadRequestException(`Session type ${session.type} has no corresponding event type`);
+    }
+
+    // A move carries serial-tracked units one by one: which units leave
+    // the source on PICK, and which land where on put-away.
+    const moveSerials =
+      session.type === SessionType.MOVE && product.trackSerials
+        ? normalizeSerials(serialNumbers)
+        : [];
+    if (session.type === SessionType.MOVE && product.trackSerials) {
+      assertSerialCount(product.name, qty, moveSerials);
     }
 
     if (effectiveType === EventType.RETURNS) {
@@ -1058,6 +1078,13 @@ async findAll(
               organizationId,
             },
           });
+          await landSessionSerials(tx, {
+            organizationId,
+            sessionId,
+            productId,
+            locationId: toLocationId!,
+            serials: moveSerials,
+          });
           break;
         }
 
@@ -1069,6 +1096,15 @@ const picked = await tx.stock.updateMany({
 if (picked.count === 0) {
   throw new BadRequestException('Insufficient stock at source location');
 }
+// Picked units are in this session's hands until they're put away.
+await takeSerials(tx, {
+  organizationId,
+  productId,
+  locationId: fromLocationId!,
+  serials: moveSerials,
+  to: 'IN_TRANSIT',
+  refs: { sessionId },
+});
 // COGS at the weighted-average cost now, as the stock leaves.
 const pickCost = session.type === SessionType.FULFILLMENT
   ? (await currentCosts(tx, organizationId, [productId])).get(productId) ?? null

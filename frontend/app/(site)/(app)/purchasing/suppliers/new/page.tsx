@@ -58,7 +58,7 @@ export default function NewSupplierPage() {
       }}
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2.5">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Building2 size={18} strokeWidth={2} className="text-blue-700" />
@@ -68,7 +68,7 @@ export default function NewSupplierPage() {
         </div>
       </div>
 
-      <div className="max-w-xl mx-auto p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
         <SupplierForm
           values={values}
           onChange={setValues}

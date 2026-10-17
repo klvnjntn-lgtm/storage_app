@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { BookOpen, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { BookOpen, Landmark, Wallet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
@@ -203,7 +204,8 @@ export default function AccountLedgerPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <BookOpen size={18} strokeWidth={2} className="text-blue-700" />
             </span>
@@ -211,6 +213,14 @@ export default function AccountLedgerPage() {
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('nav.items.accountLedger')}</h1>
               <p className="text-xs text-gray-500 truncate">{t('accounting.ledger.subtitle')}</p>
             </div>
+          </div>
+            <Link
+              href="/accounting/cash-statement/new"
+              className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
+            >
+              <Landmark size={16} strokeWidth={2} />
+              <span className="hidden sm:inline">{t('accounting.cashStatement.generateButton')}</span>
+            </Link>
           </div>
         </div>
       </div>

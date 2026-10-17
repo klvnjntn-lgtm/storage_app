@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { readErrorMessage } from '@/lib/api-error';
 import { invalidatePriceLevels, PriceLevel } from '@/lib/price-levels';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { ToggleRow } from '@/app/components/shared/PageFrame';
 
 // Settings → Price levels: the org-wide list (Retail, Wholesale, …) plus
 // who may change a sales line's level. Each product's price per level is
@@ -214,19 +215,15 @@ export default function PriceLevelsSettings() {
         </button>
       </form>
 
-      <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
-        <input
-          type="checkbox"
+      <div className="pt-1">
+        <ToggleRow
+          title={t('settings.priceLevels.adminOnlyTitle')}
+          description={t('settings.priceLevels.adminOnlyDescription')}
           checked={!!overrideAdminOnly}
           disabled={overrideAdminOnly === null}
-          onChange={(e) => saveOverride(e.target.checked)}
-          className="mt-0.5 h-4 w-4 accent-blue-600"
+          onChange={saveOverride}
         />
-        <span>
-          <span className="block text-sm font-medium text-gray-900">{t('settings.priceLevels.adminOnlyTitle')}</span>
-          <span className="block text-xs text-gray-500">{t('settings.priceLevels.adminOnlyDescription')}</span>
-        </span>
-      </label>
+      </div>
     </section>
   );
 }

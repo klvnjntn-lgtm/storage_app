@@ -227,7 +227,6 @@ export default function RemindersPage() {
               </button>
             ))}
             <DatePicker
-              variant="field"
               size="sm"
               clearable
               value={snoozeDate}

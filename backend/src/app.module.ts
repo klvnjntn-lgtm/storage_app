@@ -39,6 +39,9 @@ import { TaxRateModule } from './tax-rate/tax-rate.module';
 import { PriceLevelModule } from './price-level/price-level.module';
 import { PaymentsModule } from './payments/payment.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
+import { WorkOrdersModule } from './work-orders/work-orders.module';
+import { TaxExportModule } from './tax-export/tax-export.module';
+import { PartCatalogModule } from './part-catalog/part-catalog.module';
 import { VehicleRemindersModule } from './vehicles/vehicle-reminders.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
 import { GdbImportModule } from './gdb-import/gdb-import.module';
@@ -118,6 +121,9 @@ import { SerialsModule } from './serials/serials.module';
     HealthModule,
     InvoiceModule,
     VehiclesModule,
+    WorkOrdersModule,
+    TaxExportModule,
+    PartCatalogModule,
     CustomersModule,
     VehicleRemindersModule,
     TaxRateModule,

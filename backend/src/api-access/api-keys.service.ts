@@ -12,6 +12,13 @@ const LAST_USED_RESOLUTION_MS = 5 * 60 * 1000;
 
 const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
 
+// What each role may do, low to high. Keys are USER or ADMIN only.
+const ROLE_RANK: Record<Role, number> = {
+  [Role.DRIVER]: 0,
+  [Role.USER]: 1,
+  [Role.ADMIN]: 2,
+};
+
 export type ApiKeyPrincipal = {
   sub: string;
   email: string;
@@ -98,7 +105,9 @@ export class ApiKeysService {
     return { ok: true };
   }
 
-  // Null for anything that isn't a live key whose creator can still sign in.
+  // Null for anything that isn't a live key whose creator can still sign in
+  // with at least the key's role — demoting an admin also disables the
+  // ADMIN keys they made, so the key can't outlast their access.
   async authenticate(rawKey: string): Promise<ApiKeyPrincipal | null> {
     if (!rawKey.startsWith(API_KEY_PREFIX)) return null;
     const key = await this.prisma.apiKey.findUnique({
@@ -114,13 +123,15 @@ export class ApiKeysService {
         active: true,
         removedAt: true,
         organizationId: true,
+        role: true,
       },
     });
     if (
       !user ||
       !user.active ||
       user.removedAt ||
-      user.organizationId !== key.organizationId
+      user.organizationId !== key.organizationId ||
+      ROLE_RANK[user.role] < ROLE_RANK[key.role]
     )
       return null;
 

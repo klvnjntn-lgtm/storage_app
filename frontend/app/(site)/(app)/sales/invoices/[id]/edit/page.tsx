@@ -624,7 +624,7 @@ function changeServiceUnit(key: string, value: string) {
 
   return (
     <main className="min-h-screen bg-white text-black">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-3 sm:px-6 py-3 sm:py-5 border-b-2 border-gray-300">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
           <h1 className="text-xl sm:text-2xl font-bold truncate">
             {t('sales.invoiceEdit.editTitle', { number: invoiceNumber ?? t('sales.invoiceEdit.invoiceFallback') })}
@@ -667,7 +667,6 @@ function changeServiceUnit(key: string, value: string) {
                 {t('sales.invoiceEdit.dueDateLabel')}
               </label>
               <DatePicker
-                variant="field"
                 clearable
                 value={dueDate}
                 onChange={(v) => setDueDate(v)}

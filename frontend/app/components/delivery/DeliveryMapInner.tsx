@@ -19,6 +19,20 @@ export type MapStop = {
   color?: string;
 };
 
+// A driver's best-guess position (see DeliveryRoutesService.whereabouts) —
+// drawn as a labelled badge so it stands apart from the stop dots.
+export type MapDriver = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  // Short text on the badge (e.g. the driver's initials).
+  badge: string;
+  label: string;
+  detail?: string | null;
+  // Grey when we only know the depot, not a stop they've reached.
+  muted?: boolean;
+};
+
 // Jakarta — matches Organization.timezone's own "Asia/Jakarta" default,
 // used only when there's nothing yet to center the map on.
 const FALLBACK_CENTER: [number, number] = [-6.2088, 106.8456];
@@ -48,6 +62,16 @@ const pickedIcon = L.divIcon({
   iconSize: [18, 18],
   iconAnchor: [9, 9],
 });
+
+function driverIcon(badge: string, muted: boolean) {
+  const safe = badge.replace(/[&<>"']/g, '');
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${muted ? '#6b7280' : '#1d4ed8'};color:white;font:600 11px/1 system-ui,sans-serif;min-width:28px;height:28px;padding:0 6px;border-radius:14px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35)">${safe}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
 
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
@@ -110,6 +134,7 @@ function ClickToPick({ onPick }: { onPick: (lat: number, lng: number) => void })
 
 export default function DeliveryMapInner({
   stops,
+  drivers = [],
   height = 320,
   pickMode = false,
   pickedPosition = null,
@@ -117,6 +142,7 @@ export default function DeliveryMapInner({
   focus = null,
 }: {
   stops: MapStop[];
+  drivers?: MapDriver[];
   height?: number;
   pickMode?: boolean;
   pickedPosition?: { lat: number; lng: number } | null;
@@ -124,7 +150,10 @@ export default function DeliveryMapInner({
   focus?: { stopId: string; nonce: number } | null;
 }) {
   const markers = useRef<Record<string, L.Marker>>({});
-  const positions: [number, number][] = stops.map((s) => [s.latitude, s.longitude]);
+  const positions: [number, number][] = [
+    ...stops.map((s): [number, number] => [s.latitude, s.longitude]),
+    ...drivers.map((d): [number, number] => [d.latitude, d.longitude]),
+  ];
   const center = positions[0] ?? FALLBACK_CENTER;
 
   return (
@@ -153,6 +182,19 @@ export default function DeliveryMapInner({
             <Popup>
               <div className="text-sm font-semibold">{stop.label}</div>
               {stop.detail && <div className="text-xs text-gray-500 mt-0.5">{stop.detail}</div>}
+            </Popup>
+          </Marker>
+        ))}
+        {drivers.map((driver) => (
+          <Marker
+            key={`driver-${driver.id}`}
+            position={[driver.latitude, driver.longitude]}
+            icon={driverIcon(driver.badge, !!driver.muted)}
+            zIndexOffset={1000}
+          >
+            <Popup>
+              <div className="text-sm font-semibold">{driver.label}</div>
+              {driver.detail && <div className="text-xs text-gray-500 mt-0.5">{driver.detail}</div>}
             </Popup>
           </Marker>
         ))}

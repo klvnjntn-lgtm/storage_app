@@ -17,13 +17,19 @@ export type UpdateOrganizationSettingsInput = {
   stockPolicy?: StockPolicy;
   stockOverrideRequiresAdmin?: boolean;
   priceLevelOverrideRequiresAdmin?: boolean;
+  workOrdersEnabled?: boolean;
 };
 
 // Settings changes worth a durable "who changed what, when" record. Every
 // field in UpdateOrganizationSettingsInput could go here in principle;
 // starting with just the stock policy fields since that's what currently
 // needs auditing.
-const AUDITED_FIELDS = ['stockPolicy', 'stockOverrideRequiresAdmin', 'priceLevelOverrideRequiresAdmin'] as const;
+const AUDITED_FIELDS = [
+  'stockPolicy',
+  'stockOverrideRequiresAdmin',
+  'priceLevelOverrideRequiresAdmin',
+  'workOrdersEnabled',
+] as const;
 
 const STRING_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone'] as const;
 
@@ -75,6 +81,7 @@ export class OrganizationService {
           stockPolicy: true,
           stockOverrideRequiresAdmin: true,
           priceLevelOverrideRequiresAdmin: true,
+          workOrdersEnabled: true,
         },
       }),
       this.modules.isModuleEnabled(orgId, ModuleKey.WAREHOUSE_OPS),
@@ -97,6 +104,7 @@ export class OrganizationService {
       stockPolicy: hasWarehouseOps ? StockPolicy.BLOCK : (org?.stockPolicy ?? StockPolicy.BLOCK),
       stockOverrideRequiresAdmin: hasWarehouseOps ? false : (org?.stockOverrideRequiresAdmin ?? false),
       priceLevelOverrideRequiresAdmin: org?.priceLevelOverrideRequiresAdmin ?? false,
+      workOrdersEnabled: org?.workOrdersEnabled ?? false,
     };
   }
 
@@ -109,6 +117,7 @@ export class OrganizationService {
       stockPolicy,
       stockOverrideRequiresAdmin,
       priceLevelOverrideRequiresAdmin,
+      workOrdersEnabled,
       ...rest
     } = input;
 
@@ -152,6 +161,10 @@ export class OrganizationService {
       throw new BadRequestException('priceLevelOverrideRequiresAdmin must be a boolean');
     }
 
+    if (workOrdersEnabled !== undefined && typeof workOrdersEnabled !== 'boolean') {
+      throw new BadRequestException('workOrdersEnabled must be a boolean');
+    }
+
     // Pick/pack/ship's stock deduction (StockService.decrease(), session
     // PICK stage) is always strict and never reads this field — configuring
     // it for a warehouse-ops org would be a setting that silently does
@@ -184,7 +197,12 @@ export class OrganizationService {
     const before = touchedAuditedFields.length
       ? await this.prisma.organization.findUnique({
           where: { id: orgId },
-          select: { stockPolicy: true, stockOverrideRequiresAdmin: true, priceLevelOverrideRequiresAdmin: true },
+          select: {
+            stockPolicy: true,
+            stockOverrideRequiresAdmin: true,
+            priceLevelOverrideRequiresAdmin: true,
+            workOrdersEnabled: true,
+          },
         })
       : null;
 
@@ -198,6 +216,7 @@ export class OrganizationService {
         ...(stockPolicy !== undefined && { stockPolicy }),
         ...(stockOverrideRequiresAdmin !== undefined && { stockOverrideRequiresAdmin }),
         ...(priceLevelOverrideRequiresAdmin !== undefined && { priceLevelOverrideRequiresAdmin }),
+        ...(workOrdersEnabled !== undefined && { workOrdersEnabled }),
         ...(rest.legalName !== undefined && { legalName: rest.legalName.trim() }),
         ...(rest.npwp !== undefined && { npwp: rest.npwp.trim() }),
         ...(rest.logoUrl !== undefined && { logoUrl: rest.logoUrl.trim() }),
@@ -217,6 +236,7 @@ export class OrganizationService {
         stockPolicy: true,
         stockOverrideRequiresAdmin: true,
         priceLevelOverrideRequiresAdmin: true,
+        workOrdersEnabled: true,
       },
     });
 

@@ -40,7 +40,6 @@ export default function DateTimePicker({ value, onChange, size = 'md', clearable
   return (
     <div className={`flex gap-2 ${className}`}>
       <DatePicker
-        variant="field"
         size={size}
         clearable={clearable}
         disabled={disabled}

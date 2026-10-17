@@ -123,7 +123,7 @@ export default function ReorderPage() {
   const setPick = (id: string, patch: Partial<Pick>) => setPicks((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
 
   return (
-    <PageFrame icon={PackageSearch} title={t('reorder.title')} subtitle={t('reorder.subtitle')} width="max-w-6xl">
+    <PageFrame icon={PackageSearch} title={t('reorder.title')} subtitle={t('reorder.subtitle')}>
       <ErrorNote message={error} />
 
       {isAdmin && (

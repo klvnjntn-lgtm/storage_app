@@ -37,7 +37,7 @@ export class WarehouseController {
     @Body() body: WarehouseMoveDto,
   ) {
     return this.warehouseService.move(
-      organizationId, body.productId, body.qty, body.fromLocationId, body.toLocationId, user.sub,
+      organizationId, body.productId, body.qty, body.fromLocationId, body.toLocationId, user.sub, body.serialNumbers,
     );
   }
 

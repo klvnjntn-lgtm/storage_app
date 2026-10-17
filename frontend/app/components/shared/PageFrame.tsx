@@ -91,6 +91,70 @@ export function UsageBar({ used, limit }: { used: number; limit: number | null }
   );
 }
 
+// On/off control for settings — replaces bare checkboxes. Rendered as a
+// button with role="switch" so screen readers announce the state.
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked ? 'bg-blue-600' : 'bg-gray-300'
+      }`}
+    >
+      <span
+        className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${
+          checked ? 'translate-x-5.5' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
+// A setting line: title + hint on the left, Switch on the right.
+export function ToggleRow({
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+  badge,
+}: {
+  title: string;
+  description?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  badge?: ReactNode;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white px-3.5 py-3 ${disabled ? 'opacity-60' : ''}`}>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
+          {title}
+          {badge}
+        </p>
+        {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
+      </div>
+      <Switch checked={checked} onChange={onChange} disabled={disabled} label={title} />
+    </div>
+  );
+}
+
 export const btnPrimary =
   'inline-flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2 hover:bg-blue-700 disabled:opacity-50';
 export const btnSecondary =

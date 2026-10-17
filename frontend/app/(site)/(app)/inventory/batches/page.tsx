@@ -8,6 +8,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, type PickedProduct } from '@/app/components/shared/ProductPicker';
+import DatePicker from '@/app/components/shared/DatePicker';
 
 type Batch = {
   id: string;
@@ -131,7 +132,7 @@ export default function BatchesPage() {
             )}
             <div className="grid sm:grid-cols-3 gap-3">
               <input required placeholder={t('batches.batchNumber')} value={form.batchNumber} onChange={(e) => setForm({ ...form, batchNumber: e.target.value })} className={inputCls} />
-              <input type="date" aria-label={t('batches.expiryDate')} value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} className={inputCls} />
+              <DatePicker clearable aria-label={t('batches.expiryDate')} placeholder={t('batches.expiryDate')} value={form.expiryDate} onChange={(v) => setForm({ ...form, expiryDate: v })} />
               <input required inputMode="decimal" placeholder={t('batches.quantity')} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className={inputCls} />
             </div>
             <p className="text-xs text-gray-500">{t('batches.addHint')}</p>

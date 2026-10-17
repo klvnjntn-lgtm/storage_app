@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon } from 'lucide-react';
+import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, ClipboardList } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
+import { ToggleRow } from '@/app/components/shared/PageFrame';
+import { WORK_ORDERS_CHANGED } from '@/app/components/workshop/workOrders';
 import PriceLevelsSettings from '@/app/components/settings/PriceLevelsSettings';
 import InvoiceNumberingSettings from '@/app/components/settings/InvoiceNumberingSettings';
 import ExportBusinessSettings from '@/app/components/settings/ExportBusinessSettings';
@@ -44,6 +46,7 @@ export default function SettingsPage() {
   const [stockPolicy, setStockPolicy] = useState<StockPolicy | null>(null);
   const [stockOverrideRequiresAdmin, setStockOverrideRequiresAdmin] = useState<boolean | null>(null);
   const [modules, setModules] = useState<ModuleStatus[] | null>(null);
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
 
   const [business, setBusiness] = useState<BusinessDetails | null>(null);
   const [businessForm, setBusinessForm] = useState<Partial<BusinessDetails>>({});
@@ -102,6 +105,7 @@ export default function SettingsPage() {
         setPosPricingEnabled(data.posPricingEnabled);
         setStockPolicy(data.stockPolicy ?? 'BLOCK');
         setStockOverrideRequiresAdmin(!!data.stockOverrideRequiresAdmin);
+        setWorkOrdersEnabled(!!data.workOrdersEnabled);
         const details: BusinessDetails = {
           legalName: data.legalName ?? null,
           npwp: data.npwp ?? null,
@@ -168,6 +172,32 @@ export default function SettingsPage() {
         return;
       }
       setPosPricingEnabled(data.posPricingEnabled);
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveWorkOrdersEnabled(next: boolean) {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    const prev = workOrdersEnabled;
+    setWorkOrdersEnabled(next); // optimistic
+    try {
+      const res = await apiFetch('/organization/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workOrdersEnabled: next }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setWorkOrdersEnabled(prev); // roll back
+        setError(data?.message || t('settings.workOrders.saveFailed'));
+        return;
+      }
+      setWorkOrdersEnabled(!!data.workOrdersEnabled);
+      window.dispatchEvent(new Event(WORK_ORDERS_CHANGED));
       setSaved(true);
     } finally {
       setSaving(false);
@@ -310,6 +340,7 @@ export default function SettingsPage() {
 
   const hasWarehouseOps = modules?.find((m) => m.module === 'WAREHOUSE_OPS')?.purchased ?? false;
   const hasInvoicePos = modules?.find((m) => m.module === 'INVOICE_POS')?.purchased ?? false;
+  const hasWorkshopRms = modules?.find((m) => m.module === 'WORKSHOP_RMS')?.purchased ?? false;
 
   const loaded = fulfillmentMode !== null && posPricingEnabled !== null && stockPolicy !== null && modules !== null;
 
@@ -548,6 +579,23 @@ export default function SettingsPage() {
           </section>
         )}
 
+        {/* Work orders — optional job cards for the workshop */}
+        {hasWorkshopRms && (
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={16} strokeWidth={2} className="text-blue-700" />
+              <h2 className="font-bold">{t('settings.workOrders.heading')}</h2>
+            </div>
+            <ToggleRow
+              title={t('settings.workOrders.toggleTitle')}
+              description={t('settings.workOrders.toggleDescription')}
+              checked={workOrdersEnabled}
+              onChange={saveWorkOrdersEnabled}
+              disabled={saving || !loaded}
+            />
+          </section>
+        )}
+
         {/* Stock Policy — hidden entirely for warehouse-ops orgs: pick/pack/ship
             always deducts stock strictly there (see StockService/DeliveryOrder),
             this setting has no effect on that path, and the backend rejects
@@ -590,19 +638,15 @@ export default function SettingsPage() {
             </div>
 
             {stockPolicy === 'WARN' && (
-              <label className="flex items-start gap-2 pt-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
+              <div className="pt-2">
+                <ToggleRow
+                  title={t('settings.stockPolicy.overrideRequiresAdminLabel')}
+                  description={t('settings.stockPolicy.overrideRequiresAdminDescription')}
                   checked={stockOverrideRequiresAdmin ?? false}
                   disabled={saving || !loaded}
-                  onChange={(e) => saveStockOverrideRequiresAdmin(e.target.checked)}
+                  onChange={saveStockOverrideRequiresAdmin}
                 />
-                <span>
-                  <span className="text-sm font-medium block">{t('settings.stockPolicy.overrideRequiresAdminLabel')}</span>
-                  <span className="text-xs text-gray-500">{t('settings.stockPolicy.overrideRequiresAdminDescription')}</span>
-                </span>
-              </label>
+              </div>
             )}
           </section>
         )}

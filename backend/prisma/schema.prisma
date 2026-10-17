@@ -80,6 +80,7 @@ model Customer {
   organization Organization      @relation(fields: [organizationId], references: [id])
   invoices     Invoice[]
   vehicles     Vehicle[]
+  workOrders   WorkOrder[]
   addresses    CustomerAddress[]
 
   // Price level this customer buys at (Wholesale, Member, …). New sales
@@ -163,6 +164,7 @@ model Vehicle {
   customer       Customer          @relation(fields: [customerId], references: [id])
   organization   Organization      @relation(fields: [organizationId], references: [id])
   reminders      VehicleReminder[]
+  workOrders     WorkOrder[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, customerId, plateNumber])
@@ -217,16 +219,16 @@ model Organization {
   logoUrl                     String?
   purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
-  npwp                         String?
-  taxEnabled                   Boolean                       @default(false)
-  taxName                      String?
-  taxPercentage                Decimal?                      @db.Decimal(5, 2)
-  address                      String?
-  phone                        String?
+  npwp          String?
+  taxEnabled    Boolean  @default(false)
+  taxName       String?
+  taxPercentage Decimal? @db.Decimal(5, 2)
+  address       String?
+  phone         String?
   // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
   // period a journal entry posts into (business-date.ts) — was a single
   // global ACCOUNTING_TIMEZONE env var before; now per-org.
-  timezone                     String                        @default("Asia/Jakarta")
+  timezone      String   @default("Asia/Jakarta")
 
   // Platform billing/admin (see src/platform). Set only from the platform
   // console, never by the org's own users. suspendedAt blocks every API
@@ -255,6 +257,11 @@ model Organization {
   apiKeys                      ApiKey[]
   webhookEndpoints             WebhookEndpoint[]
   reminderWhatsappEnabled      Boolean                       @default(false)
+  // Workshop job cards (src/work-orders). Off by default: a workshop can
+  // keep invoicing vehicles directly, or turn this on to track each job
+  // from check-in to invoice.
+  workOrdersEnabled            Boolean                       @default(false)
+  workOrders                   WorkOrder[]
   messageLogs                  MessageLog[]
   waLedger                     WaLedgerEntry[]
   brands                       Brand[]
@@ -312,8 +319,8 @@ model User {
   changePasswordOtpAttempts Int       @default(0)
   pendingPasswordHash       String?
 
-  role             Role           @default(USER)
-  active           Boolean        @default(true)
+  role   Role    @default(USER)
+  active Boolean @default(true)
 
   // Two-factor sign-in (auth/two-factor.service.ts). totpSecret is
   // AES-GCM encrypted; while totpEnabledAt is null it's a setup in
@@ -322,40 +329,40 @@ model User {
   totpSecret        String?
   totpEnabledAt     DateTime?
   totpRecoveryCodes String[]  @default([])
-  lastLoginAt      DateTime?
+  lastLoginAt       DateTime?
   // Last time the user used the app, signed in by password or not
   // (refreshed at most every few minutes — see jwt.strategy.ts). A login
   // lasts 7 days, so lastLoginAt alone says little about who's active.
-  lastActiveAt     DateTime?
+  lastActiveAt      DateTime?
 
   // Platform console access (src/platform). Granted only by the
   // platform-owner script, never through the API, and only honoured
   // while the email is also listed in PLATFORM_OWNER_EMAILS. Each login
   // session must separately be unlocked with password + emailed code;
   // the unlock is bound to that session and expires.
-  isPlatformOwner           Boolean   @default(false)
-  platformOtpHash           String?
-  platformOtpExpires        DateTime?
-  platformOtpAttempts       Int       @default(0)
-  platformUnlockSessionId   String?
-  platformUnlockedUntil     DateTime?
+  isPlatformOwner         Boolean        @default(false)
+  platformOtpHash         String?
+  platformOtpExpires      DateTime?
+  platformOtpAttempts     Int            @default(0)
+  platformUnlockSessionId String?
+  platformUnlockedUntil   DateTime?
   // Set when an admin removes the member from the org. Users can't be
   // hard-deleted (invoices, journals, routes… reference them), so removal
   // = inactive + hidden from member lists + seat freed. Re-inviting the
   // same email restores the account (AuthService.invite).
-  removedAt        DateTime?
-  organizationId   String
-  createdAt        DateTime       @default(now())
-  currentSessionId String?
-  avatarUrl        String?
-  displayName      String? // admin-set label for drivers; UI only, falls back to email
-  teamId           String? // only meaningful for role=DRIVER; a team has at most one driver (TeamsService.assignDriver) and that driver works the team's routes
-  team             Team?          @relation(fields: [teamId], references: [id])
-  mediaAssets      MediaAsset[]
-  events           Event[]
-  payrolls         Payroll[]
-  expenses         Expense[]
-  journalEntries   JournalEntry[]
+  removedAt               DateTime?
+  organizationId          String
+  createdAt               DateTime       @default(now())
+  currentSessionId        String?
+  avatarUrl               String?
+  displayName             String? // admin-set label for drivers; UI only, falls back to email
+  teamId                  String? // only meaningful for role=DRIVER; a team has at most one driver (TeamsService.assignDriver) and that driver works the team's routes
+  team                    Team?          @relation(fields: [teamId], references: [id])
+  mediaAssets             MediaAsset[]
+  events                  Event[]
+  payrolls                Payroll[]
+  expenses                Expense[]
+  journalEntries          JournalEntry[]
 
   invoices                    Invoice[]
   activityEvents              InvoiceActivityEvent[]
@@ -573,6 +580,7 @@ model Brand {
 
 model Product {
   id                  String               @id @default(uuid())
+  workOrderItems      WorkOrderItem[]
   name                String
   createdAt           DateTime             @default(now())
   categoryId          String
@@ -1487,23 +1495,29 @@ model Invoice {
   bankAccountName   String?
   bankAccount       OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
 
-  notes          String?
-  events         Event[]
-  customer       Customer?              @relation(fields: [customerId, organizationId], references: [id, organizationId])
-  location       Location?              @relation(fields: [locationId, organizationId], references: [id, organizationId])
-  organization   Organization           @relation(fields: [organizationId], references: [id])
-  user           User?                  @relation(fields: [userId], references: [id])
-  vehicle        Vehicle?               @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
-  salesOrder     SalesOrder?            @relation(fields: [salesOrderId], references: [id])
-  activityEvents InvoiceActivityEvent[]
-  items          InvoiceItem[]
-  taxes          InvoiceTax[]
-  payments       Payment[]
-  session        Session?
-  quotationId    String?
-  quotation      SalesQuotation?        @relation(fields: [quotationId], references: [id])
-  odometer       Int?
-  nextServiceKm  Int?
+  notes             String?
+  events            Event[]
+  customer          Customer?              @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  location          Location?              @relation(fields: [locationId, organizationId], references: [id, organizationId])
+  organization      Organization           @relation(fields: [organizationId], references: [id])
+  user              User?                  @relation(fields: [userId], references: [id])
+  vehicle           Vehicle?               @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  salesOrder        SalesOrder?            @relation(fields: [salesOrderId], references: [id])
+  activityEvents    InvoiceActivityEvent[]
+  items             InvoiceItem[]
+  taxes             InvoiceTax[]
+  payments          Payment[]
+  session           Session?
+  quotationId       String?
+  quotation         SalesQuotation?        @relation(fields: [quotationId], references: [id])
+  odometer          Int?
+  nextServiceKm     Int?
+  // Set when the invoice went out in a Coretax e-Faktur XML export
+  // (src/tax-export), so the next export can leave it out.
+  coretaxExportedAt DateTime?
+  // Set when the invoice was made from a workshop job card.
+  workOrderId       String?
+  workOrder         WorkOrder?             @relation(fields: [workOrderId], references: [id])
 
   // FIX — vehicle/customer identity snapshot, same rationale as
   // bankAccountName above: a printed invoice shouldn't silently change
@@ -1526,6 +1540,7 @@ model Invoice {
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, employeeId]) // NEW
+  @@index([workOrderId])
 }
 
 enum PurchaseOrderStatus {
@@ -1580,12 +1595,12 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id                String             @id @default(uuid())
+  id                String               @id @default(uuid())
   purchaseOrderId   String
   productId         String?
-  quantity          Decimal            @db.Decimal(12, 2)
-  unitCost          Decimal            @db.Decimal(12, 2)
-  lineTotal         Decimal            @db.Decimal(12, 2)
+  quantity          Decimal              @db.Decimal(12, 2)
+  unitCost          Decimal              @db.Decimal(12, 2)
+  lineTotal         Decimal              @db.Decimal(12, 2)
   description       String?
   goodsReceiptItems GoodsReceiptItem[]
   returnItems       PurchaseReturnItem[]
@@ -1864,7 +1879,7 @@ enum StockPolicy {
 // Every change made from the platform console, and every unlock. Actor
 // email is copied so the row still reads correctly if the user changes.
 model PlatformAuditLog {
-  id             String    @id @default(cuid())
+  id             String   @id @default(cuid())
   actorUserId    String
   actorEmail     String
   action         String
@@ -1873,7 +1888,7 @@ model PlatformAuditLog {
   after          Json?
   ip             String?
   userAgent      String?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime @default(now())
 
   @@index([organizationId, createdAt])
   @@index([createdAt])
@@ -2116,18 +2131,19 @@ enum SalesOrderFormat {
 // ---- Payroll -------------------------------------------------------------
 
 model Employee {
-  id                String    @id @default(uuid())
+  id                String      @id @default(uuid())
   organizationId    String
   name              String
   position          String?
   nik               String? // employee ID number
   bankName          String?
   bankAccountNumber String?
-  baseSalary        Decimal   @db.Decimal(12, 2)
-  isActive          Boolean   @default(true)
-  createdAt         DateTime  @default(now())
+  baseSalary        Decimal     @db.Decimal(12, 2)
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
   archivedAt        DateTime?
   invoices          Invoice[] // NEW — inverse relation
+  workOrders        WorkOrder[]
 
   organization     Organization              @relation(fields: [organizationId], references: [id])
   salaryComponents EmployeeSalaryComponent[]
@@ -2771,6 +2787,8 @@ model StockTransfer {
   fromLocationId String
   toLocationId   String
   status         StockTransferStatus @default(DRAFT)
+  // Shipped and received in one step (same site, nothing on the road).
+  quickMove      Boolean             @default(false)
   notes          String?
   createdById    String
   shippedAt      DateTime?
@@ -3029,6 +3047,8 @@ model ProductSerial {
   soldAt           DateTime?
   purchaseReturnId String?
   stockTransferId  String?
+  // Picked in a MOVE session and not yet put away (status IN_TRANSIT).
+  sessionId        String?
   note             String?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -3039,4 +3059,134 @@ model ProductSerial {
   @@unique([productId, serialNumber])
   @@index([organizationId, serialNumber])
   @@index([invoiceId])
+  @@index([sessionId])
+}
+
+// Shared, read-only catalogue of car parts gathered from marketplace listings by the
+// car-parts-scraper project. Not per-organization: every WORKSHOP_RMS org searches the
+// same data. The scraper's `sync` command upserts by scraperId after each run and stamps
+// syncedAt; nothing is deleted, so rows not in the latest sync are simply hidden by the API.
+model PartCatalogEntry {
+  id            Int      @id @default(autoincrement())
+  scraperId     Int      @unique // row id in the scraper's own database — the upsert key
+  carBrand      String
+  model         String
+  generation    String   @default("")
+  yearFrom      Int?
+  yearTo        Int? // null with yearFrom set = still in production
+  itemType      String
+  item          String
+  oemNumber     String   @default("")
+  oemNormalized String   @default("") // uppercase, separators stripped — matches Product.oem regardless of formatting
+  origin        String // Official / Aftermarket / Unknown
+  partBrand     String   @default("")
+  listingsSeen  Int      @default(0)
+  sellers       Int      @default(0) // distinct shops behind listingsSeen — clones from one shop count once
+  thumbKey      String   @default("") // cached photo, "part-thumbs/<sha1>.webp" (served at /uploads/…); "" = none
+  spec          String   @default("") // bulb type, spark plug code, battery size, wiper lengths (H4, BKR6E, NS40ZL, 24" + 14")
+  sources       String   @default("")
+  exampleUrl    String   @default("")
+  lastSeen      DateTime
+  syncedAt      DateTime @default(now())
+
+  @@index([syncedAt])
+  @@index([carBrand, model])
+  @@index([itemType, item])
+  @@index([oemNormalized])
+}
+
+// OEM numbers that a single aftermarket part replaces (from the scraper's Sakura data): supersessions
+// and cross-maker equivalents. Used only so "Your Stock" can match a product stocked under another
+// number in the same group. Read-only; the scraper's sync upserts it.
+model PartInterchange {
+  id            Int      @id @default(autoincrement())
+  groupKey      String // e.g. "sakura:C-1109"
+  label         String // shown to the user, e.g. "Sakura C-1109 (Oil Filter)"
+  oemNumber     String
+  oemNormalized String
+  syncedAt      DateTime @default(now())
+
+  @@unique([groupKey, oemNormalized])
+  @@index([oemNormalized])
+}
+
+enum WorkOrderStatus {
+  QUEUED
+  IN_PROGRESS
+  WAITING_PARTS
+  DONE
+  CANCELLED
+}
+
+// A workshop job card: one vehicle in for one visit, from check-in to
+// invoice. Whether it has been invoiced isn't a status — it's whether a
+// non-void Invoice points at it, so voiding that invoice reopens the job.
+model WorkOrder {
+  id             String          @id @default(uuid())
+  organizationId String
+  number         String
+  status         WorkOrderStatus @default(QUEUED)
+  customerId     String
+  vehicleId      String
+  mechanicId     String?
+  odometer       Int?
+  complaint      String?
+  notes          String?
+  // Sum of the lines as priced at the last save — an estimate for the
+  // customer; the invoice reprices product lines when it is created.
+  estimatedTotal Decimal         @default(0) @db.Decimal(12, 2)
+  createdById    String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  customer     Customer        @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  vehicle      Vehicle         @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  mechanic     Employee?       @relation(fields: [mechanicId, organizationId], references: [id, organizationId])
+  items        WorkOrderItem[]
+  invoices     Invoice[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+  @@index([vehicleId])
+}
+
+// A part (productId + locationId) or a labour/service line (description +
+// unitPrice), same split as InvoiceItem.
+model WorkOrderItem {
+  id          String   @id @default(uuid())
+  workOrderId String
+  productId   String?
+  description String?
+  locationId  String?
+  quantity    Decimal  @db.Decimal(12, 2)
+  unitPrice   Decimal? @db.Decimal(12, 2)
+  sortOrder   Int      @default(0)
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  product   Product?  @relation(fields: [productId], references: [id])
+
+  @@index([workOrderId])
+}
+
+// Anonymous totals of what workshops on WareSys actually installed, per car model and item: used only
+// to quality-check the scraped catalogue (never to add rows). Written by the car-parts scraper's
+// `workshop-check`; holds no organization, customer, vehicle or price data — only counts.
+model PartWorkshopEvidence {
+  id              Int      @id @default(autoincrement())
+  carBrand        String
+  model           String
+  item            String
+  kind            String // "spec" | "oem" | "brand"
+  value           String // e.g. "H4", "48820-BZ010", "NGK"
+  valueNormalized String // OEM numbers: uppercase, separators stripped; otherwise uppercase value
+  workshops       Int // distinct workshops that installed it
+  installs        Int // invoice lines
+  syncedAt        DateTime @default(now())
+
+  @@unique([carBrand, model, item, kind, valueNormalized])
+  @@index([carBrand, model])
+  @@index([syncedAt])
 }

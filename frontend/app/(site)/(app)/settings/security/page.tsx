@@ -6,7 +6,7 @@ import { ShieldCheck, Copy, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { Card, ErrorNote, PageFrame, btnPrimary, btnDanger, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
+import { Card, ErrorNote, PageFrame, ToggleRow, btnPrimary, btnDanger, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 
 type Status = { enabled: boolean; enabledAt: string | null; recoveryCodesLeft: number; requiredByOrg: boolean };
 type Setup = { secret: string; otpauthUrl: string; qrCode: string };
@@ -90,7 +90,7 @@ function SecurityPageInner() {
   }
 
   return (
-    <PageFrame icon={ShieldCheck} title={t('security.title')} subtitle={t('security.subtitle')} width="max-w-2xl">
+    <PageFrame icon={ShieldCheck} title={t('security.title')} subtitle={t('security.subtitle')}>
       {search.get('required') && !status?.enabled && (
         <div className="bg-amber-50 border border-amber-300 text-amber-900 text-sm rounded-md px-3 py-2">{t('security.requiredNotice')}</div>
       )}
@@ -182,19 +182,13 @@ function SecurityPageInner() {
 
       {isAdmin && status && (
         <Card title={t('security.policyTitle')}>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={policy ?? status.requiredByOrg}
-              disabled={busy}
-              onChange={(e) => savePolicy(e.target.checked)}
-            />
-            <span>
-              {t('security.policyLabel')}
-              <span className="block text-xs text-gray-500">{t('security.policyHint')}</span>
-            </span>
-          </label>
+          <ToggleRow
+            title={t('security.policyLabel')}
+            description={t('security.policyHint')}
+            checked={policy ?? status.requiredByOrg}
+            disabled={busy}
+            onChange={savePolicy}
+          />
         </Card>
       )}
     </PageFrame>

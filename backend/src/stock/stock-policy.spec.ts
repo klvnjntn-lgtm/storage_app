@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventType, StockPolicy } from '@prisma/client';
 import { StockService } from './stock.service';
+import { PlanLimitsModule } from '../billing/plan-limits.module';
 import { ProductModule } from '../product/product.module';
 import { AccountingModule } from '../accounting/accounting.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -31,7 +32,12 @@ describe('StockService.fulfill() — per-tenant stock policy', () => {
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
-      imports: [PrismaModule, ProductModule, AccountingModule],
+      imports: [
+        PrismaModule,
+        ProductModule,
+        AccountingModule,
+        PlanLimitsModule,
+      ],
       providers: [StockService],
     }).compile();
     stockService = module.get(StockService);

@@ -169,6 +169,69 @@ describe('Stock transfers (database)', () => {
     await transfers.receive(orgId, draft.id, userId, {});
   });
 
+  it('a quick move lands stock at the destination in one step', async () => {
+    const [from, to] = [await qty(fromId), await qty(toId)];
+    const moved = await transfers.create(orgId, userId, {
+      fromLocationId: fromId,
+      toLocationId: toId,
+      quickMove: true,
+      items: [{ productId, quantity: 4 }],
+    });
+    expect(moved.quickMove).toBe(true);
+    expect(moved.status).toBe(StockTransferStatus.RECEIVED);
+    expect(moved.items[0].receivedQuantity?.toString()).toBe('4');
+    expect(await qty(fromId)).toBe(from - 4);
+    expect(await qty(toId)).toBe(to + 4);
+  });
+
+  it('a quick move carries serial-tracked units to the destination', async () => {
+    const category = await prisma.category.findFirstOrThrow({ where: { organizationId: orgId } });
+    const battery = await prisma.product.create({
+      data: {
+        name: 'Battery',
+        sku: `BAT-${randomUUID().slice(0, 6)}`,
+        categoryId: category.id,
+        organizationId: orgId,
+        trackSerials: true,
+      },
+    });
+    await prisma.stock.create({
+      data: { productId: battery.id, locationId: fromId, organizationId: orgId, quantity: 2 },
+    });
+    await prisma.productSerial.createMany({
+      data: ['SN-1', 'SN-2'].map((serialNumber) => ({
+        organizationId: orgId,
+        productId: battery.id,
+        serialNumber,
+        locationId: fromId,
+      })),
+    });
+
+    await expect(
+      transfers.create(orgId, userId, {
+        fromLocationId: fromId,
+        toLocationId: toId,
+        quickMove: true,
+        items: [{ productId: battery.id, quantity: 1 }],
+      }),
+    ).rejects.toThrow(/serial number/);
+
+    await transfers.create(orgId, userId, {
+      fromLocationId: fromId,
+      toLocationId: toId,
+      quickMove: true,
+      items: [{ productId: battery.id, quantity: 1, serialNumbers: ['SN-2'] }],
+    });
+    const serials = await prisma.productSerial.findMany({
+      where: { productId: battery.id },
+      orderBy: { serialNumber: 'asc' },
+    });
+    expect(serials.map((x) => [x.serialNumber, x.status, x.locationId])).toEqual([
+      ['SN-1', 'IN_STOCK', fromId],
+      ['SN-2', 'IN_STOCK', toId],
+    ]);
+  });
+
   it('refuses a transfer to the same location', async () => {
     await expect(
       transfers.create(orgId, userId, {

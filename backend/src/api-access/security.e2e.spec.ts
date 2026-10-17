@@ -225,6 +225,30 @@ describe('two-factor sign-in, API keys and webhooks (e2e)', () => {
       .expect(401);
   });
 
+  it('stops an ADMIN key once its creator is demoted', async () => {
+    const keys = app.get(ApiKeysService);
+    const other = await prisma.user.create({
+      data: {
+        email: `admin2-${randomUUID()}@example.com`,
+        password: 'x',
+        role: 'ADMIN',
+        organizationId: orgId,
+      },
+    });
+    const admin = await keys.create(orgId, other.id, {
+      name: 'Ops',
+      role: 'ADMIN',
+    });
+    const bearer = { Authorization: `Bearer ${admin.key}` };
+    await http().get('/customers').set(bearer).expect(200);
+
+    await prisma.user.update({
+      where: { id: other.id },
+      data: { role: 'USER' },
+    });
+    await http().get('/customers').set(bearer).expect(401);
+  });
+
   it('signs webhook deliveries and retries failures with backoff', async () => {
     const webhooks = app.get(WebhooksService);
     const endpoint = await webhooks.create(orgId, {
@@ -308,6 +332,7 @@ describe('two-factor sign-in, API keys and webhooks (e2e)', () => {
       return u.organization;
     };
     const previous = process.env.SELF_SERVE_BILLING;
+    const previousAuto = process.env.AUTO_ENABLE_MODULES;
     try {
       delete process.env.SELF_SERVE_BILLING;
       expect((await signup()).plan).toBe('custom');
@@ -315,8 +340,28 @@ describe('two-factor sign-in, API keys and webhooks (e2e)', () => {
       const org = await signup();
       expect(org.plan).toBe('trial');
       expect(org.trialEndsAt).not.toBeNull();
+
+      // AUTO_ENABLE_MODULES must not hand a trial a module that never ends.
+      process.env.AUTO_ENABLE_MODULES = 'INVOICE_POS';
+      const withAuto = await signup();
+      const modules = await prisma.organizationModule.findMany({
+        where: { organizationId: withAuto.id },
+      });
+      expect(modules.length).toBeGreaterThan(0);
+      expect(
+        modules.every(
+          (m) => m.expiresAt?.getTime() === withAuto.trialEndsAt?.getTime(),
+        ),
+      ).toBe(true);
     } finally {
-      process.env.SELF_SERVE_BILLING = previous;
+      restoreEnv('SELF_SERVE_BILLING', previous);
+      restoreEnv('AUTO_ENABLE_MODULES', previousAuto);
     }
   });
 });
+
+// Assigning undefined to process.env stores the string "undefined".
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

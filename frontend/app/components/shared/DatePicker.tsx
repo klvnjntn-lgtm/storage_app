@@ -10,14 +10,9 @@ type Props = {
   /** "YYYY-MM-DD", or '' for no date (field variant only). */
   value: string;
   onChange: (value: string) => void;
-  /**
-   * `filter` (default) is the black pill used in filter bars. `field` looks
-   * like the app's form inputs and is what replaces <input type="date">.
-   */
-  variant?: 'filter' | 'field';
   /** `sm` matches the compact text-xs inputs in inline edit/pay forms. */
   size?: 'md' | 'sm';
-  /** Shows a clear button when a date is set (field variant). */
+  /** Shows a clear button when a date is set. */
   clearable?: boolean;
   placeholder?: string;
   min?: string;
@@ -70,13 +65,12 @@ export const dateFieldClass = (size: 'md' | 'sm' = 'md') =>
     size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm'
   }`;
 
-// Single-day counterpart to DateRangePicker — same calendar visuals (black
-// selection, month nav, weekday grid). Picking a day applies and closes
+// Single-day counterpart to DateRangePicker — same trigger field and
+// calendar visuals (blue selection, month nav, weekday grid). Picking a day applies and closes
 // immediately instead of needing a separate Apply step.
 export default function DatePicker({
   value,
   onChange,
-  variant = 'filter',
   size = 'md',
   clearable = false,
   placeholder,
@@ -155,48 +149,29 @@ export default function DatePicker({
 
   return (
     <div className={`relative ${className}`} ref={containerRef}>
-      {variant === 'filter' ? (
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={`${dateFieldClass(size)} ${open ? 'border-blue-500' : ''} ${clearable && selected ? 'pr-8' : ''}`}
+      >
+        <CalendarIcon size={size === 'sm' ? 13 : 15} strokeWidth={2} aria-hidden="true" className="shrink-0 text-blue-600/70" />
+        <span className={`truncate ${selected ? 'text-gray-900' : 'text-gray-400'}`}>{label}</span>
+      </button>
+      {clearable && selected && !disabled && (
         <button
-          ref={triggerRef}
-          id={id}
           type="button"
-          onClick={toggle}
-          disabled={disabled}
-          aria-label={ariaLabel}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          className="flex items-center gap-1.5 text-xs sm:text-sm px-3 py-2.5 sm:py-2 rounded-md border-2 font-semibold whitespace-nowrap bg-black text-white border-black disabled:opacity-50"
+          onClick={() => onChange('')}
+          aria-label={t('shared.dateRangePicker.clear')}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
         >
-          <CalendarIcon size={14} strokeWidth={2} aria-hidden="true" />
-          {label}
+          <X size={size === 'sm' ? 12 : 14} strokeWidth={2.25} aria-hidden="true" />
         </button>
-      ) : (
-        <>
-          <button
-            ref={triggerRef}
-            id={id}
-            type="button"
-            onClick={toggle}
-            disabled={disabled}
-            aria-label={ariaLabel}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            className={`${dateFieldClass(size)} ${open ? 'border-blue-500' : ''} ${clearable && selected ? 'pr-8' : ''}`}
-          >
-            <CalendarIcon size={size === 'sm' ? 13 : 15} strokeWidth={2} aria-hidden="true" className="shrink-0 text-blue-600/70" />
-            <span className={`truncate ${selected ? 'text-gray-900' : 'text-gray-400'}`}>{label}</span>
-          </button>
-          {clearable && selected && !disabled && (
-            <button
-              type="button"
-              onClick={() => onChange('')}
-              aria-label={t('shared.dateRangePicker.clear')}
-              className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-            >
-              <X size={size === 'sm' ? 12 : 14} strokeWidth={2.25} aria-hidden="true" />
-            </button>
-          )}
-        </>
       )}
 
       {open && (
@@ -248,9 +223,9 @@ export default function DatePicker({
                     aria-pressed={isSelected}
                     className={`text-xs h-8 w-8 mx-auto rounded-md flex items-center justify-center font-medium transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed ${
                       isSelected
-                        ? 'bg-black text-white'
+                        ? 'bg-blue-600 text-white'
                         : isToday
-                        ? 'border border-gray-400 text-gray-800 hover:bg-gray-100'
+                        ? 'border border-blue-500/50 text-gray-800 hover:bg-gray-100'
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >

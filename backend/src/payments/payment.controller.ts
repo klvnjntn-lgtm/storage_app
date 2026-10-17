@@ -10,7 +10,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { PaymentService } from './payment.service';
-import { RecordPaymentDto } from './dto/record-payment.dto';
+import { RecordPaymentDto, SplitPaymentDto } from './dto/record-payment.dto';
 import { ApplyCreditDto } from './dto/apply-credit.dto';
 
 // Gated to INVOICE_POS OR WORKSHOP_RMS, same as CustomersController —
@@ -41,6 +41,21 @@ export class PaymentController {
       amount: dto.amount,
       method: dto.method,
     });
+    return result;
+  }
+
+  // Several methods in one go (e.g. cash + QRIS); all or nothing.
+  @Post('split')
+  async recordSplit(
+    @CurrentOrg() organizationId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Body() dto: SplitPaymentDto,
+    @Req() req,
+  ) {
+    const result = await this.payments.recordSplit(organizationId, invoiceId, dto.parts, req.user?.sub);
+    for (const part of dto.parts) {
+      void this.webhooks?.emit(organizationId, 'payment.recorded', { invoiceId, amount: part.amount, method: part.method });
+    }
     return result;
   }
 

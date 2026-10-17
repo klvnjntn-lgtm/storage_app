@@ -109,7 +109,7 @@ function InvoiceStatementPageInner() {
         }
       `}</style>
 
-      <div className="px-6 py-5 border-b-2 border-gray-300 print:hidden">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)] print:hidden">
         <div className="max-w-5xl mx-auto">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
@@ -164,7 +164,6 @@ function InvoiceStatementPageInner() {
                 {t('sales.statement.from')}
               </label>
               <DatePicker
-                variant="field"
                 value={from}
                 onChange={(v) => setFrom(v)}
               />
@@ -172,7 +171,6 @@ function InvoiceStatementPageInner() {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">{t('sales.statement.to')}</label>
               <DatePicker
-                variant="field"
                 value={to}
                 onChange={(v) => setTo(v)}
               />

@@ -87,13 +87,14 @@ export async function receiveSerials(
         soldAt: null,
         purchaseReturnId: null,
         stockTransferId: null,
+        sessionId: null,
       },
     });
   }
 }
 
 // Units leaving stock at a location — sold, sent back to the supplier, or
-// put on a transfer. Every serial must be in stock there right now; the
+// put on a transfer or picked in a move session. Every serial must be in stock there right now; the
 // update is conditional on that, so two documents racing for the same
 // unit can't both take it.
 export async function takeSerials(
@@ -111,6 +112,7 @@ export async function takeSerials(
       invoiceId?: string;
       purchaseReturnId?: string;
       stockTransferId?: string;
+      sessionId?: string;
     };
   },
 ) {
@@ -200,4 +202,85 @@ export async function landTransferSerials(
     },
     data: { status: SerialStatus.IN_STOCK, locationId: p.locationId },
   });
+}
+
+// Units picked in a MOVE session arriving at the location they're put
+// away at. Each must be one this session picked and hasn't put down yet.
+export async function landSessionSerials(
+  tx: Tx,
+  p: {
+    organizationId: string;
+    sessionId: string;
+    productId: string;
+    locationId: string;
+    serials: string[];
+  },
+) {
+  if (p.serials.length === 0) return;
+  const landed = await tx.productSerial.updateMany({
+    where: {
+      organizationId: p.organizationId,
+      productId: p.productId,
+      sessionId: p.sessionId,
+      status: SerialStatus.IN_TRANSIT,
+      serialNumber: { in: p.serials },
+    },
+    data: { status: SerialStatus.IN_STOCK, locationId: p.locationId, sessionId: null },
+  });
+  if (landed.count !== p.serials.length) {
+    const ok = await tx.productSerial.findMany({
+      where: {
+        productId: p.productId,
+        sessionId: null,
+        status: SerialStatus.IN_STOCK,
+        locationId: p.locationId,
+        serialNumber: { in: p.serials },
+      },
+      select: { serialNumber: true },
+    });
+    const bad = p.serials.filter((s) => !ok.some((o) => o.serialNumber === s));
+    throw new BadRequestException(
+      `Not picked in this move, or already put away: ${bad.join(', ')}`,
+    );
+  }
+}
+
+// An instant move (no transit): units go straight from one location to
+// another.
+export async function relocateSerials(
+  tx: Tx,
+  p: {
+    organizationId: string;
+    productId: string;
+    fromLocationId: string;
+    toLocationId: string;
+    serials: string[];
+  },
+) {
+  if (p.serials.length === 0) return;
+  const moved = await tx.productSerial.updateMany({
+    where: {
+      organizationId: p.organizationId,
+      productId: p.productId,
+      serialNumber: { in: p.serials },
+      status: SerialStatus.IN_STOCK,
+      locationId: p.fromLocationId,
+    },
+    data: { locationId: p.toLocationId },
+  });
+  if (moved.count !== p.serials.length) {
+    const found = await tx.productSerial.findMany({
+      where: {
+        productId: p.productId,
+        serialNumber: { in: p.serials },
+        status: SerialStatus.IN_STOCK,
+        locationId: p.toLocationId,
+      },
+      select: { serialNumber: true },
+    });
+    const bad = p.serials.filter((s) => !found.some((f) => f.serialNumber === s));
+    throw new BadRequestException(
+      `Not in stock at this location: ${bad.join(', ')}`,
+    );
+  }
 }

@@ -11,7 +11,7 @@ export default function OnboardingPage() {
   const { t } = useLanguage();
   if (!authorized) return null;
   return (
-    <PageFrame icon={Rocket} title={t('onboarding.pageTitle')} subtitle={t('onboarding.pageSubtitle')} width="max-w-2xl">
+    <PageFrame icon={Rocket} title={t('onboarding.pageTitle')} subtitle={t('onboarding.pageSubtitle')}>
       <OnboardingChecklist variant="page" />
     </PageFrame>
   );

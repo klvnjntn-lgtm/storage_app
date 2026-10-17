@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { CreditCard, Loader2, CheckCircle2 } from 'lucide-react';
+import { Check, CreditCard, Loader2, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
@@ -230,9 +230,21 @@ function BillingPageInner() {
                   return (
                     <label
                       key={m.module}
-                      className={`rounded-xl border-2 p-4 flex gap-3 ${data.gateway ? 'cursor-pointer' : ''} ${on ? 'border-blue-500 bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'}`}
+                      className={`rounded-xl border-2 p-4 flex gap-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/40 ${data.gateway ? 'cursor-pointer' : ''} ${on ? 'border-blue-500 bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'}`}
                     >
-                      {data.gateway && <input type="checkbox" className="mt-1" checked={on} onChange={() => toggle(m)} />}
+                      {data.gateway && (
+                        <>
+                          <input type="checkbox" className="sr-only" checked={on} onChange={() => toggle(m)} />
+                          <span
+                            aria-hidden
+                            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                              on ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white'
+                            }`}
+                          >
+                            {on && <Check size={12} strokeWidth={3} />}
+                          </span>
+                        </>
+                      )}
                       <span className="flex-1 min-w-0">
                         <span className="flex items-center justify-between gap-2">
                           <span className="font-semibold">{t(`billing.module.${m.module}`)}</span>

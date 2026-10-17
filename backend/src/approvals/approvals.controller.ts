@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApprovalStatus } from '@prisma/client';
+import { ApprovalStatus, ModuleKey } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -19,8 +19,10 @@ import {
   DecideApprovalDto,
   RequestApprovalDto,
 } from './dto/approvals.dto';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 @Roles('ADMIN', 'USER')
+@RequireModule(ModuleKey.INVOICE_POS)
 @Controller('approvals')
 export class ApprovalsController {
   constructor(private approvals: ApprovalsService) {}

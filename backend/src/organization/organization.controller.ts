@@ -38,6 +38,8 @@ const INVOICE_POS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = [
 
 const WAREHOUSE_OPS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = ['fulfillmentMode'];
 
+const WORKSHOP_RMS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = ['workOrdersEnabled'];
+
 // Generous but bounded — big enough for a real logo image, small enough
 // that this route can never be used to exhaust disk/memory. Multer's
 // own default is Infinity, so this is what was actually missing before
@@ -74,6 +76,7 @@ export class OrganizationController {
   ) {
     await this.assertFieldsAllowed(orgId, body, INVOICE_POS_FIELDS, ModuleKey.INVOICE_POS);
     await this.assertFieldsAllowed(orgId, body, WAREHOUSE_OPS_FIELDS, ModuleKey.WAREHOUSE_OPS);
+    await this.assertFieldsAllowed(orgId, body, WORKSHOP_RMS_FIELDS, ModuleKey.WORKSHOP_RMS);
 
     return this.organizationService.updateSettings(orgId, body, req.user.sub);
   }

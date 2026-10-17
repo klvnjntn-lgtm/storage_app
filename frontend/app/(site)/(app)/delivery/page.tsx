@@ -12,7 +12,7 @@ import { HubCard, HubGrid, HubLocked, HubPage, HubSection } from '@/app/componen
 // sales/page.tsx — one card grid, not a dashboard of its own.
 const DELIVERY_ITEM_DEFS = [
   { key: 'routes' as const, href: '/delivery/routes', icon: Navigation, gradient: 'from-blue-500 to-indigo-700', adminOnly: false },
-  { key: 'monitoring' as const, href: '/delivery/monitoring', icon: BarChart3, gradient: 'from-cyan-500 to-blue-700', adminOnly: false },
+  { key: 'monitoring' as const, href: '/delivery/monitoring', icon: BarChart3, gradient: 'from-cyan-500 to-blue-700', adminOnly: true },
   { key: 'reports' as const, href: '/delivery/reports', icon: TrendingUp, gradient: 'from-sky-500 to-blue-800', adminOnly: false },
   { key: 'drivers' as const, href: '/delivery/drivers', icon: Users, gradient: 'from-violet-500 to-purple-800', adminOnly: true },
 ];

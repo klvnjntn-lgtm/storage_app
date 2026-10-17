@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sentry/browser": "^11.7.0",
+    "@vis.gl/react-google-maps": "1.10.1",
     "@zxing/browser": "^0.2.0",
     "driver.js": "^1.8.0",
     "framer-motion": "^13.4.4",

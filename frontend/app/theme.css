@@ -74,6 +74,17 @@ html[data-theme='dark'] .console {
   --c-yellow: #facc15;
 }
 
+/* Sales Insights sits among the app pages, so it keeps the console's
+   surfaces but takes the app's blue (Tailwind blue-700, which dark mode
+   re-points like every other page) and the app's dotted page background.
+   Repeated under the dark selector, which otherwise outranks it. */
+.console.insights,
+html[data-theme='dark'] .console.insights {
+  --c-bg: var(--page-bg);
+  --c-header: color-mix(in srgb, var(--color-white) 80%, transparent);
+  --c-sky: var(--color-blue-700);
+}
+
 /* the toggle renders both icons; show the one for the theme you'd switch to */
 .theme-icon-sun {
   display: none;

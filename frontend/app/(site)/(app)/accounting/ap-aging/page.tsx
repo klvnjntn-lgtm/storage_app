@@ -153,7 +153,6 @@ export default function APAgingPage() {
               {t('accounting.balanceSheet.asOf')}
             </label>
             <DatePicker
-              variant="field"
               value={asOf}
               onChange={(v) => setAsOf(v)}
             />

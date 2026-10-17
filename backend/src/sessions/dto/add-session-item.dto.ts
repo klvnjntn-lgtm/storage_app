@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsPositive,
   IsIn,
+  IsArray,
 } from 'class-validator';
 
 const RETURN_REASONS = [
@@ -33,4 +34,11 @@ export class AddSessionItemDto {
   @IsOptional()
   @IsIn(RETURN_REASONS)
   reason?: string;
+
+  // MOVE sessions, serial-tracked products: the units picked or put away,
+  // one per quantity.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serialNumbers?: string[];
 }

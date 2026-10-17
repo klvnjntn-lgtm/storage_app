@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FileCheck2 } from 'lucide-react';
+import { FileCheck2, Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
@@ -45,7 +45,20 @@ export default function SupplierBillsPage() {
   if (!authorized) return null;
 
   return (
-    <PageFrame icon={FileCheck2} title={t('purchasing.bills.pageTitle')} subtitle={t('purchasing.bills.pageSubtitle')} width="max-w-6xl">
+    <PageFrame
+      icon={FileCheck2}
+      title={t('purchasing.bills.pageTitle')}
+      subtitle={t('purchasing.bills.pageSubtitle')}
+      actions={
+        <Link
+          href="/accounting/cash-statement/new"
+          className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
+        >
+          <Landmark size={16} strokeWidth={2} />
+          <span className="hidden sm:inline">{t('accounting.cashStatement.generateButton')}</span>
+        </Link>
+      }
+    >
       <ErrorNote message={error} />
       <div className="flex flex-wrap gap-1.5">
         {(['', 'MATCHED', 'UNDER_BILLED', 'OVER_BILLED'] as const).map((s) => (

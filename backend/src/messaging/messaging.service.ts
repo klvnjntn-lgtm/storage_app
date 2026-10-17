@@ -14,6 +14,7 @@ import {
   MessageChannel,
   MessageKind,
   MessageStatus,
+  ModuleKey,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -398,6 +399,15 @@ export class MessagingService implements OnModuleInit {
       where: {
         OR: [{ reminderEmailEnabled: true }, { reminderWhatsappEnabled: true }],
         suspendedAt: null,
+        // Same modules MessagingController requires — an org whose
+        // subscription lapsed shouldn't keep being charged for reminders.
+        modules: {
+          some: {
+            module: { in: [ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS] },
+            enabled: true,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          },
+        },
       },
       select: {
         id: true,

@@ -8,12 +8,14 @@ import { useLanguage } from '@/app/context/LanguageContext';
 type Available = { id: string; serialNumber: string };
 
 // Picks which serial-numbered units a line covers, from those in stock at
-// the line's location (GET /serials/available). Exactly `quantity` must be
-// picked; the backend checks again when the document is posted.
+// the line's location (GET /serials/available) — or, with `sessionId`, from
+// those a move session picked and hasn't put away yet. Exactly `quantity`
+// must be picked; the backend checks again when the document is posted.
 export function SerialPicker({
   productId,
   productName,
   locationId,
+  sessionId,
   quantity,
   value,
   onChange,
@@ -21,7 +23,8 @@ export function SerialPicker({
 }: {
   productId: string;
   productName: string;
-  locationId: string;
+  locationId?: string;
+  sessionId?: string;
   quantity: number;
   value: string[];
   onChange: (serials: string[]) => void;
@@ -34,11 +37,13 @@ export function SerialPicker({
 
   useEffect(() => {
     (async () => {
-      const params = new URLSearchParams({ productId, locationId });
-      const res = await apiFetch(`/serials/available?${params}`).catch(() => null);
+      const url = sessionId
+        ? `/sessions/${sessionId}/serials?${new URLSearchParams({ productId })}`
+        : `/serials/available?${new URLSearchParams({ productId, locationId: locationId ?? '' })}`;
+      const res = await apiFetch(url).catch(() => null);
       setAvailable(res?.ok ? await res.json() : []);
     })();
-  }, [productId, locationId]);
+  }, [productId, locationId, sessionId]);
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();

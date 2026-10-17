@@ -6,6 +6,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import {
   Car,
+  ClipboardList,
   Plus,
   RotateCcw,
   Trash2,
@@ -139,6 +140,13 @@ export default function VehicleDetailPage() {
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [vehicle, setVehicle] = useState<VehicleDetail | null>(null);
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
+  useEffect(() => {
+    apiFetch('/work-orders/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => setWorkOrdersEnabled(!!body?.enabled))
+      .catch(() => {});
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -307,6 +315,16 @@ export default function VehicleDetailPage() {
             </div>
 
             {vehicle && (
+              <div className="flex items-center gap-2 shrink-0">
+              {workOrdersEnabled && (
+                <button
+                  onClick={() => router.push(`/workshop/work-orders/new?vehicleId=${vehicle.id}`)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-blue-500/30 bg-white text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
+                >
+                  <ClipboardList size={16} strokeWidth={2} />
+                  <span className="hidden sm:inline">{t('workshop.workOrders.fromVehicle')}</span>
+                </button>
+              )}
               <button data-tour="veh-new-invoice"
                 onClick={() =>
                   router.push(
@@ -318,6 +336,7 @@ export default function VehicleDetailPage() {
                 <Plus size={16} strokeWidth={2} />
                 {t('workshop.vehicleDetail.newInvoice')}
               </button>
+              </div>
             )}
           </div>
         </div>

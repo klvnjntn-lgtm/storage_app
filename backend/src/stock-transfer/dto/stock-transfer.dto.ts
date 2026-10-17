@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -37,6 +38,12 @@ export class CreateStockTransferDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  // Ship and receive in one step: the stock is at the destination as soon
+  // as this is saved.
+  @IsOptional()
+  @IsBoolean()
+  quickMove?: boolean;
 
   @IsArray()
   @ArrayMinSize(1)

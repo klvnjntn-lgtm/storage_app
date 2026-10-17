@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { KeyRound, Plus, Trash2, Copy, Webhook, Send } from 'lucide-react';
+import { Check, KeyRound, Plus, Trash2, Copy, Webhook, Send } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatDMYTime } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { Card, ErrorNote, PageFrame, Switch, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 
 type ApiKey = {
   id: string;
@@ -143,10 +143,10 @@ export default function IntegrationsPage() {
               <option value="USER">{t('integrations.roleUser')}</option>
               <option value="ADMIN">{t('integrations.roleAdmin')}</option>
             </select>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={newKey.readOnly} onChange={(e) => setNewKey({ ...newKey, readOnly: e.target.checked })} />
-              {t('integrations.readOnly')}
-            </label>
+            <div className="flex items-center justify-between gap-3 rounded-md border border-gray-300 bg-white px-3 py-1.5">
+              <span className="text-sm">{t('integrations.readOnly')}</span>
+              <Switch checked={newKey.readOnly} onChange={(v) => setNewKey({ ...newKey, readOnly: v })} label={t('integrations.readOnly')} />
+            </div>
             <div className="sm:col-span-3">
               <button className={btnPrimary}>{t('integrations.create')}</button>
             </div>
@@ -203,19 +203,24 @@ export default function IntegrationsPage() {
         {newHook.open && (
           <form onSubmit={createHook} className="mb-4 space-y-2">
             <input required type="url" placeholder="https://example.com/waresys-webhook" value={newHook.url} onChange={(e) => setNewHook({ ...newHook, url: e.target.value })} className={inputCls} />
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {events.map((ev) => (
-                <label key={ev} className="flex items-center gap-1.5 text-sm font-mono">
-                  <input
-                    type="checkbox"
-                    checked={newHook.events.includes(ev)}
-                    onChange={(e) =>
-                      setNewHook({ ...newHook, events: e.target.checked ? [...newHook.events, ev] : newHook.events.filter((x) => x !== ev) })
-                    }
-                  />
-                  {ev}
-                </label>
-              ))}
+            <div className="flex flex-wrap gap-1.5">
+              {events.map((ev) => {
+                const on = newHook.events.includes(ev);
+                return (
+                  <button
+                    key={ev}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setNewHook({ ...newHook, events: on ? newHook.events.filter((x) => x !== ev) : [...newHook.events, ev] })}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-mono transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                      on ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400 hover:bg-blue-50'
+                    }`}
+                  >
+                    {on ? <Check size={12} strokeWidth={3} /> : <Plus size={12} />}
+                    {ev}
+                  </button>
+                );
+              })}
             </div>
             <button className={btnPrimary} disabled={newHook.events.length === 0}>
               {t('integrations.create')}

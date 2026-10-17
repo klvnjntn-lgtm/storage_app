@@ -144,7 +144,6 @@ export function SalesOrderCartPanel({
         <div>
           <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
           <DatePicker
-            variant="field"
             clearable
             value={orderDate}
             onChange={(v) => setOrderDate(v)}

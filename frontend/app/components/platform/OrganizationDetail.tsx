@@ -246,7 +246,6 @@ export default function OrganizationDetail({
                   <span className={label}>{t('platform.detail.paidUntil')}</span>
                   <div className="flex flex-wrap items-center gap-2">
                     <DatePicker
-                      variant="field"
                       clearable
                       value={billing.paidUntil}
                       onChange={(v) => setBilling({ ...billing, paidUntil: v })}
@@ -272,7 +271,6 @@ export default function OrganizationDetail({
                   <div>
                     <span className={label}>{t('platform.detail.trialEndsAt')}</span>
                     <DatePicker
-                      variant="field"
                       clearable
                       value={billing.trialEndsAt}
                       onChange={(v) => setBilling({ ...billing, trialEndsAt: v })}

@@ -47,8 +47,9 @@ export function PlanBanner({ isAdmin }: { isAdmin: boolean }) {
 
   if (!status || status.plan === 'custom') return null;
 
-  // A trial that ended without a purchase.
-  const lapsed = status.plan === 'trial' && status.effectivePlan === 'free';
+  // A trial that ended without a purchase, or a subscription whose every
+  // module is past its grace days.
+  const lapsed = status.effectivePlan === 'free';
   const trialEnding = trialDaysLeft !== null && trialDaysLeft <= 7;
   const renewing = renewalDaysLeft !== null && renewalDaysLeft <= 7;
   if (!lapsed && !trialEnding && !renewing) return null;
@@ -62,7 +63,7 @@ export function PlanBanner({ isAdmin }: { isAdmin: boolean }) {
       {lapsed ? <AlertTriangle size={14} /> : <Clock size={14} />}
       <span>
         {lapsed
-          ? t('billing.bannerLapsed')
+          ? t(status.plan === 'subscription' ? 'billing.bannerSubscriptionLapsed' : 'billing.bannerLapsed')
           : trialEnding
             ? t('billing.bannerTrial', { n: trialDaysLeft ?? 0 })
             : renewalDaysLeft! < 0

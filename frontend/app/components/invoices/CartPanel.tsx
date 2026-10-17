@@ -241,7 +241,6 @@ export function CartPanel({
           {t('sales.invoiceCart.invoiceDateLabel')}
         </label>
         <DatePicker
-          variant="field"
           clearable
           value={invoiceDate ?? ''}
           onChange={(v) => onChangeInvoiceDate?.(v)}
@@ -304,7 +303,6 @@ export function CartPanel({
             {t('sales.invoiceCart.dueDateLabel')}
           </label>
           <DatePicker
-            variant="field"
             clearable
             value={dueDate ?? ''}
             onChange={(v) => onChangeDueDate?.(v)}
@@ -467,7 +465,6 @@ export function CartPanel({
                   </div>
 
                   <DatePicker
-                    variant="field"
                     clearable
                     value={reminderDueDate ?? ''}
                     onChange={(v) => onChangeReminderDueDate?.(v)}

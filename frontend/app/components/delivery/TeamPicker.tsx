@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Search, Users, X } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { dateFieldClass } from '@/app/components/shared/DatePicker';
 import { driverLabel, DriverAvatar, type PickerDriver } from './DriverPicker';
 
 // A team with its driver (one per team) — the shape GET /teams members and
@@ -103,13 +104,14 @@ export default function TeamPicker({
         type="button"
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
-        className="w-full flex items-center gap-2 border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm bg-white text-left hover:border-blue-300 disabled:opacity-50 sm:min-w-[220px]"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        // Same field as DatePicker/TimeInput so pickers read as one family.
+        className={`${dateFieldClass()} ${open ? 'border-blue-500' : ''}`}
       >
+        <Users size={15} strokeWidth={2} aria-hidden="true" className="shrink-0 text-blue-600/70" />
         {selected ? (
-          <>
-            <Users size={16} className="text-blue-600 shrink-0" />
-            <span className="truncate flex-1">{teamLabel(selected, t('delivery.teams.noDriver'))}</span>
-          </>
+          <span className="truncate flex-1 text-gray-900">{teamLabel(selected, t('delivery.teams.noDriver'))}</span>
         ) : (
           <span className="truncate flex-1 text-gray-500">{clearLabel ?? t('delivery.teams.pickerPlaceholder')}</span>
         )}

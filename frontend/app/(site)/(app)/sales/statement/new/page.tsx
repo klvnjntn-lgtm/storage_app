@@ -311,7 +311,6 @@ const params = new URLSearchParams({ q: query.trim() });
             <div className="flex flex-col gap-1 flex-1">
               <label className="text-xs text-gray-500">{t('sales.statementNew.from')}</label>
               <DatePicker
-                variant="field"
                 value={from}
                 onChange={(v) => setFrom(v)}
                 className="w-full"
@@ -320,7 +319,6 @@ const params = new URLSearchParams({ q: query.trim() });
             <div className="flex flex-col gap-1 flex-1">
               <label className="text-xs text-gray-500">{t('sales.statementNew.to')}</label>
               <DatePicker
-                variant="field"
                 value={to}
                 onChange={(v) => setTo(v)}
                 className="w-full"

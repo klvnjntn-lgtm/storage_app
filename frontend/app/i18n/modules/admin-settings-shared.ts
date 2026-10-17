@@ -267,6 +267,13 @@ export const adminSettingsShared = {
         unsetDefaultFailed: 'Failed to unset default',
         removeFailed: 'Failed to remove tax rate',
       },
+      workOrders: {
+        heading: 'Workshop work orders',
+        toggleTitle: 'Use work orders',
+        toggleDescription:
+          'Track each job from check-in to invoice: complaint, mechanic, parts and labour, and status. When off, staff invoice vehicles directly.',
+        saveFailed: 'Could not update work orders',
+      },
       invoicePricing: {
         heading: 'Invoice Pricing',
         description: 'Choose how prices are set when staff create an invoice.',
@@ -821,6 +828,13 @@ export const adminSettingsShared = {
         setDefaultFailed: 'Gagal menjadikan default',
         unsetDefaultFailed: 'Gagal membatalkan default',
         removeFailed: 'Gagal menghapus tarif pajak',
+      },
+      workOrders: {
+        heading: 'Perintah kerja bengkel',
+        toggleTitle: 'Gunakan perintah kerja',
+        toggleDescription:
+          'Lacak setiap pekerjaan dari kendaraan masuk sampai faktur: keluhan, mekanik, suku cadang dan jasa, serta status. Jika mati, staf langsung membuat faktur untuk kendaraan.',
+        saveFailed: 'Gagal memperbarui perintah kerja',
       },
       invoicePricing: {
         heading: 'Harga Faktur',

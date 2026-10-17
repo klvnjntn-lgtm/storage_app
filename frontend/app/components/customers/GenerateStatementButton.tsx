@@ -91,7 +91,6 @@ export function GenerateStatementButton({ customerId, customerName }: Props) {
               <div className="flex flex-col gap-1 flex-1">
                 <label className="text-xs font-semibold text-gray-600">{t('sales.statementNew.from')}</label>
                 <DatePicker
-                  variant="field"
                   value={from}
                   onChange={(v) => setFrom(v)}
                   className="w-full"
@@ -100,7 +99,6 @@ export function GenerateStatementButton({ customerId, customerName }: Props) {
               <div className="flex flex-col gap-1 flex-1">
                 <label className="text-xs font-semibold text-gray-600">{t('sales.statementNew.to')}</label>
                 <DatePicker
-                  variant="field"
                   value={to}
                   onChange={(v) => setTo(v)}
                   className="w-full"

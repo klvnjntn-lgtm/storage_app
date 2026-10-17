@@ -178,6 +178,15 @@ export class AuthService {
 
     const hashed = await bcrypt.hash(password, 10);
 
+    // On the self-serve SaaS, signups start a free trial of the plans.
+    // Opt-in per deployment (SELF_SERVE_BILLING=true): licensed installs
+    // and the desktop app keep new orgs on "custom", as before — the
+    // edition alone can't tell them apart, since cloud servers carry a
+    // license key too.
+    const selfServe =
+      process.env.SELF_SERVE_BILLING === 'true' &&
+      process.env.SINGLE_ORGANIZATION !== 'true';
+
     const org = await this.prisma.organization.create({
       data: {
         name: organizationName.trim(),
@@ -188,8 +197,11 @@ export class AuthService {
         users: {
           create: { email: normalizedEmail, password: hashed, role: 'ADMIN' },
         },
+        // AUTO_ENABLE_MODULES grants modules with no expiry, so it's
+        // skipped for a self-serve signup: the trial already turns every
+        // module on, and a forever grant would outlive it.
         modules: {
-          create: autoEnabledModules().map((module) => ({
+          create: (selfServe ? [] : autoEnabledModules()).map((module) => ({
             module,
             enabled: true,
           })),
@@ -198,14 +210,7 @@ export class AuthService {
       include: { users: true },
     });
 
-    // On the self-serve SaaS, signups start a free trial of the plans.
-    // Opt-in per deployment (SELF_SERVE_BILLING=true): licensed installs
-    // and the desktop app keep new orgs on "custom", as before — the
-    // edition alone can't tell them apart, since cloud servers carry a
-    // license key too.
-    if (process.env.SELF_SERVE_BILLING === 'true' && process.env.SINGLE_ORGANIZATION !== 'true') {
-      await this.billing.startTrial(org.id);
-    }
+    if (selfServe) await this.billing.startTrial(org.id);
 
     const user = org.users[0];
     return this.issueToken(user.id, user.email, user.role, user.organizationId);

@@ -121,9 +121,10 @@ export class DeliveryRoutesController {
     return this.report.report(organizationId, from, to);
   }
 
+  // Monitoring is admin-only: it shows where every driver probably is.
   @Get('monitoring/summary')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'USER')
+  @Roles('ADMIN')
   monitoringSummary(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -133,7 +134,7 @@ export class DeliveryRoutesController {
 
   @Get('monitoring/teams')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'USER')
+  @Roles('ADMIN')
   monitoringByTeam(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -143,7 +144,7 @@ export class DeliveryRoutesController {
 
   @Get('monitoring/map')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'USER')
+  @Roles('ADMIN')
   monitoringMap(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,

@@ -89,15 +89,26 @@ export function isPlanKey(value: string): value is PlanKey {
   return Object.prototype.hasOwnProperty.call(PLANS, value);
 }
 
-type OrgPlanState = { plan: string; trialEndsAt: Date | null };
+type OrgPlanState = {
+  plan: string;
+  trialEndsAt: Date | null;
+  paidUntil?: Date | null;
+};
 
-// The plan whose limits apply now. An ended trial falls back to "free";
-// unknown strings (hand-typed in the platform console before billing
+// The plan whose limits apply now. An ended trial falls back to "free", and
+// so does a subscription once every module it paid for is past its grace
+// days (Organization.paidUntil mirrors the furthest-out one). A
+// subscription with no paidUntil was set by hand and keeps its plan.
+// Unknown strings (hand-typed in the platform console before billing
 // existed) count as "custom" so they never lock anyone out.
 export function effectivePlan(org: OrgPlanState, now = new Date()): PlanKey {
   if (!isPlanKey(org.plan)) return 'custom';
   if (org.plan === 'trial')
     return org.trialEndsAt && org.trialEndsAt > now ? 'trial' : 'free';
+  if (org.plan === 'subscription' && org.paidUntil) {
+    const graceEnds = org.paidUntil.getTime() + GRACE_DAYS * 86_400_000;
+    return graceEnds > now.getTime() ? 'subscription' : 'free';
+  }
   return org.plan;
 }
 

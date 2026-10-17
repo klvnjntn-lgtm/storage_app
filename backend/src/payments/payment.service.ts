@@ -118,12 +118,31 @@ export class PaymentService {
     dto: RecordPaymentDto,
     userId?: string,
   ) {
-    const method = await this.validateMoneyMovement(organizationId, dto);
+    return this.recordSplit(organizationId, invoiceId, [dto], userId);
+  }
+
+  // Several payments at once — e.g. part cash, part QRIS at checkout. All of them are recorded or none are.
+  async recordSplit(
+    organizationId: string,
+    invoiceId: string,
+    parts: RecordPaymentDto[],
+    userId?: string,
+  ) {
+    if (parts.length === 0) throw new BadRequestException('At least one payment is required');
+    const methods: PaymentMethod[] = [];
+    for (const part of parts) methods.push(await this.validateMoneyMovement(organizationId, part));
 
     const updated = await this.serializable(async (tx) => {
-      const invoice = await tx.invoice.findFirst({
+      let invoice = await tx.invoice.findFirst({
         where: { id: invoiceId, organizationId },
-        select: { id: true, status: true, total: true, amountPaid: true, creditedAmount: true, paymentStatus: true },
+        select: {
+          id: true,
+          status: true,
+          total: true,
+          amountPaid: true,
+          creditedAmount: true,
+          paymentStatus: true,
+        },
       });
       if (!invoice) throw new NotFoundException('Invoice not found');
       if (invoice.status !== 'ISSUED') {
@@ -133,48 +152,55 @@ export class PaymentService {
       // A sales return credits part of the invoice (creditedAmount), so what
       // the customer still owes is measured against the net total.
       const balance = balanceOf(invoice);
-      if (dto.amount > balance + EPS) {
-        throw new BadRequestException(`Payment of ${dto.amount} exceeds balance due (${balance})`);
+      const sum = round2(parts.reduce((s, p) => s + p.amount, 0));
+      if (sum > balance + EPS) {
+        throw new BadRequestException(`Payment of ${sum} exceeds balance due (${balance})`);
       }
 
-      const payment = await tx.payment.create({
-        data: {
-          invoiceId,
-          amount: dto.amount,
-          method,
-          note: dto.note,
-          recordedById: userId,
-          // CASH is never tied to a specific bank account, so this is
-          // forced null rather than trusting whatever the caller sent.
-          bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
-        },
-      });
-
-      const result = await this.applyToInvoice(tx, invoice, dto.amount);
-
-      await tx.invoiceActivityEvent.create({
-        data: {
-          invoiceId,
-          organizationId,
-          userId,
-          eventType: InvoiceActivityEventType.PAYMENT_RECORDED,
-          reason: `${idr(dto.amount)} via ${method}${dto.note ? ` — ${dto.note}` : ''}`,
-        },
-      });
-
-      // MARKED_PAID fires only the moment this payment crossed the invoice
-      // into PAID. invoice.paymentStatus is the status BEFORE this update.
-      if (result.paymentStatus === PaymentStatus.PAID && invoice.paymentStatus !== PaymentStatus.PAID) {
-        await tx.invoiceActivityEvent.create({
-          data: { invoiceId, organizationId, userId, eventType: InvoiceActivityEventType.MARKED_PAID },
+      let result: Awaited<ReturnType<PaymentService['applyToInvoice']>> | null = null;
+      for (const [i, dto] of parts.entries()) {
+        const method = methods[i];
+        const payment = await tx.payment.create({
+          data: {
+            invoiceId,
+            amount: dto.amount,
+            method,
+            note: dto.note,
+            recordedById: userId,
+            // CASH is never tied to a specific bank account, so this is
+            // forced null rather than trusting whatever the caller sent.
+            bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+          },
         });
+
+        result = await this.applyToInvoice(tx, invoice, dto.amount);
+
+        await tx.invoiceActivityEvent.create({
+          data: {
+            invoiceId,
+            organizationId,
+            userId,
+            eventType: InvoiceActivityEventType.PAYMENT_RECORDED,
+            reason: `${idr(dto.amount)} via ${method}${dto.note ? ` — ${dto.note}` : ''}`,
+          },
+        });
+
+        // MARKED_PAID fires only the moment this payment crossed the invoice
+        // into PAID. invoice.paymentStatus is the status BEFORE this update.
+        if (result.paymentStatus === PaymentStatus.PAID && invoice.paymentStatus !== PaymentStatus.PAID) {
+          await tx.invoiceActivityEvent.create({
+            data: { invoiceId, organizationId, userId, eventType: InvoiceActivityEventType.MARKED_PAID },
+          });
+        }
+
+        // Cash/Bank (debit) + AR (credit), in the SAME transaction. If this
+        // throws, the whole payment rolls back.
+        await this.postingRules.postPayment(organizationId, payment.id, tx);
+
+        invoice = { ...invoice, amountPaid: result.amountPaid, paymentStatus: result.paymentStatus };
       }
 
-      // Cash/Bank (debit) + AR (credit), in the SAME transaction. If this
-      // throws, the whole payment rolls back.
-      await this.postingRules.postPayment(organizationId, payment.id, tx);
-
-      return result;
+      return result!;
     }, 'Payment conflicted with a concurrent update, please retry');
 
     return this.present(updated);

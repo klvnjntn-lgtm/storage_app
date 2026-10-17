@@ -172,7 +172,7 @@ export default function PlatformPage() {
       }}
     >
       <div className="sticky top-0 z-10 bg-(--c-bg)/75 backdrop-blur-xl px-3 sm:px-6 py-3 sm:py-4 border-b border-(--c-line)">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <span className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-(--c-sky)/25 to-blue-600/10 border border-(--c-sky)/30 shadow-[0_0_24px_-4px_rgba(56,189,248,0.45)] shrink-0">
               <Terminal size={18} strokeWidth={2} className="text-(--c-sky)" aria-hidden />
@@ -217,7 +217,7 @@ export default function PlatformPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-4">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {error && (
           <div role="alert" className="border border-(--c-red)/30 bg-(--c-red)/10 text-(--c-red) text-sm rounded-lg px-3 py-2">
             {error}

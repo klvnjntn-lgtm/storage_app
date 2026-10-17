@@ -668,7 +668,6 @@ export default function InvoiceDetailPage() {
                     </div>
 
                     <DatePicker
-                      variant="field"
                       clearable
                       value={reminderDueDate}
                       onChange={(v) => setReminderDueDate(v)}

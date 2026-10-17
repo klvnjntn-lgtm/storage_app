@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Car, Bell, Search, CornerDownLeft, Loader2 } from 'lucide-react';
+import { Car, Bell, Search, CornerDownLeft, Loader2, Wrench } from 'lucide-react';
 import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -36,6 +36,13 @@ export default function WorkshopHome() {
       href: '/workshop/vehicles/search',
       icon: Search,
       gradient: 'from-blue-600 to-indigo-800',
+    },
+    {
+      title: t('workshop.overview.partsCardTitle'),
+      description: t('workshop.overview.partsCardDescription'),
+      href: '/workshop/parts',
+      icon: Wrench,
+      gradient: 'from-emerald-500 to-teal-700',
     },
     {
       title: t('workshop.overview.remindersCardTitle'),

@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsPositive } from 'class-validator';
+import { IsString, IsNumber, IsPositive, IsOptional, IsArray } from 'class-validator';
 
 export class WarehouseMoveDto {
   @IsString()
@@ -13,4 +13,10 @@ export class WarehouseMoveDto {
 
   @IsString()
   toLocationId!: string;
+
+  // Serial-tracked products: the units moving, one per quantity.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serialNumbers?: string[];
 }

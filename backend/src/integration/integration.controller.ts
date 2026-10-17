@@ -14,12 +14,21 @@ import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateConnectionDto } from './dto/create-connection.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuleKey } from '@prisma/client';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
 
 // Auth, org and role checks all come from the global guards (app.module.ts).
 // Staff only — drivers are already kept out by DriverScopeGuard; stated
-// here so the intent is visible. Deliberately not module-gated: the order
-// upload page is shown to every org regardless of modules.
+// here so the intent is visible. The order upload page is shown to every
+// org whatever modules it has — but it needs at least one active, so an
+// org whose trial or subscription has fully lapsed can't keep importing.
 @Roles('ADMIN', 'USER')
+@RequireModule(
+  ModuleKey.INVOICE_POS,
+  ModuleKey.WAREHOUSE_OPS,
+  ModuleKey.WORKSHOP_RMS,
+  ModuleKey.DELIVERY_DMS,
+)
 @Controller('integrations')
 export class IntegrationController {
   constructor(private readonly integrationService: IntegrationService) {}

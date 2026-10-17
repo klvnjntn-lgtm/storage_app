@@ -11,6 +11,7 @@ import {
   PurchaseOrderStatus,
 } from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
+import { PlanLimitsService } from '../billing/plan-limits.service';
 import { detectInvoiceNumberFormat } from '../shared/documents/invoice-number-format.util';
 // ---------------------------------------------------------------------------
 // Firebird helpers (promisified — node-firebird is callback-based)
@@ -378,6 +379,7 @@ interface PoDetRow {
 export class GdbImportService {
   constructor(private readonly prisma: PrismaService,     
     private readonly locationService: LocationService,
+    private readonly planLimits: PlanLimitsService,
 ) {}
 
   private readonly tempFiles = new Map<string, TempFileEntry>();
@@ -602,6 +604,11 @@ async saveWarehouseMapping(
         : (await attachAnyVersion(dbPath, this.firebirdHost())).db;
 
     try {
+      await this.assertImportFitsPlan(
+        fbDb,
+        organizationId,
+        target !== 'products_only',
+      );
       const { result: itemResult, productIdBySku, stockRows } = await this.importItems(fbDb, organizationId);
       const stockResult = await this.importStock(fbDb, organizationId, stockRows, productIdBySku);
 
@@ -633,6 +640,56 @@ async saveWarehouseMapping(
     } finally {
       await detach(fbDb);
       await this.cleanupToken(token);
+    }
+  }
+
+  // The trial limits (billing/plans.ts) apply to an import like any other
+  // way of adding products or invoices. Checked before anything is written,
+  // so an import that won't fit fails whole instead of stopping halfway.
+  // Paid and hand-managed orgs have no limits and skip the extra queries.
+  private async assertImportFitsPlan(
+    fbDb: Firebird.Database,
+    organizationId: string,
+    includeInvoices: boolean,
+  ) {
+    const { limits } = await this.planLimits.getPlanState(organizationId);
+
+    if (limits.products !== null) {
+      const rows = await fbQuery<{ SKU: string | null }>(
+        fbDb,
+        `SELECT ITEMNO AS SKU FROM ITEM`,
+      );
+      const skus = uniqueTrimmed(rows.map((r) => r.SKU));
+      let existing = 0;
+      for (const chunk of chunked(skus, 10_000)) {
+        existing += await this.prisma.product.count({
+          where: { organizationId, sku: { in: chunk } },
+        });
+      }
+      await this.planLimits.assertCanAdd(
+        organizationId,
+        'products',
+        skus.length - existing,
+      );
+    }
+
+    if (includeInvoices && limits.invoicesPerMonth !== null) {
+      const rows = await fbQuery<{ NO: string | null }>(
+        fbDb,
+        `SELECT COALESCE(INVOICENO, CAST(ARINVOICEID AS VARCHAR(20))) AS NO FROM ARINV`,
+      );
+      const numbers = uniqueTrimmed(rows.map((r) => r.NO));
+      let existing = 0;
+      for (const chunk of chunked(numbers, 10_000)) {
+        existing += await this.prisma.invoice.count({
+          where: { organizationId, invoiceNumber: { in: chunk } },
+        });
+      }
+      await this.planLimits.assertCanAdd(
+        organizationId,
+        'invoicesPerMonth',
+        numbers.length - existing,
+      );
     }
   }
 
@@ -1945,4 +2002,17 @@ private async importStock(
       },
     };
   }
+}
+
+function uniqueTrimmed(values: (string | null | undefined)[]): string[] {
+  return [
+    ...new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v)),
+  ];
+}
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size)
+    out.push(items.slice(i, i + size));
+  return out;
 }

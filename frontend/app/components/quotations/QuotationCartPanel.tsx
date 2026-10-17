@@ -149,7 +149,6 @@ export function QuotationCartPanel({
           {t('sales.quotationCart.validUntilLabel')}
         </label>
         <DatePicker
-          variant="field"
           clearable
           value={validUntil}
           onChange={(v) => onChangeValidUntil(v)}

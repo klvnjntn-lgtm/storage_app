@@ -24,6 +24,7 @@ import { ChartOfAccountsSeedService } from './chart-of-accounts-seed.service';
 import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { AccountingReportsService, AgingBucket } from './accounting-reports.service';
 import { CashFlowService } from './cash-flow.service';
+import { CashStatementService } from './cash-statement.service';
 import { endOfBusinessDay, parseDateOnly, resolveTimezone, todayBusinessDate } from './business-date';
 import { CreateAccountDto, CreateManualJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -78,6 +79,7 @@ export class AccountingController {
     private accountsService: ChartOfAccountsService,
     private reports: AccountingReportsService,
     private cashFlow: CashFlowService,
+    private cashStatement: CashStatementService,
   ) {}
 
   // Writes that change the books' structure or history are admin-only.
@@ -324,6 +326,26 @@ export class AccountingController {
       throw new BadRequestException('from and to query params are required (YYYY-MM-DD)');
     }
     return this.cashFlow.getCashFlow(organizationId, parseDateOnly(from, 'from'), parseDateOnly(to, 'to'));
+  }
+
+  // Bank-statement-style view of cash and bank accounts: every payment in
+  // and out with who/what it was for. accountId narrows it to one account.
+  @Get('reports/cash-statement')
+  getCashStatement(
+    @CurrentOrg() organizationId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('accountId') accountId?: string,
+  ) {
+    if (!from || !to) {
+      throw new BadRequestException('from and to query params are required (YYYY-MM-DD)');
+    }
+    return this.cashStatement.getStatement(
+      organizationId,
+      parseDateOnly(from, 'from'),
+      parseDateOnly(to, 'to'),
+      accountId || undefined,
+    );
   }
 
   // --- Fiscal periods ---

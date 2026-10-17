@@ -3,16 +3,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { display } from '@/lib/fonts';
-import { BarChart3, RefreshCw, AlertTriangle } from 'lucide-react';
+import { BarChart3, RefreshCw, AlertTriangle, MapPin, Navigation } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
-import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
+import DeliveryMap, { type MapDriver, type MapStop } from '@/app/components/delivery/DeliveryMap';
 import DatePicker from '@/app/components/shared/DatePicker';
 import TeamPicker, { teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
+import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 
 
 type Summary = { total: number; delivered: number; pending: number; failed: number; atRisk: number; late: number };
-type TeamProgress = Summary & { routeId: string; team: PickerTeam };
+// Where the driver probably is — from their last resolved stop, not live
+// GPS (see DeliveryRoutesService.whereabouts).
+type Whereabouts = {
+  lastStop: {
+    label: string;
+    status: 'DELIVERED' | 'FAILED';
+    at: string;
+    plannedEta: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  } | null;
+  nextStop: { label: string; plannedEta: string | null } | null;
+  plannedDepartureAt: string | null;
+  position: { latitude: number; longitude: number; source: 'LAST_STOP' | 'DEPOT' } | null;
+};
+type TeamProgress = Summary & Whereabouts & { routeId: string; team: PickerTeam };
 // Prisma Decimal fields serialize as strings over JSON, not numbers.
 type MapStopRaw = {
   id: string;
@@ -32,6 +48,21 @@ function todayIso() {
 // How often today's view refreshes itself while the tab is visible.
 const REFRESH_MS = 30_000;
 
+function clock(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function minutesSince(iso: string, now: number) {
+  return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
+}
+
+// Initials for the driver's map badge: driver name, else the team's.
+function initials(team: PickerTeam) {
+  const name = team.driver?.displayName || team.driver?.email.split('@')[0] || team.name;
+  const parts = name.trim().split(/\s+/);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+}
+
 function StatCard({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 min-w-0">
@@ -43,6 +74,7 @@ function StatCard({ label, value, tone }: { label: string; value: number; tone: 
 
 export default function DeliveryMonitoringPage() {
   const { t } = useLanguage();
+  const { authorized } = useRequireAdmin();
   const [date, setDate] = useState(todayIso());
   const [summary, setSummary] = useState<Summary>({ total: 0, delivered: 0, pending: 0, failed: 0, atRisk: 0, late: 0 });
   const [byTeam, setByTeam] = useState<TeamProgress[]>([]);
@@ -92,14 +124,14 @@ export default function DeliveryMonitoringPage() {
   }
 
   useEffect(() => {
-    load();
+    if (authorized) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
+  }, [date, authorized]);
 
   // Live mode for today: poll while the tab is visible, and catch up
   // immediately when the user comes back to it.
   useEffect(() => {
-    if (!isToday) return;
+    if (!isToday || !authorized) return;
     const tick = () => {
       if (document.visibilityState === 'visible') load(true);
     };
@@ -110,7 +142,7 @@ export default function DeliveryMonitoringPage() {
       document.removeEventListener('visibilitychange', tick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, isToday]);
+  }, [date, isToday, authorized]);
 
   const noDriver = t('delivery.teams.noDriver');
 
@@ -120,6 +152,28 @@ export default function DeliveryMonitoringPage() {
     for (const s of mapStops) if (!seen.has(s.team.id)) seen.set(s.team.id, s.team);
     return [...seen.values()];
   }, [mapStops]);
+
+  // One badge per driver at their best-guess position.
+  // "Minutes ago" is measured from the last refresh, which runs every 30s.
+  const now = updatedAt?.getTime() ?? 0;
+  const mapDrivers = useMemo<MapDriver[]>(() => {
+    return byTeam
+      .filter((d) => d.position && (!mapTeamId || d.team.id === mapTeamId))
+      .map((d) => ({
+        id: d.routeId,
+        latitude: d.position!.latitude,
+        longitude: d.position!.longitude,
+        badge: initials(d.team),
+        label: teamLabel(d.team, noDriver),
+        muted: d.position!.source === 'DEPOT',
+        detail: d.lastStop
+          ? t('delivery.monitoring.lastStopAgo', {
+              n: minutesSince(d.lastStop.at, now),
+              place: d.lastStop.label,
+            })
+          : t('delivery.monitoring.atDepot'),
+      }));
+  }, [byTeam, mapTeamId, noDriver, t, now]);
 
   // Popup shows the stop, then its team/driver and status.
   const visibleMapStops = useMemo<MapStop[]>(
@@ -132,6 +186,8 @@ export default function DeliveryMonitoringPage() {
         })),
     [mapStops, mapTeamId, noDriver, t],
   );
+
+  if (!authorized) return null;
 
   return (
     <main
@@ -167,7 +223,7 @@ export default function DeliveryMonitoringPage() {
             <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
               {t('delivery.monitoring.dateLabel')}
             </label>
-            <DatePicker value={date} onChange={setDate} />
+            <DatePicker value={date} onChange={setDate} className="w-44" />
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
             {isToday && (
@@ -207,7 +263,7 @@ export default function DeliveryMonitoringPage() {
           <StatCard label={t('delivery.monitoring.atRisk')} value={summary.atRisk} tone="text-amber-600" />
         </div>
 
-        {mapStops.length > 0 && (
+        {(mapStops.length > 0 || mapDrivers.length > 0) && (
           <div data-tour="dlv-mon-map" className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">{t('delivery.monitoring.mapTitle')}</h2>
@@ -219,7 +275,8 @@ export default function DeliveryMonitoringPage() {
                 className="w-full sm:w-72"
               />
             </div>
-            <DeliveryMap stops={visibleMapStops} />
+            <DeliveryMap stops={visibleMapStops} drivers={mapDrivers} />
+            <p className="text-xs text-gray-500">{t('delivery.monitoring.positionHint')}</p>
           </div>
         )}
 
@@ -273,11 +330,58 @@ export default function DeliveryMonitoringPage() {
                     )}
                   </div>
                 )}
+                <Whereabouts d={d} isToday={isToday} now={now} />
               </Link>
             );
           })}
         </div>
       </div>
     </main>
+  );
+}
+
+// "Last stop 25 min ago · Toko Abadi" / "Next: Toko Baru · planned 10:30 ·
+// 15 min overdue". Elapsed and overdue times only mean something for today.
+function Whereabouts({ d, isToday, now }: { d: TeamProgress; isToday: boolean; now: number }) {
+  const { t } = useLanguage();
+  const overdue =
+    isToday && d.nextStop?.plannedEta ? minutesSince(d.nextStop.plannedEta, now) : 0;
+  const finished = d.total > 0 && !d.nextStop;
+
+  return (
+    <div className="mt-2 space-y-0.5 text-xs text-gray-600">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <MapPin size={12} className="shrink-0 text-gray-400" />
+        <span className="truncate">
+          {d.lastStop
+            ? `${t(d.lastStop.status === 'FAILED' ? 'delivery.monitoring.lastFailed' : 'delivery.monitoring.lastDelivered', {
+                place: d.lastStop.label,
+              })} · ${
+                isToday
+                  ? t('delivery.monitoring.minutesAgo', { n: minutesSince(d.lastStop.at, now) })
+                  : clock(d.lastStop.at)
+              }`
+            : d.plannedDepartureAt
+              ? t('delivery.monitoring.notStartedDeparts', { time: clock(d.plannedDepartureAt) })
+              : t('delivery.monitoring.notStarted')}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Navigation size={12} className="shrink-0 text-gray-400" />
+        <span className="truncate">
+          {finished
+            ? t('delivery.monitoring.allDone')
+            : d.nextStop
+              ? t('delivery.monitoring.nextStop', { place: d.nextStop.label }) +
+                (d.nextStop.plannedEta ? ` · ${t('delivery.monitoring.planned', { time: clock(d.nextStop.plannedEta) })}` : '')
+              : '—'}
+        </span>
+        {overdue > 0 && !finished && (
+          <span className="shrink-0 font-semibold text-red-600">
+            {t('delivery.monitoring.overdue', { n: overdue })}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

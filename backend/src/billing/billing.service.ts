@@ -166,6 +166,22 @@ export class BillingService {
         'Your subscription is managed by WareSys support. Contact them to change it.',
       );
     }
+    // A module the platform owner granted with no expiry is already free
+    // for good — paying for it would buy nothing.
+    const owned = await this.prisma.organizationModule.findMany({
+      where: {
+        organizationId,
+        module: { in: wanted },
+        enabled: true,
+        expiresAt: null,
+      },
+      select: { module: true },
+    });
+    if (owned.length > 0) {
+      throw new BadRequestException(
+        `${owned.map((o) => MODULE_NAMES[o.module]).join(', ')} is already included in your account — remove it from this checkout`,
+      );
+    }
     // Workshop runs on top of Invoice & POS: it must already be paid for
     // (or granted for good) or be bought in the same checkout. A trial
     // doesn't count — it would end and leave the paid module unusable.
@@ -353,8 +369,9 @@ export class BillingService {
     });
   }
 
-  // Each module bought runs one more period from its own paid-until (or
-  // from today, if it had lapsed or was only on trial). The module stays on
+  // Each module bought runs one more period from its own paid-until, or —
+  // bought during the trial — from the trial's end, so paying early doesn't
+  // forfeit the trial days left; otherwise from today. The module stays on
   // GRACE_DAYS past that, so a late renewal doesn't cut anyone off; a
   // module the platform owner granted with no expiry stays that way.
   private async applySubscription(
@@ -369,6 +386,14 @@ export class BillingService {
       throw new Error('Subscription payment is missing its modules or period');
     }
     const now = new Date();
+    const org = await tx.organization.findUniqueOrThrow({
+      where: { id: payment.organizationId },
+      select: { plan: true, trialEndsAt: true, paidUntil: true },
+    });
+    const trialEnd =
+      org.plan === 'trial' && org.trialEndsAt && org.trialEndsAt > now
+        ? org.trialEndsAt
+        : now;
     let latest: Date | null = null;
     for (const module of payment.modules) {
       const row = await tx.organizationModule.findUnique({
@@ -379,7 +404,8 @@ export class BillingService {
           },
         },
       });
-      const from = row?.paidUntil && row.paidUntil > now ? row.paidUntil : now;
+      const from =
+        row?.paidUntil && row.paidUntil > trialEnd ? row.paidUntil : trialEnd;
       const paidUntil = addPeriod(from, payment.period);
       const grantedForever = !!row?.enabled && row.expiresAt === null;
       const expiresAt = grantedForever
@@ -404,11 +430,7 @@ export class BillingService {
       if (!latest || paidUntil > latest) latest = paidUntil;
     }
     // Organization.paidUntil mirrors the furthest-out module, for the
-    // platform console's payment column.
-    const org = await tx.organization.findUniqueOrThrow({
-      where: { id: payment.organizationId },
-      select: { paidUntil: true },
-    });
+    // platform console's payment column and effectivePlan().
     await tx.organization.update({
       where: { id: payment.organizationId },
       data: {
@@ -472,7 +494,8 @@ export class BillingService {
           select: { id: true },
         }),
         this.prisma.organizationModule.findMany({
-          where: { enabled: true, paidUntil: window },
+          // A module granted for good never needs renewing.
+          where: { enabled: true, paidUntil: window, expiresAt: { not: null } },
           select: { organizationId: true, module: true },
         }),
       ]);
@@ -502,12 +525,32 @@ export class BillingService {
           'PLAN_EXPIRING',
           `${mods.map((m) => MODULE_NAMES[m]).join(', ')} ${mods.length > 1 ? 'renew' : 'renews'} in ${when}`,
           {
-            body: 'Renew to keep using it without interruption.',
+            body: await this.renewalBody(orgId, mods),
             link: '/settings/billing',
           },
         );
       }
     }
+  }
+
+  // When a module about to run out is one that another, still-paid module
+  // depends on (MODULE_PRICES.requires), the reminder says the dependent
+  // stops too — otherwise a paid Workshop just goes dark.
+  private async renewalBody(organizationId: string, expiring: ModuleKey[]) {
+    for (const p of MODULE_PRICES) {
+      if (
+        !p.requires ||
+        !expiring.includes(p.requires) ||
+        expiring.includes(p.module)
+      )
+        continue;
+      const dependent = await this.prisma.organizationModule.findUnique({
+        where: { organizationId_module: { organizationId, module: p.module } },
+      });
+      if (isPaid(dependent))
+        return `Renew to keep using it without interruption — ${MODULE_NAMES[p.module]} also stops working without ${MODULE_NAMES[p.requires]}.`;
+    }
+    return 'Renew to keep using it without interruption.';
   }
 
   private async adminIds(organizationId: string) {
@@ -519,10 +562,13 @@ export class BillingService {
   }
 }
 
-// Paid for and not yet past its paid-until, or granted with no expiry.
+// Paid for and still running (its paid period or the grace days after
+// it), or granted with no expiry. A trial module has no paidUntil.
 function isPaid(row: { enabled: boolean; expiresAt: Date | null; paidUntil: Date | null } | null | undefined) {
   if (!row?.enabled) return false;
-  return row.expiresAt === null || (!!row.paidUntil && row.paidUntil > new Date());
+  return (
+    row.expiresAt === null || (!!row.paidUntil && row.expiresAt > new Date())
+  );
 }
 
 function safeEqual(a: string, b: string) {

@@ -44,6 +44,19 @@ describe('plans', () => {
     ).toBe('subscription');
   });
 
+  it('drops a subscription to free once its grace days have passed', () => {
+    const sub = (paidUntil: Date) =>
+      effectivePlan(
+        { plan: 'subscription', trialEndsAt: null, paidUntil },
+        now,
+      );
+    expect(sub(new Date(now.getTime() + DAY))).toBe('subscription');
+    expect(sub(new Date(now.getTime() - (GRACE_DAYS - 1) * DAY))).toBe(
+      'subscription',
+    );
+    expect(sub(new Date(now.getTime() - (GRACE_DAYS + 1) * DAY))).toBe('free');
+  });
+
   it('prices each module by month or year', () => {
     expect(modulePrice(ModuleKey.INVOICE_POS, 'MONTH')).toBe(300_000);
     expect(modulePrice(ModuleKey.INVOICE_POS, 'YEAR')).toBe(3_000_000);
@@ -175,12 +188,16 @@ describe('Billing (database)', () => {
     );
     expect(Number(payment.amount)).toBe(6_600_000);
 
+    const { trialEndsAt } = await prisma.organization.findUniqueOrThrow({
+      where: { id: orgId },
+    });
     await billing.markPaid(payment.id);
     await billing.markPaid(payment.id); // a duplicate webhook changes nothing
     const pos = (await moduleRow(orgId, ModuleKey.INVOICE_POS))!;
-    const days = (pos.paidUntil!.getTime() - Date.now()) / DAY;
-    expect(days).toBeGreaterThan(364);
-    expect(days).toBeLessThan(367);
+    // Bought mid-trial: the year starts when the trial would have ended.
+    expect(pos.paidUntil!.toISOString()).toBe(
+      addPeriod(trialEndsAt!, 'YEAR').toISOString(),
+    );
     expect(pos.expiresAt!.getTime() - pos.paidUntil!.getTime()).toBe(
       GRACE_DAYS * DAY,
     );
@@ -244,7 +261,7 @@ describe('Billing (database)', () => {
     });
   });
 
-  it('keeps a module the platform owner granted forever without an expiry', async () => {
+  it('refuses to sell a module the platform owner granted forever', async () => {
     const { orgId, adminId } = await newOrg();
     await prisma.organization.update({
       where: { id: orgId },
@@ -257,16 +274,14 @@ describe('Billing (database)', () => {
         enabled: true,
       },
     });
-    const payment = await billing.createSubscriptionCheckout(
-      orgId,
-      adminId,
-      [ModuleKey.DELIVERY_DMS],
-      'MONTH',
-    );
-    await billing.markPaid(payment.id);
-    const row = (await moduleRow(orgId, ModuleKey.DELIVERY_DMS))!;
-    expect(row.expiresAt).toBeNull();
-    expect(row.paidUntil).not.toBeNull();
+    await expect(
+      billing.createSubscriptionCheckout(
+        orgId,
+        adminId,
+        [ModuleKey.DELIVERY_DMS],
+        'MONTH',
+      ),
+    ).rejects.toThrow(/already included/);
   });
 
   it('rejects webhooks without the callback token', async () => {

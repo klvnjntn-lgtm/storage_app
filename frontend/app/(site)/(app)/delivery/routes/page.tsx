@@ -14,6 +14,10 @@ import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/comp
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
 
+const filterLabel = 'block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1';
+const actionBtn =
+  'flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-center leading-tight border border-gray-300 bg-white rounded-md px-2 sm:px-3 py-2 hover:bg-gray-50 transition-colors';
+
 type RouteStatus = 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
 type RouteListItem = {
@@ -269,86 +273,79 @@ function DeliveryRoutesPageInner() {
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{error}</div>
         )}
 
-        <div data-tour="dlv-routes-filters" className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-3">
-          <div className="col-span-2 sm:col-span-1">
-            <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-              {t('delivery.routes.dateLabel')}
-            </label>
-            <DatePicker value={date} onChange={setDate} />
-          </div>
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-              {t('delivery.routes.teamFilterLabel')}
-            </label>
-            <TeamPicker
-              teams={pickerTeams}
-              value={teamFilter}
-              onChange={setTeamFilter}
-              clearLabel={t('delivery.routes.allTeams')}
-            />
-          </div>
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-              {t('delivery.routes.statusFilterLabel')}
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
-            >
-              <option value="">{t('delivery.routes.allStatuses')}</option>
-              {statusOptions.map((s) => (
-                <option key={s} value={s}>
-                  {t(`delivery.routes.statusLabel.${s}`)}
-                </option>
-              ))}
-            </select>
+        <div data-tour="dlv-routes-filters" className="border border-blue-500/15 rounded-xl bg-white shadow-sm">
+          {/* Filters: three equal fields, stacked on mobile. */}
+          <div className="p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <label className={filterLabel}>{t('delivery.routes.dateLabel')}</label>
+              <DatePicker value={date} onChange={setDate} />
+            </div>
+            <div className="min-w-0">
+              <label className={filterLabel}>{t('delivery.routes.teamFilterLabel')}</label>
+              <TeamPicker
+                teams={pickerTeams}
+                value={teamFilter}
+                onChange={setTeamFilter}
+                clearLabel={t('delivery.routes.allTeams')}
+              />
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="routes-status" className={filterLabel}>{t('delivery.routes.statusFilterLabel')}</label>
+              <select
+                id="routes-status"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full border-2 border-gray-300 rounded-md bg-white px-3 py-2 text-base sm:text-sm transition-colors hover:border-blue-500/40 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="">{t('delivery.routes.allStatuses')}</option>
+                {statusOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {t(`delivery.routes.statusLabel.${s}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="col-span-2 grid grid-cols-2 sm:flex sm:ml-auto gap-2">
+          {/* Actions: management on the left, creating routes on the right. */}
+          <div className="border-t border-blue-500/10 px-3 sm:px-4 py-3 flex flex-col-reverse sm:flex-row sm:items-center gap-2">
             {/* Drivers, teams and invites are admin-only (the backend refuses staff). */}
             {isAdmin && (
-              <>
-                <button data-tour="dlv-routes-drivers"
-                  onClick={() => router.push('/delivery/drivers')}
-                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-                >
-                  <UserCog size={14} />
+              <div className="grid grid-cols-3 sm:flex gap-2">
+                <button data-tour="dlv-routes-drivers" onClick={() => router.push('/delivery/drivers')} className={actionBtn}>
+                  <UserCog size={14} className="shrink-0" />
                   {t('delivery.driversAdmin.title')}
                 </button>
-                <button data-tour="dlv-routes-teams"
-                  onClick={() => setShowTeams((v) => !v)}
-                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-                >
-                  <Users size={14} />
+                <button data-tour="dlv-routes-teams" onClick={() => setShowTeams((v) => !v)} aria-pressed={showTeams} className={`${actionBtn} ${showTeams ? 'bg-blue-50 border-blue-500/40 text-blue-700' : ''}`}>
+                  <Users size={14} className="shrink-0" />
                   {t('delivery.routes.teamsTitle')}
                 </button>
-                <button data-tour="dlv-routes-invite"
-                  onClick={() => setShowInvite((v) => !v)}
-                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50"
-                >
-                  <UserPlus size={14} />
+                <button data-tour="dlv-routes-invite" onClick={() => setShowInvite((v) => !v)} aria-pressed={showInvite} className={`${actionBtn} ${showInvite ? 'bg-blue-50 border-blue-500/40 text-blue-700' : ''}`}>
+                  <UserPlus size={14} className="shrink-0" />
                   {t('delivery.routes.inviteDriver')}
                 </button>
-              </>
+              </div>
             )}
-            {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
-            {SHOW_OPTIMIZE && (
-              <button data-tour="dlv-routes-plan"
-                onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
-                className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-100"
+            <div className="grid grid-cols-1 sm:flex gap-2 sm:ml-auto">
+              {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
+              {SHOW_OPTIMIZE && (
+                <button data-tour="dlv-routes-plan"
+                  onClick={() => router.push(`/delivery/routes/plan?date=${date}`)}
+                  className="flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 text-blue-700 bg-blue-50 rounded-md px-3 py-2 hover:bg-blue-100"
+                >
+                  <Sparkles size={14} />
+                  {t('delivery.plan.openButton')}
+                </button>
+              )}
+              <button data-tour="dlv-routes-new"
+                onClick={() => setShowNewRoute((v) => !v)}
+                aria-pressed={showNewRoute}
+                className="flex items-center justify-center gap-1.5 text-sm font-medium border border-blue-600 bg-blue-600 text-white rounded-md px-3 py-2 hover:bg-blue-700"
               >
-                <Sparkles size={14} />
-                {t('delivery.plan.openButton')}
+                <Plus size={14} />
+                {t('delivery.routes.newRoute')}
               </button>
-            )}
-            <button data-tour="dlv-routes-new"
-              onClick={() => setShowNewRoute((v) => !v)}
-              className="order-first sm:order-none flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700"
-            >
-              <Plus size={14} />
-              {t('delivery.routes.newRoute')}
-            </button>
+            </div>
           </div>
         </div>
 
@@ -464,7 +461,7 @@ function DeliveryRoutesPageInner() {
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
                 {t('delivery.routes.teamLabel')}
               </label>
-              <TeamPicker teams={pickerTeams} value={newRouteTeamId} onChange={setNewRouteTeamId} />
+              <TeamPicker teams={pickerTeams} value={newRouteTeamId} onChange={setNewRouteTeamId} className="sm:w-56" />
               {teams.length === 0 && <p className="text-xs text-gray-500 mt-1">{t('delivery.routes.noTeams')}</p>}
             </div>
             <div>

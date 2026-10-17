@@ -73,6 +73,10 @@ const SKIPPED_MODELS = new Set([
   'OrganizationModule',
   'PushSubscription',
   'BillingPayment',
+  // Shared parts catalogue (scraper / workshop data), not one org's.
+  'PartCatalogEntry',
+  'PartInterchange',
+  'PartWorkshopEvidence',
 ]);
 
 // Columns left out of an export: what belongs to the source install
