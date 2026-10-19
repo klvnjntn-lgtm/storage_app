@@ -10,6 +10,7 @@ import {
   InvoiceFormat,
   InvoiceStatus,
   PaymentStatus,
+  Prisma,
   PurchaseOrderStatus,
 } from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
@@ -206,6 +207,35 @@ function parseVehicleDescription(description: string | null | undefined): Parsed
 
 function num(value: number | null | undefined): number {
   return value == null ? 0 : Number(value);
+}
+
+// Accurate splits what settled an ARINV across columns: PAYMENT is what was
+// paid at the time of sale (most counter sales — PAIDAMOUNT stays 0 for
+// these), PAIDAMOUNT is later customer receipts, and returns and receipt
+// discounts reduce what's owed too. Capped at the invoice total so an
+// overpaid invoice doesn't show a negative balance.
+export function accuratePayment(header: {
+  INVOICEAMOUNT: number | null;
+  PAIDAMOUNT: number | null;
+  PAYMENT: number | null;
+  RETURNAMOUNT: number | null;
+  TERMDISCOUNT: number | null;
+}): { paidAmount: number; paymentStatus: PaymentStatus } {
+  const invoiceAmount = num(header.INVOICEAMOUNT);
+  const settled =
+    num(header.PAIDAMOUNT) + num(header.PAYMENT) + num(header.RETURNAMOUNT) + num(header.TERMDISCOUNT);
+  const paidAmount = Math.round(Math.min(settled, Math.max(invoiceAmount, 0)));
+  // Within Rp1 of the total counts as paid (Accurate rounds per line).
+  // A zero-total invoice (free service, fully discounted) has nothing owing.
+  const paymentStatus =
+    invoiceAmount <= 0
+      ? PaymentStatus.PAID
+      : paidAmount <= 0
+      ? PaymentStatus.UNPAID
+      : paidAmount >= invoiceAmount - 1
+        ? PaymentStatus.PAID
+        : PaymentStatus.PARTIAL;
+  return { paidAmount, paymentStatus };
 }
 
 // gdscode for "Unsupported on-disk structure ... found X, support Y"
@@ -1458,6 +1488,9 @@ private async importStock(
       INVOICEDATE: Date | null;
       INVOICEAMOUNT: number | null;
       PAIDAMOUNT: number | null;
+      PAYMENT: number | null;
+      RETURNAMOUNT: number | null;
+      TERMDISCOUNT: number | null;
       TAX1AMOUNT: number | null;
       TAX2AMOUNT: number | null;
     }>(
@@ -1472,6 +1505,9 @@ private async importStock(
         inv.INVOICEDATE AS INVOICEDATE,
         inv.INVOICEAMOUNT AS INVOICEAMOUNT,
         inv.PAIDAMOUNT AS PAIDAMOUNT,
+        inv.PAYMENT AS PAYMENT,
+        inv.RETURNAMOUNT AS RETURNAMOUNT,
+        inv.TERMDISCOUNT AS TERMDISCOUNT,
         inv.TAX1AMOUNT AS TAX1AMOUNT,
         inv.TAX2AMOUNT AS TAX2AMOUNT
       FROM ARINV inv
@@ -1567,6 +1603,10 @@ private async importStock(
         nextServiceKm: number | null;
         vehiclePlateNumber: string | null;
         customerName: string | null;
+        status: InvoiceStatus;
+        amountPaid: Prisma.Decimal;
+        paymentStatus: PaymentStatus;
+        paymentCount: number;
       }
     >();
     const INVOICE_LOOKUP_CHUNK_SIZE = 10_000;
@@ -1594,6 +1634,10 @@ private async importStock(
           nextServiceKm: true,
           vehiclePlateNumber: true,
           customerName: true,
+          status: true,
+          amountPaid: true,
+          paymentStatus: true,
+          _count: { select: { payments: true } },
         },
       });
 
@@ -1606,6 +1650,10 @@ private async importStock(
             nextServiceKm: invoice.nextServiceKm,
             vehiclePlateNumber: invoice.vehiclePlateNumber,
             customerName: invoice.customerName,
+            status: invoice.status,
+            amountPaid: invoice.amountPaid,
+            paymentStatus: invoice.paymentStatus,
+            paymentCount: invoice._count.payments,
           });
         }
       }
@@ -1697,15 +1745,9 @@ private async importStock(
         });
 
       const invoiceAmount = num(header.INVOICEAMOUNT);
-      const paidAmount = Math.round(num(header.PAIDAMOUNT));
+      const { paidAmount, paymentStatus } = accuratePayment(header);
       const taxAmount = num(header.TAX1AMOUNT) + num(header.TAX2AMOUNT);
       const subtotal = Math.round((invoiceAmount - taxAmount) * 100) / 100;
-      const paymentStatus: PaymentStatus =
-        paidAmount <= 0
-          ? PaymentStatus.UNPAID
-          : paidAmount >= invoiceAmount
-            ? PaymentStatus.PAID
-            : PaymentStatus.PARTIAL;
 
       return {
         organizationId,
@@ -1774,6 +1816,8 @@ private async importStock(
                 customerBillingAddress?: string | null;
                 customerPhone?: string | null;
                 customerNpwp?: string | null;
+                amountPaid?: number;
+                paymentStatus?: PaymentStatus;
               } = {};
               if (!existingInvoice.vehicleId && vehicleId) patch.vehicleId = vehicleId;
               if (existingInvoice.odometer == null && parsed?.odometer != null) patch.odometer = parsed.odometer;
@@ -1791,6 +1835,17 @@ private async importStock(
                 patch.customerBillingAddress = customer.billingAddress ?? customer.address;
                 patch.customerPhone = customer.phone;
                 patch.customerNpwp = customer.npwp;
+              }
+              // Earlier imports only read PAIDAMOUNT and left paid-at-sale
+              // invoices UNPAID. Sync from Accurate only while WareSys has no
+              // payment history of its own for the invoice, and never lower
+              // what is already recorded.
+              if (existingInvoice.status === InvoiceStatus.ISSUED && existingInvoice.paymentCount === 0) {
+                const accurate = accuratePayment(header);
+                if (accurate.paidAmount > Number(existingInvoice.amountPaid)) {
+                  patch.amountPaid = accurate.paidAmount;
+                  patch.paymentStatus = accurate.paymentStatus;
+                }
               }
 
               if (Object.keys(patch).length > 0) {

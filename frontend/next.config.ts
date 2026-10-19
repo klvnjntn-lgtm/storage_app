@@ -83,8 +83,12 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/:path*",
-        destination: `${backendUrl}/:path*`,
+        // Next checks rewrites before dynamic routes, so this would swallow
+        // the long-running app/api/integrations/accurate-gdb/confirm/[token]
+        // handler and cut the import off at the proxy timeout. Static route
+        // handlers (the GDB upload) already win over rewrites.
+        source: "/api/:path((?!integrations/accurate-gdb/confirm/).*)",
+        destination: `${backendUrl}/:path`,
       },
       {
         source: "/uploads/:path*",
