@@ -8,7 +8,7 @@ import { display } from '@/lib/fonts';
 import { Hash, ArrowLeft, Copy, Check, ShieldCheck, Users, CircleHelp } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartThumb, PartSearchLinks } from '../../PartMedia';
+import { PartSearchLinks } from '../../PartMedia';
 
 
 type Confidence = 'verified' | 'confirmed' | 'unverified';
@@ -17,7 +17,6 @@ type PartNumber = {
   items: string[];
   itemTypes: string[];
   genuine: boolean;
-  thumbKey: string | null;
   brands: string[];
   cars: { carBrand: string; model: string; generation: string; yearFrom: number | null; yearTo: number | null; confidence: Confidence; sellers: number }[];
   equivalents: { number: string; via: string }[];
@@ -73,13 +72,9 @@ export default function PartNumberPage() {
           <Link href="/workshop/parts" className="text-gray-500 hover:text-gray-800" title={t('workshop.partsEpc.back')}>
             <ArrowLeft size={18} />
           </Link>
-          {data?.thumbKey ? (
-            <PartThumb thumbKey={data.thumbKey} size={48} alt={number} />
-          ) : (
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
-              <Hash size={18} className="text-blue-700" />
-            </span>
-          )}
+          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+            <Hash size={18} className="text-blue-700" />
+          </span>
           <div className="min-w-0">
             <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight font-mono flex items-center gap-2`}>
               {number}

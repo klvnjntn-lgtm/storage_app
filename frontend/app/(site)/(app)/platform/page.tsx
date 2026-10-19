@@ -162,32 +162,29 @@ export default function PlatformPage() {
 
   return (
     <main
-      className="console relative min-h-screen text-(--c-text) bg-(--c-bg)"
+      className="console insights relative min-h-screen text-(--c-text) bg-(--c-bg)"
       style={{
-        backgroundImage:
-          'radial-gradient(ellipse 80% 45% at 50% -5%, var(--c-glow), transparent 70%),' +
-          'linear-gradient(var(--c-grid) 1px, transparent 1px),' +
-          'linear-gradient(90deg, var(--c-grid) 1px, transparent 1px)',
-        backgroundSize: '100% 100%, 32px 32px, 32px 32px',
+        backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
       }}
     >
-      <div className="sticky top-0 z-10 bg-(--c-bg)/75 backdrop-blur-xl px-3 sm:px-6 py-3 sm:py-4 border-b border-(--c-line)">
+      <div className="sticky top-0 z-10 bg-(--c-header) backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-(--c-sky)/25 to-blue-600/10 border border-(--c-sky)/30 shadow-[0_0_24px_-4px_rgba(56,189,248,0.45)] shrink-0">
-              <Terminal size={18} strokeWidth={2} className="text-(--c-sky)" aria-hidden />
+            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+              <Terminal size={18} strokeWidth={2} className="text-blue-700" aria-hidden />
             </span>
             <div className="min-w-0">
-              <p className="font-mono text-[11px] text-(--c-sky) truncate">waresys://platform</p>
               <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate text-(--c-ink)`}>
                 {t('platform.title')}
               </h1>
+              <p className="text-sm text-(--c-muted) truncate">{t('platform.subtitle')}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {session?.unlocked ? (
               <span
-                className="flex items-center gap-2 rounded-full border border-(--c-emerald)/25 bg-(--c-emerald)/8 px-3 py-1.5 font-mono text-xs text-(--c-emerald)"
+                className="flex items-center gap-2 rounded-full border border-(--c-emerald)/25 bg-(--c-emerald)/8 px-3 py-1.5 text-xs text-(--c-emerald)"
                 title={unlockedUntil ? t('platform.unlockedUntil', { time: unlockedUntil }) : undefined}
               >
                 <span className="relative flex h-2 w-2" aria-hidden>
@@ -198,7 +195,7 @@ export default function PlatformPage() {
                 <span className="tabular-nums">{t('platform.sessionLeft', { time: countdown })}</span>
               </span>
             ) : session ? (
-              <span className="flex items-center gap-1.5 rounded-full border border-(--c-amber)/25 bg-(--c-amber)/8 px-3 py-1.5 font-mono text-xs text-(--c-amber)">
+              <span className="flex items-center gap-1.5 rounded-full border border-(--c-amber)/25 bg-(--c-amber)/8 px-3 py-1.5 text-xs text-(--c-amber)">
                 <Lock size={12} aria-hidden />
                 {t('platform.lockedBadge')}
               </span>
@@ -217,14 +214,14 @@ export default function PlatformPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         {error && (
           <div role="alert" className="border border-(--c-red)/30 bg-(--c-red)/10 text-(--c-red) text-sm rounded-lg px-3 py-2">
             {error}
           </div>
         )}
 
-        {!session && !error && <p className="font-mono text-sm text-(--c-muted)">{t('common.loading')}</p>}
+        {!session && !error && <p className="text-sm text-(--c-muted)">{t('common.loading')}</p>}
 
         {session && !session.unlocked && (
           <div className="space-y-3 pt-6 sm:pt-12">
@@ -245,8 +242,6 @@ export default function PlatformPage() {
 
         {session?.unlocked && (
           <>
-            <p className="text-xs text-(--c-muted)">{t('platform.subtitle')}</p>
-
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
               <StatTile
                 icon={Building2}
@@ -272,17 +267,17 @@ export default function PlatformPage() {
                 active={filter === 'suspended'}
                 onClick={() => setFilter('suspended')}
               />
-              <div className="rounded-xl border border-(--c-line) bg-(--c-surface) backdrop-blur p-3 sm:p-4">
-                <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-(--c-muted)">
+              <div className="rounded-2xl border border-(--c-line) bg-(--c-surface) backdrop-blur p-3 sm:p-4 shadow-[0_20px_50px_-30px_var(--c-shadow)]">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-(--c-muted)">
                   <Users size={13} className="text-(--c-emerald)" aria-hidden />
                   {t('platform.stat.seats')}
                 </div>
                 <div className="mt-2 flex items-baseline gap-1.5">
-                  <span className="font-mono text-2xl sm:text-3xl font-semibold tabular-nums text-(--c-ink)">
+                  <span className={`${display.className} text-2xl sm:text-3xl font-bold tabular-nums text-(--c-ink)`}>
                     {orgs ? counts.seatsUsed : '—'}
                   </span>
                   {orgs && (
-                    <span className="font-mono text-xs text-(--c-muted)">
+                    <span className="text-xs text-(--c-muted)">
                       {t('platform.stat.seatsOf', { limit: counts.seatLimit })}
                     </span>
                   )}
@@ -339,20 +334,20 @@ export default function PlatformPage() {
               </div>
             )}
 
-            <div className="rounded-xl border border-(--c-line) bg-(--c-surface) backdrop-blur overflow-hidden shadow-[0_24px_60px_-30px_var(--c-shadow)]">
+            <div className="rounded-2xl border border-(--c-line) bg-(--c-surface) backdrop-blur overflow-hidden shadow-[0_20px_50px_-30px_var(--c-shadow)]">
               <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-(--c-line)">
-                <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-(--c-muted)">
+                <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-(--c-muted)">
                   <span className="h-1.5 w-1.5 rounded-full bg-(--c-sky)" aria-hidden />
                   {t(`platform.filter.${filter}`)}
                 </span>
                 {orgs && (
-                  <span className="font-mono text-[11px] tabular-nums text-(--c-muted)">
+                  <span className="text-xs tabular-nums text-(--c-muted)">
                     {t('platform.showingCount', { shown: visible.length, total: orgs.length })}
                   </span>
                 )}
               </div>
               <div
-                className={`hidden md:grid ${GRID} gap-3 px-4 py-2 font-mono text-[10.5px] uppercase tracking-wider text-(--c-faint) border-b border-(--c-line) bg-(--c-fill)`}
+                className={`hidden md:grid ${GRID} gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-(--c-muted) border-b border-(--c-line) bg-(--c-fill)`}
               >
                 <span>{t('platform.col.organization')}</span>
                 <span>{t('platform.col.plan')}</span>
@@ -370,7 +365,7 @@ export default function PlatformPage() {
                 </div>
               )}
               {orgs && visible.length === 0 && (
-                <p className="font-mono text-sm text-(--c-muted) px-4 py-8 text-center">{t('platform.empty')}</p>
+                <p className="text-sm text-(--c-muted) px-4 py-8 text-center">{t('platform.empty')}</p>
               )}
               <ul className="divide-y divide-(--c-line)">
                 {visible.map((o) => {
@@ -390,7 +385,7 @@ export default function PlatformPage() {
                         />
                         <span className="min-w-0">
                           <span className="block text-sm font-semibold truncate text-(--c-ink)">{o.name}</span>
-                          <span className="block font-mono text-[11px] text-(--c-faint)">
+                          <span className="block text-[11px] text-(--c-faint)">
                             {t('platform.detail.modules')}: {modulesOn}
                             {o.usage &&
                               ` · ${t('platform.usage.line', {
@@ -409,12 +404,12 @@ export default function PlatformPage() {
                             {o.plan}
                           </span>
                           {o.effectivePlan && o.effectivePlan !== o.plan && (
-                            <span className="ml-1 font-mono text-[11px] text-(--c-red)">→ {o.effectivePlan}</span>
+                            <span className="ml-1 text-[11px] text-(--c-red)">→ {o.effectivePlan}</span>
                           )}
                         </span>
                         <span className="text-xs">
                           <span className="md:hidden text-(--c-muted)">{t('platform.col.seats')}: </span>
-                          <span className={`font-mono tabular-nums ${seatsFull ? 'text-(--c-red)' : 'text-(--c-sub)'}`}>
+                          <span className={`tabular-nums ${seatsFull ? 'text-(--c-red)' : 'text-(--c-sub)'}`}>
                             {o.seatsUsed}/{o.seatLimit}
                           </span>
                           <span className="hidden md:block mt-1 h-1 w-16 rounded-full bg-(--c-fill) overflow-hidden" aria-hidden>
@@ -424,12 +419,12 @@ export default function PlatformPage() {
                             />
                           </span>
                         </span>
-                        <span className={`font-mono text-xs ${PAYMENT_STYLE[pay]}`}>
-                          <span className="md:hidden font-sans font-normal text-(--c-muted)">{t('platform.col.paidUntil')}: </span>
+                        <span className={`text-xs ${PAYMENT_STYLE[pay]}`}>
+                          <span className="md:hidden font-normal text-(--c-muted)">{t('platform.col.paidUntil')}: </span>
                           {o.paidUntil ? formatDate(o.paidUntil, language, true) : t('platform.status.unpaid')}
                         </span>
-                        <span className="font-mono text-xs text-(--c-muted)">
-                          <span className="md:hidden font-sans">{t('platform.col.lastLogin')}: </span>
+                        <span className="text-xs text-(--c-muted)">
+                          <span className="md:hidden">{t('platform.col.lastLogin')}: </span>
                           {o.lastActiveAt ? formatDateTime(o.lastActiveAt, language) : t('platform.never')}
                         </span>
                         <span className="hidden md:block">
@@ -490,16 +485,16 @@ function StatTile({
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`relative overflow-hidden text-left rounded-xl border bg-(--c-surface) backdrop-blur p-3 sm:p-4 transition-[border-color,box-shadow,background-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--c-sky)/60 cursor-pointer ${
+      className={`relative overflow-hidden text-left rounded-2xl border bg-(--c-surface) backdrop-blur p-3 sm:p-4 shadow-[0_20px_50px_-30px_var(--c-shadow)] transition-[border-color,box-shadow,background-color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--c-sky)/60 cursor-pointer ${
         active ? c.ring : 'border-(--c-line) hover:border-(--c-line-strong) hover:bg-(--c-surface-hover)'
       }`}
     >
       {active && <span className={`absolute inset-0 bg-gradient-to-b ${c.glow} to-transparent pointer-events-none`} aria-hidden />}
-      <span className="relative flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-(--c-muted)">
+      <span className="relative flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-(--c-muted)">
         <Icon size={13} className={c.icon} aria-hidden />
         {label}
       </span>
-      <span className="relative mt-2 block font-mono text-2xl sm:text-3xl font-semibold tabular-nums text-(--c-ink)">
+      <span className={`${display.className} relative mt-2 block text-2xl sm:text-3xl font-bold tabular-nums text-(--c-ink)`}>
         {value ?? '—'}
       </span>
     </button>
@@ -516,7 +511,7 @@ function StatusBadge({ org, pay }: { org: PlatformOrg; pay: PaymentState }) {
         ? [t('platform.status.dueSoon'), 'border-(--c-yellow)/30 bg-(--c-yellow)/10 text-(--c-yellow)', 'bg-(--c-yellow)']
         : [t('platform.status.active'), 'border-(--c-emerald)/30 bg-(--c-emerald)/10 text-(--c-emerald)', 'bg-(--c-emerald)'];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10.5px] font-medium ${style}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${style}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
       {text}
     </span>

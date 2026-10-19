@@ -10,7 +10,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartThumb, PartSearchLinks } from '../PartMedia';
+import { PartSearchLinks } from '../PartMedia';
 
 
 type Facets = {
@@ -37,7 +37,6 @@ type PartRow = {
   spec: string;
   sellers: number;
   exampleUrl: string;
-  thumbKey: string;
   // equivalentVia: set when the product is stocked under an interchangeable OEM number, e.g.
   // "Sakura C-1109 (Oil Filter)" — fits the same way, but isn't necessarily the identical part.
   inStock: { productId: string; name: string; quantity: number; oem: string; equivalentVia: string | null }[];
@@ -429,8 +428,6 @@ function PartsCatalogPageInner() {
                       </td>
                       <td className="px-4 py-3 align-top text-gray-600 whitespace-nowrap">{yearsLabel(r)}</td>
                       <td className="px-4 py-3 align-top">
-                        <div className="flex items-start gap-2.5">
-                        <PartThumb thumbKey={r.thumbKey} size={40} alt={r.item} />
                         <div className="min-w-0">
                         {r.exampleUrl ? (
                           <a
@@ -448,7 +445,6 @@ function PartsCatalogPageInner() {
                         )}
                         <div className="text-xs text-gray-500 whitespace-nowrap">{r.itemType}</div>
                         <PartSearchLinks compact query={`${r.item} ${r.carBrand} ${r.model} ${r.oemNumber || r.spec}`} />
-                        </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top whitespace-nowrap">

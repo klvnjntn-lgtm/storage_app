@@ -62,7 +62,7 @@ export default function NewCashStatementPage() {
   }
 
   return (
-    <PageFrame icon={Landmark} title={t('accounting.cashStatement.newTitle')} subtitle={t('accounting.cashStatement.newSubtitle')} width="max-w-2xl">
+    <PageFrame icon={Landmark} title={t('accounting.cashStatement.newTitle')} subtitle={t('accounting.cashStatement.newSubtitle')} width="max-w-5xl">
       <Card title={t('accounting.cashStatement.whichAccounts')}>
         <div className="flex flex-col gap-2">
           {[{ id: '', code: '', name: t('accounting.cashStatement.allAccounts') }, ...accounts].map((a) => (

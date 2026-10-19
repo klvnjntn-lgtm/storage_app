@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PageFrame, Card, ErrorNote, btnPrimary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { PageFrame, Card, ErrorNote, btnPrimary, inputCls, thCls, tdCls, Switch } from '@/app/components/shared/PageFrame';
 
 type Row = {
   id: string;
@@ -119,10 +119,13 @@ export default function TaxExportPage() {
               }} />
           </label>
           <label className="flex items-center gap-2 text-sm text-gray-700 sm:pb-2">
-            <input type="checkbox" checked={includeExported} onChange={(e) => {
-              setLoading(true);
-              setIncludeExported(e.target.checked);
-            }} />
+            <Switch
+              checked={includeExported}
+              onChange={(next) => {
+                setLoading(true);
+                setIncludeExported(next);
+              }}
+            />
             {t('accounting.taxExport.includeExported')}
           </label>
           <div className="sm:ml-auto">

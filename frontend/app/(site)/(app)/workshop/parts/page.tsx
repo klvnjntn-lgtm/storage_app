@@ -8,7 +8,7 @@ import { Wrench, Search, Car, Copy, Check, ShieldCheck, Users, CircleHelp, ListF
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartThumb, PartSearchLinks } from './PartMedia';
+import { PartSearchLinks } from './PartMedia';
 
 
 type Facets = { brands: { brand: string; models: string[] }[] };
@@ -23,7 +23,6 @@ type ItemSummary = {
   brands: Counted[];
   confidence: Confidence;
   sellers: number;
-  thumbKey: string | null;
   // What WareSys workshops install most for this car (anonymous totals), and how it compares.
   workshop: {
     spec: { value: string; workshops: number; installs: number } | null;
@@ -296,7 +295,6 @@ function PartsCatalogInner() {
                   <div key={`${i.itemType}|${i.item}`} className="rounded-xl border-2 border-gray-200 bg-white p-4 flex flex-col gap-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-3 min-w-0">
-                        <PartThumb thumbKey={i.thumbKey} alt={i.item} />
                         <div className="min-w-0">
                           <div className="font-semibold">{i.item}</div>
                           {find && <div className="text-xs text-gray-500">{i.itemType}</div>}
