@@ -7,6 +7,7 @@ import { FileText, X } from 'lucide-react';
 import { toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 // A statement is a per-customer running account (opening balance, period
 // activity, closing balance) — there's no meaningful "all customers"
@@ -55,6 +56,7 @@ export function GenerateStatementButton({ customerId, customerName }: Props) {
     setOpen(false);
   }
 
+  useEscapeToClose(open, () => setOpen(false));
   return (
     <>
       <button
@@ -67,10 +69,10 @@ export function GenerateStatementButton({ customerId, customerName }: Props) {
 
       {open && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-sm p-4">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-sm p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-bold text-lg">{t('sales.statementNew.statementForCustomer', { name: customerName })}</h2>
-              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-black">
+              <button aria-label={t('common.close')} onClick={() => setOpen(false)} className="text-gray-400 hover:text-black">
                 <X size={18} strokeWidth={2} />
               </button>
             </div>

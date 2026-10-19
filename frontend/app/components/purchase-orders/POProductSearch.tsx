@@ -139,7 +139,7 @@ export function POProductSearch({ onAddProduct }: Props) {
             <div>
               <label className="block text-[11px] text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.colQty')}</label>
               <div className="flex items-center gap-1.5">
-                <button
+                <button aria-label={t('common.decreaseQty')}
                   onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, prev.quantity - 1) } : prev))}
                   disabled={staged.quantity <= 1}
                   className="w-7 h-7 flex items-center justify-center border-2 border-gray-200 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -147,7 +147,7 @@ export function POProductSearch({ onAddProduct }: Props) {
                   <Minus size={14} strokeWidth={2} />
                 </button>
                 <span className="w-6 text-center text-sm">{staged.quantity}</span>
-                <button
+                <button aria-label={t('common.increaseQty')}
                   onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: prev.quantity + 1 } : prev))}
                   className="w-7 h-7 flex items-center justify-center border-2 border-gray-200 rounded hover:bg-gray-100"
                 >

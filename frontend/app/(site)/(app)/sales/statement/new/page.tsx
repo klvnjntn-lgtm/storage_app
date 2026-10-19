@@ -190,7 +190,7 @@ const params = new URLSearchParams({ q: query.trim(), limit: '50' });
                   </p>
                 )}
               </div>
-              <button onClick={clearCustomer} className="text-gray-400 hover:text-black">
+              <button aria-label={t('common.clear')} onClick={clearCustomer} className="text-gray-400 hover:text-black">
                 <X size={16} strokeWidth={2} />
               </button>
             </div>

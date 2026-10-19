@@ -506,7 +506,7 @@ function PurchaseOrderFormPageInner() {
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
                       <td className="px-3 py-2">
-                        <button onClick={() => removeProduct(l.product.id)} className="text-red-500 hover:text-red-700">
+                        <button aria-label={t('common.remove')} onClick={() => removeProduct(l.product.id)} className="text-red-500 hover:text-red-700">
                           <Trash2 size={15} strokeWidth={2} />
                         </button>
                       </td>
@@ -578,7 +578,7 @@ function PurchaseOrderFormPageInner() {
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
                       <td className="px-3 py-2">
-                        <button onClick={() => removeNewProductLine(l.key)} className="text-red-500 hover:text-red-700">
+                        <button aria-label={t('common.remove')} onClick={() => removeNewProductLine(l.key)} className="text-red-500 hover:text-red-700">
                           <Trash2 size={15} strokeWidth={2} />
                         </button>
                       </td>

@@ -22,6 +22,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
@@ -429,6 +430,10 @@ export default function InvoiceDetailPage() {
   const period = invoicePeriodStatus(invoice, periods);
   const periodClosed = period?.status === 'CLOSED' || period?.status === 'LOCKED';
 
+  useEscapeToClose(paymentDialogOpen, () => setPaymentDialogOpen(false));
+  useEscapeToClose(refundDialogOpen, () => setRefundDialogOpen(false));
+  useEscapeToClose(applyCreditOpen, () => setApplyCreditOpen(false));
+  useEscapeToClose(voidDialogOpen, () => setVoidDialogOpen(false));
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
       <style>{`
@@ -640,7 +645,7 @@ export default function InvoiceDetailPage() {
                         <Bell size={12} strokeWidth={2} />
                         {t('sales.invoiceDetail.reminderFor', { plate: invoice.vehiclePlateNumber ?? '', model: invoice.vehicleModel ?? '' })}
                       </span>
-                      <button onClick={() => setReminderOpen(false)} className="text-gray-400 hover:text-blue-700">
+                      <button aria-label={t('common.close')} onClick={() => setReminderOpen(false)} className="text-gray-400 hover:text-blue-700">
                         <X size={14} strokeWidth={2} />
                       </button>
                     </div>
@@ -939,7 +944,7 @@ export default function InvoiceDetailPage() {
 
       {invoice && paymentDialogOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-sm">
             <RecordPaymentDialog
               invoiceId={invoice.id}
               balanceDue={balanceDue}
@@ -952,7 +957,7 @@ export default function InvoiceDetailPage() {
 
       {invoice && refundDialogOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-sm">
             <RecordPaymentDialog
               mode="refund"
               invoiceId={invoice.id}
@@ -966,7 +971,7 @@ export default function InvoiceDetailPage() {
 
       {invoice && applyCreditOpen && creditInfo && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-sm">
             <ApplyCreditDialog
               sourceInvoiceId={invoice.id}
               credit={creditBalance}
@@ -980,7 +985,7 @@ export default function InvoiceDetailPage() {
 
       {invoice && voidDialogOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-sm">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-sm">
             <VoidInvoiceDialog
               invoiceId={invoice.id}
               periodClosed={periodClosed}

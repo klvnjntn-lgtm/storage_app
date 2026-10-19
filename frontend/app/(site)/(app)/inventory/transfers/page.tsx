@@ -303,7 +303,7 @@ export default function TransfersPage() {
                       onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)))}
                       className="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm text-right"
                     />
-                    <button type="button" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600">
+                    <button aria-label={t('common.remove')} type="button" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600">
                       <Trash2 size={14} />
                     </button>
                   </li>

@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PurchaseOrderService } from '../purchase-order/purchase-order.service';
 import { CreateReorderPosDto, ReorderSettingsDto } from './dto/reorder.dto';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -253,7 +254,7 @@ export class ReorderService {
 
   // Morning nudge to admins when anything is low. Once a day at most, and
   // only for orgs that watch at least one product.
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CRON_TIMEZONE })
   async notifyLowStock() {
     const orgs = await this.prisma.product.groupBy({
       by: ['organizationId'],

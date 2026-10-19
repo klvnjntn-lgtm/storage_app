@@ -14,12 +14,14 @@ import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicke
 import { teamLabel } from '@/app/components/delivery/TeamPicker';
 import type { PlanCandidates, PlanPreview } from '@/app/components/delivery/plan-types';
 import TimeInput from '@/app/components/shared/TimeInput';
+import { toCalendarDateString } from '@/lib/dates';
 
 // One color per team in the preview (list swatch + map dots).
 const DRIVER_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#4b5563'];
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date — toISOString() is UTC, still yesterday before 07:00 WIB.
+  return toCalendarDateString(new Date());
 }
 
 function formatTime(iso: string | null) {

@@ -371,6 +371,25 @@ describe('Team routes & customer stops', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it("gives a driver today's route in the org's timezone, before UTC's day turns", async () => {
+    const date = nextDate();
+    const mine = await routes.createRoute(orgId, adminId, { teamId, routeDate: date });
+    // 23:30 UTC the day before = 06:30 the same day in Jakarta (the default).
+    const dayBefore = new Date(`${date}T00:00:00.000Z`);
+    dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+    jest.useFakeTimers({
+      now: new Date(`${dayBefore.toISOString().slice(0, 10)}T23:30:00.000Z`),
+      // Only Date is faked; Prisma needs real timers.
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+    try {
+      const list = await routes.listMyRoutes(orgId, driverId);
+      expect(list.map((r) => r.id)).toEqual([mine.id]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("edits a customer stop's priority and window while it is pending", async () => {
     const route = await mkRoute();
     const stop = await routes.addStop(orgId, route.id, {

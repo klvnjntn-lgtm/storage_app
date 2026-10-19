@@ -11,6 +11,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { clearSession } from '@/lib/session';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 import { ensurePushSubscription } from '@/lib/push';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 // Deliberately NOT wrapped in AppShell — that sidebar is built for the
 // admin desktop dashboard. A driver is on their phone in the field and
@@ -46,6 +47,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
     window.location.href = '/login';
   }
 
+  useEscapeToClose(open, () => setOpen(false));
   return (
     <div
       className="min-h-dvh text-black"

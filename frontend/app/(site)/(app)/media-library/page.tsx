@@ -9,6 +9,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import Pagination from '@/app/components/shared/Pagination';
 import type { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import { formatDMY } from '@/lib/dates';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB — mirrors MediaLibraryModal's limit
@@ -148,6 +149,8 @@ export default function MediaLibraryPage() {
       setDeleting(false);
     }
   }
+
+  useEscapeToClose(!!deleteTarget && !deleting, () => setDeleteTarget(null));
 
   if (authLoading || profile?.role !== 'ADMIN') {
     return null;
@@ -319,7 +322,7 @@ export default function MediaLibraryPage() {
           className="fixed inset-0 bg-black/25 flex items-center justify-center z-[60] p-4"
           onClick={() => !deleting && setDeleteTarget(null)}
         >
-          <div
+          <div role="dialog" aria-modal="true"
             className="bg-white rounded-xl border border-blue-500/15 w-full max-w-sm shadow-xl p-5"
             onClick={(e) => e.stopPropagation()}
           >

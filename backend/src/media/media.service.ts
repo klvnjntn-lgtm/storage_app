@@ -15,6 +15,7 @@ import {
   type FileStorage,
 } from '../storage/file-storage.interface';
 import { escapeLike } from '../common/text/escape-like';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 // Library files live under this storage key prefix, served publicly at
 // /uploads/media/<filename> (see main.ts).
@@ -220,7 +221,7 @@ export class MediaService {
     return { processed: stale.length };
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  @Cron(CronExpression.EVERY_DAY_AT_3AM, { timeZone: CRON_TIMEZONE })
   async scheduledRecompress() {
     const { processed } = await this.recompressStaleAssets();
     if (processed > 0) {

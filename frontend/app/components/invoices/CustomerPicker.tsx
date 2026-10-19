@@ -173,7 +173,7 @@ export function CustomerPicker({
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('sales.customerPicker.newCustomer')}</p>
-                <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-blue-700">
+                <button aria-label={t('common.close')} onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-blue-700">
                   <X size={14} strokeWidth={2} />
                 </button>
               </div>

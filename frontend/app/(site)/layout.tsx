@@ -23,6 +23,9 @@ export const metadata: Metadata = {
   },
   description: "Warehouse inventory management system",
   manifest: "/manifest.json",
+  icons: { apple: "/apple-touch-icon.png" },
+  // Home-screen launch on iOS opens full screen, titled WareSys.
+  appleWebApp: { capable: true, title: "WareSys", statusBarStyle: "default" },
 };
 
 export default function RootLayout({

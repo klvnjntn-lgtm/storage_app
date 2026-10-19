@@ -107,7 +107,7 @@ export default function CustomerStopPicker({
               className="flex-1 min-w-0 text-base sm:text-sm outline-none"
             />
             {query && (
-              <button type="button" onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600">
+              <button aria-label={t('common.clear')} type="button" onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600">
                 <X size={14} />
               </button>
             )}

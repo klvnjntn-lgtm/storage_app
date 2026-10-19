@@ -5,6 +5,7 @@ import { X, Upload, Camera, Search, ImageOff, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import Pagination from './Pagination';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 export type MediaAsset = {
   id: string;
@@ -86,6 +87,7 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, page, pageSize, search, mimeType]);
 
+  useEscapeToClose(open, () => onClose());
   if (!open) return null;
 
   async function uploadFile(file: File) {
@@ -128,7 +130,7 @@ export default function MediaLibraryModal({ open, onClose, onSelect }: Props) {
       className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4"
       onClick={onClose}
     >
-      <div
+      <div role="dialog" aria-modal="true"
         className="bg-white rounded-t-xl sm:rounded-xl border border-blue-500/15 w-full sm:w-[640px] max-w-full sm:max-w-[640px] max-h-[85vh] flex flex-col shadow-xl shadow-blue-900/5 pb-[env(safe-area-inset-bottom)]"
         onClick={(e) => e.stopPropagation()}
       >

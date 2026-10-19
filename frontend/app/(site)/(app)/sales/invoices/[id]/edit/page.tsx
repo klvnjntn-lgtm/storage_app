@@ -786,7 +786,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button
+                        <button aria-label={t('common.decreaseQty')}
                           onClick={() => changeQty(line.key, -1)}
                           disabled={line.quantity <= floor}
                           className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
@@ -794,14 +794,14 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                           <Minus size={14} strokeWidth={2} />
                         </button>
                         <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
-                        <button
+                        <button aria-label={t('common.increaseQty')}
                           onClick={() => changeQty(line.key, 1)}
                           disabled={!allowOversell && line.quantity >= available}
                           className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-40"
                         >
                           <Plus size={14} strokeWidth={2} />
                         </button>
-                        <button
+                        <button aria-label={t('common.remove')}
                           onClick={() => removeFromCart(line.key)}
                           className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
                         >
@@ -854,7 +854,7 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                             placeholder={t('sales.invoiceEdit.serviceDescriptionPlaceholder')}
                             className="flex-1 min-w-0 border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black resize-none"
                           />
-                          <button onClick={() => removeService(s.key)} className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0">
+                          <button aria-label={t('common.remove')} onClick={() => removeService(s.key)} className="w-8 h-8 sm:w-7 sm:h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0">
                             <X size={14} strokeWidth={2} />
                           </button>
                         </div>

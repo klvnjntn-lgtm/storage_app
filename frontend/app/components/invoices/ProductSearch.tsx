@@ -328,7 +328,7 @@ export function ProductSearch({
             )}
 
             <div className="flex items-center gap-1.5">
-              <button
+              <button aria-label={t('common.decreaseQty')}
                 onClick={() =>
                   setStaged((prev) => (prev ? { ...prev, quantity: Math.max(1, roundQty(prev.quantity - 1)) } : prev))
                 }
@@ -345,7 +345,7 @@ export function ProductSearch({
                   )
                 }
               />
-              <button
+              <button aria-label={t('common.increaseQty')}
                 onClick={() => setStaged((prev) => (prev ? { ...prev, quantity: roundQty(prev.quantity + 1) } : prev))}
                 disabled={!canOversell && staged.quantity >= stagedAvailable}
                 className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md bg-white hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"

@@ -22,6 +22,7 @@ import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressP
 import { formatDMYTime } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 
 type CustomerInvoice = {
@@ -254,6 +255,7 @@ export default function CustomerDetailPage() {
   const totals = customer?.invoiceTotals;
 
 
+  useEscapeToClose(pickingLocation, () => setPickingLocation(false));
   return (
     <main
       className="min-h-screen text-black"
@@ -386,7 +388,7 @@ export default function CustomerDetailPage() {
               <div className="border-2 border-gray-300 rounded-md p-3 mb-3 bg-white">
                 <div className="flex items-center justify-between mb-2.5">
                   <span className="text-xs font-semibold text-gray-500">{t('customers.detailPage.newVehicle')}</span>
-                  <button onClick={() => setAddingVehicle(false)} className="text-gray-400 hover:text-blue-700">
+                  <button aria-label={t('common.close')} onClick={() => setAddingVehicle(false)} className="text-gray-400 hover:text-blue-700">
                     <X size={15} strokeWidth={2} />
                   </button>
                 </div>
@@ -529,10 +531,10 @@ export default function CustomerDetailPage() {
 
       {pickingLocation && (
         <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-4 space-y-3">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-xl shadow-lg w-full max-w-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">{t('customers.detailPage.pickLocationTitle')}</h3>
-              <button onClick={() => setPickingLocation(false)} className="text-gray-400 hover:text-gray-600">
+              <button aria-label={t('common.close')} onClick={() => setPickingLocation(false)} className="text-gray-400 hover:text-gray-600">
                 <X size={16} />
               </button>
             </div>

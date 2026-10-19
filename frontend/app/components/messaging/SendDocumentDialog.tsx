@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Mail, MessageCircle, Send, X, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 type Channel = 'EMAIL' | 'WHATSAPP';
 
@@ -93,6 +94,7 @@ export function SendDocumentDialog({
     </button>
   );
 
+  useEscapeToClose(true, () => onClose());
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:hidden" role="dialog" aria-modal="true">
       <div className="bg-white rounded-md shadow-lg w-full max-w-md p-4">

@@ -9,6 +9,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { UserAvatar, userLabel } from '@/app/components/shared/UserAvatar';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 type Role = 'ADMIN' | 'USER' | 'DRIVER';
 
@@ -150,6 +151,8 @@ export default function MembersPage() {
       setInviting(false);
     }
   }
+
+  useEscapeToClose(!!removing, () => setRemoving(null));
 
   if (authLoading || !authorized) {
     return <p className="text-sm text-gray-500 p-6">{t('common.loading')}</p>;

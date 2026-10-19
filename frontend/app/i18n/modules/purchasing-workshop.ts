@@ -155,7 +155,6 @@ export const purchasingWorkshop = {
         dateRange: 'Date range',
         status: 'Status',
         clearFilters: 'Clear filters',
-        backToCatalog: 'Catalogue by car',
         loading: 'Loading...',
         empty: 'No purchase orders match these filters.',
         unissuedDraft: 'Unissued draft',
@@ -410,6 +409,7 @@ export const purchasingWorkshop = {
       },
       partsCatalog: {
         title: 'Advanced Parts Search',
+        backToCatalog: 'Catalogue by car',
         subtitle: 'Parts, OEM numbers and fitment for cars sold in Indonesia',
         searchPlaceholder: 'Search OEM number, spec, part or brand — e.g. 48820-B0010, H4, tie rod',
         allBrands: 'All car brands',
@@ -711,7 +711,6 @@ export const purchasingWorkshop = {
         dateRange: 'Rentang tanggal',
         status: 'Status',
         clearFilters: 'Hapus filter',
-        backToCatalog: 'Katalog per mobil',
         loading: 'Memuat...',
         empty: 'Tidak ada pesanan pembelian yang cocok dengan filter ini.',
         unissuedDraft: 'Draf belum diterbitkan',
@@ -966,6 +965,7 @@ export const purchasingWorkshop = {
       },
       partsCatalog: {
         title: 'Pencarian Suku Cadang Lanjutan',
+        backToCatalog: 'Katalog per mobil',
         subtitle: 'Suku cadang, nomor OEM dan kecocokan untuk mobil di Indonesia',
         searchPlaceholder: 'Cari nomor OEM, spesifikasi, nama part atau merek — mis. 48820-B0010, H4, tie rod',
         allBrands: 'Semua merek mobil',

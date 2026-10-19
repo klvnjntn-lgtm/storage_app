@@ -15,6 +15,7 @@ import {
 } from '../accounting/business-date';
 import { allocateOnHand } from './batch-allocation';
 import { CreateBatchDto } from './dto/batches.dto';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 type Tx = Prisma.TransactionClient;
 
@@ -201,7 +202,7 @@ export class BatchesService {
     };
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CRON_TIMEZONE })
   async notifyExpiring() {
     const orgs = await this.prisma.productBatch.groupBy({
       by: ['organizationId'],

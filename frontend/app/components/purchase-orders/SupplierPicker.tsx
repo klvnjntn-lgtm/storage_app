@@ -167,7 +167,7 @@ export function SupplierPicker({
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('purchasing.supplierPicker.newSupplierLabel')}</p>
-                <button onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-black">
+                <button aria-label={t('common.close')} onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-black">
                   <X size={14} strokeWidth={2} />
                 </button>
               </div>

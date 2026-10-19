@@ -18,6 +18,7 @@ import {
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
 import { DeliveryOrderService } from './delivery-order.service';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 // Target retention for proof photos. Automatic deletion is OFF unless
 // DELIVERY_PROOF_AUTO_DELETE=true; until then the daily job only reports
@@ -198,7 +199,7 @@ export class DeliveryProofService {
     return { expired: expired.length, deleted };
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  @Cron(CronExpression.EVERY_DAY_AT_4AM, { timeZone: CRON_TIMEZONE })
   async scheduledRetention() {
     const apply = this.autoDeleteEnabled();
     const { expired, deleted } = await this.enforceRetention(apply);

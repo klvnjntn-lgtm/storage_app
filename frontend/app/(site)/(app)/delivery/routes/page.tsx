@@ -10,6 +10,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
+import { toCalendarDateString } from '@/lib/dates';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -46,7 +47,8 @@ function statusStyle(status: RouteStatus) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date — toISOString() is UTC, still yesterday before 07:00 WIB.
+  return toCalendarDateString(new Date());
 }
 
 // useSearchParams() needs a Suspense boundary (same as sales/orders/new).

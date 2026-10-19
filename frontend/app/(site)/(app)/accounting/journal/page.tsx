@@ -359,7 +359,7 @@ export default function JournalPage() {
                     onChange={(e) => updateManualLine(idx, { amount: e.target.value })}
                     className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white w-24"
                   />
-                  <button
+                  <button aria-label={t('common.remove')}
                     type="button"
                     onClick={() => removeManualLine(idx)}
                     disabled={manualLines.length <= 2}

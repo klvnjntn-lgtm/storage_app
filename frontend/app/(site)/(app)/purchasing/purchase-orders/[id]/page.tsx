@@ -23,6 +23,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 
 function statusBadgeClasses(status: string) {
@@ -198,6 +199,9 @@ export default function PurchaseOrderDetailPage() {
       setPdfGenerating(false);
     }
   }
+
+  useEscapeToClose(returnOpen, () => setReturnOpen(false));
+  useEscapeToClose(receiveOpen, () => setReceiveOpen(false));
 
   if (loading) {
     return (
@@ -394,7 +398,7 @@ export default function PurchaseOrderDetailPage() {
 
       {returnOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50 p-4">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-lg">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-lg">
             <PurchaseReturnDialog
               po={po}
               onReturned={() => {
@@ -409,7 +413,7 @@ export default function PurchaseOrderDetailPage() {
 
       {receiveOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50 p-4">
-          <div className="bg-white rounded-md shadow-lg w-full max-w-lg">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-lg">
             <ReceiveGoodsDialog
               po={po}
               onReceived={() => {

@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 import { chmodSync, mkdirSync } from 'fs';
 import { chmod, unlink } from 'fs/promises';
 import { Request } from 'express';
-import { GdbImportService } from './gdb-import.service';
+import { GDB_UPLOAD_DIR, GdbImportService } from './gdb-import.service';
 import { InvoiceFormat, ModuleKey } from '@prisma/client';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -30,7 +30,7 @@ interface AuthedRequest extends Request {
   user?: { organizationId: string };
 }
 
-const UPLOAD_DIR = '/tmp/gdb-imports';
+const UPLOAD_DIR = GDB_UPLOAD_DIR;
 
 // diskStorage's `destination` does not create the directory for you — make
 // sure it exists once, at module load, rather than on every request.

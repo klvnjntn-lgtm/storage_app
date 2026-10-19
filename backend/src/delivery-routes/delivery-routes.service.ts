@@ -36,6 +36,7 @@ import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
 } from './dto/customer-stop-actions.dto';
+import { resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 
 export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -357,6 +358,17 @@ export class DeliveryRoutesService {
       ...s,
       customerInfo: (s.customerId && byId.get(s.customerId)) || null,
     }));
+  }
+
+  // "Today" for a route list with no date given, in the org's own timezone:
+  // UTC's today is still yesterday in Jakarta until 07:00, when drivers
+  // are already out.
+  private async orgToday(organizationId: string): Promise<string> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { timezone: true },
+    });
+    return todayBusinessDate(resolveTimezone(org)).toISOString().slice(0, 10);
   }
 
   dayRange(date: string): { gte: Date; lt: Date } {
@@ -1793,7 +1805,7 @@ export class DeliveryRoutesService {
 
   // The driver's team's route(s) for the day — cancelled ones hidden.
   async listMyRoutes(organizationId: string, driverId: string, date?: string) {
-    const routeDate = date ?? new Date().toISOString().slice(0, 10);
+    const routeDate = date ?? (await this.orgToday(organizationId));
     const routes = await this.prisma.route.findMany({
       where: {
         organizationId,
@@ -1824,7 +1836,7 @@ export class DeliveryRoutesService {
   }
 
   async monitoringSummary(organizationId: string, date?: string) {
-    const routeDate = date ?? new Date().toISOString().slice(0, 10);
+    const routeDate = date ?? (await this.orgToday(organizationId));
     const stops = await this.prisma.routeStop.findMany({
       where: { route: { organizationId, routeDate: this.dayRange(routeDate) } },
       select: stopSelect,
@@ -1851,7 +1863,7 @@ export class DeliveryRoutesService {
   }
 
   async monitoringByTeam(organizationId: string, date?: string) {
-    const routeDate = date ?? new Date().toISOString().slice(0, 10);
+    const routeDate = date ?? (await this.orgToday(organizationId));
     const routes = await this.prisma.route.findMany({
       where: { organizationId, routeDate: this.dayRange(routeDate) },
       include: {
@@ -1953,7 +1965,7 @@ export class DeliveryRoutesService {
   // ever set, so a resolved stop still shows up on the map even if
   // nobody set its destination beforehand.
   async monitoringMap(organizationId: string, date?: string) {
-    const routeDate = date ?? new Date().toISOString().slice(0, 10);
+    const routeDate = date ?? (await this.orgToday(organizationId));
     const stops = await this.prisma.routeStop.findMany({
       where: { route: { organizationId, routeDate: this.dayRange(routeDate) } },
       // The route's team lets the map filter by team and name it in a popup.

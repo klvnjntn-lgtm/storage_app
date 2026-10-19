@@ -10,6 +10,7 @@ import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { PinStatusBadge } from '@/app/components/delivery/PinStatus';
 import type { CustomerAddress } from '@/app/components/delivery/CustomerAddressPicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 type LatLng = { lat: number; lng: number };
 // original = the pin as loaded; the location is only sent when it changed,
@@ -95,6 +96,7 @@ export default function CustomerAddressesSection({
     }
   }
 
+  useEscapeToClose(!!draft, () => setDraft(null));
   return (
     <div className="border-2 border-gray-300 rounded-md p-3 mb-6 bg-white">
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -146,7 +148,7 @@ export default function CustomerAddressesSection({
 
       {draft && (
         <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">
                 {draft.id ? t('delivery.addresses.editTitle') : t('delivery.addresses.addTitle')}

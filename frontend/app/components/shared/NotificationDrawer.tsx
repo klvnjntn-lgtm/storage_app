@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useNotifications, type AppNotification } from '@/lib/hooks/useNotifications';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 const DUE_SOON_DAYS = 7;
 
@@ -41,6 +42,7 @@ export default function NotificationDrawer({ enabled, remindersEnabled }: { enab
     })();
   }, [remindersEnabled]);
 
+  useEscapeToClose(open, () => setOpen(false));
   if (!enabled) return null;
 
   const pending = reminders.filter((r) => r.status === 'PENDING');

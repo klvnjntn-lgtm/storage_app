@@ -20,6 +20,7 @@ import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import { PinStatusBadge, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 
 // Columns the (desktop) table can be sorted by. Address is deliberately
@@ -257,6 +258,7 @@ export default function CustomersPage() {
     }
   }
 
+  useEscapeToClose(!!editing && !saving, () => setEditing(null));
   return (
     <main
       className="min-h-screen text-black"
@@ -359,7 +361,7 @@ export default function CustomersPage() {
                   className="flex items-center gap-1.5 shrink-0"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
+                  <button aria-label={t('common.edit')}
                     onClick={() => openEdit(c)}
                     className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-blue-50 hover:border-blue-500/40"
                   >
@@ -376,7 +378,7 @@ export default function CustomersPage() {
                     </button>
                   )}
                   {isAdmin && (
-                    <button
+                    <button aria-label={t('common.delete')}
                       onClick={() => remove(c)}
                       className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
                     >
@@ -447,7 +449,7 @@ export default function CustomersPage() {
                   )}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                      <button
+                      <button aria-label={t('common.edit')}
                         onClick={() => openEdit(c)}
                         className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-blue-50 hover:border-blue-500/40"
                       >
@@ -464,7 +466,7 @@ export default function CustomersPage() {
                         </button>
                       )}
                       {isAdmin && (
-                        <button
+                        <button aria-label={t('common.delete')}
                           onClick={() => remove(c)}
                           className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
                         >
@@ -502,10 +504,10 @@ export default function CustomersPage() {
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-md border-2 border-gray-300 w-full ${hasDelivery ? 'max-w-md' : 'max-w-sm'} p-5 max-h-[95vh] overflow-y-auto`}>
+          <div role="dialog" aria-modal="true" className={`bg-white rounded-md border-2 border-gray-300 w-full ${hasDelivery ? 'max-w-md' : 'max-w-sm'} p-5 max-h-[95vh] overflow-y-auto`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{editing.id ? t('customers.listPage.editCustomer') : t('customers.listPage.newCustomerTitle')}</h2>
-              <button onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
+              <button aria-label={t('common.close')} onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
                 <X size={18} strokeWidth={2} />
               </button>
             </div>

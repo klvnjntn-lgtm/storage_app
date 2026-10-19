@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { unlink } from 'fs/promises';
+import { readdir, stat, unlink } from 'fs/promises';
+import { join } from 'path';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import Firebird = require('node-firebird');
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -330,6 +332,8 @@ async function attachAnyVersion(
 
 const TEMP_FILE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+export const GDB_UPLOAD_DIR = '/tmp/gdb-imports';
+
 interface TempFileEntry {
   path: string;
   // The org whose admin uploaded the file. A token only works for that
@@ -376,13 +380,41 @@ interface PoDetRow {
 }
 
 @Injectable()
-export class GdbImportService {
+export class GdbImportService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService,     
     private readonly locationService: LocationService,
     private readonly planLimits: PlanLimitsService,
 ) {}
 
   private readonly tempFiles = new Map<string, TempFileEntry>();
+
+  // The upload registry is in memory, so a restart (deploy, crash) between
+  // upload and expiry left a file of up to 1.2GB on disk for good. A file
+  // older than the TTL is never referenced — the registry drops it at the
+  // TTL — so sweeping those is safe even with another process using the dir.
+  onModuleInit() {
+    void this.sweepStaleUploads();
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async sweepStaleUploads() {
+    let names: string[];
+    try {
+      names = await readdir(GDB_UPLOAD_DIR);
+    } catch {
+      return; // directory not created yet
+    }
+    const cutoff = Date.now() - TEMP_FILE_TTL_MS;
+    for (const name of names) {
+      if (!name.endsWith('.gdb')) continue;
+      const path = join(GDB_UPLOAD_DIR, name);
+      try {
+        if ((await stat(path)).mtimeMs < cutoff) await unlink(path);
+      } catch {
+        // gone already, or not ours to remove
+      }
+    }
+  }
 
   registerUploadedFile(diskPath: string, organizationId: string): string {
     const token = randomUUID();

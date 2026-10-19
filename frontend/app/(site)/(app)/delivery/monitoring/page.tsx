@@ -10,6 +10,7 @@ import DeliveryMap, { type MapDriver, type MapStop } from '@/app/components/deli
 import DatePicker from '@/app/components/shared/DatePicker';
 import TeamPicker, { teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { toCalendarDateString } from '@/lib/dates';
 
 
 type Summary = { total: number; delivered: number; pending: number; failed: number; atRisk: number; late: number };
@@ -42,7 +43,8 @@ type MapStopRaw = {
 type MonitoringMapStop = MapStop & { team: PickerTeam };
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date — toISOString() is UTC, still yesterday before 07:00 WIB.
+  return toCalendarDateString(new Date());
 }
 
 // How often today's view refreshes itself while the tab is visible.

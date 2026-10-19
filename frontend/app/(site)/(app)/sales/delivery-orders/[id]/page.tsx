@@ -16,6 +16,7 @@ import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 
 function statusStyle(status: string) {
@@ -191,6 +192,8 @@ export default function DeliveryOrderDetailPage() {
       setPdfGenerating(false);
     }
   }
+
+  useEscapeToClose(changingAddress, () => setChangingAddress(false));
 
   if (loading) {
     return (
@@ -417,7 +420,7 @@ export default function DeliveryOrderDetailPage() {
 
       {changingAddress && (
         <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4 print:hidden">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[90vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">{t('delivery.addresses.changeTitle')}</h3>
               <button onClick={() => setChangingAddress(false)} aria-label={t('common.cancel')} className="p-2 -m-2 text-gray-400 hover:text-gray-600">

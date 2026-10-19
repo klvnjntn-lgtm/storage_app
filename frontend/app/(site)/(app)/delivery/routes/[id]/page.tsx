@@ -21,8 +21,9 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
-import { formatDMY, formatDMYTime } from '@/lib/dates';
+import { formatDMY, formatDMYTime, toCalendarDateString } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -499,7 +500,7 @@ export default function DeliveryRouteDetailPage() {
 
   function openReschedule(stop: Stop) {
     // Default to tomorrow — the usual "try again next day" case.
-    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const tomorrow = toCalendarDateString(new Date(Date.now() + 24 * 60 * 60 * 1000));
     setRescheduleStop(stop);
     setRescheduleDate(tomorrow);
     setRescheduleWindowStart('');
@@ -579,6 +580,9 @@ export default function DeliveryRouteDetailPage() {
     const res = await apiFetch(`/delivery-routes/${id}/history`);
     if (res.ok) setHistory(await res.json());
   }
+
+  useEscapeToClose(!!rescheduleStop, () => setRescheduleStop(null));
+  useEscapeToClose(!!pickingStop || pickingStart, () => { setPickingStop(null); setPickingStart(false); });
 
   if (loading) {
     return <p className="text-sm text-gray-500 p-6">{t('common.loading')}</p>;
@@ -1118,7 +1122,7 @@ export default function DeliveryRouteDetailPage() {
 
       {rescheduleStop && (
         <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
                 <CalendarClock size={16} className="text-amber-600" />
@@ -1211,7 +1215,7 @@ export default function DeliveryRouteDetailPage() {
 
       {(pickingStop || pickingStart) && (
         <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">
                 {t(pickingStart ? 'delivery.routeDetail.pickStartTitle' : 'delivery.routeDetail.pickLocationTitle')}

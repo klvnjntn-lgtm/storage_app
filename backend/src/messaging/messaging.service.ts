@@ -50,6 +50,7 @@ import {
   money,
   shortDate,
 } from './message-templates';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 const DAY = 86_400_000;
 // WhatsApp document links stay valid this long; the PDF is deleted after.
@@ -393,7 +394,7 @@ export class MessagingService implements OnModuleInit {
   // whose due date is exactly a reminder stage away gets one reminder per
   // enabled channel. reminderKey makes a stage go out once, even if the job
   // runs twice or a stage is retried after a failure.
-  @Cron(CronExpression.EVERY_DAY_AT_9AM)
+  @Cron(CronExpression.EVERY_DAY_AT_9AM, { timeZone: CRON_TIMEZONE })
   async runPaymentReminders() {
     const orgs = await this.prisma.organization.findMany({
       where: {
@@ -739,7 +740,7 @@ export class MessagingService implements OnModuleInit {
   }
 
   // WhatsApp document links expire after a week; the PDFs behind them go too.
-  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  @Cron(CronExpression.EVERY_DAY_AT_4AM, { timeZone: CRON_TIMEZONE })
   async cleanupAttachments() {
     const old = await this.prisma.messageLog.findMany({
       where: {

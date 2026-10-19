@@ -231,21 +231,21 @@ export function SalesOrderCartPanel({
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button
+                  <button aria-label={t('common.decreaseQty')}
                     onClick={() => changeQty(line.key, -1)}
                     className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60"
                   >
                     <Minus size={14} strokeWidth={2} />
                   </button>
                   <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
-                  <button
+                  <button aria-label={t('common.increaseQty')}
                     onClick={() => changeQty(line.key, 1)}
                     disabled={line.quantity >= available}
                     className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={14} strokeWidth={2} />
                   </button>
-                  <button
+                  <button aria-label={t('common.remove')}
                     onClick={() => removeFromCart(line.key)}
                     className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600"
                   >
@@ -328,7 +328,7 @@ export function SalesOrderCartPanel({
                     rows={2}
                     className="flex-1 border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
                   />
-                  <button
+                  <button aria-label={t('common.remove')}
                     onClick={() => onRemoveService(line.key)}
                     className="w-7 h-7 flex items-center justify-center border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 text-red-600 shrink-0"
                   >

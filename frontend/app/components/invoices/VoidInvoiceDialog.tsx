@@ -60,7 +60,7 @@ export function VoidInvoiceDialog({
           <Ban size={16} strokeWidth={2} />
           {t('sales.voidInvoice.title')}
         </h2>
-        <button onClick={onClose} className="text-gray-400 hover:text-black">
+        <button aria-label={t('common.close')} onClick={onClose} className="text-gray-400 hover:text-black">
           <X size={16} strokeWidth={2} />
         </button>
       </div>

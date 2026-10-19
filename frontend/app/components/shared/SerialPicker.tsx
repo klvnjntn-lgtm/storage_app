@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Hash, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
 type Available = { id: string; serialNumber: string };
 
@@ -58,6 +59,7 @@ export function SerialPicker({
     setPicked((cur) => (cur.includes(serial) ? cur.filter((s) => s !== serial) : cur.length >= quantity ? cur : [...cur, serial]));
   }
 
+  useEscapeToClose(true, () => onClose());
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true">
       <div className="bg-white rounded-md shadow-lg w-full max-w-md p-4">

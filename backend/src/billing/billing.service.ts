@@ -28,6 +28,7 @@ import {
   TRIAL_DAYS,
   TRIAL_MODULES,
 } from './plans';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 type Tx = Prisma.TransactionClient;
 
@@ -480,7 +481,7 @@ export class BillingService {
   // Daily reminder to admins three days and one day before a trial ends or
   // a subscribed module's paid period runs out. Nothing changes here —
   // modules lapse on their own expiry.
-  @Cron(CronExpression.EVERY_DAY_AT_9AM)
+  @Cron(CronExpression.EVERY_DAY_AT_9AM, { timeZone: CRON_TIMEZONE })
   async remindExpiring() {
     const now = Date.now();
     for (const daysLeft of [3, 1]) {
