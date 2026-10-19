@@ -65,10 +65,12 @@ type GdbImportResult = {
   items: { created: number; updated: number };
   invoices?: {
     created: number;
+    updated: number;
     skipped: number;
     errors: string[];
     fractionalQuantityWarnings: string[];
     discountIgnoredWarnings: string[];
+    totalsResynced?: string[];
   };
   // NEW
   purchaseOrders?: {
@@ -673,8 +675,8 @@ export default function ImportOrdersPage() {
                   : t('upload.uploadOrderPage.gdb.itemsSummaryMany', { created: gdbResult.items.created, updated: gdbResult.items.updated })}
                 {gdbResult.invoices &&
                   (gdbResult.invoices.created === 1
-                    ? t('upload.uploadOrderPage.gdb.invoicesSummaryOne', { created: gdbResult.invoices.created, skipped: gdbResult.invoices.skipped })
-                    : t('upload.uploadOrderPage.gdb.invoicesSummaryMany', { created: gdbResult.invoices.created, skipped: gdbResult.invoices.skipped }))}
+                    ? t('upload.uploadOrderPage.gdb.invoicesSummaryOne', { created: gdbResult.invoices.created, updated: gdbResult.invoices.updated, skipped: gdbResult.invoices.skipped })
+                    : t('upload.uploadOrderPage.gdb.invoicesSummaryMany', { created: gdbResult.invoices.created, updated: gdbResult.invoices.updated, skipped: gdbResult.invoices.skipped }))}
                 {gdbResult.purchaseOrders &&
                   (gdbResult.purchaseOrders.created === 1
                     ? t('upload.uploadOrderPage.gdb.purchaseOrdersSummaryOne', { created: gdbResult.purchaseOrders.created, updated: gdbResult.purchaseOrders.updated })
@@ -692,6 +694,20 @@ export default function ImportOrdersPage() {
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.invoices.fractionalQuantityWarnings.map((w, i) => (
                     <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.invoices?.totalsResynced && gdbResult.invoices.totalsResynced.length > 0 && (
+              <div className="border border-blue-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {t('upload.uploadOrderPage.gdb.totalsResyncedNotice', { count: gdbResult.invoices.totalsResynced.length })}
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.invoices.totalsResynced.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-blue-800">{w}</li>
                   ))}
                 </ul>
               </div>

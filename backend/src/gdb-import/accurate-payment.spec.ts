@@ -1,5 +1,5 @@
 import { PaymentStatus } from '@prisma/client';
-import { accuratePayment } from './gdb-import.service';
+import { accuratePayment, parseAccurateDiscount } from './gdb-import.service';
 
 describe('accuratePayment', () => {
   const inv = (amount: number, cols: Partial<Record<'PAIDAMOUNT' | 'PAYMENT' | 'RETURNAMOUNT' | 'TERMDISCOUNT', number>> = {}) =>
@@ -36,5 +36,22 @@ describe('accuratePayment', () => {
 
   it('tolerates Rp1 rounding', () => {
     expect(inv(100001, { PAYMENT: 100000 }).paymentStatus).toBe(PaymentStatus.PAID);
+  });
+});
+
+describe('parseAccurateDiscount', () => {
+  it('reads plain, comma-decimal and blank discounts', () => {
+    expect(parseAccurateDiscount('10')).toBe(10);
+    expect(parseAccurateDiscount('2,5')).toBe(2.5);
+    expect(parseAccurateDiscount('')).toBe(0);
+    expect(parseAccurateDiscount(null)).toBe(0);
+  });
+
+  it('chains "10+5" as 10% then 5% of the rest', () => {
+    expect(parseAccurateDiscount('10+5')).toBe(14.5);
+  });
+
+  it('returns null for text it cannot read instead of NaN', () => {
+    expect(parseAccurateDiscount('abc')).toBeNull();
   });
 });

@@ -209,6 +209,22 @@ function num(value: number | null | undefined): number {
   return value == null ? 0 : Number(value);
 }
 
+// Accurate's per-line discount is free text: "10", "2,5", or a chain like
+// "10+5" (10% off, then 5% off the rest = 14.5%). Returns the combined
+// percentage, 0 for blank, or null when it can't be read.
+export function parseAccurateDiscount(value: string | number | null | undefined): number | null {
+  if (value == null) return 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+  let remaining = 1;
+  for (const part of text.split('+')) {
+    const pct = Number(part.trim().replace(',', '.').replace(/%$/, ''));
+    if (!Number.isFinite(pct)) return null;
+    remaining *= 1 - pct / 100;
+  }
+  return Math.round((1 - remaining) * 100 * 10000) / 10000;
+}
+
 // Accurate splits what settled an ARINV across columns: PAYMENT is what was
 // paid at the time of sale (most counter sales — PAIDAMOUNT stays 0 for
 // these), PAIDAMOUNT is later customer receipts, and returns and receipt
@@ -406,7 +422,7 @@ interface PoDetRow {
   UNITPRICE: number | null;
   ITEMUNIT: string | null;
   UNITRATIO: number | null;
-  ITEMDISCPC: number | null;
+  ITEMDISCPC: string | null; // VARCHAR in Accurate, e.g. "10" or "10+5"
 }
 
 @Injectable()
@@ -1289,7 +1305,13 @@ private async importStock(
             const itemsData: BuiltLine[] = itemRows.map((line) => {
               const quantity = num(line.QUANTITY);
               const unitPrice = num(line.UNITPRICE);
-              const discPc = line.ITEMDISCPC != null ? Number(line.ITEMDISCPC) : 0;
+              let discPc = parseAccurateDiscount(line.ITEMDISCPC);
+              if (discPc == null) {
+                overReceivedWarnings.push(
+                  `PO ${externalId} SEQ ${line.SEQ}: unreadable discount "${line.ITEMDISCPC}" — imported without it`,
+                );
+                discPc = 0;
+              }
               const lineTotal = Math.round(quantity * unitPrice * (1 - discPc / 100) * 100) / 100;
               const receivedQty = num(line.QTYRECV);
 
@@ -1589,6 +1611,7 @@ private async importStock(
     const errors: string[] = [];
     const fractionalQuantityWarnings: string[] = [];
     const discountIgnoredWarnings: string[] = [];
+    const totalsResynced: string[] = [];
 
     // One query for every already-imported invoice number, instead of one
     // findFirst per header row (was up to thousands of sequential queries).
@@ -1607,6 +1630,10 @@ private async importStock(
         amountPaid: Prisma.Decimal;
         paymentStatus: PaymentStatus;
         paymentCount: number;
+        total: Prisma.Decimal;
+        // Anything WareSys has hung off the invoice since import — when set,
+        // its lines/total are left alone even if Accurate's changed.
+        hasDownstream: boolean;
       }
     >();
     const INVOICE_LOOKUP_CHUNK_SIZE = 10_000;
@@ -1637,7 +1664,11 @@ private async importStock(
           status: true,
           amountPaid: true,
           paymentStatus: true,
-          _count: { select: { payments: true } },
+          total: true,
+          creditedAmount: true,
+          replacesInvoiceId: true,
+          replacedBy: { select: { id: true } },
+          _count: { select: { payments: true, deliveryOrders: true } },
         },
       });
 
@@ -1654,6 +1685,13 @@ private async importStock(
             amountPaid: invoice.amountPaid,
             paymentStatus: invoice.paymentStatus,
             paymentCount: invoice._count.payments,
+            total: invoice.total,
+            hasDownstream:
+              invoice._count.payments > 0 ||
+              invoice._count.deliveryOrders > 0 ||
+              Number(invoice.creditedAmount) > 0 ||
+              invoice.replacesInvoiceId != null ||
+              invoice.replacedBy != null,
           });
         }
       }
@@ -1803,6 +1841,39 @@ private async importStock(
             // missing — covers re-imports of a GDB that now includes data
             // an earlier import predates, and invoices imported before
             // the snapshot columns existed.
+            // Invoice edited in Accurate since it was imported (total no
+            // longer matches): replace its lines and amounts with Accurate's,
+            // as long as nothing in WareSys depends on the old ones.
+            // Imported invoices never moved stock or posted to the ledger,
+            // so swapping their lines has no side effects.
+            if (
+              existingInvoice &&
+              existingInvoice.status === InvoiceStatus.ISSUED &&
+              !existingInvoice.hasDownstream &&
+              Math.abs(Number(existingInvoice.total) - num(header.INVOICEAMOUNT)) > 1
+            ) {
+              const fresh = buildInvoiceData(header);
+              await this.prisma.$transaction([
+                this.prisma.invoiceItem.deleteMany({ where: { invoiceId: existingInvoice.id } }),
+                this.prisma.invoice.update({
+                  where: { id: existingInvoice.id },
+                  data: {
+                    subtotal: fresh.subtotal,
+                    taxAmount: fresh.taxAmount,
+                    total: fresh.total,
+                    amountPaid: fresh.amountPaid,
+                    paymentStatus: fresh.paymentStatus,
+                    items: fresh.items,
+                  },
+                }),
+              ]);
+              updated++;
+              totalsResynced.push(
+                `Invoice ${invoiceNumber}: total ${Number(existingInvoice.total)} → ${num(header.INVOICEAMOUNT)} (edited in Accurate)`,
+              );
+              return;
+            }
+
             if (existingInvoice) {
               const patch: {
                 vehicleId?: string;
@@ -1841,9 +1912,16 @@ private async importStock(
               // payment history of its own for the invoice, and never lower
               // what is already recorded.
               if (existingInvoice.status === InvoiceStatus.ISSUED && existingInvoice.paymentCount === 0) {
+                // Status moves forward only (UNPAID → PARTIAL → PAID). Compared
+                // separately from the amount: a zero-total invoice, or one
+                // whose rounded amount already matches, still needs its stale
+                // UNPAID/PARTIAL corrected.
+                const rank = { [PaymentStatus.UNPAID]: 0, [PaymentStatus.PARTIAL]: 1, [PaymentStatus.PAID]: 2 };
                 const accurate = accuratePayment(header);
                 if (accurate.paidAmount > Number(existingInvoice.amountPaid)) {
                   patch.amountPaid = accurate.paidAmount;
+                }
+                if (rank[accurate.paymentStatus] > rank[existingInvoice.paymentStatus]) {
                   patch.paymentStatus = accurate.paymentStatus;
                 }
               }
@@ -1909,6 +1987,7 @@ private async importStock(
       errors,
       fractionalQuantityWarnings,
       discountIgnoredWarnings,
+      totalsResynced,
       invoicesScannedForVehicles: headers.length,
       vehicles: vehicleStats, // { descriptionsWithPlate, vehiclesDetected, vehiclesCreated, duplicateVehicleRefsSkipped, ambiguousPlateWarnings }
       vehicleOdometerCacheUpdated,
