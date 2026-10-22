@@ -42,6 +42,7 @@ import {
   ApplyStopAddressDto,
 } from './dto/customer-stop-actions.dto';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
+import { ProofDraftDto, ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
 import {
   ApplyRoutePlanDto,
   PlanCandidatesQueryDto,
@@ -415,8 +416,22 @@ export class DeliveryRoutesController {
     @Param('stopId') stopId: string,
     @Req() req,
     @UploadedFile() file: Express.Multer.File,
+    @Body() meta: ProofPhotoMetaDto,
   ) {
-    return this.stopProof.uploadPhoto(organizationId, routeId, stopId, file, req.user);
+    return this.stopProof.uploadPhoto(organizationId, routeId, stopId, file, req.user, meta);
+  }
+
+  @Patch(':id/stops/:stopId/proof-draft')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  saveStopProofDraft(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: ProofDraftDto,
+  ) {
+    return this.stopProof.saveDraft(organizationId, routeId, stopId, dto.receivedBy, req.user);
   }
 
   @Get(':id/stops/:stopId/proof-photo-link')
@@ -427,8 +442,15 @@ export class DeliveryRoutesController {
     @Param('id') routeId: string,
     @Param('stopId') stopId: string,
     @Req() req,
+    @Query('kind') kind?: string,
   ) {
-    return this.stopProof.photoLink(organizationId, routeId, stopId, req.user);
+    return this.stopProof.photoLink(
+      organizationId,
+      routeId,
+      stopId,
+      req.user,
+      kind === 'failure' ? 'failure' : 'proof',
+    );
   }
 
   @Patch(':id/stops/:stopId/proof')

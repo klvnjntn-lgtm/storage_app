@@ -14,6 +14,7 @@ import {
 } from '../storage/file-storage.interface';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
+import type { PhotoCaptureMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 
 export const MAX_LOCATION_PHOTOS = 2;
 
@@ -46,6 +47,10 @@ export class CustomerLocationService {
     return photos.map((p) => ({
       id: p.id,
       createdAt: p.createdAt,
+      takenAt: p.takenAt,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      accuracy: p.accuracy,
       ...this.signer.sign(p.storageKey),
     }));
   }
@@ -54,6 +59,7 @@ export class CustomerLocationService {
     organizationId: string,
     customerId: string,
     file: Express.Multer.File,
+    meta: PhotoCaptureMetaDto = {},
   ) {
     await this.assertCustomer(organizationId, customerId);
     const count = await this.prisma.customerLocationPhoto.count({
@@ -67,8 +73,19 @@ export class CustomerLocationService {
     const data = await encodePrivatePhoto(file);
     const key = `customer-locations/${organizationId}/${customerId}/${randomUUID()}.webp`;
     await this.storage.put(key, data, 'image/webp');
+    // GPS is optional here — office staff may add a photo from a desktop.
+    const hasFix = meta.latitude != null && meta.longitude != null;
+    const takenAt = meta.takenAt ? new Date(meta.takenAt) : null;
     await this.prisma.customerLocationPhoto.create({
-      data: { organizationId, customerId, storageKey: key },
+      data: {
+        organizationId,
+        customerId,
+        storageKey: key,
+        takenAt: takenAt && takenAt <= new Date() ? takenAt : new Date(),
+        latitude: hasFix ? meta.latitude : null,
+        longitude: hasFix ? meta.longitude : null,
+        accuracy: hasFix ? (meta.accuracy ?? null) : null,
+      },
     });
     return this.list(organizationId, customerId);
   }

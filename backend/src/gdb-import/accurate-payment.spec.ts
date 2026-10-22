@@ -45,6 +45,7 @@ describe('parseAccurateDiscount', () => {
     expect(parseAccurateDiscount('2,5')).toBe(2.5);
     expect(parseAccurateDiscount('')).toBe(0);
     expect(parseAccurateDiscount(null)).toBe(0);
+    expect(parseAccurateDiscount('.')).toBe(0);
   });
 
   it('chains "10+5" as 10% then 5% of the rest', () => {

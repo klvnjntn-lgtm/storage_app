@@ -57,6 +57,15 @@ type Stop = {
   deliveryWindowEnd: string | null;
   receivedBy: string | null;
   hasProofPhoto: boolean;
+  // Sent with the proof photo, before the driver tapped Done — all the
+  // office has when the driver never confirmed the delivery.
+  photoTakenAt: string | null;
+  photoLatitude: string | null;
+  photoLongitude: string | null;
+  photoAccuracy: number | null;
+  pendingReceivedBy: string | null;
+  // Photo from a failed attempt (closed shop, locked gate).
+  hasFailurePhoto: boolean;
   // Where the driver marked it delivered (Decimal → string) and how good
   // that GPS fix was, in metres.
   completedLatitude: string | null;
@@ -892,6 +901,50 @@ export default function DeliveryRouteDetailPage() {
                     )}
                     {stop.status === 'FAILED' && stop.failureReason && (
                       <div className="text-xs text-red-600">{stop.failureReason}</div>
+                    )}
+                    {stop.status === 'FAILED' && stop.hasFailurePhoto && (
+                      <ProofPhoto
+                        linkPath={`${
+                          stop.deliveryOrder
+                            ? `/delivery-orders/${stop.deliveryOrder.id}/proof-photo-link`
+                            : `/delivery-routes/${id}/stops/${stop.id}/proof-photo-link`
+                        }?kind=failure`}
+                      />
+                    )}
+                    {stop.status === 'PENDING' && stop.hasProofPhoto && (
+                      <div data-no-map-focus className="mt-1.5 space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2">
+                        <div className="flex items-start gap-1.5 text-xs font-semibold text-amber-800">
+                          <AlertTriangle size={13} className="shrink-0 mt-px" />
+                          {stop.photoTakenAt
+                            ? t('delivery.routeDetail.unconfirmedPhoto', {
+                                time: new Date(stop.photoTakenAt).toLocaleString([], {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                }),
+                              })
+                            : t('delivery.routeDetail.unconfirmedPhotoNoTime')}
+                        </div>
+                        {stop.pendingReceivedBy && (
+                          <div className="text-xs text-gray-700">
+                            {t('delivery.routeDetail.receivedByLabel')}: {stop.pendingReceivedBy}
+                          </div>
+                        )}
+                        {stop.photoLatitude && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <DeliveryFixBadge accuracy={stop.photoAccuracy} />
+                            <GoogleMapsLink lat={stop.photoLatitude} lng={stop.photoLongitude} className="!px-2 !py-1" />
+                          </div>
+                        )}
+                        <ProofPhoto
+                          linkPath={
+                            stop.deliveryOrder
+                              ? `/delivery-orders/${stop.deliveryOrder.id}/proof-photo-link`
+                              : `/delivery-routes/${id}/stops/${stop.id}/proof-photo-link`
+                          }
+                        />
+                      </div>
                     )}
                     <div className="flex items-center gap-2 flex-wrap">
                       {isCurrent && (

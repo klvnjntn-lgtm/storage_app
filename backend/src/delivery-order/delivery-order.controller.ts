@@ -10,6 +10,7 @@ import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { DeliveryOrderService } from './delivery-order.service';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { RecordDeliveryOrderReturnDto } from './dto/delivery-order-return.dto';
+import { ProofDraftDto, ProofPhotoMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 import { RecordDeliveryOrderProofDto } from './dto/delivery-order-proof.dto'; // adjust path/name to your actual DTO
 import { RecordDeliveryOrderFailureDto } from './dto/delivery-order-failure.dto';
 import { SetDeliveryOrderDestinationDto } from './dto/delivery-order-destination.dto';
@@ -128,8 +129,20 @@ export class DeliveryOrderController {
     @Param('id') id: string,
     @Req() req,
     @UploadedFile() file: Express.Multer.File,
+    @Body() meta: ProofPhotoMetaDto,
   ) {
-    return this.deliveryProofService.uploadPhoto(organizationId, id, file, req.user);
+    return this.deliveryProofService.uploadPhoto(organizationId, id, file, req.user, meta);
+  }
+
+  @Patch(':id/proof-draft')
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  saveProofDraft(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: ProofDraftDto,
+  ) {
+    return this.deliveryProofService.saveDraft(organizationId, id, dto.receivedBy, req.user);
   }
 
   @Get(':id/proof-photo-link')
@@ -138,8 +151,9 @@ export class DeliveryOrderController {
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
     @Req() req,
+    @Query('kind') kind?: string,
   ) {
-    return this.deliveryProofService.photoLink(organizationId, id, req.user);
+    return this.deliveryProofService.photoLink(organizationId, id, req.user, kind === 'failure' ? 'failure' : 'proof');
   }
 
   @Post(':id/failure')

@@ -14,12 +14,18 @@ import {
 } from 'class-validator';
 
 // Proof for a customer stop — receiver name is required (as is the photo,
-// uploaded beforehand). GPS is best-effort: the phone may refuse it.
+// uploaded beforehand). GPS is required when a driver records it (see
+// driver-proof.ts), optional for office staff.
 export class RecordCustomerStopProofDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
   receivedBy: string;
+
+  // When the proof photo was taken; defaults to now.
+  @IsOptional()
+  @IsDateString()
+  signedAt?: string;
 
   @IsOptional()
   @IsLatitude()

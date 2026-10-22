@@ -4,6 +4,11 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  assertDriverLocation,
+  driverSignedAt,
+  movePhotoToFailure,
+} from '../delivery-routes/driver-proof';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
@@ -501,7 +506,29 @@ export class DeliveryOrderService {
     }
     await this.assertRequesterCanActOnDeliveryOrder(id, requester);
 
-    const signedAt = params.signedAt ?? deliveryOrder.signedAt ?? new Date();
+    // From the driver's phone: GPS required, time sanity-checked (see
+    // driver-proof.ts). Office staff can record what they like. Either
+    // way, what came with the proof photo fills in what wasn't sent — the
+    // delivery happened where and when the photo was taken.
+    if (
+      params.completedLatitude == null &&
+      deliveryOrder.proofPhotoLatitude != null
+    ) {
+      params = {
+        ...params,
+        completedLatitude: Number(deliveryOrder.proofPhotoLatitude),
+        completedLongitude: Number(deliveryOrder.proofPhotoLongitude),
+        completedAccuracy: deliveryOrder.proofPhotoAccuracy ?? undefined,
+      };
+    }
+    const isDriver = requester?.role === 'DRIVER';
+    if (isDriver) {
+      assertDriverLocation(params.completedLatitude, params.completedLongitude);
+    }
+    const photoAt = deliveryOrder.proofPhotoTakenAt ?? undefined;
+    const signedAt = isDriver
+      ? driverSignedAt(params.signedAt ?? photoAt, deliveryOrder.shippedAt)
+      : (params.signedAt ?? deliveryOrder.signedAt ?? photoAt ?? new Date());
     const updated = await this.prisma.deliveryOrder.update({
       where: { id },
       data: {
@@ -577,14 +604,24 @@ export class DeliveryOrderService {
     await this.assertRequesterCanActOnDeliveryOrder(id, requester);
 
     const failedAt = params.failedAt ?? new Date();
+    // A photo taken at the stop becomes the failed attempt's photo (see
+    // movePhotoToFailure), and its GPS the failure's location if the phone
+    // sent none.
+    const useFix =
+      params.latitude == null && deliveryOrder.proofPhotoLatitude != null;
     const claim = await this.prisma.deliveryOrder.updateMany({
       where: { id, organizationId, status: DeliveryOrderStatus.SHIPPED },
       data: {
         status: DeliveryOrderStatus.FAILED,
         failedAt,
         failureReason: params.reason ?? null,
-        failureLatitude: params.latitude ?? null,
-        failureLongitude: params.longitude ?? null,
+        failureLatitude: useFix
+          ? deliveryOrder.proofPhotoLatitude
+          : (params.latitude ?? null),
+        failureLongitude: useFix
+          ? deliveryOrder.proofPhotoLongitude
+          : (params.longitude ?? null),
+        ...movePhotoToFailure(deliveryOrder.proofPhotoKey),
       },
     });
     if (claim.count === 0) {

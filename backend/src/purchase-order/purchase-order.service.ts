@@ -451,6 +451,8 @@ export class PurchaseOrderService {
       where.OR = [
         { poNumber: { contains: escapeLike(term), mode: 'insensitive' } },
         { supplier: { name: { contains: escapeLike(term), mode: 'insensitive' } } },
+        // The supplier's own invoice number (imported Accurate purchases carry it here).
+        { supplierBills: { some: { billNumber: { contains: escapeLike(term), mode: 'insensitive' } } } },
       ];
     }
 

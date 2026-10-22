@@ -12,6 +12,7 @@ import { PurchaseOrderDetail, PurchaseOrderPrintView } from '@/app/components/pu
 import { ReceiveGoodsDialog } from '@/app/components/purchase-orders/ReceiveGoodsDialog';
 import { PurchaseReturnDialog } from '@/app/components/purchase-orders/PurchaseReturnDialog';
 import { ThreeWayMatchPanel } from '@/app/components/purchase-orders/ThreeWayMatchPanel';
+import { SupplierPaymentsPanel } from '@/app/components/purchase-orders/SupplierPaymentsPanel';
 import {
   ApprovalRequiredNotice,
   isApprovalRequired,
@@ -341,6 +342,9 @@ export default function PurchaseOrderDetailPage() {
         {approvalError && <ApprovalRequiredNotice error={approvalError} />}
 
         {isAdmin && po.status !== 'DRAFT' && <ThreeWayMatchPanel purchaseOrderId={po.id} refreshKey={refreshKey} />}
+        {isAdmin && po.status !== 'DRAFT' && po.status !== 'CANCELLED' && (
+          <SupplierPaymentsPanel purchaseOrderId={po.id} refreshKey={refreshKey} />
+        )}
 
         {returns.length > 0 && (
           <section className="bg-white border-2 border-gray-200 rounded-md p-3">

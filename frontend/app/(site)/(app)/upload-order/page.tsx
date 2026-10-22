@@ -62,7 +62,16 @@ type GdbPreviewResponse = {
 type GdbImportTarget = 'products_only' | 'full_invoices' | 'full_invoices_and_purchase_orders';
 
 type GdbImportResult = {
-  items: { created: number; updated: number };
+  items: { created: number; updated: number; priceLevelPrices?: number };
+  salesmen?: { created: number; updated: number };
+  purchaseInvoices?: {
+    created: number;
+    updated: number;
+    unchanged: number;
+    paymentsCreated: number;
+    errors: string[];
+    warnings: string[];
+  };
   invoices?: {
     created: number;
     updated: number;
@@ -673,6 +682,10 @@ export default function ImportOrdersPage() {
                 {gdbResult.items.created === 1
                   ? t('upload.uploadOrderPage.gdb.itemsSummaryOne', { created: gdbResult.items.created, updated: gdbResult.items.updated })
                   : t('upload.uploadOrderPage.gdb.itemsSummaryMany', { created: gdbResult.items.created, updated: gdbResult.items.updated })}
+                {!!gdbResult.items.priceLevelPrices &&
+                  t('upload.uploadOrderPage.gdb.priceLevelSummary', { count: gdbResult.items.priceLevelPrices })}
+                {!!gdbResult.salesmen?.created &&
+                  t('upload.uploadOrderPage.gdb.salesmenSummary', { created: gdbResult.salesmen.created })}
                 {gdbResult.invoices &&
                   (gdbResult.invoices.created === 1
                     ? t('upload.uploadOrderPage.gdb.invoicesSummaryOne', { created: gdbResult.invoices.created, updated: gdbResult.invoices.updated, skipped: gdbResult.invoices.skipped })
@@ -681,6 +694,12 @@ export default function ImportOrdersPage() {
                   (gdbResult.purchaseOrders.created === 1
                     ? t('upload.uploadOrderPage.gdb.purchaseOrdersSummaryOne', { created: gdbResult.purchaseOrders.created, updated: gdbResult.purchaseOrders.updated })
                     : t('upload.uploadOrderPage.gdb.purchaseOrdersSummaryMany', { created: gdbResult.purchaseOrders.created, updated: gdbResult.purchaseOrders.updated }))}
+                {gdbResult.purchaseInvoices &&
+                  t('upload.uploadOrderPage.gdb.purchaseInvoicesSummary', {
+                    created: gdbResult.purchaseInvoices.created,
+                    updated: gdbResult.purchaseInvoices.updated,
+                    paymentsCreated: gdbResult.purchaseInvoices.paymentsCreated,
+                  })}
                 .
               </span>
             </div>
@@ -803,6 +822,34 @@ export default function ImportOrdersPage() {
                 <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
                   {gdbResult.purchaseOrders.overReceivedWarnings.map((w, i) => (
                     <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseInvoices && gdbResult.purchaseInvoices.warnings.length > 0 && (
+              <div className="border border-yellow-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {t('upload.uploadOrderPage.gdb.purchaseInvoicesWarning', { count: gdbResult.purchaseInvoices.warnings.length })}
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseInvoices.warnings.map((w, i) => (
+                    <li key={i} className="px-3 py-2 text-yellow-800">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {gdbResult.purchaseInvoices && gdbResult.purchaseInvoices.errors.length > 0 && (
+              <div className="border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-semibold uppercase tracking-wide flex items-center gap-2">
+                  <AlertCircle size={14} strokeWidth={2} />
+                  {t('upload.uploadOrderPage.gdb.purchaseInvoicesFailed', { count: gdbResult.purchaseInvoices.errors.length })}
+                </div>
+                <ul className="text-sm divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                  {gdbResult.purchaseInvoices.errors.map((e, i) => (
+                    <li key={i} className="px-3 py-2 text-red-700">{e}</li>
                   ))}
                 </ul>
               </div>

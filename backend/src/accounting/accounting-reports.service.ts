@@ -643,7 +643,12 @@ async getARAging(
         status: {
           in: [PurchaseOrderStatus.SENT, PurchaseOrderStatus.PARTIALLY_RECEIVED, PurchaseOrderStatus.FULLY_RECEIVED],
         },
-        goodsReceipts: { some: {} }, // nothing's owed until something arrived
+        OR: [
+          { goodsReceipts: { some: {} } }, // nothing's owed until something arrived
+          // ...or a bill imported from Accurate, whose goods arrived before
+          // WareSys (no GoodsReceipt; see GdbImportService.importPurchaseInvoices)
+          { goodsReceipts: { none: {} }, supplierBills: { some: { externalId: { not: null }, voidedAt: null } } },
+        ],
       },
       select: {
         id: true,
@@ -656,7 +661,10 @@ async getARAging(
         supplier: { select: { name: true } },
         goodsReceipts: { select: { id: true } },
         // The supplier's own bill sets the real due date when there is one.
-        supplierBills: { where: { voidedAt: null }, select: { dueDate: true } },
+        supplierBills: {
+          where: { voidedAt: null },
+          select: { dueDate: true, externalId: true, amount: true, billDate: true },
+        },
       },
     });
 
@@ -689,6 +697,17 @@ async getARAging(
         if (!poId) continue;
         owedByPo.set(poId, (owedByPo.get(poId) ?? 0) + Number(l.credit));
       }
+    }
+
+    // 1a) Imported Accurate bills on POs with no goods receipt: the bill is
+    // what's owed. These never posted to the ledger, so the reconciliation
+    // below reports them as a difference until an opening balance is posted.
+    for (const po of purchaseOrders) {
+      if (po.goodsReceipts.length > 0) continue;
+      const billed = po.supplierBills
+        .filter((b) => b.externalId != null && b.billDate <= asOf)
+        .reduce((sum, b) => sum + Number(b.amount), 0);
+      if (billed > 0) owedByPo.set(po.id, billed);
     }
 
     // 1b) Goods returned to the supplier as of `asOf`: the AP debits their

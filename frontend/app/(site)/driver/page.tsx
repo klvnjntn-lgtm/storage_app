@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -28,6 +28,8 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/captureLocation';
+import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 
@@ -54,6 +56,10 @@ type Stop = {
   signedAt: string | null;
   failedAt: string | null;
   hasProofPhoto: boolean;
+  // Sent with the photo, before Done (see the backend's presentStop).
+  photoTakenAt: string | null;
+  pendingReceivedBy: string | null;
+  hasFailurePhoto: boolean;
   completedLatitude: string | null;
   completedAccuracy: number | null;
   // Prisma Decimal fields serialize as strings over JSON, not numbers.
@@ -126,51 +132,99 @@ type RouteWithStops = {
 function stopEndpoints(routeId: string, stop: Stop) {
   if (stop.deliveryOrder) {
     const base = `/delivery-orders/${stop.deliveryOrder.id}`;
-    return { photo: `${base}/proof-photo`, proof: `${base}/proof-of-delivery`, failure: `${base}/failure` };
+    return { photo: `${base}/proof-photo`, proof: `${base}/proof-of-delivery`, failure: `${base}/failure`, draft: `${base}/proof-draft` };
   }
   const base = `/delivery-routes/${routeId}/stops/${stop.id}`;
-  return { photo: `${base}/proof-photo`, proof: `${base}/proof`, failure: `${base}/failure` };
+  return { photo: `${base}/proof-photo`, proof: `${base}/proof`, failure: `${base}/failure`, draft: `${base}/proof-draft` };
+}
+
+// A phone on a dying signal can leave a request hanging for minutes with
+// the button stuck on "Marking…". Give up after this long so the driver
+// can just tap again — whatever already reached the server stays there.
+const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
 }
 
 // No Content-Type set here deliberately — the browser fills in the
 // multipart boundary itself. apiFetch always sets Content-Type:
 // application/json, so this bypasses it rather than fighting it.
 // Goes to private proof storage, not the media library.
-async function uploadProofPhoto(path: string, file: File): Promise<boolean> {
+// Sent with it: when and where it was taken and the name typed so far, so
+// the office sees the evidence even if Done is never tapped.
+type PhotoMeta = { takenAt?: string; fix?: Fix; receivedBy?: string };
+async function uploadProofPhoto(
+  path: string,
+  file: File,
+  meta: PhotoMeta,
+): Promise<{ ok: boolean; status?: number; message?: string }> {
   const formData = new FormData();
   formData.append('file', file);
+  if (meta.takenAt) formData.append('takenAt', meta.takenAt);
+  if (meta.fix?.latitude != null && meta.fix.longitude != null) {
+    formData.append('latitude', String(meta.fix.latitude));
+    formData.append('longitude', String(meta.fix.longitude));
+    if (meta.fix.accuracy != null) formData.append('accuracy', String(meta.fix.accuracy));
+  }
+  if (meta.receivedBy?.trim()) formData.append('receivedBy', meta.receivedBy.trim());
   const res = await fetch(`/api${path}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { ...CSRF_HEADERS, 'X-Device-Id': getDeviceId() },
     body: formData,
+    signal: timeoutSignal(PHOTO_UPLOAD_TIMEOUT_MS),
   });
-  return res.ok;
+  if (res.ok) return { ok: true, status: res.status };
+  const body = await res.json().catch(() => null);
+  return { ok: false, status: res.status, message: typeof body?.message === 'string' ? body.message : undefined };
 }
 
-// Best-effort single-shot GPS capture — the fallback when the warm watch
-// (useGpsWatch) has no fresh reading. Never blocks the action on
-// permission being denied, the API being unsupported or a timeout. Comes
-// from the device, never from the photo's EXIF. accuracy (metres) goes
-// along so the backend only turns a tight fix into a customer's first pin.
-type Fix = { latitude?: number; longitude?: number; accuracy?: number };
-function captureLocation(): Promise<Fix> {
-  return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) {
-      resolve({});
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : undefined,
-        }),
-      () => resolve({}),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    );
-  });
+// Android often drops the page while the camera app is open; it comes back
+// as a fresh load at the top. Remember which stop opened the camera so the
+// reload can scroll back to it (ignored after a couple of minutes, e.g.
+// when the camera was cancelled).
+const RETURN_TO_KEY = 'driver.returnTo';
+const RETURN_TO_MAX_AGE_MS = 2 * 60 * 1000;
+function rememberReturnTo(stopId: string) {
+  try {
+    sessionStorage.setItem(RETURN_TO_KEY, JSON.stringify({ stopId, at: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+function clearReturnTo() {
+  try {
+    sessionStorage.removeItem(RETURN_TO_KEY);
+  } catch {
+    // ignore
+  }
+}
+function takeReturnTo(): string | null {
+  try {
+    const raw = sessionStorage.getItem(RETURN_TO_KEY);
+    sessionStorage.removeItem(RETURN_TO_KEY);
+    if (!raw) return null;
+    const { stopId, at } = JSON.parse(raw) as { stopId: string; at: number };
+    return Date.now() - at < RETURN_TO_MAX_AGE_MS ? stopId : null;
+  } catch {
+    return null;
+  }
+}
+
+// The server said no (wrong date, stop already resolved…) rather than the
+// connection failing — sending the same photo again won't help.
+function isRefusal(status: number | undefined): boolean {
+  return status != null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+// How often a photo kept on the phone is tried again while the page is open.
+const PHOTO_RETRY_MS = 20_000;
+
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
 }
 
 // Matches WEAK_PIN_ACCURACY_M: a vaguer fix still becomes the customer's
@@ -402,6 +456,24 @@ function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Sto
           {stop.status === 'FAILED' && stop.failureReason && (
             <p className="text-red-700 whitespace-pre-line">{stop.failureReason}</p>
           )}
+          {stop.status === 'FAILED' && stop.hasFailurePhoto && <SentProofPhoto linkPath={`${photoLink}?kind=failure`} />}
+          {/* Photo sent but Done never tapped: kept for the office, no
+              longer finishable from here. */}
+          {stop.status === 'PENDING' && stop.hasProofPhoto && (
+            <>
+              <p className="flex items-start gap-1.5 text-amber-800">
+                <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                {t('delivery.driver.notConfirmed', { time: stop.photoTakenAt ? formatTime(stop.photoTakenAt) : '—' })}
+              </p>
+              {stop.pendingReceivedBy && (
+                <p className="flex items-center gap-1.5 text-gray-700">
+                  <User size={18} className="shrink-0 text-gray-500" />
+                  {t('delivery.driver.receivedByValue', { name: stop.pendingReceivedBy })}
+                </p>
+              )}
+              <SentProofPhoto linkPath={photoLink} />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -423,8 +495,28 @@ export default function DriverRoutePage() {
   const [routes, setRoutes] = useState<RouteWithStops[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Non-error heads-up, e.g. delivered without GPS.
-  const [notice, setNotice] = useState<string | null>(null);
+  // Photo refused for want of a GPS reading — shown at that stop's camera,
+  // where the driver is looking.
+  const [photoGpsFailedFor, setPhotoGpsFailedFor] = useState<string | null>(null);
+  // Photo kept on the phone after its upload failed; Done sends it again.
+  const [photoQueuedFor, setPhotoQueuedFor] = useState<Record<string, boolean>>({});
+  // Uploads in flight per stop (and the photo each is sending), so Done
+  // waits for the one already going instead of sending the photo twice,
+  // and a retake goes up right after it.
+  const uploads = useRef<Record<string, Promise<boolean> | undefined>>({});
+  const uploadingFile = useRef<Record<string, File | undefined>>({});
+  // Photos the server refused: not retried in the background.
+  const refusedPhoto = useRef<Record<string, File | undefined>>({});
+  // Receiver names not yet sent to the server (sent after a pause in
+  // typing, or at once when the page is being left).
+  const nameTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pendingNames = useRef<Record<string, { url: string; value: string }>>({});
+  // Errors from a stop's own actions, shown at that stop — the page-level
+  // box is at the top, out of sight of a driver scrolled down to the stop.
+  const [stopErrors, setStopErrors] = useState<Record<string, string | undefined>>({});
+  function setStopError(stopId: string, message: string | null) {
+    setStopErrors((e) => ({ ...e, [stopId]: message ?? undefined }));
+  }
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [receivedByDraft, setReceivedByDraft] = useState<Record<string, string>>({});
   const [failureDraft, setFailureDraft] = useState<Record<string, string>>({});
@@ -435,6 +527,15 @@ export default function DriverRoutePage() {
   // the photo was shot even if the upload only gets through later.
   const [photoFix, setPhotoFix] = useState<Record<string, Fix>>({});
   const [preparingPhotoFor, setPreparingPhotoFor] = useState<string | null>(null);
+  // When the photo was taken — that, not the tap on Done, is when the
+  // delivery happened.
+  const [photoTakenAt, setPhotoTakenAt] = useState<Record<string, string>>({});
+  // The current values, for the background retry and for uploads that
+  // finish after a retake.
+  const latest = useRef({ routes, photoDraft, photoFix, photoTakenAt, receivedByDraft });
+  useEffect(() => {
+    latest.current = { routes, photoDraft, photoFix, photoTakenAt, receivedByDraft };
+  });
   // 0 = today; past days are view-only, to look back at what was done.
   const [daysBack, setDaysBack] = useState(0);
   const isToday = daysBack === 0;
@@ -442,41 +543,199 @@ export default function DriverRoutePage() {
   // GPS stays warm only while there's something left to deliver today.
   const hasPending = isToday && routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
   const gps = useGpsWatch(user?.role === 'DRIVER' && hasPending);
+  // Location can't work at all here, so no photo can be taken.
+  const gpsBlocked = gps.status === 'denied' || gps.status === 'insecure' || gps.status === 'unsupported';
 
-  // Best warm reading if there is one, else ask the phone once.
-  async function takeFix(): Promise<Fix> {
-    const f = gps.bestFix();
-    if (f) return { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy };
-    return captureLocation();
+  // Best warm reading if there is one, else ask the phone — and keep
+  // checking the warm watch meanwhile, since on a weak signal it often
+  // lands a reading before the one-off request answers. {} after capMs.
+  async function takeFix(capMs = GPS_WAIT_MS): Promise<Fix> {
+    const warm = () => {
+      const f = gps.bestFix();
+      return f ? { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy } : null;
+    };
+    const now = warm();
+    if (now) return now;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    const fromWatch = new Promise<Fix>((resolve) => {
+      poll = setInterval(() => {
+        const f = warm();
+        if (f) resolve(f);
+      }, 1000);
+    });
+    const once = captureLocation(capMs).then((f) => (f.latitude != null ? f : warm() ?? f));
+    try {
+      return await Promise.race([fromWatch, once]);
+    } finally {
+      clearInterval(poll);
+    }
   }
 
   // Takes the GPS reading at the moment of the photo, stamps date, day,
   // time and that reading onto the photo, and shrinks it for a weak
-  // signal. A retake replaces both.
-  async function onPhotoPicked(stopId: string, file: File) {
+  // signal. No reading, no photo: the delivery is placed where the photo
+  // was taken, so a photo without one would leave it nowhere. Saved on
+  // the phone straight away (driverDrafts) so a refresh or closed tab
+  // loses nothing. A retake replaces all of it.
+  async function onPhotoPicked(routeId: string, stop: Stop, file: File) {
+    const stopId = stop.id;
+    clearReturnTo();
     setPreparingPhotoFor(stopId);
+    setPhotoGpsFailedFor(null);
     try {
       const takenAt = new Date();
       const fix = await takeFix();
+      if (fix.latitude == null || fix.longitude == null) {
+        setPhotoGpsFailedFor(stopId);
+        return;
+      }
       const small = await shrinkPhoto(file, { stamp: photoStamp(takenAt, fix) });
       setPhotoDraft((d) => ({ ...d, [stopId]: small }));
       setPhotoFix((f) => ({ ...f, [stopId]: fix }));
+      setPhotoTakenAt((a) => ({ ...a, [stopId]: takenAt.toISOString() }));
+      setStopError(stopId, null);
+      void saveDraft(stopId, {
+        photo: small,
+        photoFix: { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy },
+        photoTakenAt: takenAt.toISOString(),
+      });
+      // Sent straight away rather than on Done, so a delivery the driver
+      // forgets to confirm is still on the office's screen.
+      void sendPhoto(routeId, stop, small, { takenAt: takenAt.toISOString(), fix, receivedBy: receivedByDraft[stopId] });
     } finally {
       setPreparingPhotoFor((id) => (id === stopId ? null : id));
     }
   }
 
+  // Uploads a stop's photo; true once the server has it. If it can't get
+  // through, the photo stays on the phone (driverDrafts) and goes up in the
+  // background later, or on Done. While another upload for the stop is
+  // running: the same photo waits for it, a retake is sent right after it.
+  function sendPhoto(routeId: string, stop: Stop, photo: File, meta: PhotoMeta): Promise<boolean> {
+    const key = stop.id;
+    const running = uploads.current[key];
+    if (running) {
+      if (uploadingFile.current[key] === photo) return running;
+      return running.then(() =>
+        // Retaken again since? That later photo is sent by its own call.
+        latest.current.photoDraft[key] === photo ? sendPhoto(routeId, stop, photo, meta) : true,
+      );
+    }
+    const run = (async () => {
+      setUploadingPhotoFor(key);
+      uploadingFile.current[key] = photo;
+      try {
+        const upload = await uploadProofPhoto(stopEndpoints(routeId, stop).photo, photo, meta);
+        if (!upload.ok) {
+          if (isRefusal(upload.status)) {
+            refusedPhoto.current[key] = photo;
+            setStopError(key, upload.message ?? t('delivery.driver.photoUploadFailed'));
+          } else {
+            setPhotoQueuedFor((q) => ({ ...q, [key]: true }));
+          }
+          return false;
+        }
+        setPhotoQueuedFor((q) => ({ ...q, [key]: false }));
+        setStopError(key, null);
+        // Only drop the copy on the phone if it's still the one sent (no
+        // retake meanwhile).
+        if (latest.current.photoDraft[key] === photo) void saveDraft(key, { photo: undefined });
+        setPhotoDraft((d) => {
+          if (d[key] !== photo) return d;
+          const rest = { ...d };
+          delete rest[key];
+          return rest;
+        });
+        setRoutes((rs) =>
+          rs.map((r) => ({ ...r, stops: r.stops.map((s) => (s.id === key ? { ...s, hasProofPhoto: true } : s)) })),
+        );
+        return true;
+      } catch {
+        setPhotoQueuedFor((q) => ({ ...q, [key]: true }));
+        return false;
+      } finally {
+        delete uploads.current[key];
+        delete uploadingFile.current[key];
+        setUploadingPhotoFor((id) => (id === key ? null : id));
+      }
+    })();
+    uploads.current[key] = run;
+    return run;
+  }
+
+  // Photos still on the phone go up on their own once there's signal
+  // again, so a driver who never taps Done still gets them to the office.
+  function retryQueuedPhotos() {
+    const { routes: rs, photoDraft: photos, photoFix: fixes, photoTakenAt: times, receivedByDraft: names } = latest.current;
+    for (const r of rs) {
+      for (const stop of r.stops) {
+        const photo = photos[stop.id];
+        if (stop.status !== 'PENDING' || !photo || uploads.current[stop.id]) continue;
+        if (refusedPhoto.current[stop.id] === photo) continue;
+        void sendPhoto(r.id, stop, photo, { takenAt: times[stop.id], fix: fixes[stop.id], receivedBy: names[stop.id] });
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!isToday) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') retryQueuedPhotos();
+    };
+    const timer = setInterval(retryQueuedPhotos, PHOTO_RETRY_MS);
+    window.addEventListener('online', retryQueuedPhotos);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', retryQueuedPhotos);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isToday]);
+
+  // Names typed but not yet sent go now if the page is being left — the
+  // phone closing the tab, switching apps — rather than after the pause.
+  function sendName(key: string) {
+    const pending = pendingNames.current[key];
+    clearTimeout(nameTimers.current[key]);
+    delete pendingNames.current[key];
+    if (!pending) return;
+    apiFetch(pending.url, {
+      method: 'PATCH',
+      body: JSON.stringify({ receivedBy: pending.value }),
+      keepalive: true,
+      signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+    }).catch(() => {});
+  }
+
+  useEffect(() => {
+    const flush = () => Object.keys(pendingNames.current).forEach(sendName);
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, []);
+
+  // The name as it's typed: on the phone at once, on the server shortly
+  // after (best-effort) so the office sees it even without Done.
+  function onReceivedByChange(routeId: string, stop: Stop, value: string) {
+    const key = stop.id;
+    setReceivedByDraft((d) => ({ ...d, [key]: value }));
+    void saveDraft(key, { receivedBy: value || undefined });
+    clearTimeout(nameTimers.current[key]);
+    pendingNames.current[key] = { url: stopEndpoints(routeId, stop).draft, value };
+    nameTimers.current[key] = setTimeout(() => sendName(key), 1500);
+  }
+
   // "Jumat, 10 Oktober 2026" / "14.32.05 WIB" / "-6.12345, 106.12345 (±12 m)"
   // in the driver's language, from the phone's clock.
   function photoStamp(at: Date, fix: Fix): string[] {
-    const locale = language === 'id' ? 'id-ID' : 'en-GB';
-    const date = at.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const time = at.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
-    const where =
-      fix.latitude != null && fix.longitude != null
-        ? `${fix.latitude.toFixed(6)}, ${fix.longitude.toFixed(6)}${fix.accuracy != null ? ` (±${Math.round(fix.accuracy)} m)` : ''}`
-        : t('delivery.driver.photoNoGps');
-    return [date, time, where];
+    return photoStampLines(at, fix, language, t('delivery.driver.photoNoGps'));
   }
 
   useEffect(() => {
@@ -485,53 +744,120 @@ export default function DriverRoutePage() {
     }
   }, [userLoading, user, router]);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  // quiet: re-sync after a failed action without blanking the list or
+  // replacing the error the driver is reading.
+  async function load({ quiet = false }: { quiet?: boolean } = {}) {
+    if (!quiet) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       // Today leaves the date to the server, as it always has.
-      const res = await apiFetch(isToday ? '/delivery-routes/mine' : `/delivery-routes/mine?date=${dayAt(daysBack)}`);
+      const res = await apiFetch(isToday ? '/delivery-routes/mine' : `/delivery-routes/mine?date=${dayAt(daysBack)}`, {
+        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+        if (!quiet) setError(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
         return;
       }
-      setRoutes(await res.json());
-    } catch {
-      setError(t('delivery.driver.couldNotReachServer'));
+      const data: RouteWithStops[] = await res.json();
+      setRoutes(data);
+      await restoreDrafts(data);
+    } catch (err) {
+      if (!quiet) setError(t(isAbort(err) ? 'delivery.driver.slowConnection' : 'delivery.driver.couldNotReachServer'));
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }
+
+  // Brings back what was entered before a refresh or a closed tab, and
+  // clears drafts for stops that are finished or long forgotten. What's
+  // already on screen wins over what's saved.
+  async function restoreDrafts(data: RouteWithStops[]) {
+    const stops = new Map(data.flatMap((r) => r.stops).map((s) => [s.id, s]));
+    const names: Record<string, string> = {};
+    const photos: Record<string, File> = {};
+    const fixes: Record<string, Fix> = {};
+    const times: Record<string, string> = {};
+    for (const draft of await listDrafts()) {
+      const stop = stops.get(draft.stopId);
+      if ((stop && stop.status !== 'PENDING') || Date.now() - draft.savedAt > DRAFT_MAX_AGE_MS) {
+        void deleteDraft(draft.stopId);
+        continue;
+      }
+      if (!stop) continue; // another day's route
+      if (draft.receivedBy) names[draft.stopId] = draft.receivedBy;
+      // A photo the server already has isn't sent again.
+      if (draft.photo && !stop.hasProofPhoto) photos[draft.stopId] = draft.photo;
+      if (draft.photoFix) fixes[draft.stopId] = draft.photoFix;
+      if (draft.photoTakenAt) times[draft.stopId] = draft.photoTakenAt;
+    }
+    setReceivedByDraft((d) => ({ ...names, ...d }));
+    setPhotoDraft((d) => ({ ...photos, ...d }));
+    setPhotoFix((f) => ({ ...fixes, ...f }));
+    setPhotoTakenAt((a) => ({ ...times, ...a }));
+  }
+
+  // Back to the stop that opened the camera if the phone reloaded the page.
+  useEffect(() => {
+    if (loading) return;
+    retryQueuedPhotos();
+    const stopId = takeReturnTo();
+    if (stopId) requestAnimationFrame(() => document.getElementById(`stop-${stopId}`)?.scrollIntoView({ block: 'start' }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   useEffect(() => {
     if (user?.role === 'DRIVER') load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, daysBack]);
 
+  // Gets the stop's photo onto the server before Done or Mark failed: waits
+  // for the upload already going, or sends one still on the phone. False
+  // (with the reason shown at the stop) if it can't get through.
+  async function photoSent(routeId: string, stop: Stop): Promise<boolean> {
+    const key = stop.id;
+    const photo: File | undefined = photoDraft[key];
+    const running = uploads.current[key];
+    if (!photo && !running) return true;
+    const sent = await (photo
+      ? sendPhoto(routeId, stop, photo, {
+          takenAt: photoTakenAt[key],
+          fix: photoFix[key],
+          receivedBy: receivedByDraft[key],
+        })
+      : running!);
+    if (!sent) setStopErrors((e) => ({ ...e, [key]: e[key] ?? t('delivery.driver.photoUploadFailed') }));
+    return sent;
+  }
+
   async function handleMarkDelivered(routeId: string, stop: Stop) {
     const key = stop.id;
     const urls = stopEndpoints(routeId, stop);
+    let failed = false;
     setActionLoading(key);
-    setError(null);
-    setNotice(null);
+    setStopError(key, null);
     try {
-      // The reading from when the photo was taken; a new one only if there
-      // was no photo or the phone gave no location then.
-      const shotFix = photoDraft[key] ? photoFix[key] : undefined;
+      // Placed and timed where and when the photo was taken, however much
+      // later Done is tapped. A fresh reading only when there's no photo
+      // reading to hand (no photo, or one sent before this phone kept
+      // drafts) — and a delivery always needs one.
+      const shotFix = photoFix[key];
       const { latitude, longitude, accuracy } = shotFix?.latitude != null ? shotFix : await takeFix();
+      if (latitude == null || longitude == null) {
+        setStopError(key, t('delivery.driver.deliveryNeedsGps'));
+        return;
+      }
+      const signedAt = photoTakenAt[key] ?? new Date().toISOString();
 
       // Photo first: it attaches to the stop/delivery order directly, and
-      // the proof locks it once the delivery is signed for.
-      const photo = photoDraft[key];
-      if (photo) {
-        setUploadingPhotoFor(key);
-        const ok = await uploadProofPhoto(urls.photo, photo);
-        setUploadingPhotoFor(null);
-        if (!ok) {
-          setError(t('delivery.driver.photoUploadFailed'));
-          return;
-        }
+      // the proof locks it once the delivery is signed for. Usually it
+      // went up when it was taken; this waits for that upload, or sends
+      // one that didn't get through.
+      if (!(await photoSent(routeId, stop))) {
+        failed = true;
+        return;
       }
 
       const receivedBy = receivedByDraft[key]?.trim() || undefined;
@@ -541,35 +867,52 @@ export default function DriverRoutePage() {
           stop.deliveryOrder
             ? {
                 receivedBy,
-                signedAt: new Date().toISOString(),
+                signedAt,
                 completedLatitude: latitude,
                 completedLongitude: longitude,
                 completedAccuracy: accuracy,
               }
-            : { receivedBy, latitude, longitude, accuracy },
+            : { receivedBy, signedAt, latitude, longitude, accuracy },
         ),
+        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+        setStopError(key, body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+        failed = true;
         return;
       }
-      if (latitude == null) setNotice(t('delivery.driver.locationDenied'));
-      await load();
-    } catch {
-      setError(t('delivery.driver.couldNotReachServer'));
+      void deleteDraft(key);
+      clearTimeout(nameTimers.current[key]);
+      delete pendingNames.current[key];
+      // Quietly: blanking the list while it reloads threw the driver back
+      // to the top of the page.
+      await load({ quiet: true });
+    } catch (err) {
+      setStopError(key, t(isAbort(err) ? 'delivery.driver.slowConnection' : 'delivery.driver.couldNotReachServer'));
+      failed = true;
     } finally {
       setActionLoading(null);
     }
+    // A timed-out or refused attempt may still have landed (e.g. signed
+    // for, but the reply never made it back): show what the server has
+    // rather than leaving a stop the driver can't finish.
+    if (failed) await load({ quiet: true });
   }
 
   async function handleMarkFailed(routeId: string, stop: Stop) {
     const key = stop.id;
     setActionLoading(key);
-    setError(null);
-    setNotice(null);
+    setStopError(key, null);
     try {
-      const { latitude, longitude } = await takeFix();
+      // A photo of the attempt (closed shop, locked gate) has to reach the
+      // server first — the failure attaches it, and after that the stop
+      // takes no more photos.
+      if (!(await photoSent(routeId, stop))) return;
+      // Where the photo was taken, else a best-effort reading: a failed
+      // visit is recorded with or without one.
+      const shot = photoFix[key];
+      const { latitude, longitude } = shot?.latitude != null ? shot : await takeFix(12_000);
       const res = await apiFetch(stopEndpoints(routeId, stop).failure, {
         method: 'POST',
         body: JSON.stringify({
@@ -577,16 +920,20 @@ export default function DriverRoutePage() {
           latitude,
           longitude,
         }),
+        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+        setStopError(key, body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
         return;
       }
       setFailingStopId(null);
-      await load();
-    } catch {
-      setError(t('delivery.driver.couldNotReachServer'));
+      void deleteDraft(key);
+      clearTimeout(nameTimers.current[key]);
+      delete pendingNames.current[key];
+      await load({ quiet: true });
+    } catch (err) {
+      setStopError(key, t(isAbort(err) ? 'delivery.driver.slowConnection' : 'delivery.driver.couldNotReachServer'));
     } finally {
       setActionLoading(null);
     }
@@ -657,12 +1004,6 @@ export default function DriverRoutePage() {
           {error}
         </div>
       )}
-      {notice && (
-        <div className="flex items-start gap-2 bg-amber-50 border-2 border-amber-200 text-amber-800 text-base rounded-xl px-4 py-3">
-          <AlertTriangle size={20} className="shrink-0 mt-0.5" />
-          {notice}
-        </div>
-      )}
 
       {loading && <p className="text-base text-gray-500">{t('delivery.driver.loading')}</p>}
 
@@ -702,7 +1043,8 @@ export default function DriverRoutePage() {
             const actionable = stop.status === 'PENDING' && (stop.deliveryOrder ? stop.deliveryOrder.status === 'SHIPPED' : true);
             // Customer stops require receiver + photo (the DO flow keeps
             // its existing optional fields).
-            const proofMissing = !stop.deliveryOrder && (!receivedByDraft[doId]?.trim() || !photoDraft[doId]);
+            const hasPhoto = !!photoDraft[doId] || stop.hasProofPhoto;
+            const proofMissing = !stop.deliveryOrder && (!receivedByDraft[doId]?.trim() || !hasPhoto);
             const info = stop.customerInfo;
             const mapsUrl = googleMapsUrl(stop);
 
@@ -715,7 +1057,8 @@ export default function DriverRoutePage() {
             return (
               <div
                 key={stop.id}
-                className={`rounded-2xl bg-white shadow-sm overflow-hidden ${
+                id={`stop-${stop.id}`}
+                className={`rounded-2xl bg-white shadow-sm overflow-hidden scroll-mt-4 ${
                   isCurrent ? 'border-2 border-blue-600 ring-4 ring-blue-100' : 'border border-blue-500/15'
                 }`}
               >
@@ -843,18 +1186,21 @@ export default function DriverRoutePage() {
                         type="text"
                         placeholder={t(stop.deliveryOrder ? 'delivery.driver.receivedByLabel' : 'delivery.driver.receivedByRequired')}
                         value={receivedByDraft[doId] ?? ''}
-                        onChange={(e) => setReceivedByDraft((d) => ({ ...d, [doId]: e.target.value }))}
+                        onChange={(e) => onReceivedByChange(route.id, stop, e.target.value)}
                         className="w-full h-12 border-2 border-gray-300 rounded-xl px-3 text-base focus:border-blue-600 focus:outline-none"
                       />
 
-                      {photoDraft[doId] ? (
+                      {hasPhoto ? (
                         <div className="flex items-center gap-3 rounded-xl border-2 border-green-200 bg-green-50 p-2">
-                          <PhotoThumb file={photoDraft[doId]} />
+                          {photoDraft[doId] && <PhotoThumb file={photoDraft[doId]} />}
                           <div className="flex-1 min-w-0 flex items-center gap-1.5 text-base font-semibold text-green-800">
                             <CheckCircle2 size={20} className="shrink-0" />
-                            {t('delivery.driver.photoTaken')}
+                            {t(photoDraft[doId] ? 'delivery.driver.photoTaken' : 'delivery.driver.photoAlreadySent')}
                           </div>
-                          <label className="shrink-0 h-12 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer">
+                          <label
+                            onClick={() => rememberReturnTo(doId)}
+                            className="shrink-0 h-12 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer"
+                          >
                             <RotateCcw size={16} />
                             {t('delivery.driver.retakePhoto')}
                             <input
@@ -862,16 +1208,22 @@ export default function DriverRoutePage() {
                               accept="image/*"
                               capture="environment"
                               className="hidden"
+                              disabled={gpsBlocked}
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
-                                if (file) onPhotoPicked(doId, file);
+                                if (file) onPhotoPicked(route.id, stop, file);
                                 e.target.value = '';
                               }}
                             />
                           </label>
                         </div>
                       ) : (
-                        <label className="flex flex-col items-center justify-center gap-1 h-24 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 text-blue-700 text-base font-semibold cursor-pointer active:bg-blue-50">
+                        <label
+                          onClick={() => rememberReturnTo(doId)}
+                          className={`flex flex-col items-center justify-center gap-1 h-24 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 text-blue-700 text-base font-semibold ${
+                            gpsBlocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer active:bg-blue-50'
+                          }`}
+                        >
                           <Camera size={30} />
                           {t(stop.deliveryOrder ? 'delivery.driver.photoLabel' : 'delivery.driver.photoRequired')}
                           <input
@@ -879,9 +1231,10 @@ export default function DriverRoutePage() {
                             accept="image/*"
                             capture="environment"
                             className="hidden"
+                            disabled={gpsBlocked}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) onPhotoPicked(doId, file);
+                              if (file) onPhotoPicked(route.id, stop, file);
                               e.target.value = '';
                             }}
                           />
@@ -889,6 +1242,15 @@ export default function DriverRoutePage() {
                       )}
                       {preparingPhotoFor === doId && (
                         <p className="text-base text-gray-500">{t('delivery.driver.preparingPhoto')}</p>
+                      )}
+                      {photoQueuedFor[doId] && photoDraft[doId] && uploadingPhotoFor !== doId && (
+                        <p className="text-sm text-amber-700">{t('delivery.driver.photoQueued')}</p>
+                      )}
+                      {photoGpsFailedFor === doId && (
+                        <p className="flex items-start gap-2 rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2.5 text-base font-medium text-red-700">
+                          <LocateOff size={20} className="shrink-0 mt-0.5" />
+                          {t('delivery.driver.photoNeedsGps')}
+                        </p>
                       )}
                       {uploadingPhotoFor === doId && (
                         <p className="text-base text-gray-500">{t('delivery.driver.uploadingPhoto')}</p>
@@ -898,6 +1260,10 @@ export default function DriverRoutePage() {
 
                       {failingStopId === doId ? (
                         <div className="space-y-2 rounded-xl border-2 border-red-200 bg-red-50/50 p-3">
+                          <p className="flex items-start gap-1.5 text-sm text-red-800">
+                            <Camera size={18} className="shrink-0 mt-0.5" />
+                            {t('delivery.driver.failurePhotoHint')}
+                          </p>
                           <input
                             type="text"
                             placeholder={t('delivery.driver.failureReasonPlaceholder')}
@@ -941,6 +1307,12 @@ export default function DriverRoutePage() {
                             <XCircle size={20} />
                             {t('delivery.driver.markFailed')}
                           </button>
+                        </div>
+                      )}
+                      {stopErrors[doId] && (
+                        <div role="alert" className="flex items-start gap-2 bg-red-50 border-2 border-red-200 text-red-700 text-base font-medium rounded-xl px-3 py-2.5">
+                          <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+                          {stopErrors[doId]}
                         </div>
                       )}
                     </div>

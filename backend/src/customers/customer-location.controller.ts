@@ -1,5 +1,6 @@
 // src/customers/customer-location.controller.ts
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -20,6 +21,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
+import { PhotoCaptureMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 import { CustomerLocationService } from './customer-location.service';
 
 // Office staff manage location photos; drivers see them on their route
@@ -47,8 +49,9 @@ export class CustomerLocationController {
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body() meta: PhotoCaptureMetaDto,
   ) {
-    return this.locations.upload(organizationId, id, file);
+    return this.locations.upload(organizationId, id, file, meta);
   }
 
   @Delete(':photoId')

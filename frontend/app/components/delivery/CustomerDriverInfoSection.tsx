@@ -4,13 +4,26 @@ import { useEffect, useState } from 'react';
 import { Camera, Check, StickyNote, Trash2 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { CSRF_HEADERS } from '@/lib/session';
+import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { captureLocation, photoStampLines } from '@/lib/captureLocation';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 
 // Must match CustomerLocationService.MAX_LOCATION_PHOTOS.
 const MAX_PHOTOS = 2;
 
-type LocationPhoto = { id: string; path: string };
+// Decimal latitude/longitude arrive as strings; null when the photo was
+// added without a GPS reading.
+type LocationPhoto = {
+  id: string;
+  path: string;
+  takenAt: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  accuracy: number | null;
+};
 
 // DELIVERY_DMS — what the driver sees on every stop for this customer:
 // directions (notes) and up to two photos of the building/entrance.
@@ -25,7 +38,7 @@ export default function CustomerDriverInfoSection({
   onNotesSaved: (notes: string) => void;
 }) {
   const dialog = useDialog();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [notes, setNotes] = useState(deliveryNotes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
   const [photos, setPhotos] = useState<LocationPhoto[]>([]);
@@ -63,14 +76,28 @@ export default function CustomerDriverInfoSection({
     }
   }
 
-  // Multipart — bypasses apiFetch's JSON Content-Type, same as the proof
-  // photo upload in the driver app.
-  async function upload(file: File) {
+  // Taken the same way as a driver's proof photo: the GPS reading at the
+  // moment of the photo, stamped onto it with date and time, shrunk, and
+  // sent along. Unlike a driver's, no reading doesn't stop the upload —
+  // staff may add a photo from a desktop; it's then stamped "No GPS".
+  // Multipart — bypasses apiFetch's JSON Content-Type.
+  async function upload(picked: File) {
     setUploading(true);
     setError('');
     try {
+      const takenAt = new Date();
+      const fix = await captureLocation();
+      const file = await shrinkPhoto(picked, {
+        stamp: photoStampLines(takenAt, fix, language, t('delivery.driver.photoNoGps')),
+      });
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('takenAt', takenAt.toISOString());
+      if (fix.latitude != null && fix.longitude != null) {
+        formData.append('latitude', String(fix.latitude));
+        formData.append('longitude', String(fix.longitude));
+        if (fix.accuracy != null) formData.append('accuracy', String(fix.accuracy));
+      }
       const res = await fetch(`/api/customers/${customerId}/location-photos`, {
         method: 'POST',
         credentials: 'same-origin',
@@ -138,22 +165,32 @@ export default function CustomerDriverInfoSection({
         </p>
         <div className="flex flex-wrap gap-2">
           {photos.map((p) => (
-            <div key={p.id} className="relative">
-              <a href={`/api${p.path}`} target="_blank" rel="noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, not optimizable */}
-                <img
-                  src={`/api${p.path}`}
-                  alt={t('customers.driverInfo.photoAlt')}
-                  className="h-24 w-32 object-cover rounded border border-gray-300"
-                />
-              </a>
-              <button
-                onClick={() => remove(p.id)}
-                aria-label={t('customers.driverInfo.deletePhoto')}
-                className="absolute top-1 right-1 p-1 rounded bg-white/90 border border-red-200 text-red-600"
-              >
-                <Trash2 size={12} />
-              </button>
+            <div key={p.id} className="w-32 space-y-1">
+              <div className="relative">
+                <a href={`/api${p.path}`} target="_blank" rel="noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, not optimizable */}
+                  <img
+                    src={`/api${p.path}`}
+                    alt={t('customers.driverInfo.photoAlt')}
+                    className="h-24 w-32 object-cover rounded border border-gray-300"
+                  />
+                </a>
+                <button
+                  onClick={() => remove(p.id)}
+                  aria-label={t('customers.driverInfo.deletePhoto')}
+                  className="absolute top-1 right-1 p-1 rounded bg-white/90 border border-red-200 text-red-600"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              {p.latitude && p.longitude ? (
+                <div className="space-y-1">
+                  <DeliveryFixBadge accuracy={p.accuracy} label="photo" />
+                  <GoogleMapsLink lat={p.latitude} lng={p.longitude} className="!px-2 !py-1" />
+                </div>
+              ) : (
+                <DeliveryFixBadge accuracy={null} label="photo" />
+              )}
             </div>
           ))}
           {photos.length < MAX_PHOTOS && (
@@ -167,6 +204,7 @@ export default function CustomerDriverInfoSection({
               <input
                 type="file"
                 accept="image/*"
+                capture="environment"
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) => {

@@ -7,6 +7,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  assertDriverLocation,
+  driverSignedAt,
+  movePhotoToFailure,
+} from './driver-proof';
+import {
   DeliveryOrderStatus,
   DeliveryPriority,
   ModuleKey,
@@ -36,9 +41,27 @@ import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
 } from './dto/customer-stop-actions.dto';
-import { resolveTimezone, todayBusinessDate } from '../accounting/business-date';
+import {
+  resolveTimezone,
+  todayBusinessDate,
+  wallTimeOnBusinessDay,
+} from '../accounting/business-date';
 
 export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
+
+// Start of a route's day in the org's timezone — nothing on the route can
+// have happened before it (driver-proof.ts uses it to catch a phone set to
+// the wrong date).
+export function routeDayStart(route: {
+  routeDate: Date;
+  organization: { timezone: string | null };
+}): Date {
+  return wallTimeOnBusinessDay(
+    route.routeDate,
+    '00:00',
+    resolveTimezone(route.organization),
+  );
+}
 
 type Requester = { sub: string; role: string };
 
@@ -82,6 +105,12 @@ export const stopSelect = {
   receivedBy: true,
   signedAt: true,
   proofPhotoKey: true,
+  proofPhotoTakenAt: true,
+  proofPhotoLatitude: true,
+  proofPhotoLongitude: true,
+  proofPhotoAccuracy: true,
+  pendingReceivedBy: true,
+  failurePhotoKey: true,
   completedLatitude: true,
   completedLongitude: true,
   completedAccuracy: true,
@@ -113,6 +142,12 @@ export const stopSelect = {
       receivedBy: true,
       proofPhotoKey: true,
       proofPhotoUrl: true,
+      proofPhotoTakenAt: true,
+      proofPhotoLatitude: true,
+      proofPhotoLongitude: true,
+      proofPhotoAccuracy: true,
+      pendingReceivedBy: true,
+      failurePhotoKey: true,
     },
   },
 } satisfies Prisma.RouteStopSelect;
@@ -282,7 +317,12 @@ export class DeliveryRoutesService {
     const status = this.stopStatus(stop);
     const target = stopTarget(stop);
     const d = stop.deliveryOrder;
-    const { proofPhotoKey: _key, proofPhotoUrl: _url, ...deliveryOrder } =
+    const {
+      proofPhotoKey: _key,
+      proofPhotoUrl: _url,
+      failurePhotoKey: _failKey,
+      ...deliveryOrder
+    } =
       d ?? ({} as NonNullable<StopRow['deliveryOrder']>);
     return {
       id: stop.id,
@@ -306,6 +346,15 @@ export class DeliveryRoutesService {
       hasProofPhoto: d
         ? d.proofPhotoKey != null || d.proofPhotoUrl != null
         : stop.proofPhotoKey != null,
+      // Captured with the photo before Done — what the office sees for a
+      // delivery the driver hasn't confirmed (or never did).
+      photoTakenAt: d ? d.proofPhotoTakenAt : stop.proofPhotoTakenAt,
+      photoLatitude: d ? d.proofPhotoLatitude : stop.proofPhotoLatitude,
+      photoLongitude: d ? d.proofPhotoLongitude : stop.proofPhotoLongitude,
+      photoAccuracy: d ? d.proofPhotoAccuracy : stop.proofPhotoAccuracy,
+      pendingReceivedBy: d ? d.pendingReceivedBy : stop.pendingReceivedBy,
+      // Photo from a failed attempt (closed shop, locked gate).
+      hasFailurePhoto: d ? d.failurePhotoKey != null : stop.failurePhotoKey != null,
       completedLatitude: d ? d.completedLatitude : stop.completedLatitude,
       completedLongitude: d ? d.completedLongitude : stop.completedLongitude,
       completedAccuracy: d ? d.completedAccuracy : stop.completedAccuracy,
@@ -1284,7 +1333,18 @@ export class DeliveryRoutesService {
         signedAt: true,
         failedAt: true,
         proofPhotoKey: true,
-        route: { select: { status: true } },
+        proofPhotoTakenAt: true,
+        proofPhotoLatitude: true,
+        proofPhotoLongitude: true,
+        proofPhotoAccuracy: true,
+        failurePhotoKey: true,
+        route: {
+          select: {
+            status: true,
+            routeDate: true,
+            organization: { select: { timezone: true } },
+          },
+        },
       },
     });
     if (!stop) throw new NotFoundException('Stop not found');
@@ -1302,6 +1362,7 @@ export class DeliveryRoutesService {
     stopId: string,
     params: {
       receivedBy: string;
+      signedAt?: string;
       latitude?: number;
       longitude?: number;
       accuracy?: number;
@@ -1320,7 +1381,24 @@ export class DeliveryRoutesService {
     if (!stop.proofPhotoKey) {
       throw new BadRequestException('Take a proof photo before completing the stop');
     }
-    const signedAt = new Date();
+    // What the phone sends, else what came with the photo — the delivery
+    // happened where and when the photo was taken.
+    if (params.latitude == null && stop.proofPhotoLatitude != null) {
+      params = {
+        ...params,
+        latitude: Number(stop.proofPhotoLatitude),
+        longitude: Number(stop.proofPhotoLongitude),
+        accuracy: stop.proofPhotoAccuracy ?? undefined,
+      };
+    }
+    const isDriver = requester.role === 'DRIVER';
+    if (isDriver) assertDriverLocation(params.latitude, params.longitude);
+    const requested = params.signedAt
+      ? new Date(params.signedAt)
+      : (stop.proofPhotoTakenAt ?? undefined);
+    const signedAt = isDriver
+      ? driverSignedAt(requested, routeDayStart(stop.route))
+      : (requested ?? new Date());
     const claim = await this.prisma.routeStop.updateMany({
       where: { id: stopId, signedAt: null, failedAt: null },
       data: {
@@ -1374,14 +1452,24 @@ export class DeliveryRoutesService {
       throw new BadRequestException('This route was cancelled');
     }
     const failedAt = new Date();
+    // A photo taken at the stop becomes the failed attempt's photo, and
+    // its GPS the failure's location if the phone sent none.
+    const photoFix =
+      params.latitude == null && stop.proofPhotoLatitude != null
+        ? {
+            latitude: Number(stop.proofPhotoLatitude),
+            longitude: Number(stop.proofPhotoLongitude),
+          }
+        : { latitude: params.latitude, longitude: params.longitude };
     const claim = await this.prisma.routeStop.updateMany({
       where: { id: stopId, signedAt: null, failedAt: null },
       data: {
         failedAt,
         failureReason: params.reason ?? null,
-        failureLatitude: params.latitude ?? null,
-        failureLongitude: params.longitude ?? null,
+        failureLatitude: photoFix.latitude ?? null,
+        failureLongitude: photoFix.longitude ?? null,
         completedByUserId: requester.sub,
+        ...movePhotoToFailure(stop.proofPhotoKey),
       },
     });
     if (claim.count === 0) {

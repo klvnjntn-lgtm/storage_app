@@ -18,6 +18,8 @@ import {
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
 import { DeliveryOrderService } from './delivery-order.service';
+import { photoCaptureData } from '../delivery-routes/driver-proof';
+import type { ProofPhotoMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
 
 // Target retention for proof photos. Automatic deletion is OFF unless
@@ -53,8 +55,10 @@ export class DeliveryProofService {
         id: true,
         status: true,
         signedAt: true,
+        shippedAt: true,
         proofPhotoKey: true,
         proofPhotoUrl: true,
+        failurePhotoKey: true,
       },
     });
     if (!order) throw new NotFoundException('Delivery order not found');
@@ -74,6 +78,7 @@ export class DeliveryProofService {
     id: string,
     file: Express.Multer.File,
     requester?: Requester,
+    meta: ProofPhotoMetaDto = {},
   ) {
     const order = await this.findOrder(organizationId, id, requester);
     if (order.status !== DeliveryOrderStatus.SHIPPED) {
@@ -87,6 +92,12 @@ export class DeliveryProofService {
       );
     }
 
+    // Before storing anything: a driver's photo without GPS is refused.
+    const capture = photoCaptureData(
+      meta,
+      requester?.role === 'DRIVER',
+      order.shippedAt,
+    );
     const data = await encodePrivatePhoto(file);
 
     const key = `delivery-proofs/${organizationId}/${id}/${randomUUID()}.webp`;
@@ -96,7 +107,7 @@ export class DeliveryProofService {
     // think they replaced the same previous photo.
     const claim = await this.prisma.deliveryOrder.updateMany({
       where: { id, organizationId, proofPhotoKey: order.proofPhotoKey },
-      data: { proofPhotoKey: key },
+      data: { proofPhotoKey: key, ...capture },
     });
     if (claim.count === 0) {
       await this.storage.delete(key);
@@ -116,10 +127,42 @@ export class DeliveryProofService {
     return { hasPhoto: true };
   }
 
+  // The receiver name as the driver types it, so the office sees it even
+  // if Done is never tapped. Only while the delivery is still open.
+  async saveDraft(
+    organizationId: string,
+    id: string,
+    receivedBy: string | undefined,
+    requester?: Requester,
+  ) {
+    const order = await this.findOrder(organizationId, id, requester);
+    if (order.status !== DeliveryOrderStatus.SHIPPED || order.signedAt) {
+      throw new BadRequestException('This delivery is already resolved');
+    }
+    await this.prisma.deliveryOrder.update({
+      where: { id },
+      data: { pendingReceivedBy: receivedBy?.trim() || null },
+    });
+    return { saved: true };
+  }
+
   // A link for <img src>. Private photos get a signed link valid for a few
   // minutes; legacy proofs (media-library URLs) are returned as-is.
-  async photoLink(organizationId: string, id: string, requester?: Requester) {
+  // kind 'failure': the photo from a failed attempt.
+  async photoLink(
+    organizationId: string,
+    id: string,
+    requester?: Requester,
+    kind: 'proof' | 'failure' = 'proof',
+  ) {
     const order = await this.findOrder(organizationId, id, requester);
+    if (kind === 'failure') {
+      if (!order.failurePhotoKey) {
+        throw new NotFoundException('This delivery order has no failure photo');
+      }
+      const { path, expiresAt } = this.signer.sign(order.failurePhotoKey);
+      return { kind: 'signed' as const, path, expiresAt };
+    }
     if (order.proofPhotoKey) {
       const { path, expiresAt } = this.signer.sign(order.proofPhotoKey);
       return { kind: 'signed' as const, path, expiresAt };
@@ -145,48 +188,65 @@ export class DeliveryProofService {
 
   // Proof photos past the retention window (by delivery date, falling back
   // to creation date for unsigned ones) — delivery orders' and customer
-  // stops' ("stop-proofs/") alike. Deletes only when `apply` is set — the
-  // scheduled job passes autoDeleteEnabled(), which is off by default.
+  // stops' ("stop-proofs/") alike, and failed-attempt photos by when the
+  // attempt failed. Deletes only when `apply` is set — the scheduled job
+  // passes autoDeleteEnabled(), which is off by default.
   async enforceRetention(apply: boolean) {
     const cutoff = new Date(
       Date.now() - this.retentionDays() * 24 * 60 * 60 * 1000,
     );
-    const olderThanCutoff = {
+    const proofExpired = {
       proofPhotoKey: { not: null },
       OR: [
         { signedAt: { lt: cutoff } },
         { signedAt: null, createdAt: { lt: cutoff } },
       ],
     };
-    const [orders, stops] = await Promise.all([
-      this.prisma.deliveryOrder.findMany({
-        where: olderThanCutoff,
-        select: { id: true, proofPhotoKey: true },
-      }),
-      this.prisma.routeStop.findMany({
-        where: olderThanCutoff,
-        select: { id: true, proofPhotoKey: true },
-      }),
+    const failureExpired = {
+      failurePhotoKey: { not: null },
+      OR: [
+        { failedAt: { lt: cutoff } },
+        { failedAt: null, createdAt: { lt: cutoff } },
+      ],
+    };
+    const select = { id: true, proofPhotoKey: true, failurePhotoKey: true };
+    const [orders, stops, failedOrders, failedStops] = await Promise.all([
+      this.prisma.deliveryOrder.findMany({ where: proofExpired, select }),
+      this.prisma.routeStop.findMany({ where: proofExpired, select }),
+      this.prisma.deliveryOrder.findMany({ where: failureExpired, select }),
+      this.prisma.routeStop.findMany({ where: failureExpired, select }),
     ]);
+    type Field = 'proofPhotoKey' | 'failurePhotoKey';
+    const rows = (
+      list: {
+        id: string;
+        proofPhotoKey: string | null;
+        failurePhotoKey: string | null;
+      }[],
+      kind: 'deliveryOrder' | 'routeStop',
+      field: Field,
+    ) => list.map((r) => ({ id: r.id, key: r[field]!, kind, field }));
     const expired = [
-      ...orders.map((o) => ({ ...o, kind: 'deliveryOrder' as const })),
-      ...stops.map((o) => ({ ...o, kind: 'routeStop' as const })),
+      ...rows(orders, 'deliveryOrder', 'proofPhotoKey'),
+      ...rows(stops, 'routeStop', 'proofPhotoKey'),
+      ...rows(failedOrders, 'deliveryOrder', 'failurePhotoKey'),
+      ...rows(failedStops, 'routeStop', 'failurePhotoKey'),
     ];
     if (!apply) return { expired: expired.length, deleted: 0 };
 
     let deleted = 0;
     for (const row of expired) {
       try {
-        await this.storage.delete(row.proofPhotoKey!);
+        await this.storage.delete(row.key);
         if (row.kind === 'deliveryOrder') {
           await this.prisma.deliveryOrder.update({
             where: { id: row.id },
-            data: { proofPhotoKey: null },
+            data: { [row.field]: null },
           });
         } else {
           await this.prisma.routeStop.update({
             where: { id: row.id },
-            data: { proofPhotoKey: null },
+            data: { [row.field]: null },
           });
         }
         deleted++;

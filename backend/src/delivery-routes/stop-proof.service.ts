@@ -15,7 +15,12 @@ import {
 } from '../storage/file-storage.interface';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
-import { DeliveryRoutesService } from './delivery-routes.service';
+import {
+  DeliveryRoutesService,
+  routeDayStart,
+} from './delivery-routes.service';
+import { photoCaptureData } from './driver-proof';
+import type { ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
 
 type Requester = { sub: string; role: string };
 
@@ -40,6 +45,7 @@ export class StopProofService {
     stopId: string,
     file: Express.Multer.File,
     requester: Requester,
+    meta: ProofPhotoMetaDto = {},
   ) {
     const stop = await this.routes.findCustomerStopForAction(
       organizationId,
@@ -56,13 +62,19 @@ export class StopProofService {
       );
     }
 
+    // Before storing anything: a driver's photo without GPS is refused.
+    const capture = photoCaptureData(
+      meta,
+      requester.role === 'DRIVER',
+      routeDayStart(stop.route),
+    );
     const data = await encodePrivatePhoto(file);
     const key = `stop-proofs/${organizationId}/${stopId}/${randomUUID()}.webp`;
     await this.storage.put(key, data, 'image/webp');
 
     const claim = await this.prisma.routeStop.updateMany({
       where: { id: stopId, proofPhotoKey: stop.proofPhotoKey },
-      data: { proofPhotoKey: key },
+      data: { proofPhotoKey: key, ...capture },
     });
     if (claim.count === 0) {
       await this.storage.delete(key);
@@ -82,10 +94,13 @@ export class StopProofService {
     return { hasPhoto: true };
   }
 
-  async photoLink(
+  // The receiver name as the driver types it, so the office sees it even
+  // if Done is never tapped. Only while the stop is open.
+  async saveDraft(
     organizationId: string,
     routeId: string,
     stopId: string,
+    receivedBy: string | undefined,
     requester: Requester,
   ) {
     const stop = await this.routes.findCustomerStopForAction(
@@ -94,10 +109,35 @@ export class StopProofService {
       stopId,
       requester,
     );
-    if (!stop.proofPhotoKey) {
-      throw new NotFoundException('This stop has no proof photo');
+    if (stop.signedAt || stop.failedAt) {
+      throw new BadRequestException('This stop is already resolved');
     }
-    const { path, expiresAt } = this.signer.sign(stop.proofPhotoKey);
+    await this.prisma.routeStop.update({
+      where: { id: stopId },
+      data: { pendingReceivedBy: receivedBy?.trim() || null },
+    });
+    return { saved: true };
+  }
+
+  // kind 'failure': the photo from a failed attempt.
+  async photoLink(
+    organizationId: string,
+    routeId: string,
+    stopId: string,
+    requester: Requester,
+    kind: 'proof' | 'failure' = 'proof',
+  ) {
+    const stop = await this.routes.findCustomerStopForAction(
+      organizationId,
+      routeId,
+      stopId,
+      requester,
+    );
+    const key = kind === 'failure' ? stop.failurePhotoKey : stop.proofPhotoKey;
+    if (!key) {
+      throw new NotFoundException('This stop has no such photo');
+    }
+    const { path, expiresAt } = this.signer.sign(key);
     return { kind: 'signed' as const, path, expiresAt };
   }
 }

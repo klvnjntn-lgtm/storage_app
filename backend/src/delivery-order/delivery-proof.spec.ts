@@ -36,6 +36,8 @@ describe('Delivery proof photos', () => {
 
   const admin = () => ({ sub: adminId, role: 'ADMIN' });
   const driver = () => ({ sub: driverId, role: 'DRIVER' });
+  // A driver's photo has to come with GPS.
+  const shotAt = { latitude: 1.2, longitude: 104.2, accuracy: 8 };
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'waresys-proof-'));
@@ -106,6 +108,8 @@ describe('Delivery proof photos', () => {
     await prisma.deliveryOrder.deleteMany({ where: { organizationId: orgId } });
     await prisma.customerAddress.deleteMany({ where: { organizationId: orgId } });
     await prisma.customer.deleteMany({ where: { organizationId: orgId } });
+    // Recording a failed delivery notifies the office.
+    await prisma.notification.deleteMany({ where: { user: { organizationId: orgId } } });
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
     await prisma.team.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
@@ -146,9 +150,28 @@ describe('Delivery proof photos', () => {
     return order;
   };
 
+  it('moves the photo to a failed attempt, so a rescheduled delivery starts clean', async () => {
+    const order = await shippedDo(driverId);
+    await proofs.uploadPhoto(orgId, order.id, photo, driver(), shotAt);
+    const { proofPhotoKey } = await prisma.deliveryOrder.findUniqueOrThrow({
+      where: { id: order.id },
+    });
+
+    await orders.recordFailedDelivery(orgId, order.id, { reason: 'Gate locked' }, driver());
+    const saved = await prisma.deliveryOrder.findUniqueOrThrow({
+      where: { id: order.id },
+    });
+    expect(saved.proofPhotoKey).toBeNull();
+    expect(saved.failurePhotoKey).toBe(proofPhotoKey);
+    expect(Number(saved.failureLatitude)).toBeCloseTo(1.2);
+    await expect(
+      proofs.photoLink(orgId, order.id, driver(), 'failure'),
+    ).resolves.toMatchObject({ kind: 'signed' });
+  });
+
   it('stores the photo privately, outside the media library, resized once', async () => {
     const order = await shippedDo(driverId);
-    await proofs.uploadPhoto(orgId, order.id, photo, driver());
+    await proofs.uploadPhoto(orgId, order.id, photo, driver(), shotAt);
 
     const saved = await prisma.deliveryOrder.findUniqueOrThrow({
       where: { id: order.id },
@@ -200,12 +223,12 @@ describe('Delivery proof photos', () => {
 
   it('replaces the photo before sign-off (deleting the old file), locks it after', async () => {
     const order = await shippedDo(driverId);
-    await proofs.uploadPhoto(orgId, order.id, photo, driver());
+    await proofs.uploadPhoto(orgId, order.id, photo, driver(), shotAt);
     const first = (
       await prisma.deliveryOrder.findUniqueOrThrow({ where: { id: order.id } })
     ).proofPhotoKey!;
 
-    await proofs.uploadPhoto(orgId, order.id, photo, driver());
+    await proofs.uploadPhoto(orgId, order.id, photo, driver(), shotAt);
     const second = (
       await prisma.deliveryOrder.findUniqueOrThrow({ where: { id: order.id } })
     ).proofPhotoKey!;
@@ -219,7 +242,7 @@ describe('Delivery proof photos', () => {
       data: { signedAt: new Date() },
     });
     await expect(
-      proofs.uploadPhoto(orgId, order.id, photo, driver()),
+      proofs.uploadPhoto(orgId, order.id, photo, driver(), shotAt),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(await storage.exists(second)).toBe(true);
   });

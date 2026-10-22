@@ -71,6 +71,14 @@ export class SupplierPaymentsService {
         select: { credit: true },
       });
       totalCredited = lines.reduce((sum: number, l: { credit: unknown }) => sum + Number(l.credit), 0);
+    } else {
+      // A bill imported from Accurate stands in for the receipts it never
+      // had (see GdbImportService.importPurchaseInvoices).
+      const imported = await tx.supplierBill.aggregate({
+        where: { organizationId, purchaseOrderId, voidedAt: null, externalId: { not: null } },
+        _sum: { amount: true },
+      });
+      totalCredited = Number(imported._sum.amount ?? 0);
     }
 
     // Goods sent back reduce what's owed by exactly the AP debit their
@@ -164,6 +172,14 @@ export class SupplierPaymentsService {
   // "void this document" elsewhere, and just as irreversible once called.
   async void(organizationId: string, id: string, userId?: string, reason?: string) {
     const payment = await this.get(organizationId, id);
+    // Imported from Accurate (no journal entry behind it). Deleting it here
+    // wouldn't stick — the next GDB re-import adds it back — so the fix
+    // belongs in Accurate.
+    if (payment.externalId) {
+      throw new BadRequestException(
+        'This payment was imported from Accurate. Correct it in Accurate, then re-import the GDB file.',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const entry = await this.journal.findPostedBySource(

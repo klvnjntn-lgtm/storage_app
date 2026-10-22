@@ -9,12 +9,14 @@ import {
   DocumentType,
   InvoiceFormat,
   InvoiceStatus,
+  PaymentMethod,
   PaymentStatus,
   Prisma,
   PurchaseOrderStatus,
 } from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
 import { PlanLimitsService } from '../billing/plan-limits.service';
+import { ensureDefaultPriceLevel } from '../price-level/default-price-level';
 import { detectInvoiceNumberFormat } from '../shared/documents/invoice-number-format.util';
 // ---------------------------------------------------------------------------
 // Firebird helpers (promisified — node-firebird is callback-based)
@@ -218,6 +220,8 @@ export function parseAccurateDiscount(value: string | number | null | undefined)
   if (!text) return 0;
   let remaining = 1;
   for (const part of text.split('+')) {
+    // A stray "." or "," (a half-typed entry Accurate saved anyway) means none.
+    if (/^[.,\s]*$/.test(part)) continue;
     const pct = Number(part.trim().replace(',', '.').replace(/%$/, ''));
     if (!Number.isFinite(pct)) return null;
     remaining *= 1 - pct / 100;
@@ -425,6 +429,30 @@ interface PoDetRow {
   ITEMDISCPC: string | null; // VARCHAR in Accurate, e.g. "10" or "10+5"
 }
 
+interface AccurateTerm {
+  name: string;
+  netDays: number;
+}
+
+// TERMOPMT: Accurate's payment terms ("C.O.D", "Net 30", ...).
+async function loadTerms(fbDb: Firebird.Database): Promise<Map<number, AccurateTerm>> {
+  const rows = await fbQuery<{ TERMID: number; TERMNAME: string | null; NETDAYS: number | null }>(
+    fbDb,
+    `SELECT TERMID, TERMNAME, NETDAYS FROM TERMOPMT`,
+  );
+  return new Map(
+    rows.map((r) => [r.TERMID, { name: r.TERMNAME?.trim() || `Term ${r.TERMID}`, netDays: num(r.NETDAYS) }]),
+  );
+}
+
+interface ItemFields {
+  name: string;
+  sellingPrice: number | null;
+  costPrice: number | null;
+  unit: string | null;
+  levelPrices: (number | null)[]; // Accurate UNITPRICE2..UNITPRICE5
+}
+
 @Injectable()
 export class GdbImportService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService,     
@@ -557,6 +585,21 @@ export class GdbImportService implements OnModuleInit {
         console.log('[Firebird] PO tables not available in this database', {
           message: err?.message,
         });
+      }
+      // Purchase invoices (APINV) import under the same option and are
+      // counted with POs as "purchases"; most Accurate files have far more
+      // of these than POs.
+      try {
+        const [piCount] = await fbQuery<{ CNT: number }>(fbDb, `SELECT COUNT(*) AS CNT FROM APINV`);
+        const [vCount] = await fbQuery<{ CNT: number }>(
+          fbDb,
+          `SELECT COUNT(*) AS CNT FROM PERSONDATA pd
+           WHERE pd.ID IN (SELECT VENDORID FROM PO) OR pd.ID IN (SELECT VENDORID FROM APINV)`,
+        );
+        purchaseOrderCount = (purchaseOrderCount ?? 0) + piCount.CNT;
+        vendorCount = vCount.CNT;
+      } catch (err: any) {
+        console.log('[Firebird] APINV not available in this database', { message: err?.message });
       }
 
       const entry = this.tempFiles.get(token);
@@ -695,10 +738,24 @@ async saveWarehouseMapping(
       }
 
       const customerIdMap = await this.importCustomers(fbDb, organizationId);
-      const invoiceResult = await this.importInvoices(fbDb, organizationId, customerIdMap, invoiceFormat);
+      const salesmen = await this.importSalesmen(fbDb, organizationId);
+      const terms = await loadTerms(fbDb);
+      const invoiceResult = await this.importInvoices(
+        fbDb,
+        organizationId,
+        customerIdMap,
+        invoiceFormat,
+        salesmen.employeeIdBySalesmanId,
+        terms,
+      );
 
       if (target !== 'full_invoices_and_purchase_orders') {
-        return { items: itemResult, stock: stockResult, invoices: invoiceResult };
+        return {
+          items: itemResult,
+          stock: stockResult,
+          salesmen: { created: salesmen.created, updated: salesmen.updated },
+          invoices: invoiceResult,
+        };
       }
 
       const supplierIdMap = await this.importSuppliers(fbDb, organizationId);
@@ -708,12 +765,21 @@ async saveWarehouseMapping(
         supplierIdMap,
         productIdBySku,
       );
+      const purchaseInvoiceResult = await this.importPurchaseInvoices(
+        fbDb,
+        organizationId,
+        supplierIdMap,
+        productIdBySku,
+        terms,
+      );
 
       return {
         items: itemResult,
         stock: stockResult,
+        salesmen: { created: salesmen.created, updated: salesmen.updated },
         invoices: invoiceResult,
         purchaseOrders: purchaseOrderResult,
+        purchaseInvoices: purchaseInvoiceResult,
       };
     } finally {
       await detach(fbDb);
@@ -802,20 +868,36 @@ private async getOrCreateImportCategory(organizationId: string): Promise<string>
       NAME: string;
       STOCK: number | null;
       WAREHOUSE_ID: number | null;
+      UNITPRICE: number | null;
+      UNITPRICE2: number | null;
+      UNITPRICE3: number | null;
+      UNITPRICE4: number | null;
+      UNITPRICE5: number | null;
+      COST: number | null;
+      UNIT1: string | null;
     }>(
       fbDb,
-      `SELECT ITEMNO AS SKU, ITEMDESCRIPTION AS NAME, QUANTITY AS STOCK, WAREHOUSEID AS WAREHOUSE_ID FROM ITEM`,
+      `SELECT ITEMNO AS SKU, ITEMDESCRIPTION AS NAME, QUANTITY AS STOCK, WAREHOUSEID AS WAREHOUSE_ID,
+              UNITPRICE, UNITPRICE2, UNITPRICE3, UNITPRICE4, UNITPRICE5, COST, UNIT1
+       FROM ITEM`,
     );
 
     const categoryId = await this.getOrCreateImportCategory(organizationId);
 
-    // Dedupe + clean incoming rows first.
-    const bySku = new Map<string, string>(); // sku -> name
+    // Dedupe + clean incoming rows first. Prices/cost of 0 mean "not set"
+    // in Accurate, so they're treated as blank.
+    const positive = (v: number | null) => (v != null && Number(v) > 0 ? Number(v) : null);
+    const bySku = new Map<string, ItemFields>();
     for (const row of rows) {
       const sku = row.SKU?.trim();
       if (!sku) continue;
-      const name = row.NAME?.trim() || sku;
-      bySku.set(sku, name);
+      bySku.set(sku, {
+        name: row.NAME?.trim() || sku,
+        sellingPrice: positive(row.UNITPRICE),
+        costPrice: positive(row.COST),
+        unit: row.UNIT1?.trim().toLowerCase() || null,
+        levelPrices: [row.UNITPRICE2, row.UNITPRICE3, row.UNITPRICE4, row.UNITPRICE5].map(positive),
+      });
     }
     const skus = [...bySku.keys()];
 
@@ -823,19 +905,33 @@ private async getOrCreateImportCategory(organizationId: string): Promise<string>
     // one findFirst per row (was ~10,853 sequential round trips on its own).
     const existingProducts = await this.prisma.product.findMany({
       where: { organizationId, sku: { in: skus } },
-      select: { id: true, sku: true },
+      select: { id: true, sku: true, sellingPrice: true, costPrice: true, unit: true },
     });
-    const existingBySku = new Map(existingProducts.map((p) => [p.sku, p.id]));
+    const existingBySku = new Map(existingProducts.map((p) => [p.sku, p]));
 
-    const toCreate: { organizationId: string; sku: string; name: string; categoryId: string }[] = [];
-    const toUpdate: { id: string; name: string }[] = [];
+    const toCreate: Prisma.ProductCreateManyInput[] = [];
+    const toUpdate: { id: string; data: Prisma.ProductUpdateInput }[] = [];
 
-    for (const [sku, name] of bySku) {
-      const existingId = existingBySku.get(sku);
-      if (existingId) {
-        toUpdate.push({ id: existingId, name });
+    for (const [sku, item] of bySku) {
+      const existing = existingBySku.get(sku);
+      if (existing) {
+        // Name follows Accurate; price, cost and unit only fill blanks, so
+        // anything set in WareSys since the first import is kept.
+        const data: Prisma.ProductUpdateInput = { name: item.name };
+        if (existing.sellingPrice == null && item.sellingPrice != null) data.sellingPrice = item.sellingPrice;
+        if (existing.costPrice == null && item.costPrice != null) data.costPrice = item.costPrice;
+        if (existing.unit == null && item.unit != null) data.unit = item.unit;
+        toUpdate.push({ id: existing.id, data });
       } else {
-        toCreate.push({ organizationId, sku, name, categoryId });
+        toCreate.push({
+          organizationId,
+          sku,
+          name: item.name,
+          categoryId,
+          sellingPrice: item.sellingPrice,
+          costPrice: item.costPrice,
+          unit: item.unit,
+        });
       }
     }
 
@@ -850,7 +946,7 @@ private async getOrCreateImportCategory(organizationId: string): Promise<string>
     for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
       const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE);
       await Promise.all(
-        chunk.map((u) => this.prisma.product.update({ where: { id: u.id }, data: { name: u.name } })),
+        chunk.map((u) => this.prisma.product.update({ where: { id: u.id }, data: u.data })),
       );
     }
 
@@ -864,13 +960,61 @@ private async getOrCreateImportCategory(organizationId: string): Promise<string>
       allProducts.filter((p) => p.sku != null).map((p) => [p.sku as string, p.id]),
     );
 
-    console.log('[GdbImport] importItems done', { created: toCreate.length, updated: toUpdate.length });
+    const priceLevelPrices = await this.importPriceLevels(organizationId, bySku, productIdBySku);
+
+    console.log('[GdbImport] importItems done', {
+      created: toCreate.length,
+      updated: toUpdate.length,
+      priceLevelPrices,
+    });
 
     return {
-      result: { created: toCreate.length, updated: toUpdate.length },
+      result: { created: toCreate.length, updated: toUpdate.length, priceLevelPrices },
       productIdBySku,
       stockRows: rows,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // ITEM.UNITPRICE2..5 -> PriceLevel + ProductPrice
+  //
+  // UNITPRICE is the org's default level (Product.sellingPrice). Each other
+  // Accurate price column gets its own WareSys level, created only when some
+  // item uses it. Like the product price, a level price only fills a blank:
+  // createMany skipDuplicates leaves any existing ProductPrice untouched.
+  // -------------------------------------------------------------------------
+  private async importPriceLevels(
+    organizationId: string,
+    bySku: Map<string, ItemFields>,
+    productIdBySku: Map<string, string>,
+  ): Promise<number> {
+    await ensureDefaultPriceLevel(this.prisma, organizationId);
+    let written = 0;
+    for (let level = 0; level < 4; level++) {
+      const rows: { productId: string; price: number }[] = [];
+      for (const [sku, item] of bySku) {
+        const price = item.levelPrices[level];
+        const productId = productIdBySku.get(sku);
+        if (price != null && productId) rows.push({ productId, price });
+      }
+      if (rows.length === 0) continue;
+
+      const name = `Accurate Price ${level + 2}`;
+      const priceLevel = await this.prisma.priceLevel.upsert({
+        where: { organizationId_name: { organizationId, name } },
+        create: { organizationId, name, sortOrder: level + 2 },
+        update: {},
+      });
+      const CHUNK = 5000;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const res = await this.prisma.productPrice.createMany({
+          data: rows.slice(i, i + CHUNK).map((r) => ({ ...r, priceLevelId: priceLevel.id })),
+          skipDuplicates: true,
+        });
+        written += res.count;
+      }
+    }
+    return written;
   }
 
   // -------------------------------------------------------------------------
@@ -1059,6 +1203,63 @@ private async importStock(
   // Suppliers across re-imports — externalId avoids that entirely.
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // SALESMAN -> Employee (only salesmen named on at least one ARINV)
+  //
+  // Matched on Employee.externalId (SALESMANID). New employees start with a
+  // base salary of 0 — Accurate has no payroll data — so the org sets real
+  // salaries before running payroll. Existing ones only get their name
+  // refreshed; position, salary and active status are WareSys's to manage.
+  // -------------------------------------------------------------------------
+  private async importSalesmen(fbDb: Firebird.Database, organizationId: string) {
+    const rows = await fbQuery<{
+      SALESMANID: number;
+      FIRSTNAME: string | null;
+      LASTNAME: string | null;
+      JOBTITLE: string | null;
+      SUSPENDED: number | null;
+    }>(
+      fbDb,
+      `SELECT S.SALESMANID, S.FIRSTNAME, S.LASTNAME, S.JOBTITLE, S.SUSPENDED
+       FROM SALESMAN S
+       WHERE S.SALESMANID IN (SELECT SALESMANID FROM ARINV)`,
+    );
+
+    const existing = await this.prisma.employee.findMany({
+      where: { organizationId, externalId: { in: rows.map((r) => String(r.SALESMANID)) } },
+      select: { id: true, externalId: true },
+    });
+    const existingByExternalId = new Map(existing.map((e) => [e.externalId as string, e.id]));
+
+    const employeeIdBySalesmanId = new Map<number, string>();
+    let created = 0;
+    for (const row of rows) {
+      const externalId = String(row.SALESMANID);
+      const name = [row.FIRSTNAME, row.LASTNAME].map((v) => v?.trim()).filter(Boolean).join(' ') || `Salesman ${externalId}`;
+      const existingId = existingByExternalId.get(externalId);
+      if (existingId) {
+        await this.prisma.employee.update({ where: { id: existingId }, data: { name } });
+        employeeIdBySalesmanId.set(row.SALESMANID, existingId);
+      } else {
+        const employee = await this.prisma.employee.create({
+          data: {
+            organizationId,
+            externalId,
+            name,
+            position: row.JOBTITLE?.trim() || 'Salesman',
+            baseSalary: 0,
+            isActive: !row.SUSPENDED,
+          },
+        });
+        employeeIdBySalesmanId.set(row.SALESMANID, employee.id);
+        created++;
+      }
+    }
+
+    console.log('[GdbImport] importSalesmen done', { created, updated: rows.length - created });
+    return { employeeIdBySalesmanId, created, updated: rows.length - created };
+  }
+
   private async importSuppliers(
     fbDb: Firebird.Database,
     organizationId: string,
@@ -1075,7 +1276,7 @@ private async importStock(
       SELECT DISTINCT pd.ID AS ID, pd.NAME AS NAME, pd.PHONE AS PHONE,
              pd.ADDRESSLINE1 AS ADDRESSLINE1, pd.ADDRESSLINE2 AS ADDRESSLINE2
       FROM PERSONDATA pd
-      JOIN PO p ON p.VENDORID = pd.ID
+      WHERE pd.ID IN (SELECT VENDORID FROM PO) OR pd.ID IN (SELECT VENDORID FROM APINV)
       `,
     );
 
@@ -1500,6 +1701,8 @@ private async importStock(
     organizationId: string,
     customerIdMap: Map<number, string>,
     invoiceFormat: InvoiceFormat,
+    employeeIdBySalesmanId: Map<number, string>,
+    terms: Map<number, AccurateTerm>,
   ) {
     const headers = await fbQuery<{
       ARINVOICEID: number;
@@ -1515,6 +1718,8 @@ private async importStock(
       TERMDISCOUNT: number | null;
       TAX1AMOUNT: number | null;
       TAX2AMOUNT: number | null;
+      TERMSID: number | null;
+      SALESMANID: number | null;
     }>(
       fbDb,
       `
@@ -1531,7 +1736,9 @@ private async importStock(
         inv.RETURNAMOUNT AS RETURNAMOUNT,
         inv.TERMDISCOUNT AS TERMDISCOUNT,
         inv.TAX1AMOUNT AS TAX1AMOUNT,
-        inv.TAX2AMOUNT AS TAX2AMOUNT
+        inv.TAX2AMOUNT AS TAX2AMOUNT,
+        inv.TERMSID AS TERMSID,
+        inv.SALESMANID AS SALESMANID
       FROM ARINV inv
       LEFT JOIN PERSONDATA cust ON cust.ID = inv.CUSTOMERID
       ORDER BY inv.ARINVOICEID
@@ -1626,6 +1833,9 @@ private async importStock(
         nextServiceKm: number | null;
         vehiclePlateNumber: string | null;
         customerName: string | null;
+        paymentTerms: string | null;
+        dueDate: Date | null;
+        employeeId: string | null;
         status: InvoiceStatus;
         amountPaid: Prisma.Decimal;
         paymentStatus: PaymentStatus;
@@ -1661,6 +1871,9 @@ private async importStock(
           nextServiceKm: true,
           vehiclePlateNumber: true,
           customerName: true,
+          paymentTerms: true,
+          dueDate: true,
+          employeeId: true,
           status: true,
           amountPaid: true,
           paymentStatus: true,
@@ -1681,6 +1894,9 @@ private async importStock(
             nextServiceKm: invoice.nextServiceKm,
             vehiclePlateNumber: invoice.vehiclePlateNumber,
             customerName: invoice.customerName,
+            paymentTerms: invoice.paymentTerms,
+            dueDate: invoice.dueDate,
+            employeeId: invoice.employeeId,
             status: invoice.status,
             amountPaid: invoice.amountPaid,
             paymentStatus: invoice.paymentStatus,
@@ -1736,6 +1952,18 @@ private async importStock(
         ? (await this.prisma.customer.findMany({ where: { id: { in: customerIds } } })).map((c) => [c.id, c])
         : [],
     );
+
+    // ARINV.TERMSID -> payment terms + due date (AR Aging ages by due date),
+    // ARINV.SALESMANID -> the employee credited with the sale.
+    const termsAndSalesman = (header: (typeof headers)[number]) => {
+      const term = header.TERMSID != null ? terms.get(header.TERMSID) : undefined;
+      const dueDate =
+        term && header.INVOICEDATE
+          ? new Date(header.INVOICEDATE.getTime() + term.netDays * 86_400_000)
+          : undefined;
+      const employeeId = header.SALESMANID != null ? employeeIdBySalesmanId.get(header.SALESMANID) : undefined;
+      return { paymentTerms: term?.name, dueDate, employeeId };
+    };
 
     const buildInvoiceData = (header: (typeof headers)[number]) => {
       const invoiceNumber = header.EXTERNAL_INVOICE_NO;
@@ -1803,6 +2031,7 @@ private async importStock(
         vehicleModel: vehicle?.vehicleModel ?? null,
         vehicleVin: vehicle?.vin ?? null,
         issuedAt: header.INVOICEDATE ?? undefined,
+        ...termsAndSalesman(header),
         amountPaid: paidAmount,
         paymentStatus,
         subtotal: subtotal.toString(),
@@ -1887,6 +2116,9 @@ private async importStock(
                 customerBillingAddress?: string | null;
                 customerPhone?: string | null;
                 customerNpwp?: string | null;
+                paymentTerms?: string;
+                dueDate?: Date;
+                employeeId?: string;
                 amountPaid?: number;
                 paymentStatus?: PaymentStatus;
               } = {};
@@ -1907,6 +2139,10 @@ private async importStock(
                 patch.customerPhone = customer.phone;
                 patch.customerNpwp = customer.npwp;
               }
+              const ts = termsAndSalesman(header);
+              if (!existingInvoice.paymentTerms && ts.paymentTerms) patch.paymentTerms = ts.paymentTerms;
+              if (!existingInvoice.dueDate && ts.dueDate) patch.dueDate = ts.dueDate;
+              if (!existingInvoice.employeeId && ts.employeeId) patch.employeeId = ts.employeeId;
               // Earlier imports only read PAIDAMOUNT and left paid-at-sale
               // invoices UNPAID. Sync from Accurate only while WareSys has no
               // payment history of its own for the invoice, and never lower
@@ -1992,6 +2228,320 @@ private async importStock(
       vehicles: vehicleStats, // { descriptionsWithPlate, vehiclesDetected, vehiclesCreated, duplicateVehicleRefsSkipped, ambiguousPlateWarnings }
       vehicleOdometerCacheUpdated,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // APINV + APITMDET/APINVDET + APINVCHQ/APCHEQ -> PurchaseOrder (+ items),
+  // SupplierBill and SupplierPayment
+  //
+  // Accurate records most buying as a purchase invoice with no PO behind it.
+  // WareSys hangs bills and payments off a PurchaseOrder, so each one
+  // becomes a FULLY_RECEIVED PO (poNumber "PI-<APINVOICEID>", the
+  // supplier's own invoice number on the bill), one bill for the invoice
+  // amount, and a SupplierPayment per settlement:
+  //   APINV.PAYMENT          paid at purchase        externalId APINV:<id>
+  //   APINVCHQ.PAYMENTAMOUNT a supplier payment      externalId APINVCHQ:<INVCHQID>
+  //   APINVCHQ.DISCOUNT      discount taken on it    externalId APINVCHQ-DISC:<INVCHQID>
+  //   APINV.RETURNAMOUNT     goods returned          externalId APINV-RET:<id>
+  // so bill − payments is exactly Accurate's owing (Accurate keeps
+  // PAIDAMOUNT = Σ PAYMENTAMOUNT and TERMDISCOUNT = Σ DISCOUNT).
+  //
+  // No GoodsReceipt is created: received quantities go in
+  // importedReceivedQuantity, so stock (set from ITEM.QUANTITY) and the
+  // ledger are untouched — the same as imported sales invoices.
+  //
+  // Re-import: payments are inserted with skipDuplicates on externalId, so
+  // new Accurate payments are added and existing ones left alone. A PO whose
+  // Accurate total changed gets its lines, totals and bill amount replaced,
+  // unless WareSys has added receipts, returns or payments of its own.
+  // -------------------------------------------------------------------------
+  private async importPurchaseInvoices(
+    fbDb: Firebird.Database,
+    organizationId: string,
+    supplierIdMap: Map<number, string>,
+    productIdBySku: Map<string, string>,
+    terms: Map<number, AccurateTerm>,
+  ) {
+    const headers = await fbQuery<{
+      APINVOICEID: number;
+      VENDORID: number | null;
+      INVOICENO: string | null;
+      DESCRIPTION: string | null;
+      INVOICEDATE: Date | null;
+      TERMSID: number | null;
+      INVOICEAMOUNT: number | null;
+      PAYMENT: number | null;
+      RETURNAMOUNT: number | null;
+      CASHDISCOUNT: number | null;
+      TAX1AMOUNT: number | null;
+      TAX2AMOUNT: number | null;
+    }>(
+      fbDb,
+      `SELECT APINVOICEID, VENDORID, INVOICENO, DESCRIPTION, INVOICEDATE, TERMSID, INVOICEAMOUNT,
+              PAYMENT, RETURNAMOUNT, CASHDISCOUNT, TAX1AMOUNT, TAX2AMOUNT
+       FROM APINV ORDER BY APINVOICEID`,
+    );
+    const itemRows = await fbQuery<{
+      APINVOICEID: number;
+      SEQ: number;
+      ITEMNO: string | null;
+      ITEMOVDESC: string | null;
+      QUANTITY: number | null;
+      UNITPRICE: number | null;
+      ITEMUNIT: string | null;
+      UNITRATIO: number | null;
+      ITEMDISCPC: string | null;
+    }>(
+      fbDb,
+      `SELECT APINVOICEID, SEQ, ITEMNO, ITEMOVDESC, QUANTITY, UNITPRICE, ITEMUNIT, UNITRATIO, ITEMDISCPC
+       FROM APITMDET ORDER BY APINVOICEID, SEQ`,
+    );
+    // Non-stock lines booked straight to a GL account (freight, services...).
+    const expenseRows = await fbQuery<{ APINVOICEID: number; SEQ: number; DESCRIPTION: string | null; GLAMOUNT: number | null }>(
+      fbDb,
+      `SELECT APINVOICEID, SEQ, DESCRIPTION, GLAMOUNT FROM APINVDET ORDER BY APINVOICEID, SEQ`,
+    );
+    const paymentRows = await fbQuery<{
+      INVCHQID: number;
+      APINVOICEID: number;
+      PAYMENTAMOUNT: number | null;
+      DISCOUNT: number | null;
+      CHEQUENO: string | null;
+      CHEQUEDATE: Date | null;
+      PAYMENTDATE: Date | null;
+      VOID: number | null;
+    }>(
+      fbDb,
+      `SELECT IC.INVCHQID, IC.APINVOICEID, IC.PAYMENTAMOUNT, IC.DISCOUNT,
+              C.CHEQUENO, C.CHEQUEDATE, C.PAYMENTDATE, C.VOID
+       FROM APINVCHQ IC JOIN APCHEQ C ON C.CHEQUEID = IC.CHEQUEID`,
+    );
+
+    const group = <T extends { APINVOICEID: number }>(rows: T[]) => {
+      const m = new Map<number, T[]>();
+      for (const r of rows) {
+        const arr = m.get(r.APINVOICEID) ?? [];
+        arr.push(r);
+        m.set(r.APINVOICEID, arr);
+      }
+      return m;
+    };
+    const itemsByInvoice = group(itemRows);
+    const expensesByInvoice = group(expenseRows);
+
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    const buildLines = (header: (typeof headers)[number]) => {
+      const lines: Prisma.PurchaseOrderItemCreateWithoutPurchaseOrderInput[] = [];
+      for (const line of itemsByInvoice.get(header.APINVOICEID) ?? []) {
+        const quantity = num(line.QUANTITY);
+        const unitCost = num(line.UNITPRICE);
+        let discPc = parseAccurateDiscount(line.ITEMDISCPC);
+        if (discPc == null) {
+          warnings.push(`Purchase invoice ${header.INVOICENO} SEQ ${line.SEQ}: unreadable discount "${line.ITEMDISCPC}" — imported without it`);
+          discPc = 0;
+        }
+        const sku = line.ITEMNO?.trim();
+        const productId = sku ? productIdBySku.get(sku) ?? null : null;
+        lines.push({
+          externalSeq: line.SEQ,
+          product: productId ? { connect: { id: productId } } : undefined,
+          description: productId ? line.ITEMOVDESC?.trim() || null : `Unmapped Accurate SKU: ${sku ?? '(none)'}`,
+          quantity,
+          unitCost,
+          lineTotal: Math.round(quantity * unitCost * (1 - discPc / 100) * 100) / 100,
+          unit: line.ITEMUNIT?.trim() || null,
+          unitRatio: line.UNITRATIO,
+          discountPercentage: discPc || null,
+          importedReceivedQuantity: quantity,
+        });
+      }
+      // Expense lines get a SEQ past the item lines so (PO, externalSeq) stays unique.
+      for (const line of expensesByInvoice.get(header.APINVOICEID) ?? []) {
+        const amount = num(line.GLAMOUNT);
+        lines.push({
+          externalSeq: 100_000 + line.SEQ,
+          description: line.DESCRIPTION?.trim() || 'Expense (Accurate)',
+          quantity: 1,
+          unitCost: amount,
+          lineTotal: amount,
+          importedReceivedQuantity: 1,
+        });
+      }
+      const total = num(header.INVOICEAMOUNT);
+      const taxAmount = num(header.TAX1AMOUNT) + num(header.TAX2AMOUNT);
+      const discountAmount = num(header.CASHDISCOUNT);
+      return { lines, total, taxAmount, discountAmount, subtotal: Math.round((total - taxAmount + discountAmount) * 100) / 100 };
+    };
+
+    const dueDateFor = (header: (typeof headers)[number]) => {
+      const term = header.TERMSID != null ? terms.get(header.TERMSID) : undefined;
+      return {
+        paymentTerms: term?.name ?? null,
+        dueDate: term && header.INVOICEDATE ? new Date(header.INVOICEDATE.getTime() + term.netDays * 86_400_000) : null,
+      };
+    };
+
+    // Existing imports, by externalId.
+    const existing = new Map<
+      string,
+      { id: string; total: Prisma.Decimal; locked: boolean; billId: string | null }
+    >();
+    const externalIds = headers.map((h) => `APINV:${h.APINVOICEID}`);
+    for (let i = 0; i < externalIds.length; i += 5000) {
+      const rows = await this.prisma.purchaseOrder.findMany({
+        where: { organizationId, externalId: { in: externalIds.slice(i, i + 5000) } },
+        select: {
+          id: true,
+          externalId: true,
+          total: true,
+          supplierBills: { where: { externalId: { not: null } }, select: { id: true } },
+          _count: { select: { goodsReceipts: true, purchaseReturns: true } },
+          supplierPayments: { where: { externalId: null }, select: { id: true } },
+        },
+      });
+      for (const r of rows) {
+        existing.set(r.externalId as string, {
+          id: r.id,
+          total: r.total,
+          billId: r.supplierBills[0]?.id ?? null,
+          locked: r._count.goodsReceipts > 0 || r._count.purchaseReturns > 0 || r.supplierPayments.length > 0,
+        });
+      }
+    }
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    const poIdByInvoiceId = new Map<number, string>();
+    const CONCURRENCY = 20;
+
+    for (let i = 0; i < headers.length; i += CONCURRENCY) {
+      await Promise.all(
+        headers.slice(i, i + CONCURRENCY).map(async (header) => {
+          const externalId = `APINV:${header.APINVOICEID}`;
+          const billNumber = header.INVOICENO?.trim() || String(header.APINVOICEID);
+          const supplierId = header.VENDORID != null ? supplierIdMap.get(header.VENDORID) ?? null : null;
+          if (!supplierId) warnings.push(`Purchase invoice ${billNumber}: supplier ${header.VENDORID} not found`);
+          const billDate = header.INVOICEDATE ?? new Date();
+          try {
+            const prior = existing.get(externalId);
+            if (prior) {
+              poIdByInvoiceId.set(header.APINVOICEID, prior.id);
+              if (prior.locked || Math.abs(Number(prior.total) - num(header.INVOICEAMOUNT)) <= 1) {
+                unchanged++;
+                return;
+              }
+              const built = buildLines(header);
+              await this.prisma.$transaction([
+                this.prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: prior.id } }),
+                this.prisma.purchaseOrder.update({
+                  where: { id: prior.id },
+                  data: {
+                    subtotal: built.subtotal,
+                    taxAmount: built.taxAmount,
+                    discountAmount: built.discountAmount,
+                    total: built.total,
+                    items: { create: built.lines },
+                  },
+                }),
+                ...(prior.billId
+                  ? [this.prisma.supplierBill.update({ where: { id: prior.billId }, data: { amount: built.total } })]
+                  : []),
+              ]);
+              updated++;
+              return;
+            }
+
+            const built = buildLines(header);
+            const { paymentTerms, dueDate } = dueDateFor(header);
+            const po = await this.prisma.purchaseOrder.create({
+              data: {
+                organizationId,
+                externalId,
+                poNumber: `PI-${header.APINVOICEID}`,
+                status: PurchaseOrderStatus.FULLY_RECEIVED,
+                // The PO list sorts, filters and shows dates by createdAt, so
+                // an imported purchase takes its Accurate date rather than
+                // the moment it was imported.
+                createdAt: header.INVOICEDATE ?? undefined,
+                supplierId,
+                orderDate: header.INVOICEDATE,
+                dueDate,
+                paymentTerms,
+                notes: [`Accurate purchase invoice ${billNumber}`, header.DESCRIPTION?.trim()].filter(Boolean).join('\n'),
+                subtotal: built.subtotal,
+                taxAmount: built.taxAmount,
+                discountAmount: built.discountAmount,
+                total: built.total,
+                items: { create: built.lines },
+                supplierBills: {
+                  create: {
+                    organizationId,
+                    externalId,
+                    supplierId,
+                    billNumber,
+                    billDate,
+                    dueDate,
+                    amount: built.total,
+                  },
+                },
+              },
+              select: { id: true },
+            });
+            poIdByInvoiceId.set(header.APINVOICEID, po.id);
+            created++;
+          } catch (err: any) {
+            errors.push(`Purchase invoice ${billNumber}: ${err.message}`);
+          }
+        }),
+      );
+      if ((i / CONCURRENCY) % 50 === 0) {
+        console.log('[GdbImport] importPurchaseInvoices progress', { processed: i + CONCURRENCY, total: headers.length });
+      }
+    }
+
+    // Settlements. Built for every invoice (new and existing); skipDuplicates
+    // on (organizationId, externalId) makes a re-import add only new ones.
+    const payments: Prisma.SupplierPaymentCreateManyInput[] = [];
+    const add = (invoiceId: number, externalId: string, amount: number, paidAt: Date | null, note: string) => {
+      const purchaseOrderId = poIdByInvoiceId.get(invoiceId);
+      // Negative rows are real: Accurate reverses a payment, or records a
+      // supplier refund, as a negative APINVCHQ line. Keeping them is what
+      // makes payments add up to PAIDAMOUNT.
+      if (!purchaseOrderId || amount === 0) return;
+      payments.push({
+        organizationId,
+        purchaseOrderId,
+        externalId,
+        amount,
+        method: PaymentMethod.OTHER,
+        paidAt: paidAt ?? new Date(),
+        note,
+      });
+    };
+    for (const h of headers) {
+      add(h.APINVOICEID, `APINV:${h.APINVOICEID}`, num(h.PAYMENT), h.INVOICEDATE, 'Paid at purchase (Accurate)');
+      add(h.APINVOICEID, `APINV-RET:${h.APINVOICEID}`, num(h.RETURNAMOUNT), h.INVOICEDATE, 'Goods returned (Accurate)');
+    }
+    for (const r of paymentRows) {
+      if (r.VOID) continue;
+      const paidAt = r.PAYMENTDATE ?? r.CHEQUEDATE;
+      const ref = r.CHEQUENO?.trim();
+      const amount = num(r.PAYMENTAMOUNT);
+      const label = amount < 0 ? 'Accurate payment reversal / supplier refund' : 'Accurate payment';
+      add(r.APINVOICEID, `APINVCHQ:${r.INVCHQID}`, amount, paidAt, ref ? `${label} ${ref}` : label);
+      add(r.APINVOICEID, `APINVCHQ-DISC:${r.INVCHQID}`, num(r.DISCOUNT), paidAt, 'Discount taken (Accurate)');
+    }
+    let paymentsCreated = 0;
+    for (let i = 0; i < payments.length; i += 5000) {
+      const res = await this.prisma.supplierPayment.createMany({ data: payments.slice(i, i + 5000), skipDuplicates: true });
+      paymentsCreated += res.count;
+    }
+
+    console.log('[GdbImport] importPurchaseInvoices done', { created, updated, unchanged, paymentsCreated, errors: errors.length });
+    return { created, updated, unchanged, paymentsCreated, errors, warnings };
   }
 
   // -------------------------------------------------------------------------

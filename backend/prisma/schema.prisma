@@ -135,11 +135,17 @@ enum PinSource {
 // Private files under "customer-locations/", viewed via signed links like
 // delivery proofs — a customer's premises aren't public media.
 model CustomerLocationPhoto {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   customerId     String
   storageKey     String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
+  // When and where it was taken, from the device that took it (the same
+  // capture as a driver's proof photo). Null when no GPS reading came.
+  takenAt        DateTime?
+  latitude       Decimal?  @db.Decimal(9, 6)
+  longitude      Decimal?  @db.Decimal(9, 6)
+  accuracy       Float?
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
@@ -509,7 +515,11 @@ model SupplierPayment {
   organization    Organization             @relation(fields: [organizationId], references: [id])
   purchaseOrder   PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
   recordedBy      User?                    @relation(fields: [recordedById], references: [id])
+  // Accurate source row, set by the GDB import: "APINVCHQ:<INVCHQID>" for a
+  // supplier payment, "APINV:<APINVOICEID>" for money paid at purchase.
+  externalId      String?
 
+  @@unique([organizationId, externalId])
   @@index([purchaseOrderId])
   @@index([organizationId, paidAt])
 }
@@ -786,6 +796,7 @@ model IntegrationConnection {
   externalOrders          ExternalOrder[]
   externalProductMappings ExternalProductMapping[]
   organization            Organization             @relation(fields: [organizationId], references: [id])
+
   @@index([organizationId])
 }
 
@@ -1117,6 +1128,7 @@ model SalesOrderActivityEvent {
   metadata       Json?
   salesOrder     SalesOrder @relation(fields: [salesOrderId], references: [id])
   user           User       @relation(fields: [userId], references: [id])
+
   @@index([salesOrderId])
   @@index([organizationId, createdAt])
 }
@@ -1171,6 +1183,10 @@ model DeliveryOrder {
   failureReason      String?
   failureLatitude    Decimal?  @db.Decimal(9, 6)
   failureLongitude   Decimal?  @db.Decimal(9, 6)
+  // Photo taken at a failed attempt (closed shop, locked gate). Moved here
+  // from proofPhotoKey when the failure is recorded, so a rescheduled
+  // delivery doesn't start out with it as its proof.
+  failurePhotoKey    String?
 
   // NEW — the delivery destination pin, set by clicking a point on a map
   // (no geocoding service exists). Planning data, correctable any time —
@@ -1197,14 +1213,22 @@ model DeliveryOrder {
   // through the media library (POST /media) and referenced here as a
   // plain public URL. No longer written; still read for old deliveries.
   // MediaService refuses to delete or recompress assets referenced here.
-  proofPhotoUrl String?
+  proofPhotoUrl       String?
   // Private delivery-proof photo, as a FileStorage key
   // ("delivery-proofs/<orgId>/<doId>/<uuid>.webp") — never a public URL.
   // Uploaded via POST /delivery-orders/:id/proof-photo and viewed through a
   // short-lived signed link. Kept apart from the media library: no
   // recompression, not deletable from the gallery. proofPhotoUrl above is
   // the legacy field from when proofs went through the media library.
-  proofPhotoKey String?
+  proofPhotoKey       String?
+  // Sent with the proof photo, before the driver taps Done: when and where
+  // it was taken, and the receiver name typed so far. Lets the office see
+  // a delivery the driver never confirmed; Done falls back to them.
+  proofPhotoTakenAt   DateTime?
+  proofPhotoLatitude  Decimal?  @db.Decimal(9, 6)
+  proofPhotoLongitude Decimal?  @db.Decimal(9, 6)
+  proofPhotoAccuracy  Float?
+  pendingReceivedBy   String?
 
   // NEW — set by rescheduleDelivery() when a FAILED delivery is put back
   // into SHIPPED status for re-attempt. failedAt/failureReason are kept
@@ -1350,6 +1374,12 @@ model RouteStop {
   receivedBy           String?
   signedAt             DateTime?
   proofPhotoKey        String? // "stop-proofs/<orgId>/<stopId>/<uuid>.webp", private
+  // Same meaning as the DO fields: captured with the photo, before Done.
+  proofPhotoTakenAt    DateTime?
+  proofPhotoLatitude   Decimal?         @db.Decimal(9, 6)
+  proofPhotoLongitude  Decimal?         @db.Decimal(9, 6)
+  proofPhotoAccuracy   Float?
+  pendingReceivedBy    String?
   completedByUserId    String?
   completedLatitude    Decimal?         @db.Decimal(9, 6)
   completedLongitude   Decimal?         @db.Decimal(9, 6)
@@ -1358,6 +1388,10 @@ model RouteStop {
   failureReason        String?
   failureLatitude      Decimal?         @db.Decimal(9, 6)
   failureLongitude     Decimal?         @db.Decimal(9, 6)
+  // Photo taken at a failed attempt (closed shop, locked gate). Moved here
+  // from proofPhotoKey when the failure is recorded, so a rescheduled
+  // delivery doesn't start out with it as its proof.
+  failurePhotoKey      String?
 
   route               Route            @relation(fields: [routeId], references: [id])
   deliveryOrder       DeliveryOrder?   @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id], onDelete: Restrict)
@@ -2155,7 +2189,10 @@ model Employee {
   salaryComponents EmployeeSalaryComponent[]
   payrollItems     PayrollItem[]
 
+  externalId String? // Accurate SALESMAN.SALESMANID — set by the GDB import
+
   @@unique([id, organizationId]) // NEW
+  @@unique([organizationId, externalId])
   @@index([organizationId])
 }
 
@@ -2769,7 +2806,9 @@ model SupplierBill {
   organization    Organization  @relation(fields: [organizationId], references: [id])
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   supplier        Supplier?     @relation(fields: [supplierId], references: [id])
+  externalId      String? // Accurate APINV.APINVOICEID — set by the GDB import
 
+  @@unique([organizationId, externalId])
   @@index([organizationId, purchaseOrderId])
   @@index([organizationId, dueDate])
 }

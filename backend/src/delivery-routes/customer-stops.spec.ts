@@ -35,6 +35,8 @@ describe('Team routes & customer stops', () => {
 
   const admin = () => ({ sub: adminId, role: 'ADMIN' });
   const driver = () => ({ sub: driverId, role: 'DRIVER' });
+  // A driver's photo has to come with GPS.
+  const shotAt = { latitude: 1.2, longitude: 104.2, accuracy: 8 };
   const nextDate = () => `2031-03-${String(++day).padStart(2, '0')}`;
 
   beforeAll(async () => {
@@ -155,6 +157,17 @@ describe('Team routes & customer stops', () => {
 
   const mkRoute = (team = teamId) =>
     routes.createRoute(orgId, adminId, { teamId: team, routeDate: nextDate() });
+  // A route that has already started, so deliveries recorded now aren't
+  // before its day (driver-proof.ts refuses those as a wrong phone clock).
+  let pastDay = 0;
+  const mkStartedRoute = async () => {
+    const route = await mkRoute();
+    await prisma.route.update({
+      where: { id: route.id },
+      data: { routeDate: new Date(Date.UTC(2020, 0, ++pastDay)) },
+    });
+    return route;
+  };
 
   beforeEach(() => setInvoicePos(false));
 
@@ -310,7 +323,7 @@ describe('Team routes & customer stops', () => {
   });
 
   it('requires a proof photo and receiver, and only the team driver may record it', async () => {
-    const route = await mkRoute();
+    const route = await mkStartedRoute();
     const stop = await routes.addStop(orgId, route.id, {
       customerId: (await mkCustomer('Proof Co')).id,
     });
@@ -330,7 +343,7 @@ describe('Team routes & customer stops', () => {
       proofs.uploadPhoto(orgId, route.id, stop.id, photo, outsider),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver());
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt);
     const view = await routes.recordCustomerStopProof(
       orgId,
       route.id,
@@ -345,11 +358,150 @@ describe('Team routes & customer stops', () => {
 
     // Locked once signed for.
     await expect(
-      proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver()),
+      proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       routes.recordCustomerStopFailure(orgId, route.id, stop.id, {}, admin()),
     ).rejects.toThrow(/already resolved/);
+  });
+
+  it("needs a driver's GPS, and dates the delivery from the photo", async () => {
+    const route = await mkStartedRoute();
+    const stop = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Late Done Co')).id,
+    });
+    // Uploaded from the office, so no GPS came with it to fall back on.
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, admin());
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const gps = { latitude: 1.1, longitude: 104.1 };
+
+    await expect(
+      routes.recordCustomerStopProof(orgId, route.id, stop.id, { receivedBy: 'Ani' }, driver()),
+    ).rejects.toThrow(/GPS location is required/);
+    await expect(
+      routes.recordCustomerStopProof(
+        orgId,
+        route.id,
+        stop.id,
+        { receivedBy: 'Ani', ...gps, signedAt: at(-5 * 24 * 60 * 60 * 1000) },
+        driver(),
+      ),
+    ).rejects.toThrow(/too far back/);
+
+    // Photo taken 40 minutes before Done was tapped.
+    const photoAt = at(-40 * 60 * 1000);
+    await routes.recordCustomerStopProof(
+      orgId,
+      route.id,
+      stop.id,
+      { receivedBy: 'Ani', ...gps, signedAt: photoAt },
+      driver(),
+    );
+    const saved = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+    expect(saved.signedAt?.toISOString()).toBe(photoAt);
+  });
+
+  it('keeps what came with the photo for the office, and Done falls back to it', async () => {
+    const route = await mkStartedRoute();
+    const stop = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Forgot Done Co')).id,
+    });
+
+    await expect(
+      proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {}),
+    ).rejects.toThrow(/GPS location is required/);
+
+    const takenAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {
+      ...shotAt,
+      takenAt,
+      receivedBy: 'Budi',
+    });
+    await proofs.saveDraft(orgId, route.id, stop.id, 'Budi Santoso', driver());
+
+    // Never confirmed: still pending, but the office sees the evidence.
+    const view = await routes.getRoute(orgId, route.id);
+    const pending = view.stops.find((s) => s.id === stop.id)!;
+    expect(pending.status).toBe('PENDING');
+    expect(pending.hasProofPhoto).toBe(true);
+    expect(pending.photoTakenAt?.toISOString()).toBe(takenAt);
+    expect(Number(pending.photoLatitude)).toBeCloseTo(1.2);
+    expect(pending.pendingReceivedBy).toBe('Budi Santoso');
+
+    // Done later, from a phone that lost the photo's reading.
+    await routes.recordCustomerStopProof(
+      orgId,
+      route.id,
+      stop.id,
+      { receivedBy: 'Budi Santoso' },
+      driver(),
+    );
+    const saved = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+    expect(saved.signedAt?.toISOString()).toBe(takenAt);
+    expect(Number(saved.completedLatitude)).toBeCloseTo(1.2);
+    expect(saved.completedAccuracy).toBe(8);
+    await expect(
+      proofs.saveDraft(orgId, route.id, stop.id, 'Late', driver()),
+    ).rejects.toThrow(/already resolved/);
+  });
+
+  it("refuses a photo from before the route's day (phone set to the wrong date)", async () => {
+    const route = await mkRoute(); // dated in the future
+    const stop = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Wrong Date Co')).id,
+    });
+    await expect(
+      proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {
+        ...shotAt,
+        takenAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow(/date or time looks wrong/);
+  });
+
+  it('moves the photo to a failed attempt, out of the way of a retry', async () => {
+    const route = await mkStartedRoute();
+    const stop = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Closed Shop Co')).id,
+    });
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt);
+    const view = await routes.recordCustomerStopFailure(
+      orgId,
+      route.id,
+      stop.id,
+      { reason: 'Shop closed' },
+      driver(),
+    );
+    const failed = view.stops.find((s) => s.id === stop.id)!;
+    expect(failed.hasProofPhoto).toBe(false);
+    expect(failed.hasFailurePhoto).toBe(true);
+    expect(Number(failed.failureLatitude)).toBeCloseTo(1.2);
+    await expect(
+      proofs.photoLink(orgId, route.id, stop.id, driver(), 'failure'),
+    ).resolves.toMatchObject({ kind: 'signed' });
+  });
+
+  it('pulls a phone clock running ahead back to now', async () => {
+    const route = await mkStartedRoute();
+    const stop = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Fast Clock Co')).id,
+    });
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt);
+    const before = Date.now();
+    await routes.recordCustomerStopProof(
+      orgId,
+      route.id,
+      stop.id,
+      {
+        receivedBy: 'Ani',
+        latitude: 1.1,
+        longitude: 104.1,
+        signedAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      },
+      driver(),
+    );
+    const saved = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+    expect(saved.signedAt!.getTime()).toBeGreaterThanOrEqual(before);
+    expect(saved.signedAt!.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it("shows a driver their team's route, and nobody else's", async () => {

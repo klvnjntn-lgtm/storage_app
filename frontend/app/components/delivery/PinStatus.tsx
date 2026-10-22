@@ -87,21 +87,28 @@ export function pinHint(
   return t(status === 'WEAK_GPS' ? 'delivery.pin.weakHint' : 'delivery.pin.gpsHint', { date, m });
 }
 
-// Where a delivery was marked done, and how good that GPS fix was:
-// "Delivered at ±12 m (good signal)".
-export function DeliveryFixBadge({ accuracy }: { accuracy: number | null | undefined }) {
+// Where a delivery was marked done (or a photo taken — label "photo"),
+// and how good that GPS fix was: "Delivered at ±12 m (good signal)".
+export function DeliveryFixBadge({
+  accuracy,
+  label = 'delivery',
+}: {
+  accuracy: number | null | undefined;
+  label?: 'delivery' | 'photo';
+}) {
   const { t } = useLanguage();
+  const prefix = label === 'photo' ? 'delivery.pin.photo' : 'delivery.pin.delivered';
   if (accuracy == null) {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-gray-500">
         <MapPinOff size={13} className="shrink-0" />
-        {t('delivery.pin.deliveredNoGps')}
+        {t(`${prefix}NoGps`)}
       </span>
     );
   }
   const m = Math.round(accuracy);
   const quality = gpsQuality(accuracy);
-  const key = { GOOD: 'delivery.pin.deliveredAtGood', OK: 'delivery.pin.deliveredAtOk', WEAK: 'delivery.pin.deliveredAtWeak' }[quality];
+  const key = `${prefix}${{ GOOD: 'AtGood', OK: 'AtOk', WEAK: 'AtWeak' }[quality]}`;
   return (
     <span className={`inline-flex items-center gap-1 text-xs ${QUALITY_TONE[quality]}`}>
       <LocateFixed size={13} className="shrink-0" />

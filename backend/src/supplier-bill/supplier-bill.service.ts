@@ -235,6 +235,16 @@ export class SupplierBillService {
         _sum: { amount: true },
       }),
     ]);
+    // Bills imported from Accurate: their goods arrived before WareSys, so
+    // with no receipt on the PO the imported bill stands in for "received"
+    // (same rule as SupplierPaymentsService.getOutstanding and AP Aging).
+    const importedBills = await this.prisma.supplierBill.groupBy({
+      by: ['purchaseOrderId'],
+      where: { organizationId, purchaseOrderId: { in: poIds }, voidedAt: null, externalId: { not: null } },
+      _sum: { amount: true },
+    });
+    const importedByPo = new Map(importedBills.map((b) => [b.purchaseOrderId, Number(b._sum.amount ?? 0)]));
+    const poWithReceipts = new Set(receipts.map((r) => r.purchaseOrderId));
 
     const receiptToPo = new Map(receipts.map((r) => [r.id, r.purchaseOrderId]));
     const creditedByPo = new Map<string, number>();
@@ -268,9 +278,10 @@ export class SupplierBillService {
     );
 
     for (const po of pos) {
-      const received = round2(
-        (creditedByPo.get(po.id) ?? 0) - (returnedByPo.get(po.id) ?? 0),
-      );
+      const credited = poWithReceipts.has(po.id)
+        ? (creditedByPo.get(po.id) ?? 0)
+        : (importedByPo.get(po.id) ?? 0);
+      const received = round2(credited - (returnedByPo.get(po.id) ?? 0));
       const billed = round2(billedByPo.get(po.id) ?? 0);
       const difference = round2(billed - received);
       const status: MatchStatus =
