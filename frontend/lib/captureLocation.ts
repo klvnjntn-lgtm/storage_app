@@ -62,3 +62,12 @@ export async function locationProblem(): Promise<LocationProblem | null> {
   }
   return null;
 }
+
+// What to tell the user when no reading came (delivery.* i18n keys).
+export async function noFixMessage(t: (key: string) => string): Promise<string> {
+  const problem = await locationProblem();
+  if (problem === 'insecure') return t('delivery.driver.gps.insecure');
+  if (problem === 'unsupported') return t('delivery.driver.gps.unsupported');
+  if (problem === 'denied') return t('delivery.coordinates.gpsDenied');
+  return t('delivery.coordinates.gpsFailed');
+}

@@ -5,7 +5,7 @@ import { LocateFixed } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { gpsQuality } from '@/app/components/delivery/PinStatus';
-import { captureLocation, locationProblem } from '@/lib/captureLocation';
+import { captureLocation, noFixMessage } from '@/lib/captureLocation';
 
 type Position = { lat: number; lng: number };
 
@@ -52,16 +52,7 @@ export default function CoordinateInputs({
     try {
       const fix = await captureLocation();
       if (fix.latitude == null || fix.longitude == null) {
-        const problem = await locationProblem();
-        setGpsError(
-          problem === 'insecure'
-            ? t('delivery.driver.gps.insecure')
-            : problem === 'unsupported'
-              ? t('delivery.driver.gps.unsupported')
-              : problem === 'denied'
-                ? t('delivery.coordinates.gpsDenied')
-                : t('delivery.coordinates.gpsFailed'),
-        );
+        setGpsError(await noFixMessage(t));
         return;
       }
       const pos = { lat: Number(fix.latitude.toFixed(6)), lng: Number(fix.longitude.toFixed(6)) };

@@ -357,6 +357,21 @@ export default function CustomerDetailPage() {
             customerId={customer.id}
             deliveryNotes={customer.deliveryNotes}
             onNotesSaved={(deliveryNotes) => setCustomer({ ...customer, deliveryNotes })}
+            // Mirrors the backend: an empty pin is filled from the photo.
+            onPhotoLocated={({ lat, lng, accuracy }) =>
+              setCustomer((c) =>
+                c && !c.latitude
+                  ? {
+                      ...c,
+                      latitude: String(lat),
+                      longitude: String(lng),
+                      pinSource: 'GPS',
+                      pinAccuracy: accuracy,
+                      pinSetAt: new Date().toISOString(),
+                    }
+                  : c,
+              )
+            }
           />
         )}
 

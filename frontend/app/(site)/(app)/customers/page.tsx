@@ -17,6 +17,11 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { usePriceLevels } from '@/lib/price-levels';
 import DeliveryMap from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import LandmarkPhotos, {
+  discardPending,
+  uploadLandmarkPhoto,
+  type PendingLandmarkPhoto,
+} from '@/app/components/delivery/LandmarkPhotos';
 import { PinStatusBadge, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
@@ -41,6 +46,10 @@ type EditState = {
   // editing a name doesn't re-save (and lock) a driver's GPS pin.
   originalPosition: { lat: number; lng: number } | null;
   deliveryNotes: string;
+  // Filled from a landmark photo's GPS while the pin was empty. The backend
+  // saves that pin itself with the photo (as GPS, with its accuracy), so
+  // it isn't sent with the form unless the user changed it.
+  photoPin: { lat: number; lng: number; accuracy: number | null } | null;
   // '' = the org's default price level.
   priceLevelId: string;
 };
@@ -55,6 +64,7 @@ const EMPTY_EDIT: EditState = {
   position: null,
   originalPosition: null,
   deliveryNotes: '',
+  photoPin: null,
   priceLevelId: '',
 };
 
@@ -78,6 +88,9 @@ export default function CustomersPage() {
   const [pinFilter, setPinFilter] = useState<PinStatus | ''>(() => getInitialParam('pin', '') as PinStatus | '');
 
   const [editing, setEditing] = useState<EditState | null>(null);
+  // Landmark photos picked in the New customer dialog — uploaded once the
+  // customer exists. (Editing saves each photo straight away.)
+  const [pendingPhotos, setPendingPhotos] = useState<PendingLandmarkPhoto[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -162,6 +175,12 @@ export default function CustomersPage() {
     setEditing({ ...EMPTY_EDIT });
   }
 
+  function closeEditor() {
+    discardPending(pendingPhotos);
+    setPendingPhotos([]);
+    setEditing(null);
+  }
+
   function openEdit(c: Customer) {
     setError('');
     setEditing({
@@ -174,6 +193,7 @@ export default function CustomersPage() {
       position: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
       originalPosition: c.latitude && c.longitude ? { lat: Number(c.latitude), lng: Number(c.longitude) } : null,
       deliveryNotes: c.deliveryNotes ?? '',
+      photoPin: null,
       priceLevelId: c.priceLevelId ?? '',
     });
   }
@@ -186,6 +206,14 @@ export default function CustomersPage() {
     }
     setSaving(true);
     setError('');
+    // New customer: the pin comes from a pending photo, uploaded below.
+    // (If that photo was removed again, the pin is sent like a typed one.)
+    const pinFromPhoto =
+      !editing.id &&
+      !!editing.photoPin &&
+      editing.position?.lat === editing.photoPin.lat &&
+      editing.position?.lng === editing.photoPin.lng &&
+      pendingPhotos.some((p) => p.fix?.latitude === editing.photoPin?.lat && p.fix?.longitude === editing.photoPin?.lng);
     try {
       const body = JSON.stringify({
         name: editing.name.trim(),
@@ -199,6 +227,7 @@ export default function CustomersPage() {
         ...(hasDelivery
           ? {
               ...(editing.position &&
+              !pinFromPhoto &&
               (editing.position.lat !== editing.originalPosition?.lat ||
                 editing.position.lng !== editing.originalPosition?.lng)
                 ? { latitude: editing.position.lat, longitude: editing.position.lng }
@@ -220,8 +249,30 @@ export default function CustomersPage() {
         throw new Error(err?.message || `Failed to save (${res.status})`);
       }
 
-      setEditing(null);
+      // The customer exists now; a photo that fails is reported, not
+      // retried — it can be added again from the customer's page. The one
+      // carrying the pin goes first, so it's that one that sets it.
+      let photoError = '';
+      if (!editing.id && pendingPhotos.length > 0) {
+        const created = await res.json();
+        const pin = editing.photoPin;
+        const ordered = [...pendingPhotos].sort(
+          (a, b) =>
+            Number(b.fix?.latitude === pin?.lat && b.fix?.longitude === pin?.lng) -
+            Number(a.fix?.latitude === pin?.lat && a.fix?.longitude === pin?.lng),
+        );
+        for (const photo of ordered) {
+          try {
+            await uploadLandmarkPhoto(created.id, photo);
+          } catch (e) {
+            photoError = errorMessage(e) || t('customers.driverInfo.uploadFailed');
+          }
+        }
+      }
+
+      closeEditor();
       load();
+      if (photoError) await dialog.alert(t('customers.listPage.photoUploadFailed', { error: photoError }));
     } catch (e) {
       setError(errorMessage(e) || t('customers.listPage.saveFailed'));
     } finally {
@@ -258,7 +309,7 @@ export default function CustomersPage() {
     }
   }
 
-  useEscapeToClose(!!editing && !saving, () => setEditing(null));
+  useEscapeToClose(!!editing && !saving, closeEditor);
   return (
     <main
       className="min-h-screen text-black"
@@ -507,7 +558,7 @@ export default function CustomersPage() {
           <div role="dialog" aria-modal="true" className={`bg-white rounded-md border-2 border-gray-300 w-full ${hasDelivery ? 'max-w-md' : 'max-w-sm'} p-5 max-h-[95vh] overflow-y-auto`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{editing.id ? t('customers.listPage.editCustomer') : t('customers.listPage.newCustomerTitle')}</h2>
-              <button aria-label={t('common.close')} onClick={() => setEditing(null)} className="text-gray-400 hover:text-blue-700">
+              <button aria-label={t('common.close')} onClick={closeEditor} className="text-gray-400 hover:text-blue-700">
                 <X size={18} strokeWidth={2} />
               </button>
             </div>
@@ -597,6 +648,36 @@ export default function CustomersPage() {
                     maxLength={1000}
                     className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
+                  <LandmarkPhotos
+                    customerId={editing.id}
+                    pending={pendingPhotos}
+                    onPendingChange={setPendingPhotos}
+                    onLocated={(loc) =>
+                      setEditing((e) =>
+                        // Only into an empty pin, as the backend does (a
+                        // pin cleared in the form is still set in the DB).
+                        e && !e.position && !e.originalPosition
+                          ? {
+                              ...e,
+                              position: { lat: loc.lat, lng: loc.lng },
+                              photoPin: loc,
+                              // Editing: already saved by the upload, so it
+                              // counts as unchanged.
+                              ...(e.id ? { originalPosition: { lat: loc.lat, lng: loc.lng } } : {}),
+                            }
+                          : e,
+                      )
+                    }
+                  />
+                  {editing.photoPin &&
+                    editing.position?.lat === editing.photoPin.lat &&
+                    editing.position?.lng === editing.photoPin.lng && (
+                      <p className="text-xs text-gray-600">
+                        {editing.photoPin.accuracy != null
+                          ? t('customers.listPage.pinFromPhoto', { m: Math.round(editing.photoPin.accuracy) })
+                          : t('customers.listPage.pinFromPhotoNoAccuracy')}
+                      </p>
+                    )}
                 </div>
               )}
             </div>

@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { PinSource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   FILE_STORAGE,
@@ -73,20 +74,40 @@ export class CustomerLocationService {
     const data = await encodePrivatePhoto(file);
     const key = `customer-locations/${organizationId}/${customerId}/${randomUUID()}.webp`;
     await this.storage.put(key, data, 'image/webp');
-    // GPS is optional here — office staff may add a photo from a desktop.
+    // Sent only for a photo taken on the spot ("Take photo" — camera + GPS).
+    // A plain upload (an existing picture) has neither: when and where it
+    // was taken isn't known.
     const hasFix = meta.latitude != null && meta.longitude != null;
     const takenAt = meta.takenAt ? new Date(meta.takenAt) : null;
+    const now = new Date();
     await this.prisma.customerLocationPhoto.create({
       data: {
         organizationId,
         customerId,
         storageKey: key,
-        takenAt: takenAt && takenAt <= new Date() ? takenAt : new Date(),
+        takenAt: takenAt && takenAt > now ? now : takenAt,
         latitude: hasFix ? meta.latitude : null,
         longitude: hasFix ? meta.longitude : null,
         accuracy: hasFix ? (meta.accuracy ?? null) : null,
       },
     });
+    // A customer with no pin gets the photo's location, however weak — the
+    // photo was taken at their place. Saved as a GPS pin with its accuracy,
+    // like a driver's fix (customer-pin-backfill): a weak one is flagged to
+    // the office and a later, tighter driver fix still replaces it. Only
+    // when empty, checked in the UPDATE so a pin set meanwhile wins.
+    if (hasFix) {
+      await this.prisma.customer.updateMany({
+        where: { id: customerId, organizationId, latitude: null },
+        data: {
+          latitude: meta.latitude,
+          longitude: meta.longitude,
+          pinSource: PinSource.GPS,
+          pinAccuracy: meta.accuracy ?? null,
+          pinSetAt: new Date(),
+        },
+      });
+    }
     return this.list(organizationId, customerId);
   }
 
