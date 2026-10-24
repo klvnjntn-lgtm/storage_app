@@ -94,26 +94,30 @@ export class AuthService {
         }
       }
 
-      // Without this, a driver whose device was rejected could log in by
-      // simply not sending x-device-id. The web client always sends one.
-      if (!deviceId) {
-        throw new UnauthorizedException('A device id is required to sign in as a driver.');
-      }
-      const result = await this.devices.registerOrCheck(
-        user.organizationId,
-        user.id,
-        deviceId,
-        userAgent,
-      );
-      if (result === 'PENDING') {
-        throw new UnauthorizedException(
-          'This device is pending admin approval.',
+      // Device approval is switched off unless DRIVER_DEVICE_APPROVAL=true
+      // (turned off while approved drivers were still being refused).
+      if (process.env.DRIVER_DEVICE_APPROVAL === 'true') {
+        // Without this, a driver whose device was rejected could log in by
+        // simply not sending x-device-id. The web client always sends one.
+        if (!deviceId) {
+          throw new UnauthorizedException('A device id is required to sign in as a driver.');
+        }
+        const result = await this.devices.registerOrCheck(
+          user.organizationId,
+          user.id,
+          deviceId,
+          userAgent,
         );
-      }
-      if (result === 'REJECTED') {
-        throw new UnauthorizedException(
-          'This device has been denied access. Contact your administrator.',
-        );
+        if (result === 'PENDING') {
+          throw new UnauthorizedException(
+            'This device is pending admin approval.',
+          );
+        }
+        if (result === 'REJECTED') {
+          throw new UnauthorizedException(
+            'This device has been denied access. Contact your administrator.',
+          );
+        }
       }
     }
 
