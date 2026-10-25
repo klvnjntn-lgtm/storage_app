@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res, UseInterceptors, UploadedFile } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { DeliveryOrderStatus, ModuleKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -118,20 +118,32 @@ export class DeliveryOrderController {
   // only through a short-lived signed link (see DeliveryProofService).
   @Post(':id/proof-photo')
   @Roles('ADMIN', 'USER', 'DRIVER')
+  // `landmark`: the same photo without its stamp, sent when the customer
+  // has no landmark photo yet (see landmarkFromProof).
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'file', maxCount: 1 },
+        { name: 'landmark', maxCount: 1 },
+      ],
+      { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } },
+    ),
   )
   uploadProofPhoto(
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
     @Req() req,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: { file?: Express.Multer.File[]; landmark?: Express.Multer.File[] },
     @Body() meta: ProofPhotoMetaDto,
   ) {
-    return this.deliveryProofService.uploadPhoto(organizationId, id, file, req.user, meta);
+    return this.deliveryProofService.uploadPhoto(
+      organizationId,
+      id,
+      files?.file?.[0] as Express.Multer.File,
+      req.user,
+      meta,
+      files?.landmark?.[0],
+    );
   }
 
   @Patch(':id/proof-draft')

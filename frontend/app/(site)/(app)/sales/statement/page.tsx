@@ -10,6 +10,7 @@ import { CustomerStatement } from '@/app/components/invoices/types';
 import { toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useMergeQueryParams } from '@/lib/useQuerySync';
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -53,6 +54,8 @@ function InvoiceStatementPageInner() {
 
   const [from, setFrom] = useState(searchParams.get('from') ?? defaultFrom());
   const [to, setTo] = useState(searchParams.get('to') ?? toDateInput(new Date()));
+  // Kept in the URL, so opening an invoice and coming back keeps the range.
+  useMergeQueryParams({ from, to });
 
   const [statement, setStatement] = useState<CustomerStatement | null>(null);
   const [sendOpen, setSendOpen] = useState(false);

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ChevronRight, Menu, X, ArrowUp, Pause, Play, Package, ReceiptText, Wrench, Truck } from 'lucide-react';
 import {
@@ -27,6 +28,8 @@ import { Contact, Faq, SiteFooter, TechMarquee, WhoItsFor, WhySection } from './
 import {
   EASE_OUT,
   GridBackdrop,
+  hasWebGL,
+  isLowEndDevice,
   Kicker,
   MotionPauseContext,
   ParallaxGlow,
@@ -35,6 +38,9 @@ import {
   SectionDivider,
   SectionHeading,
 } from './_landing/primitives';
+
+// three.js stays out of the main bundle and off the server.
+const HeroCanvas = dynamic(() => import('./_landing/hero3d/HeroCanvas'), { ssr: false });
 
 /* ─── Scroll-to-top with a progress ring. framer only does work while the
    page is actually scrolling. ─────────────────────────────────────── */
@@ -91,6 +97,12 @@ export default function LandingPage() {
   const motionPaused = userPaused ?? lite;
   const toggleMotion = () => setUserPaused(!motionPaused);
   const reduceMotion = useReducedMotion() || lite;
+  // WebGL hero where the device can carry it, the CSS scene otherwise.
+  const [heroMode, setHeroMode] = useState<'pending' | '3d' | 'css'>('pending');
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only APIs once after mount
+    setHeroMode(!isLowEndDevice() && hasWebGL() ? '3d' : 'css');
+  }, []);
 
   // Nav: transparent over the hero, solid once scrolled; slides away while
   // scrolling down and comes back on any upward scroll.
@@ -252,9 +264,10 @@ export default function LandingPage() {
 
         <motion.div
           style={reduceMotion ? { y: 0, opacity: 1 } : { y: heroTextY, opacity: heroTextOpacity }}
-          className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 pt-28 sm:pt-32 lg:pt-24 lg:pb-12 lg:min-h-svh flex items-center"
+          className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 pt-28 sm:pt-32 lg:pt-24 lg:pb-12 lg:min-h-svh flex items-center pointer-events-none"
         >
-          <div className="max-w-md animate-hero-in motion-reduce:animate-none">
+          {/* the wrapper spans the hero over the 3D scene; only the copy takes the pointer */}
+          <div className="max-w-md animate-hero-in motion-reduce:animate-none pointer-events-auto">
             <Kicker index="00" label={t('landing.hero.eyebrow')} className="mb-5 sm:mb-6" />
             <h1 className={`${display.className} text-[2.5rem] sm:text-6xl xl:text-7xl font-bold tracking-[-0.035em] leading-[0.98] mb-6 sm:mb-7`}>
               {t('landing.hero.headline')}
@@ -301,10 +314,22 @@ export default function LandingPage() {
         </motion.div>
 
         <div className="relative h-[300px] sm:h-[470px] lg:absolute lg:inset-y-0 lg:right-0 lg:h-auto lg:w-[60%] pointer-events-none">
-          <motion.div style={reduceMotion ? { y: 0, scale: 1 } : { y: sceneY, scale: sceneScale }} className="absolute inset-0">
-            <div className="dark-island absolute left-[53%] lg:left-[60%] xl:left-[52%] top-1/2 lg:top-[52%] -translate-x-1/2 -translate-y-1/2 scale-[0.4] sm:scale-[0.64] lg:scale-[0.56] xl:scale-[0.84] 2xl:scale-[0.96]">
-              <HeroScene />
-            </div>
+          {/* the 3D hero does its own scroll motion with the camera; scaling its
+              box would make the canvas re-measure and resize on every frame */}
+          <motion.div
+            style={reduceMotion || heroMode === '3d' ? { y: 0, scale: 1 } : { y: sceneY, scale: sceneScale }}
+            className="absolute inset-0"
+          >
+            {heroMode === '3d' && (
+              <div className="dark-island absolute inset-0">
+                <HeroCanvas />
+              </div>
+            )}
+            {heroMode === 'css' && (
+              <div className="dark-island absolute left-[53%] lg:left-[60%] xl:left-[52%] top-1/2 lg:top-[52%] -translate-x-1/2 -translate-y-1/2 scale-[0.4] sm:scale-[0.64] lg:scale-[0.56] xl:scale-[0.84] 2xl:scale-[0.96]">
+                <HeroScene />
+              </div>
+            )}
           </motion.div>
         </div>
 

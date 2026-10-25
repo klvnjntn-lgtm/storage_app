@@ -72,7 +72,9 @@ type Stop = {
   customerInfo: {
     phone: string | null;
     deliveryNotes: string | null;
-    locationPhotos: { id: string; path: string }[];
+    // fromProofOf: filled in from a delivery's proof photo (its stop or
+    // delivery order id) because the customer had none.
+    locationPhotos: { id: string; path: string; fromProofOf?: string | null }[];
   } | null;
 };
 
@@ -160,9 +162,13 @@ async function uploadProofPhoto(
   path: string,
   file: File,
   meta: PhotoMeta,
+  // The same photo without the stamp, to become the customer's landmark
+  // photo when they have none (the server decides; see landmarkFromProof).
+  landmark?: File,
 ): Promise<{ ok: boolean; status?: number; message?: string }> {
   const formData = new FormData();
   formData.append('file', file);
+  if (landmark) formData.append('landmark', landmark);
   if (meta.takenAt) formData.append('takenAt', meta.takenAt);
   if (meta.fix?.latitude != null && meta.fix.longitude != null) {
     formData.append('latitude', String(meta.fix.latitude));
@@ -504,6 +510,10 @@ export default function DriverRoutePage() {
   // waits for the one already going instead of sending the photo twice,
   // and a retake goes up right after it.
   const uploads = useRef<Record<string, Promise<boolean> | undefined>>({});
+  // Clean (unstamped) copy of a proof photo, for a customer without a
+  // landmark photo — keyed by the stamped photo it belongs to, so a retake
+  // carries its own.
+  const landmarkFor = useRef(new WeakMap<File, File>());
   const uploadingFile = useRef<Record<string, File | undefined>>({});
   // Photos the server refused: not retried in the background.
   const refusedPhoto = useRef<Record<string, File | undefined>>({});
@@ -590,12 +600,20 @@ export default function DriverRoutePage() {
         return;
       }
       const small = await shrinkPhoto(file, { stamp: photoStamp(takenAt, fix) });
+      // No landmark photo for this customer yet (or only one this delivery
+      // filled in): send a copy without the date/GPS stamp to become it.
+      const sourceId = stop.deliveryOrder?.id ?? stop.id;
+      const info = stop.customerInfo;
+      const landmark =
+        info && info.locationPhotos.every((p) => p.fromProofOf === sourceId) ? await shrinkPhoto(file) : undefined;
+      if (landmark) landmarkFor.current.set(small, landmark);
       setPhotoDraft((d) => ({ ...d, [stopId]: small }));
       setPhotoFix((f) => ({ ...f, [stopId]: fix }));
       setPhotoTakenAt((a) => ({ ...a, [stopId]: takenAt.toISOString() }));
       setStopError(stopId, null);
       void saveDraft(stopId, {
         photo: small,
+        landmark,
         photoFix: { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy },
         photoTakenAt: takenAt.toISOString(),
       });
@@ -625,7 +643,12 @@ export default function DriverRoutePage() {
       setUploadingPhotoFor(key);
       uploadingFile.current[key] = photo;
       try {
-        const upload = await uploadProofPhoto(stopEndpoints(routeId, stop).photo, photo, meta);
+        const upload = await uploadProofPhoto(
+          stopEndpoints(routeId, stop).photo,
+          photo,
+          meta,
+          landmarkFor.current.get(photo),
+        );
         if (!upload.ok) {
           if (isRefusal(upload.status)) {
             refusedPhoto.current[key] = photo;
@@ -639,7 +662,7 @@ export default function DriverRoutePage() {
         setStopError(key, null);
         // Only drop the copy on the phone if it's still the one sent (no
         // retake meanwhile).
-        if (latest.current.photoDraft[key] === photo) void saveDraft(key, { photo: undefined });
+        if (latest.current.photoDraft[key] === photo) void saveDraft(key, { photo: undefined, landmark: undefined });
         setPhotoDraft((d) => {
           if (d[key] !== photo) return d;
           const rest = { ...d };
@@ -789,7 +812,10 @@ export default function DriverRoutePage() {
       if (!stop) continue; // another day's route
       if (draft.receivedBy) names[draft.stopId] = draft.receivedBy;
       // A photo the server already has isn't sent again.
-      if (draft.photo && !stop.hasProofPhoto) photos[draft.stopId] = draft.photo;
+      if (draft.photo && !stop.hasProofPhoto) {
+        photos[draft.stopId] = draft.photo;
+        if (draft.landmark) landmarkFor.current.set(draft.photo, draft.landmark);
+      }
       if (draft.photoFix) fixes[draft.stopId] = draft.photoFix;
       if (draft.photoTakenAt) times[draft.stopId] = draft.photoTakenAt;
     }

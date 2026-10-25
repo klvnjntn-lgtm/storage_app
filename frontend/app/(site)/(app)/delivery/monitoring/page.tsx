@@ -11,6 +11,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import TeamPicker, { teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { toCalendarDateString } from '@/lib/dates';
+import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
 
 
 type Summary = { total: number; delivered: number; pending: number; failed: number; atRisk: number; late: number };
@@ -74,20 +75,27 @@ function StatCard({ label, value, tone }: { label: string; value: number; tone: 
   );
 }
 
+// Office staff watch deliveries too; drivers have their own page.
+const MONITORING_ROLES = ['ADMIN', 'USER'] as const;
+
+const validDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+
 export default function DeliveryMonitoringPage() {
   const { t } = useLanguage();
-  const { authorized } = useRequireAdmin();
-  const [date, setDate] = useState(todayIso());
+  const { authorized } = useRequireAdmin(MONITORING_ROLES);
+  // In the URL, so opening a route and coming back keeps the day picked.
+  const [date, setDate] = useState(() => validDay(getInitialParam('date', '')) ?? todayIso());
   const [summary, setSummary] = useState<Summary>({ total: 0, delivered: 0, pending: 0, failed: 0, atRisk: 0, late: 0 });
   const [byTeam, setByTeam] = useState<TeamProgress[]>([]);
   const [mapStops, setMapStops] = useState<MonitoringMapStop[]>([]);
   // '' = all teams. Narrows the map only; the stats and team list stay org-wide.
-  const [mapTeamId, setMapTeamId] = useState('');
+  const [mapTeamId, setMapTeamId] = useState(() => getInitialParam<string>('team', ''));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const inFlight = useRef(false);
   const isToday = date === todayIso();
+  useSyncQueryParams({ date: isToday ? null : date, team: mapTeamId });
 
   // silent: background refresh — no loading state, keeps the last good
   // data on screen if a poll fails.

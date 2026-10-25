@@ -146,6 +146,11 @@ model CustomerLocationPhoto {
   latitude       Decimal?  @db.Decimal(9, 6)
   longitude      Decimal?  @db.Decimal(9, 6)
   accuracy       Float?
+  // Filled in from a driver's proof photo (a clean copy, without the
+  // date/GPS stamp) because the customer had no landmark photo yet: the
+  // stop's or delivery order's id. A retake for that delivery replaces it;
+  // null = added by the office.
+  fromProofOf    String?
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)

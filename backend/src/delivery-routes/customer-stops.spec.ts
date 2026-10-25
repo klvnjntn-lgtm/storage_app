@@ -480,6 +480,37 @@ describe('Team routes & customer stops', () => {
     ).resolves.toMatchObject({ kind: 'signed' });
   });
 
+  it('fills in a landmark photo from the proof photo, only for a customer without one', async () => {
+    const route = await mkStartedRoute();
+    const customer = await mkCustomer('No Landmark Co');
+    const stop = await routes.addStop(orgId, route.id, { customerId: customer.id });
+    const landmarks = () =>
+      prisma.customerLocationPhoto.findMany({ where: { customerId: customer.id } });
+
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt, photo);
+    const first = await landmarks();
+    expect(first).toHaveLength(1);
+    expect(first[0].fromProofOf).toBe(stop.id);
+    expect(Number(first[0].latitude)).toBeCloseTo(1.2);
+
+    // A retake replaces the one it filled in.
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), shotAt, photo);
+    const retaken = await landmarks();
+    expect(retaken).toHaveLength(1);
+    expect(retaken[0].id).not.toBe(first[0].id);
+
+    // A customer whose landmark came from the office keeps it as it is.
+    const other = await mkCustomer('Has Landmark Co');
+    await prisma.customerLocationPhoto.create({
+      data: { organizationId: orgId, customerId: other.id, storageKey: 'customer-locations/x/office.webp' },
+    });
+    const stop2 = await routes.addStop(orgId, route.id, { customerId: other.id });
+    await proofs.uploadPhoto(orgId, route.id, stop2.id, photo, driver(), shotAt, photo);
+    const kept = await prisma.customerLocationPhoto.findMany({ where: { customerId: other.id } });
+    expect(kept).toHaveLength(1);
+    expect(kept[0].fromProofOf).toBeNull();
+  });
+
   it('pulls a phone clock running ahead back to now', async () => {
     const route = await mkStartedRoute();
     const stop = await routes.addStop(orgId, route.id, {

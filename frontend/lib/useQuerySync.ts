@@ -55,3 +55,28 @@ export function useSyncQueryParams(params: Record<string, string | number | null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, values);
 }
+
+// Like useSyncQueryParams, but only sets/removes the keys given and keeps
+// every other query param — for pages whose URL also names what they
+// show (?accountId=, ?customerId=&vehicleId=…), where rewriting the whole
+// query would drop it.
+export function useMergeQueryParams(params: Record<string, string | number | null | undefined>) {
+  const skipFirstRun = useRef(true);
+  const values = Object.values(params);
+
+  useEffect(() => {
+    if (skipFirstRun.current) {
+      skipFirstRun.current = false;
+      return;
+    }
+    const search = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(params)) {
+      if (value === null || value === undefined || value === '') search.delete(key);
+      else search.set(key, String(value));
+    }
+    const query = search.toString();
+    const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
+    window.history.replaceState(window.history.state, '', url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, values);
+}

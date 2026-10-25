@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, CalendarClock, Store, Truck } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
+import RescheduleStopDialog from '@/app/components/delivery/RescheduleStopDialog';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
 import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
@@ -17,11 +18,10 @@ import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
 import { driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import CustomerStopPicker, { type StopCustomer } from '@/app/components/delivery/CustomerStopPicker';
-import DatePicker from '@/app/components/shared/DatePicker';
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
-import { formatDMY, formatDMYTime, toCalendarDateString } from '@/lib/dates';
+import { formatDMY, formatDMYTime } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
@@ -88,7 +88,6 @@ type HistoryEvent = {
   } | null;
 };
 
-type RouteOption = { id: string; name: string | null; status: string; team: PickerTeam };
 
 type RouteDetail = {
   id: string;
@@ -196,7 +195,6 @@ export default function DeliveryRouteDetailPage() {
   const [editWindowStart, setEditWindowStart] = useState('');
   const [editWindowEnd, setEditWindowEnd] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
-  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
 
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -207,11 +205,6 @@ export default function DeliveryRouteDetailPage() {
   const [savingTeam, setSavingTeam] = useState(false);
 
   const [rescheduleStop, setRescheduleStop] = useState<Stop | null>(null);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleRoutes, setRescheduleRoutes] = useState<RouteOption[]>([]);
-  const [rescheduleRouteId, setRescheduleRouteId] = useState('');
-  const [rescheduleWindowStart, setRescheduleWindowStart] = useState('');
-  const [rescheduleWindowEnd, setRescheduleWindowEnd] = useState('');
 
   async function load() {
     setLoading(true);
@@ -496,61 +489,6 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
-  async function loadRescheduleRoutes(date: string) {
-    setRescheduleRouteId('');
-    setRescheduleRoutes([]);
-    if (!date) return;
-    const res = await apiFetch(`/delivery-routes?date=${date}`);
-    if (res.ok) {
-      const rows: RouteOption[] = await res.json();
-      setRescheduleRoutes(rows.filter((r) => r.id !== id && r.status !== 'COMPLETED' && r.status !== 'CANCELLED'));
-    }
-  }
-
-  function openReschedule(stop: Stop) {
-    // Default to tomorrow — the usual "try again next day" case.
-    const tomorrow = toCalendarDateString(new Date(Date.now() + 24 * 60 * 60 * 1000));
-    setRescheduleStop(stop);
-    setRescheduleDate(tomorrow);
-    setRescheduleWindowStart('');
-    setRescheduleWindowEnd('');
-    loadRescheduleRoutes(tomorrow);
-  }
-
-  async function handleReschedule() {
-    const stop = rescheduleStop;
-    if (!stop) return;
-    // A customer stop has no unrouted pool to return to — it needs a route.
-    if (!stop.deliveryOrder && !rescheduleRouteId) return;
-    setReschedulingId(stop.id);
-    setError(null);
-    try {
-      const url = stop.deliveryOrder
-        ? `/delivery-orders/${stop.deliveryOrder.id}/reschedule`
-        : `/delivery-routes/${id}/stops/${stop.id}/reschedule`;
-      const res = await apiFetch(url, {
-        method: 'POST',
-        body: JSON.stringify({
-          routeId: rescheduleRouteId || undefined,
-          deliveryWindowStart: rescheduleWindowStart ? new Date(rescheduleWindowStart).toISOString() : undefined,
-          deliveryWindowEnd: rescheduleWindowEnd ? new Date(rescheduleWindowEnd).toISOString() : undefined,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
-        return;
-      }
-      setRescheduleStop(null);
-      await load();
-      if (showHistory) await loadHistory();
-    } catch {
-      setError(t('delivery.routeDetail.couldNotReachServer'));
-    } finally {
-      setReschedulingId(null);
-    }
-  }
-
   async function openChangeTeam() {
     setChangingTeam(true);
     if (teams.length === 0) {
@@ -590,7 +528,6 @@ export default function DeliveryRouteDetailPage() {
     if (res.ok) setHistory(await res.json());
   }
 
-  useEscapeToClose(!!rescheduleStop, () => setRescheduleStop(null));
   useEscapeToClose(!!pickingStop || pickingStart, () => { setPickingStop(null); setPickingStart(false); });
 
   if (loading) {
@@ -1056,13 +993,10 @@ export default function DeliveryRouteDetailPage() {
                   )}
                   {stop.status === 'FAILED' && !stop.superseded && !isDriver && (
                     <button
-                      disabled={reschedulingId === stop.id}
-                      onClick={() => openReschedule(stop)}
+                      onClick={() => setRescheduleStop(stop)}
                       className="text-xs sm:text-[11px] font-medium text-amber-700 border border-amber-300 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
                     >
-                      {reschedulingId === stop.id
-                        ? t('delivery.routeDetail.rescheduling')
-                        : t('delivery.routeDetail.reschedule')}
+                      {t('delivery.routeDetail.reschedule')}
                     </button>
                   )}
                   <button
@@ -1174,96 +1108,21 @@ export default function DeliveryRouteDetailPage() {
       </div>
 
       {rescheduleStop && (
-        <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
-          <div role="dialog" aria-modal="true" className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-lg p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3 max-h-[95vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                <CalendarClock size={16} className="text-amber-600" />
-                {t('delivery.routeDetail.rescheduleTitle', { name: rescheduleStop.label })}
-              </h3>
-              <button onClick={() => setRescheduleStop(null)} aria-label={t('common.cancel')} className="p-2 -m-2 text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            {rescheduleStop.failureReason && (
-              <p className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-md px-2 py-1.5">
-                {t('delivery.routeDetail.failureReasonLabel')}: {rescheduleStop.failureReason}
-              </p>
-            )}
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-                {t('delivery.routeDetail.rescheduleDate')}
-              </label>
-              <DatePicker
-                value={rescheduleDate}
-                onChange={(d) => {
-                  setRescheduleDate(d);
-                  loadRescheduleRoutes(d);
-                }}
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-                {t('delivery.routeDetail.rescheduleRoute')}
-              </label>
-              <select
-                value={rescheduleRouteId}
-                onChange={(e) => setRescheduleRouteId(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
-              >
-                {rescheduleStop.deliveryOrder ? (
-                  <option value="">{t('delivery.routeDetail.rescheduleNoRoute')}</option>
-                ) : (
-                  <option value="">{t('delivery.routeDetail.rescheduleSelectRoute')}</option>
-                )}
-                {rescheduleRoutes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {(r.name ?? r.team.name) + (r.name ? ` — ${r.team.name}` : '')}
-                  </option>
-                ))}
-              </select>
-              {rescheduleDate && rescheduleRoutes.length === 0 && (
-                <p className="text-xs text-gray-500 mt-1">{t('delivery.routeDetail.rescheduleNoRoutesOnDate')}</p>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <label className="block">
-                <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowStartLabel')}</span>
-                <DateTimePicker
-                  value={rescheduleWindowStart}
-                  onChange={(v) => setRescheduleWindowStart(v)}
-                  className="w-full"
-                />
-              </label>
-              <label className="block">
-                <span className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">{t('delivery.routeDetail.windowEndLabel')}</span>
-                <DateTimePicker
-                  value={rescheduleWindowEnd}
-                  onChange={(v) => setRescheduleWindowEnd(v)}
-                  className="w-full"
-                />
-              </label>
-            </div>
-            <p className="text-xs text-gray-500">
-              {t(rescheduleStop.deliveryOrder ? 'delivery.routeDetail.rescheduleHint' : 'delivery.routeDetail.rescheduleCustomerHint')}
-            </p>
-            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
-              <button
-                onClick={() => setRescheduleStop(null)}
-                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-2.5 sm:py-1.5"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                disabled={reschedulingId === rescheduleStop.id || (!rescheduleStop.deliveryOrder && !rescheduleRouteId)}
-                onClick={handleReschedule}
-                className="bg-amber-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-amber-700 disabled:opacity-50"
-              >
-                {reschedulingId === rescheduleStop.id ? t('delivery.routeDetail.rescheduling') : t('delivery.routeDetail.reschedule')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RescheduleStopDialog
+          target={{
+            stopId: rescheduleStop.id,
+            routeId: id,
+            label: rescheduleStop.label,
+            failureReason: rescheduleStop.failureReason,
+            deliveryOrderId: rescheduleStop.deliveryOrder?.id ?? null,
+          }}
+          onClose={() => setRescheduleStop(null)}
+          onDone={async () => {
+            setRescheduleStop(null);
+            await load();
+            if (showHistory) await loadHistory();
+          }}
+        />
       )}
 
       {(pickingStop || pickingStart) && (

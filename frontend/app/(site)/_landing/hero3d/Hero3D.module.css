@@ -1,0 +1,499 @@
+/* ─── Floating cards over the WebGL hero ──────────────────────────────
+   Each anchor is moved onto its 3D point by Story's projector (a
+   transform per frame), so keep cards free of blur filters. */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden; /* until the projector places it */
+  will-change: transform;
+}
+
+.card {
+  width: 236px;
+  padding: 11px 12px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 27, 0.92));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 40px -16px rgba(0, 0, 0, 0.8),
+    0 0 40px -12px rgba(59, 130, 246, 0.45);
+  color: #e2e8f0;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.35;
+  transition:
+    border-color 0.4s,
+    box-shadow 0.4s;
+  user-select: none;
+}
+
+.active {
+  border-color: rgba(96, 165, 250, 0.6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 40px -16px rgba(0, 0, 0, 0.8),
+    0 0 50px -8px rgba(59, 130, 246, 0.8);
+}
+
+.done {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.tag {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #bfdbfe;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.time,
+.muted {
+  color: #94a3b8;
+}
+
+.time {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.ok {
+  color: #4ade80;
+  flex: none;
+}
+
+/* ─── 01 Receive ─────────────────────────────────────────────────── */
+
+.viewfinder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 0 6px;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 10px;
+  overflow: hidden;
+}
+
+.barcode rect {
+  fill: #0f172a;
+}
+
+.laser {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  border-radius: 2px;
+  background: #f43f5e;
+  box-shadow: 0 0 10px 2px rgba(244, 63, 94, 0.7);
+  animation: sweep 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes sweep {
+  from {
+    top: 12%;
+  }
+  to {
+    top: 82%;
+  }
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  opacity: 0.25;
+  transition: opacity 0.4s;
+}
+
+.plus {
+  color: #4ade80;
+}
+
+/* ─── 02 Move ────────────────────────────────────────────────────── */
+
+.route {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bin {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.8);
+  transition:
+    border-color 0.4s,
+    color 0.4s;
+}
+
+.binOn {
+  border-color: rgba(74, 222, 128, 0.6);
+  color: #86efac;
+}
+
+.track {
+  --p: 0;
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--p) * 100%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3b82f6, #22d3ee);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+}
+
+.parcel {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--p) * 100%);
+  transform: translate(-50%, -50%);
+  padding: 2px;
+  box-sizing: content-box;
+  border-radius: 5px;
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 9px 0 0;
+  color: #94a3b8;
+}
+
+/* ─── 03 Track ───────────────────────────────────────────────────── */
+
+.feed {
+  width: 252px;
+}
+
+.liveTag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #86efac;
+}
+
+.liveTag i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: blink 1.6s ease-in-out infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 25px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  overflow: hidden;
+}
+
+.newRow {
+  height: 0;
+  opacity: 0;
+  border-top-color: transparent;
+  transition:
+    height 0.45s ease,
+    opacity 0.45s ease;
+}
+
+.newRow.show {
+  height: 25px;
+  opacity: 1;
+  border-top-color: rgba(148, 163, 184, 0.1);
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.14), transparent 70%);
+}
+
+.rowText {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0f172a;
+  flex: none;
+}
+
+.avBlue {
+  background: #93c5fd;
+}
+.avGreen {
+  background: #86efac;
+}
+.avAmber {
+  background: #fcd34d;
+}
+.avViolet {
+  background: #c4b5fd;
+}
+
+.badge {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  flex: none;
+}
+
+.bMove {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.18);
+}
+.bReceive {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.16);
+}
+.bAdjust {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.16);
+}
+.bShip {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.18);
+}
+
+/* ─── Low-stock toast & slot tags ────────────────────────────────── */
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px 9px 9px;
+  border-radius: 12px;
+  background: rgba(28, 20, 6, 0.94);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 36px -8px rgba(245, 158, 11, 0.7);
+  color: #fde68a;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 11.5px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(10px) scale(0.92);
+  transition:
+    opacity 0.4s ease,
+    transform 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+
+.toast b {
+  display: block;
+  color: #fbbf24;
+}
+
+.toastIcon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.slotTag {
+  display: inline-block;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  transition: all 0.4s;
+}
+
+.slotLit {
+  color: #0f172a;
+  background: #4ade80;
+  border-color: #4ade80;
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.8);
+}
+
+.show {
+  opacity: 1;
+  transform: none;
+}
+
+/* ─── Stock inspector & hint ─────────────────────────────────────── */
+
+.inspect {
+  width: 168px;
+  margin-bottom: 6px;
+  padding: 9px 11px 10px;
+  border-radius: 12px;
+  background: rgba(10, 16, 32, 0.95);
+  border: 1px solid rgba(147, 197, 253, 0.55);
+  box-shadow:
+    0 14px 30px -12px rgba(0, 0, 0, 0.8),
+    0 0 30px -8px rgba(59, 130, 246, 0.7);
+  color: #e2e8f0;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 11.5px;
+  animation: pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+
+.inspect .head {
+  margin-bottom: 2px;
+}
+
+.inspectLow {
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow:
+    0 14px 30px -12px rgba(0, 0, 0, 0.8),
+    0 0 30px -8px rgba(245, 158, 11, 0.7);
+}
+
+.inspectSku {
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inspectName {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.inspectStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.inspectStats span {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 7px;
+  border-radius: 7px;
+  background: rgba(30, 41, 59, 0.75);
+}
+
+.inspectStats small {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.inspectStats b {
+  font-size: 13px;
+}
+
+.amberText {
+  color: #fbbf24;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+  font-size: 11.5px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s ease;
+}
+
+.hint.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* the global pause control and reduced motion freeze CSS loops too */
+:global([data-anim='paused']) .laser,
+:global([data-anim='paused']) .liveTag i {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .laser,
+  .liveTag i {
+    animation: none;
+  }
+}

@@ -384,7 +384,7 @@ export class DeliveryRoutesService {
             phone: true,
             deliveryNotes: true,
             locationPhotos: {
-              select: { id: true, storageKey: true },
+              select: { id: true, storageKey: true, fromProofOf: true },
               orderBy: { createdAt: 'asc' },
             },
           },
@@ -398,6 +398,9 @@ export class DeliveryRoutesService {
           deliveryNotes: c.deliveryNotes,
           locationPhotos: c.locationPhotos.map((p) => ({
             id: p.id,
+            // Filled in from this delivery's proof photo — the phone sends
+            // a clean copy again on a retake so it can be replaced.
+            fromProofOf: p.fromProofOf,
             ...this.signer.sign(p.storageKey),
           })),
         },

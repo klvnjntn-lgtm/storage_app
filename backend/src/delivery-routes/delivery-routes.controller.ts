@@ -10,11 +10,11 @@ import {
   Post,
   Query,
   Req,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ModuleKey, RouteStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -125,7 +125,7 @@ export class DeliveryRoutesController {
   // Monitoring is admin-only: it shows where every driver probably is.
   @Get('monitoring/summary')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'USER')
   monitoringSummary(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -135,7 +135,7 @@ export class DeliveryRoutesController {
 
   @Get('monitoring/teams')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'USER')
   monitoringByTeam(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -145,7 +145,7 @@ export class DeliveryRoutesController {
 
   @Get('monitoring/map')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'USER')
   monitoringMap(
     @CurrentOrg() organizationId: string,
     @Query('date') date?: string,
@@ -404,21 +404,34 @@ export class DeliveryRoutesController {
   @Post(':id/stops/:stopId/proof-photo')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'USER', 'DRIVER')
+  // `landmark`: the same photo without its stamp, sent when the customer
+  // has no landmark photo yet (see landmarkFromProof).
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: MAX_PHOTO_UPLOAD_BYTES },
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'file', maxCount: 1 },
+        { name: 'landmark', maxCount: 1 },
+      ],
+      { storage: memoryStorage(), limits: { fileSize: MAX_PHOTO_UPLOAD_BYTES } },
+    ),
   )
   uploadStopProofPhoto(
     @CurrentOrg() organizationId: string,
     @Param('id') routeId: string,
     @Param('stopId') stopId: string,
     @Req() req,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: { file?: Express.Multer.File[]; landmark?: Express.Multer.File[] },
     @Body() meta: ProofPhotoMetaDto,
   ) {
-    return this.stopProof.uploadPhoto(organizationId, routeId, stopId, file, req.user, meta);
+    return this.stopProof.uploadPhoto(
+      organizationId,
+      routeId,
+      stopId,
+      files?.file?.[0] as Express.Multer.File,
+      req.user,
+      meta,
+      files?.landmark?.[0],
+    );
   }
 
   @Patch(':id/stops/:stopId/proof-draft')

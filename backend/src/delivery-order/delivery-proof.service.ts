@@ -19,6 +19,7 @@ import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
 import { DeliveryOrderService } from './delivery-order.service';
 import { photoCaptureData } from '../delivery-routes/driver-proof';
+import { landmarkFromProof } from '../customers/landmark-from-proof';
 import type { ProofPhotoMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
 
@@ -56,6 +57,7 @@ export class DeliveryProofService {
         status: true,
         signedAt: true,
         shippedAt: true,
+        customerId: true,
         proofPhotoKey: true,
         proofPhotoUrl: true,
         failurePhotoKey: true,
@@ -79,6 +81,9 @@ export class DeliveryProofService {
     file: Express.Multer.File,
     requester?: Requester,
     meta: ProofPhotoMetaDto = {},
+    // The same photo without the date/GPS stamp, for a customer with no
+    // landmark photo yet (landmarkFromProof).
+    landmark?: Express.Multer.File,
   ) {
     const order = await this.findOrder(organizationId, id, requester);
     if (order.status !== DeliveryOrderStatus.SHIPPED) {
@@ -124,6 +129,21 @@ export class DeliveryProofService {
           ),
         );
     }
+    await landmarkFromProof(
+      { prisma: this.prisma, storage: this.storage, logger: this.logger },
+      {
+        organizationId,
+        customerId: order.customerId,
+        source: id,
+        file: landmark,
+        meta: {
+          takenAt: capture.proofPhotoTakenAt,
+          latitude: capture.proofPhotoLatitude,
+          longitude: capture.proofPhotoLongitude,
+          accuracy: capture.proofPhotoAccuracy,
+        },
+      },
+    );
     return { hasPhoto: true };
   }
 

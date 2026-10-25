@@ -476,6 +476,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: accountingChildren,
   };
 
+  // Stock pages only mean something to a module that sells, stores or
+  // fits parts — a Delivery-only org has none of them. Transfers, batches
+  // and serials need WAREHOUSE_OPS or INVOICE_POS on the backend too.
+  const hasStock = hasInvoicePos || hasWarehouseOps || hasWorkshopRms;
+  const hasStockMovement = hasInvoicePos || hasWarehouseOps;
+
   // Each module is one collapsible row, so the sidebar stays a short list
   // however many pages a module grows; a group opens itself when you're on
   // one of its pages.
@@ -485,10 +491,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     icon: Inbox,
     children: [
       { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Home },
-      { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
-      { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
-      { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
-      { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
+      ...(hasStockMovement
+        ? [
+            { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
+            { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
+            { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
+          ]
+        : []),
       ...(hasWarehouseOps
         ? [
             { href: '/inventory/warehouse', label: t('nav.items.warehouse'), icon: Warehouse },
@@ -504,8 +513,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: [
       ...salesChildren,
       { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
-      { href: '/customers', label: t('nav.items.customers'), icon: Users, tourId: 'nav-customers' },
+      { href: '/customers', label: t('nav.items.customers'), icon: Users },
     ],
+  };
+
+  // Stock and Customers are the pages people open most, so each gets its
+  // own top-level row instead of hiding inside a module group. Customers
+  // stays under Sales too; Delivery picks its stops from the same list.
+  const stockItem: NavItem = { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard };
+  const customersItem: NavItem = {
+    href: '/customers',
+    label: t('nav.items.customers'),
+    icon: Contact,
+    tourId: 'nav-customers',
   };
 
   const workshopItem: NavItem = {
@@ -531,13 +551,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: [
       { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Home },
       { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
-      ...(profile?.role === 'ADMIN'
-        ? [{ href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 }]
-        : []),
+      { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
       { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
-      // Stops are picked from customers; with INVOICE_POS the link
-      // already lives under Sales.
-      ...(!hasInvoicePos ? [{ href: '/customers', label: t('nav.items.customers'), icon: Contact }] : []),
       ...(profile?.role === 'ADMIN'
         ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
         : []),
@@ -564,7 +579,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       label: t('nav.groups.modules'),
       items: [
         { href: '/home', label: t('nav.items.home'), icon: Home },
-        inventoryItem,
+        ...(hasStock ? [stockItem] : []),
+        ...(hasInvoicePos || hasDelivery ? [customersItem] : []),
+        ...(hasStock ? [inventoryItem] : []),
         ...(hasInvoicePos ? [salesWithExtras, purchasingItem] : []),
         // The books are admin-only (backend enforces it too); staff keep
         // Sales Insights, which reads invoice reports, not the ledger.
@@ -579,9 +596,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     },
     {
       label: t('nav.groups.operations'),
+      // Stock upload and marketplace order import — nothing to upload
+      // without a stock module, nothing to import orders into without Sales.
       items: [
-        { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
-        { href: '/upload-order', label: t('nav.items.uploadOrder'), icon: PlugZap },
+        ...(hasStock ? [{ href: '/upload', label: t('nav.items.upload'), icon: UploadIcon }] : []),
+        ...(hasInvoicePos ? [{ href: '/upload-order', label: t('nav.items.uploadOrder'), icon: PlugZap }] : []),
       ],
     },
     {
@@ -601,7 +620,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     ? allNavGroups.map((group) => ({
         ...group,
         // A group survives if any of its pages does; one left over (e.g.
-        // just Stock under Inventory) shows as a plain link.
+        // just Inventory Home under Inventory) shows as a plain link.
         items: group.items.flatMap((item): NavItem[] => {
           if (!item.children) return isDesktopRoute(item.href) ? [item] : [];
           const children = item.children.filter((c) => isDesktopRoute(c.href));
@@ -616,12 +635,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // is the most a bottom bar holds before labels stop fitting at 375px.
   const tabCandidates: (NavItem | false)[] = [
     { href: '/home', label: t('nav.items.home'), icon: Home },
-    { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
+    hasStock && { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
     hasInvoicePos && { href: '/sales', label: t('nav.items.sales'), icon: ShoppingCart },
     hasDelivery && { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Truck },
+    hasDelivery && { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
     hasWorkshopRms && { href: '/workshop', label: t('nav.items.workshopHome'), icon: Car },
-    { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
-    { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
+    hasStock && { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
+    hasStock && { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
   ];
   const bottomTabs = tabCandidates
     .filter((x): x is NavItem => !!x && (!desktopApp || isDesktopRoute(x.href)))

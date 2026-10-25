@@ -236,6 +236,10 @@ services:
       WA_TEMPLATE_STATEMENT: ${WA_TEMPLATE_STATEMENT:-waresys_statement}
       MESSAGE_LANGUAGE: ${MESSAGE_LANGUAGE:-id}
 
+      # Driver device approval (a new phone waits for an admin). Off
+      # unless true — see .env.example.
+      DRIVER_DEVICE_APPROVAL: ${DRIVER_DEVICE_APPROVAL:-false}
+
       # Encrypts 2FA secrets at rest; falls back to one derived from JWT_SECRET.
       SECRET_BOX_KEY: ${SECRET_BOX_KEY:-}
 

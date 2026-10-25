@@ -15,6 +15,8 @@ import {
 // can't scan the org's whole history.
 const MAX_RANGE_DAYS = 366;
 const TOP_N = 10;
+// Rows per "needs attention" list; the totals still count every one.
+const ATTENTION_ROWS = 200;
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -88,6 +90,28 @@ export class DeliveryReportService {
     const reasons = new Map<string, { reason: string; count: number }>();
     const deliveredDoIds: string[] = [];
     const totals = { stops: 0, delivered: 0, failed: 0, notDone: 0 };
+    // Stops someone has to look at: not delivered yet (or never), and
+    // failed ones — flagged when nobody has rescheduled them.
+    type AttentionRow = {
+      stopId: string;
+      routeId: string;
+      date: string;
+      team: ReturnType<typeof presentTeam>;
+      customerId: string | null;
+      name: string;
+      doNumber: string | null;
+      // Set for a DO stop — it's rescheduled through the delivery order.
+      deliveryOrderId: string | null;
+      address: string | null;
+      // Pending: the driver took the proof photo but never tapped Done.
+      photoTaken: boolean;
+      photoTakenAt: Date | null;
+      failedAt: Date | null;
+      reason: string | null;
+      needsReschedule: boolean;
+    };
+    const pendingRows: AttentionRow[] = [];
+    const failedRows: AttentionRow[] = [];
 
     for (const route of routes) {
       const date = isoDay(route.routeDate);
@@ -108,9 +132,29 @@ export class DeliveryReportService {
       teams.set(route.team.id, acc);
 
       let delivered = 0;
+      const team = presentTeam(route.team);
       for (const stop of route.stops) {
         const status = this.routes.stopStatus(stop);
         const target = stopTarget(stop);
+        const d = stop.deliveryOrder;
+        const row = (): AttentionRow => ({
+          stopId: stop.id,
+          routeId: route.id,
+          date,
+          team,
+          customerId: target.customerId,
+          name: target.customerName ?? target.doNumber ?? '—',
+          doNumber: target.doNumber,
+          deliveryOrderId: d?.id ?? null,
+          address: target.address,
+          photoTaken: d ? d.proofPhotoKey != null || d.proofPhotoUrl != null : stop.proofPhotoKey != null,
+          photoTakenAt: d ? d.proofPhotoTakenAt : stop.proofPhotoTakenAt,
+          failedAt: d ? d.failedAt : stop.failedAt,
+          reason: (d ? d.failureReason : stop.failureReason)?.trim() || null,
+          // A rescheduled failure is marked superseded (customer stop: a new
+          // stop elsewhere; DO: back on a route) — the rest still need it.
+          needsReschedule: stop.supersededAt == null,
+        });
         const custKey = target.customerId ?? `name:${(target.customerName ?? '').trim().toLowerCase()}`;
         const cust =
           customers.get(custKey) ??
@@ -125,6 +169,7 @@ export class DeliveryReportService {
           if (bucket) bucket.delivered++;
           if (stop.deliveryOrder) deliveredDoIds.push(stop.deliveryOrder.id);
         } else if (status === 'FAILED') {
+          failedRows.push(row());
           acc.failed++;
           totals.failed++;
           cust.failed++;
@@ -137,6 +182,7 @@ export class DeliveryReportService {
             reasons.set(key, r);
           }
         } else {
+          pendingRows.push(row());
           acc.notDone++;
           totals.notDone++;
           if (bucket) bucket.notDone++;
@@ -207,6 +253,17 @@ export class DeliveryReportService {
         .sort((a, b) => b.delivered - a.delivered || a.failed - b.failed)
         .slice(0, TOP_N),
       failureReasons: [...reasons.values()].sort((a, b) => b.count - a.count).slice(0, 5),
+      attention: {
+        // Newest day first.
+        pending: pendingRows.sort((a, b) => b.date.localeCompare(a.date)).slice(0, ATTENTION_ROWS),
+        pendingTotal: pendingRows.length,
+        // Still to reschedule first, then newest.
+        failed: failedRows
+          .sort((a, b) => Number(b.needsReschedule) - Number(a.needsReschedule) || b.date.localeCompare(a.date))
+          .slice(0, ATTENTION_ROWS),
+        failedTotal: failedRows.length,
+        needsReschedule: failedRows.filter((f) => f.needsReschedule).length,
+      },
       itemsEnabled,
       topItems,
     };

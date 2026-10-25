@@ -20,6 +20,7 @@ import {
   routeDayStart,
 } from './delivery-routes.service';
 import { photoCaptureData } from './driver-proof';
+import { landmarkFromProof } from '../customers/landmark-from-proof';
 import type { ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
 
 type Requester = { sub: string; role: string };
@@ -46,6 +47,9 @@ export class StopProofService {
     file: Express.Multer.File,
     requester: Requester,
     meta: ProofPhotoMetaDto = {},
+    // The same photo without the date/GPS stamp, for a customer with no
+    // landmark photo yet (landmarkFromProof).
+    landmark?: Express.Multer.File,
   ) {
     const stop = await this.routes.findCustomerStopForAction(
       organizationId,
@@ -91,6 +95,21 @@ export class StopProofService {
           ),
         );
     }
+    await landmarkFromProof(
+      { prisma: this.prisma, storage: this.storage, logger: this.logger },
+      {
+        organizationId,
+        customerId: stop.customerId,
+        source: stopId,
+        file: landmark,
+        meta: {
+          takenAt: capture.proofPhotoTakenAt,
+          latitude: capture.proofPhotoLatitude,
+          longitude: capture.proofPhotoLongitude,
+          accuracy: capture.proofPhotoAccuracy,
+        },
+      },
+    );
     return { hasPhoto: true };
   }
 

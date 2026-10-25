@@ -8,6 +8,7 @@ import { formatIDR } from '@/lib/format';
 import { toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { useMergeQueryParams } from '@/lib/useQuerySync';
 
 type Kind =
   | 'CUSTOMER_PAYMENT'
@@ -91,6 +92,8 @@ function CashStatementPageInner() {
 
   const [from, setFrom] = useState(searchParams.get('from') ?? toCalendarDateString(new Date()));
   const [to, setTo] = useState(searchParams.get('to') ?? toCalendarDateString(new Date()));
+  // Kept in the URL, so opening an entry and coming back keeps the range.
+  useMergeQueryParams({ from, to });
   const [statement, setStatement] = useState<Statement | null>(null);
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);

@@ -66,6 +66,7 @@ export const landing = {
         badgeMove: 'MOVE',
         badgeAdjust: 'ADJUST',
         badgeShip: 'SHIP',
+        dragHint: 'Drag to look around · hover a box',
         items: {
           brakePads: 'Brake pad set',
           oilFilter: 'Oil filter',
@@ -347,6 +348,7 @@ export const landing = {
         badgeMove: 'PINDAH',
         badgeAdjust: 'KOREKSI',
         badgeShip: 'KIRIM',
+        dragHint: 'Geser untuk melihat · arahkan ke kotak',
         items: {
           brakePads: 'Set kampas rem',
           oilFilter: 'Filter oli',

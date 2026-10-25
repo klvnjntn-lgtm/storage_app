@@ -14,6 +14,9 @@ export type StopDraft = {
   receivedBy?: string;
   // Dropped once uploaded — the server has it then (hasProofPhoto).
   photo?: File;
+  // The same photo without the stamp, for a customer with no landmark
+  // photo yet; goes up with it.
+  landmark?: File;
   photoFix?: DraftFix;
   photoTakenAt?: string;
   savedAt: number;
@@ -62,7 +65,7 @@ function asFile(photo: Blob | undefined): File | undefined {
 export async function listDrafts(): Promise<StopDraft[]> {
   try {
     const rows = await run<StopDraft[]>('readonly', (s) => s.getAll() as IDBRequest<StopDraft[]>);
-    return rows.map((r) => ({ ...r, photo: asFile(r.photo) }));
+    return rows.map((r) => ({ ...r, photo: asFile(r.photo), landmark: asFile(r.landmark) }));
   } catch {
     return [];
   }

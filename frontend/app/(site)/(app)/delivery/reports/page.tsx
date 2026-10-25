@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, Flame, CircleCheck, CircleAlert, RotateCcw, Package, Store, TriangleAlert } from 'lucide-react';
+import { TrendingUp, Flame, CircleCheck, CircleAlert, RotateCcw, Package, Store, TriangleAlert, ListTodo, Camera, CalendarClock } from 'lucide-react';
 import { display } from '@/lib/fonts';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import RescheduleStopDialog, { type RescheduleTarget } from '@/app/components/delivery/RescheduleStopDialog';
 
 // Mirrors DeliveryReportService.report() on the backend.
 type Driver = { id: string; email: string; displayName: string | null };
@@ -24,6 +26,23 @@ type TeamRow = {
   completionRate: number | null;
   perfectRate: number | null;
   streak: number;
+};
+// A stop someone has to look at — see DeliveryReportService's attention.
+type AttentionRow = {
+  stopId: string;
+  routeId: string;
+  date: string;
+  team: { id: string; name: string; driver: Driver | null };
+  customerId: string | null;
+  name: string;
+  doNumber: string | null;
+  deliveryOrderId: string | null;
+  address: string | null;
+  photoTaken: boolean;
+  photoTakenAt: string | null;
+  failedAt: string | null;
+  reason: string | null;
+  needsReschedule: boolean;
 };
 type Report = {
   totals: {
@@ -41,6 +60,13 @@ type Report = {
   failureReasons: { reason: string; count: number }[];
   itemsEnabled: boolean;
   topItems: { productId: string | null; name: string; unit: string | null; quantity: number; deliveries: number }[];
+  attention: {
+    pending: AttentionRow[];
+    pendingTotal: number;
+    failed: AttentionRow[];
+    failedTotal: number;
+    needsReschedule: number;
+  };
 };
 
 // Tailwind palette variables, so the chart follows the app's dark mode
@@ -139,15 +165,148 @@ function BarList({
   );
 }
 
+// Who still has to be delivered to, and which failures nobody has put
+// back on a route yet — each row opens its route, where it's handled.
+function AttentionPanel({
+  attention,
+  dayLabel,
+  driverName,
+  onReschedule,
+}: {
+  attention: Report['attention'];
+  dayLabel: (iso: string) => string;
+  driverName: (d: Driver | null) => string;
+  onReschedule: (target: RescheduleTarget) => void;
+}) {
+  const { t } = useLanguage();
+  const [tab, setTab] = useState<'pending' | 'failed'>(attention.needsReschedule > 0 ? 'failed' : 'pending');
+  const rows = tab === 'pending' ? attention.pending : attention.failed;
+  const total = tab === 'pending' ? attention.pendingTotal : attention.failedTotal;
+  const today = toCalendarDateString(new Date());
+  const tabs = [
+    { key: 'pending' as const, label: t('delivery.reports.attention.tabPending', { count: attention.pendingTotal }) },
+    {
+      key: 'failed' as const,
+      label: t('delivery.reports.attention.tabFailed', { count: attention.failedTotal }),
+      note: attention.needsReschedule > 0 ? t('delivery.reports.attention.toReschedule', { count: attention.needsReschedule }) : null,
+    },
+  ];
+
+  return (
+    <Panel title={t('delivery.reports.attention.title')} subtitle={t('delivery.reports.attention.subtitle')} icon={ListTodo}>
+      <div role="tablist" className="flex flex-wrap gap-2 mb-3">
+        {tabs.map((tb) => (
+          <button
+            key={tb.key}
+            role="tab"
+            aria-selected={tab === tb.key}
+            onClick={() => setTab(tb.key)}
+            className={`text-sm font-medium rounded-md border px-3 py-1.5 cursor-pointer ${
+              tab === tb.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300'
+            }`}
+          >
+            {tb.label}
+            {'note' in tb && tb.note && (
+              <span className={`ml-1.5 text-xs ${tab === tb.key ? 'text-white/80' : 'text-amber-700'}`}>· {tb.note}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          {t(tab === 'pending' ? 'delivery.reports.attention.nonePending' : 'delivery.reports.attention.noneFailed')}
+        </p>
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {rows.map((row) => (
+            <li key={row.stopId} className="py-2.5 first:pt-0 last:pb-0 grid grid-cols-[3.5rem_minmax(0,1fr)] sm:grid-cols-[4rem_minmax(0,1fr)_auto] gap-x-3 gap-y-1 items-start">
+              <span className="font-mono text-xs text-gray-500 tabular-nums pt-0.5">{dayLabel(row.date)}</span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">
+                  {row.customerId ? (
+                    <Link href={`/customers/${row.customerId}`} className="hover:text-blue-700 hover:underline">
+                      {row.name}
+                    </Link>
+                  ) : (
+                    row.name
+                  )}
+                  {row.doNumber && <span className="ml-1.5 font-mono text-[11px] font-normal text-gray-400">{row.doNumber}</span>}
+                </div>
+                <div className="text-xs text-gray-500 truncate">
+                  {row.team.name} · {driverName(row.team.driver)}
+                </div>
+                {tab === 'failed' && row.reason && <div className="text-xs text-red-600 line-clamp-2">{row.reason}</div>}
+              </div>
+              <div className="col-start-2 sm:col-start-auto flex flex-wrap items-center gap-1.5 sm:justify-end">
+                {tab === 'pending' &&
+                  (row.photoTaken ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                      <Camera size={11} aria-hidden="true" />
+                      {t('delivery.reports.attention.photoNotConfirmed')}
+                    </span>
+                  ) : (
+                    <span
+                      className={`text-[11px] font-semibold rounded px-1.5 py-0.5 border ${
+                        row.date < today ? 'text-red-700 bg-red-50 border-red-200' : 'text-gray-600 bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      {t(row.date < today ? 'delivery.reports.attention.missed' : 'delivery.reports.attention.stillOpen')}
+                    </span>
+                  ))}
+                {tab === 'failed' &&
+                  (row.needsReschedule ? (
+                    <button
+                      onClick={() =>
+                        onReschedule({
+                          stopId: row.stopId,
+                          routeId: row.routeId,
+                          label: row.name,
+                          failureReason: row.reason,
+                          deliveryOrderId: row.deliveryOrderId,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded px-2 py-1 cursor-pointer"
+                    >
+                      <CalendarClock size={11} aria-hidden="true" />
+                      {t('delivery.reports.attention.reschedule')}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5">
+                      {t('delivery.reports.attention.rescheduled')}
+                    </span>
+                  ))}
+                <Link href={`/delivery/routes/${row.routeId}`} className="text-xs font-medium text-blue-700 hover:underline">
+                  {t('delivery.reports.attention.openRoute')} →
+                </Link>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {total > rows.length && (
+        <p className="text-xs text-gray-500 mt-3">{t('delivery.reports.attention.showingFirst', { shown: rows.length, total })}</p>
+      )}
+    </Panel>
+  );
+}
+
+const validDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+
 export default function DeliveryReportsPage() {
   const { t, language } = useLanguage();
   const locale = language === 'id' ? 'id-ID' : 'en-US';
-  const [from, setFrom] = useState(daysAgo(29));
-  const [to, setTo] = useState(daysAgo(0));
+  // In the URL, so opening a customer or route and coming back keeps the
+  // range picked. The default (last 30 days) keeps a clean URL.
+  const [from, setFrom] = useState(() => validDay(getInitialParam('from', '')) ?? daysAgo(29));
+  const [to, setTo] = useState(() => validDay(getInitialParam('to', '')) ?? daysAgo(0));
+  const isDefaultRange = from === daysAgo(29) && to === daysAgo(0);
+  useSyncQueryParams({ from: isDefaultRange ? null : from, to: isDefaultRange ? null : to });
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [rescheduling, setRescheduling] = useState<RescheduleTarget | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -287,6 +446,14 @@ export default function DeliveryReportsPage() {
 
         {r && hasData && (
           <>
+            <AttentionPanel
+              key={`${from}-${to}`}
+              attention={r.attention}
+              dayLabel={dayLabel}
+              driverName={driverName}
+              onReschedule={setRescheduling}
+            />
+
             <Panel title={t('delivery.reports.daily.title')} subtitle={t('delivery.reports.daily.subtitle')} icon={TrendingUp}>
               <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-gray-600">
                 {(['delivered', 'failed', 'notDone'] as const).map((k) => (
@@ -465,6 +632,16 @@ export default function DeliveryReportsPage() {
           </>
         )}
       </div>
+      {rescheduling && (
+        <RescheduleStopDialog
+          target={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onDone={() => {
+            setRescheduling(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
     </main>
   );
 }

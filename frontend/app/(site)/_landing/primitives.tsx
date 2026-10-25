@@ -35,18 +35,32 @@ export const useMotionPause = () => useContext(MotionPauseContext);
    Starts false so SSR and first paint match; flips after mount. */
 type NavigatorHints = Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
 
+export function isLowEndDevice() {
+  const nav = navigator as NavigatorHints;
+  return (
+    nav.connection?.saveData === true ||
+    (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) ||
+    (nav.hardwareConcurrency !== undefined && nav.hardwareConcurrency <= 4)
+  );
+}
+
 export function useLowEndDevice() {
   const [lowEnd, setLowEnd] = useState(false);
   useEffect(() => {
-    const nav = navigator as NavigatorHints;
-    const detected =
-      nav.connection?.saveData === true ||
-      (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) ||
-      (nav.hardwareConcurrency !== undefined && nav.hardwareConcurrency <= 4);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only APIs once after mount
-    if (detected) setLowEnd(true);
+    if (isLowEndDevice()) setLowEnd(true);
   }, []);
   return lowEnd;
+}
+
+/** True when the browser can create a WebGL context. */
+export function hasWebGL() {
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch {
+    return false;
+  }
 }
 
 /** `data-anim` value for a decorative-animation root: paused when the

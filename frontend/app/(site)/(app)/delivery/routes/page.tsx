@@ -11,6 +11,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { toCalendarDateString } from '@/lib/dates';
+import { useSyncQueryParams } from '@/lib/useQuerySync';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -67,13 +68,16 @@ function DeliveryRoutesPageInner() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'ADMIN';
 
-  // Honors ?date= (e.g. coming back from "Optimize all teams").
+  // Date and filters live in the URL, so opening a route and pressing
+  // Back returns to the same day (and ?date= works from "Optimize all
+  // teams").
   const [date, setDate] = useState(() => {
     const fromUrl = searchParams.get('date');
     return fromUrl && /^\d{4}-\d{2}-\d{2}$/.test(fromUrl) ? fromUrl : todayIso();
   });
-  const [teamFilter, setTeamFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState(() => searchParams.get('team') ?? '');
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? '');
+  useSyncQueryParams({ date: date === todayIso() ? null : date, team: teamFilter, status: statusFilter });
 
   const [routes, setRoutes] = useState<RouteListItem[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
