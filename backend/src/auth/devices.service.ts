@@ -5,6 +5,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 export type DeviceCheckResult = 'OK' | 'PENDING' | 'REJECTED';
 
+// A blocked phone retrying every few seconds shouldn't flood the office.
+const BLOCKED_ATTEMPT_NOTIFY_MS = 60 * 60 * 1000;
+
 // Lives inside AuthModule (not its own module) so AuthService can inject it
 // directly without a circular import — the admin-facing DevicesController
 // lives in its own DevicesModule, which imports AuthModule to reuse this
@@ -42,7 +45,11 @@ export class DevicesService {
         return 'OK';
       }
       if (existing.status === 'PENDING') return 'PENDING';
-      return 'REJECTED'; // REJECTED or REVOKED
+      // REJECTED or REVOKED: still refused, but no longer silently — the
+      // office is told (at most hourly per phone) and can approve it again
+      // from the Drivers page, where the attempt shows.
+      await this.reportBlockedAttempt(organizationId, userId, existing);
+      return 'REJECTED';
     }
 
     // "Very first" means no device row of any status — not "no APPROVED
@@ -76,6 +83,34 @@ export class DevicesService {
       { link: '/delivery/drivers' },
     );
     return 'PENDING';
+  }
+
+  private async reportBlockedAttempt(
+    organizationId: string,
+    userId: string,
+    device: { id: string; lastBlockedAttemptAt: Date | null },
+  ) {
+    const now = new Date();
+    await this.prisma.device.update({
+      where: { id: device.id },
+      data: { lastBlockedAttemptAt: now },
+    });
+    const last = device.lastBlockedAttemptAt?.getTime() ?? 0;
+    if (now.getTime() - last < BLOCKED_ATTEMPT_NOTIFY_MS) return;
+    const driver = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, displayName: true },
+    });
+    await this.notifications.notifyOrgStaff(
+      organizationId,
+      'DEVICE_BLOCKED_ATTEMPT',
+      `${driver?.displayName || driver?.email || 'A driver'} tried to sign in on a blocked phone`,
+      {
+        body: 'If it is theirs, approve it again on the Drivers page.',
+        link: '/delivery/drivers',
+        payload: { userId, deviceId: device.id },
+      },
+    );
   }
 
   // Best-effort per-request freshness update, called from jwt.strategy.ts —
@@ -123,10 +158,12 @@ export class DevicesService {
     const [updated, replaced] = await this.prisma.$transaction([
       this.prisma.device.update({
         where: { id: device.id },
+        // Any status: a rejected or revoked phone can be approved again.
         data: {
           status: 'APPROVED',
           approvedAt: new Date(),
           approvedByUserId: adminId,
+          lastBlockedAttemptAt: null,
         },
       }),
       this.prisma.device.updateMany({

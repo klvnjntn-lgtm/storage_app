@@ -1,7 +1,7 @@
 // app/(app)/workshop/vehicles/page.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Car, Search } from 'lucide-react';
@@ -25,7 +25,7 @@ export default function VehiclesPage() {
   const { t, language } = useLanguage();
 
   const [vehicles, setVehicles] = useState<VehicleListItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
   // Seeded from the URL so pressing the browser's Back button from a
   // vehicle's detail page restores the same search/page instead of
   // resetting to page 1 with no search.
@@ -40,48 +40,16 @@ export default function VehiclesPage() {
     pageSize: pageSize !== 20 ? pageSize : null,
   });
 
-  async function load(q?: string) {
-    setLoading(true);
-    setError('');
-    try {
-      const params = q ? `?q=${encodeURIComponent(q)}` : '';
-      const res = await apiFetch(`/vehicles${params}`);
-      if (res.ok) {
-        setVehicles(await res.json());
-      } else {
-        const body = await res.json().catch(() => null);
-        setError(body?.message ?? t('workshop.vehiclesList.loadFailed', { status: res.status }));
-      }
-    } catch {
-      setError(t('workshop.vehiclesList.serverError'));
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Debounced copy of the search box — what the list is actually loaded for.
+  const [searchQuery, setSearchQuery] = useState(() => query.trim());
   useEffect(() => {
-    load(query.trim() || undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Skips its own first run — the mount effect above already covers the
-  // initial load, and re-running it here would fire a redundant duplicate
-  // fetch on every page load.
-  const isFirstDebounceRef = useRef(true);
-  useEffect(() => {
-    if (isFirstDebounceRef.current) {
-      isFirstDebounceRef.current = false;
-      return;
-    }
-    const timeout = setTimeout(() => load(query.trim() || undefined), 300);
+    const timeout = setTimeout(() => setSearchQuery(query.trim()), 300);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // Reset to page 1 whenever the query (and therefore the underlying
-  // result set) changes — but not on the very first run, or a `page`
-  // restored from the URL (e.g. via the browser's Back button) would get
-  // clobbered back to 1 before the list even finishes loading.
+  // Reset to page 1 whenever the search changes — but not on the very
+  // first run, or a `page` restored from the URL (e.g. via the browser's
+  // Back button) would get clobbered back to 1.
   const isFirstPageResetRef = useRef(true);
   useEffect(() => {
     if (isFirstPageResetRef.current) {
@@ -89,18 +57,47 @@ export default function VehiclesPage() {
       return;
     }
     setPage(1);
-  }, [query]);
+  }, [searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(vehicles.length / pageSize));
-
+  // The server pages the list, so big workshops don't load every vehicle.
+  // `loading` is derived: the list is stale until this exact request lands.
+  const requestKey = `${searchQuery}|${page}|${pageSize}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
-  const paginatedVehicles = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return vehicles.slice(start, start + pageSize);
-  }, [vehicles, page, pageSize]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+        if (searchQuery) params.set('q', searchQuery);
+        const res = await apiFetch(`/vehicles?${params}`);
+        if (cancelled) return;
+        setError('');
+        if (res.ok) {
+          const body: { data: VehicleListItem[]; total: number } = await res.json();
+          // Past the end (e.g. a restored page after vehicles were deleted).
+          const lastPage = Math.max(1, Math.ceil(body.total / pageSize));
+          if (page > lastPage) {
+            setPage(lastPage);
+            return;
+          }
+          setVehicles(body.data);
+          setTotal(body.total);
+        } else {
+          const body = await res.json().catch(() => null);
+          setError(body?.message ?? t('workshop.vehiclesList.loadFailed', { status: res.status }));
+        }
+      } catch {
+        if (!cancelled) setError(t('workshop.vehiclesList.serverError'));
+      } finally {
+        if (!cancelled) setLoadedKey(requestKey);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, page, pageSize]);
 
   return (
     <main
@@ -166,7 +163,7 @@ export default function VehiclesPage() {
                 </tr>
               </thead>
               <tbody>
-                {paginatedVehicles.map((v, idx) => (
+                {vehicles.map((v, idx) => (
                   <tr data-tour="veh-row"
                     key={v.id}
                     onClick={() => router.push(`/workshop/vehicles/${v.id}`)}
@@ -197,12 +194,12 @@ export default function VehiclesPage() {
         </div>
 
         {/* Pagination */}
-        {vehicles.length > 0 && (
+        {total > 0 && (
           <div className="mt-4">
             <Pagination
               page={page}
               pageSize={pageSize}
-              totalItems={vehicles.length}
+              totalItems={total}
               onPageChange={setPage}
               onPageSizeChange={(size) => {
                 setPageSize(size);

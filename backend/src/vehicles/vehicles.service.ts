@@ -158,33 +158,55 @@ export class VehiclesService {
     // Safe to filter by vehicleId alone here — getVehicleOrThrow above
     // already proved this vehicleId belongs to this org, so an invoice
     // count on it can't leak or miscount across tenants.
-    const invoiceCount = await this.prisma.invoice.count({ where: { vehicleId } });
+    const [invoiceCount, workOrderCount] = await Promise.all([
+      this.prisma.invoice.count({ where: { vehicleId } }),
+      this.prisma.workOrder.count({ where: { vehicleId } }),
+    ]);
     if (invoiceCount > 0) {
       throw new ConflictException(
         `Cannot delete: ${invoiceCount} invoice(s) reference this vehicle`,
       );
     }
-    await this.prisma.vehicle.delete({ where: { id: vehicleId } });
+    if (workOrderCount > 0) {
+      throw new ConflictException(`Cannot delete: ${workOrderCount} work order(s) reference this vehicle`);
+    }
+    // Reminders only make sense for this vehicle, and have no cascade.
+    await this.prisma.$transaction([
+      this.prisma.vehicleReminder.deleteMany({ where: { vehicleId } }),
+      this.prisma.vehicle.delete({ where: { id: vehicleId } }),
+    ]);
   }
 
-  async listAll(organizationId: string, search?: string) {
-    return this.prisma.vehicle.findMany({
-      where: {
-        organizationId,
-        ...(search
-          ? {
-              OR: [
-                { plateNumber: { contains: escapeLike(search), mode: 'insensitive' } },
-                { vehicleModel: { contains: escapeLike(search), mode: 'insensitive' } },
-                { vin: { contains: escapeLike(search), mode: 'insensitive' } },
-                { customer: { name: { contains: escapeLike(search), mode: 'insensitive' } } },
-              ],
-            }
-          : {}),
-      },
+  // With `paging` it's one page ({ data, total, page, pageSize }); without,
+  // every match as before. Plates match spacing-insensitively, like search().
+  async listAll(organizationId: string, search?: string, paging?: { page: number; pageSize: number }) {
+    const q = search?.trim();
+    const plate = q ? normalizePlate(q) : '';
+    const where: Prisma.VehicleWhereInput = {
+      organizationId,
+      ...(q && {
+        OR: [
+          ...(plate ? [{ plateNormalized: { contains: escapeLike(plate) } }] : []),
+          { vehicleModel: { contains: escapeLike(q), mode: 'insensitive' } },
+          { vin: { contains: escapeLike(q), mode: 'insensitive' } },
+          { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
+        ],
+      }),
+    };
+    const query = {
+      where,
       include: { customer: { select: { id: true, name: true, companyName: true } } },
       orderBy: { createdAt: 'desc' },
-    });
+    } satisfies Prisma.VehicleFindManyArgs;
+    if (!paging) return this.prisma.vehicle.findMany(query);
+
+    const pageSize = Math.min(Math.max(paging.pageSize, 1), 100);
+    const page = Math.max(paging.page, 1);
+    const [data, total] = await Promise.all([
+      this.prisma.vehicle.findMany({ ...query, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.vehicle.count({ where }),
+    ]);
+    return { data, total, page, pageSize };
   }
 
   // ── Vehicle Lookup (/vehicles/search) ─────────────────────────────────

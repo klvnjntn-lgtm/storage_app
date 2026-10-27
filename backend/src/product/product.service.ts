@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventType, Prisma } from '@prisma/client';
 import { applyOpeningCost, recordManualCost } from '../accounting/inventory-costing';
 import { PlanLimitsService } from '../billing/plan-limits.service';
+import { heldWorkOrderItemsWhere } from '../stock/work-order-holds';
 import { escapeLike } from '../common/text/escape-like';
 
 type Tx = PrismaService | Prisma.TransactionClient;
@@ -501,6 +502,22 @@ async create(
       take: 20,
     });
 
+    // Units held for open work orders, shown next to the stock so a cashier
+    // can see why some of it won't sell (StockService.fulfill enforces it).
+    const held = new Map<string, number>();
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { workOrdersEnabled: true },
+    });
+    if (org?.workOrdersEnabled && products.length > 0) {
+      const rows = await this.prisma.workOrderItem.groupBy({
+        by: ['productId', 'locationId'],
+        _sum: { quantity: true },
+        where: { ...heldWorkOrderItemsWhere(organizationId), productId: { in: products.map((p) => p.id) } },
+      });
+      for (const r of rows) held.set(`${r.productId}|${r.locationId}`, Number(r._sum.quantity ?? 0));
+    }
+
     return products.map((p) => ({
       id: p.id,
       name: p.name,
@@ -516,6 +533,7 @@ async create(
         locationId: s.locationId,
         locationName: s.location.name,
         quantity: Number(s.quantity),
+        held: held.get(`${p.id}|${s.locationId}`) ?? 0,
       })),
     }));
   }

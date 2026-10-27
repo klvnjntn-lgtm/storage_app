@@ -32,6 +32,19 @@ export function useMechanics() {
   return mechanics;
 }
 
+// Without POS pricing a part is always invoiced at the catalogue price,
+// so its price box is locked (the server drops a typed one too).
+function usePosPricing() {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    apiFetch('/work-orders/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((c) => setEnabled(!!c?.posPricingEnabled))
+      .catch(() => {});
+  }, []);
+  return enabled;
+}
+
 // Job details + parts/labour lines. Shared by the new and detail pages;
 // `readOnly` once the job is invoiced or cancelled.
 export default function WorkOrderForm({
@@ -48,6 +61,7 @@ export default function WorkOrderForm({
   const { t } = useLanguage();
   const mechanics = useMechanics();
   const locations = useLocations();
+  const posPricing = usePosPricing();
   const set = (patch: Partial<WorkOrderFormValue>) => onChange({ ...value, ...patch });
 
   function updateLine(key: string, patch: Partial<DraftLine>) {
@@ -177,8 +191,8 @@ export default function WorkOrderForm({
                   type="number"
                   min={0}
                   className={`${inputCls} mt-1`}
-                  value={l.unitPrice ?? ''}
-                  disabled={readOnly}
+                  value={l.kind === 'part' && !posPricing ? '' : (l.unitPrice ?? '')}
+                  disabled={readOnly || (l.kind === 'part' && !posPricing)}
                   placeholder={l.kind === 'part' ? t('workshop.workOrders.cataloguePrice') : '0'}
                   onChange={(e) =>
                     updateLine(l.key, {

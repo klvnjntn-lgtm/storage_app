@@ -542,6 +542,8 @@ export const adminSettingsShared = {
         dueToday: 'Due today',
         dueInOneDay: 'Due in 1 day',
         dueInDays: 'Due in {count} days',
+        phoneWaiting: 'New phone waiting for approval',
+        phoneWaitingBody: '{name} — approve or reject it on the Drivers page.',
       },
       bulkApplyBar: {
         taxAllLines: 'Tax, all lines:',
@@ -1110,6 +1112,8 @@ export const adminSettingsShared = {
         dueToday: 'Jatuh tempo hari ini',
         dueInOneDay: 'Jatuh tempo dalam 1 hari',
         dueInDays: 'Jatuh tempo dalam {count} hari',
+        phoneWaiting: 'HP baru menunggu persetujuan',
+        phoneWaitingBody: '{name} — setujui atau tolak di halaman Driver.',
       },
       bulkApplyBar: {
         taxAllLines: 'Pajak, semua baris:',

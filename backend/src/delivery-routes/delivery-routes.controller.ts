@@ -33,7 +33,7 @@ import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RoutePlannerService } from './route-planner.service';
 import { StopProofService } from './stop-proof.service';
-import { DeliveryReportService } from './delivery-report.service';
+import { DeliveryReportService, type AttentionQuery } from './delivery-report.service';
 import {
   RecordCustomerStopFailureDto,
   RecordCustomerStopProofDto,
@@ -120,6 +120,20 @@ export class DeliveryRoutesController {
   ) {
     if (!from || !to) throw new BadRequestException('"from" and "to" are required');
     return this.report.report(organizationId, from, to);
+  }
+
+  // The report's "needs attention" list, one filtered page at a time — see
+  // DeliveryReportService.attention for the filters.
+  @Get('reports/attention')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  deliveryReportAttention(
+    @CurrentOrg() organizationId: string,
+    @Query() query: AttentionQuery & { from?: string; to?: string },
+  ) {
+    const { from, to, ...filters } = query;
+    if (!from || !to) throw new BadRequestException('"from" and "to" are required');
+    return this.report.attention(organizationId, from, to, filters);
   }
 
   // Monitoring is admin-only: it shows where every driver probably is.

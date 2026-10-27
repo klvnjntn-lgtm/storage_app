@@ -5,6 +5,7 @@ import { ProductService } from '../product/product.service'; // adjust path if d
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
+import { heldWorkOrderItemsWhere } from './work-order-holds';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { PlanLimitsService } from '../billing/plan-limits.service';
 
@@ -132,6 +133,24 @@ export class StockService {
       FOR UPDATE
     `);
     return rows[0] ? Number(rows[0].quantity) : 0;
+  }
+
+  // Units at this location held for open work orders (see
+  // work-order-holds.ts), less the ones excludeInvoiceId's own job holds.
+  async heldForWorkOrders(
+    client: Prisma.TransactionClient,
+    orgId: string,
+    productId: string,
+    locationId: string,
+    excludeInvoiceId?: string,
+  ): Promise<number> {
+    const org = await client.organization.findUnique({ where: { id: orgId }, select: { workOrdersEnabled: true } });
+    if (!org?.workOrdersEnabled) return 0;
+    const held = await client.workOrderItem.aggregate({
+      _sum: { quantity: true },
+      where: { ...heldWorkOrderItemsWhere(orgId, excludeInvoiceId), productId, locationId },
+    });
+    return Number(held._sum.quantity ?? 0);
   }
 
   // -----------------------------
@@ -272,7 +291,10 @@ export class StockService {
       await this.assertProductActive(orgId, productId, client);
       await this.assertLocationOwnership(orgId, locationId, client);
 
-      const available = await this.lockStockRow(client, orgId, productId, locationId);
+      const onHand = await this.lockStockRow(client, orgId, productId, locationId);
+      // What this sale may take: on hand less what open jobs are holding.
+      const held = await this.heldForWorkOrders(client, orgId, productId, locationId, context.invoiceId);
+      const available = Math.max(0, onHand - held);
       const shortfall = Math.max(0, requestedQty - available);
 
       let fulfilledQuantity: number;
@@ -286,6 +308,7 @@ export class StockService {
             productId,
             locationId,
             available,
+            held,
             requested: requestedQty,
           });
         }
@@ -295,7 +318,9 @@ export class StockService {
         fulfilledQuantity = available;
       }
 
-      const balanceAfter = available - fulfilledQuantity;
+      // Physical balance: selling into held stock (WARN/ALLOW) isn't an
+      // oversell unless the shelf actually goes negative.
+      const balanceAfter = onHand - fulfilledQuantity;
       const oversold = balanceAfter < 0;
 
       if (fulfilledQuantity > 0) {

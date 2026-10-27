@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban, Pencil } from 'lucide-react';
+import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban, Pencil, RotateCcw } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { DEVICES_CHANGED_EVENT } from '@/lib/hooks/usePendingDevices';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -12,12 +13,22 @@ import Pagination from '@/app/components/shared/Pagination';
 import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
 import TimeInput from '@/app/components/shared/TimeInput';
 import { formatDMYTime } from '@/lib/dates';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 type Driver = { id: string; email: string; displayName: string | null; active: boolean; teamId: string | null; createdAt: string };
 
 type DeviceStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVOKED';
-type Device = { id: string; deviceId: string; label: string | null; userAgent: string | null; status: DeviceStatus; lastSeenAt: string };
+type Device = {
+  id: string;
+  deviceId: string;
+  label: string | null;
+  userAgent: string | null;
+  status: DeviceStatus;
+  lastSeenAt: string;
+  // A rejected/revoked phone that tried to sign in since.
+  lastBlockedAttemptAt: string | null;
+};
 type PendingDevice = Device & { firstSeenAt: string; user: { id: string; email: string; displayName: string | null } };
 
 // "Mozilla/5.0 (Linux; Android 14; SM-A155F) …" → "Android 14 · SM-A155F"-ish,
@@ -48,6 +59,7 @@ function deviceStatusBadge(status: DeviceStatus, label: string) {
 
 export default function DriversAdminPage() {
   const router = useRouter();
+  const dialog = useDialog();
   const { t } = useLanguage();
   const { user, loading: userLoading } = useCurrentUser();
 
@@ -77,11 +89,15 @@ export default function DriversAdminPage() {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
 
+  // Admins and office staff: staff handle drivers' phones; locking,
+  // renaming and access hours are admin-only (hidden below for staff).
+  const isAdmin = user?.role === 'ADMIN';
+  const canManage = isAdmin || user?.role === 'USER';
   useEffect(() => {
-    if (!userLoading && (!user || user.role !== 'ADMIN')) {
+    if (!userLoading && !canManage) {
       router.replace('/home');
     }
-  }, [userLoading, user, router]);
+  }, [userLoading, canManage, router]);
 
   // New phones waiting for approval, across all drivers — shown on top so
   // the admin doesn't have to open each driver to find them.
@@ -91,7 +107,28 @@ export default function DriversAdminPage() {
     if (res.ok) setPending(await res.json());
   }
 
+  // One phone per driver: approving this one signs them out of the phone
+  // they use now. Say which, and let the person back out.
+  async function confirmApprove(driverId: string, driverName: string, deviceId: string): Promise<boolean> {
+    const res = await apiFetch(`/users/${driverId}/devices`);
+    if (!res.ok) return true; // the server still does the right thing
+    const current = ((await res.json()) as Device[]).filter((d) => d.status === 'APPROVED' && d.id !== deviceId);
+    if (current.length === 0) return true;
+    const phone = current[0];
+    return dialog.confirm(
+      t('delivery.driversAdmin.confirmReplace', {
+        name: driverName,
+        phone: shortDevice(phone.userAgent) || phone.deviceId,
+        seen: formatDMYTime(new Date(phone.lastSeenAt)),
+      }),
+      { confirmLabel: t('delivery.driversAdmin.approve') },
+    );
+  }
+
   async function handlePendingAction(device: PendingDevice, action: 'approve' | 'reject') {
+    if (action === 'approve' && !(await confirmApprove(device.user.id, device.user.displayName || device.user.email, device.id))) {
+      return;
+    }
     setDeviceBusyId(device.id);
     setError(null);
     try {
@@ -102,6 +139,7 @@ export default function DriversAdminPage() {
         return;
       }
       await loadPending();
+      window.dispatchEvent(new Event(DEVICES_CHANGED_EVENT));
       if (expandedId === device.user.id) await loadDevices(device.user.id);
     } catch {
       setError(t('delivery.driversAdmin.couldNotReachServer'));
@@ -129,7 +167,7 @@ export default function DriversAdminPage() {
   }
 
   useEffect(() => {
-    if (user?.role === 'ADMIN') {
+    if (canManage) {
       loadDrivers();
       loadPending();
     }
@@ -226,10 +264,14 @@ export default function DriversAdminPage() {
     setExpandedId(driver.id);
     setDevices([]);
     setWindows([]);
-    await Promise.all([loadDevices(driver.id), loadSchedule(driver.id)]);
+    await Promise.all([loadDevices(driver.id), isAdmin ? loadSchedule(driver.id) : Promise.resolve()]);
   }
 
   async function handleDeviceAction(driverId: string, deviceId: string, action: 'approve' | 'reject' | 'revoke') {
+    if (action === 'approve') {
+      const driver = drivers.find((d) => d.id === driverId);
+      if (!(await confirmApprove(driverId, driver ? driverLabel(driver) : '', deviceId))) return;
+    }
     setDeviceBusyId(deviceId);
     setError(null);
     try {
@@ -241,6 +283,7 @@ export default function DriversAdminPage() {
       }
       await loadDevices(driverId);
       await loadPending();
+      window.dispatchEvent(new Event(DEVICES_CHANGED_EVENT));
     } catch {
       setError(t('delivery.driversAdmin.couldNotReachServer'));
     } finally {
@@ -282,10 +325,10 @@ export default function DriversAdminPage() {
     }
   }
 
-  if (userLoading || (user?.role === 'ADMIN' && loading)) {
+  if (userLoading || (canManage && loading)) {
     return <p className="text-sm text-gray-500 p-6">{t('common.loading')}</p>;
   }
-  if (!user || user.role !== 'ADMIN') return null;
+  if (!canManage) return null;
 
   return (
     <main
@@ -399,6 +442,7 @@ export default function DriversAdminPage() {
                     <span className={`text-sm font-semibold truncate ${driver.displayName ? '' : 'text-gray-700'}`}>
                       {driverLabel(driver)}
                     </span>
+                    {isAdmin && (
                     <button
                       onClick={() => startEditName(driver)}
                       aria-label={t('delivery.driversAdmin.editName')}
@@ -407,12 +451,13 @@ export default function DriversAdminPage() {
                     >
                       <Pencil size={13} />
                     </button>
+                    )}
                   </div>
                 )}
                 {driver.displayName && editingNameId !== driver.id && (
                   <div className="text-xs text-gray-500 truncate">{driver.email}</div>
                 )}
-                {!driver.displayName && editingNameId !== driver.id && (
+                {isAdmin && !driver.displayName && editingNameId !== driver.id && (
                   <button onClick={() => startEditName(driver)} className="text-xs text-blue-600 hover:underline">
                     {t('delivery.driversAdmin.addName')}
                   </button>
@@ -433,6 +478,7 @@ export default function DriversAdminPage() {
                 >
                   {expandedId === driver.id ? t('delivery.driversAdmin.close') : t('delivery.driversAdmin.manage')}
                 </button>
+                {isAdmin && (
                 <button data-tour="dlv-drivers-lock"
                   disabled={busyId === driver.id}
                   onClick={() => toggleActive(driver)}
@@ -443,6 +489,7 @@ export default function DriversAdminPage() {
                   {driver.active ? <Lock size={12} /> : <Unlock size={12} />}
                   {driver.active ? t('delivery.driversAdmin.lock') : t('delivery.driversAdmin.unlock')}
                 </button>
+                )}
               </div>
             </div>
 
@@ -470,6 +517,11 @@ export default function DriversAdminPage() {
                           <div className="text-[10px] text-gray-400 mt-0.5">
                             {t('delivery.driversAdmin.lastSeen')}: {formatDMYTime(new Date(d.lastSeenAt))}
                           </div>
+                          {(d.status === 'REJECTED' || d.status === 'REVOKED') && d.lastBlockedAttemptAt && (
+                            <div className="text-[11px] font-medium text-amber-700 mt-0.5">
+                              {t('delivery.driversAdmin.blockedAttempt', { time: formatDMYTime(new Date(d.lastBlockedAttemptAt)) })}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {d.status === 'PENDING' && (
@@ -492,6 +544,18 @@ export default function DriversAdminPage() {
                               </button>
                             </>
                           )}
+                          {/* Blocking is never final: a rejected or revoked
+                              phone can be let back in. */}
+                          {(d.status === 'REJECTED' || d.status === 'REVOKED') && (
+                            <button
+                              disabled={deviceBusyId === d.id}
+                              onClick={() => handleDeviceAction(driver.id, d.id, 'approve')}
+                              className="inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium px-2 py-1.5 sm:py-1 rounded border border-green-200 text-green-700 disabled:opacity-40"
+                            >
+                              <RotateCcw size={12} aria-hidden="true" />
+                              {t('delivery.driversAdmin.approveAgain')}
+                            </button>
+                          )}
                           {d.status === 'APPROVED' && (
                             <button
                               disabled={deviceBusyId === d.id}
@@ -508,6 +572,8 @@ export default function DriversAdminPage() {
                   </div>
                 </div>
 
+                {/* Access hours stay admin-only (backend AccessControlController). */}
+                {isAdmin && (
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 mb-1">
                     <Clock size={13} />
@@ -569,6 +635,7 @@ export default function DriversAdminPage() {
                     </button>
                   </div>
                 </div>
+                )}
               </div>
             )}
           </div>

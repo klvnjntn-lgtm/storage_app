@@ -197,12 +197,24 @@ constructor(
     userId: string,
     dto: CreateDraftInvoiceDto,
     // Set by WorkOrdersService.createInvoice() — links the draft to the
-    // job card it was made from.
-    opts: { workOrderId?: string } = {},
+    // job card it was made from. keepPartPrices carries the job's part
+    // prices over as-is: they passed the custom-price check when the job
+    // was saved, so whoever invoices it needn't be an admin.
+    opts: { workOrderId?: string; keepPartPrices?: boolean } = {},
   ) {
     await this.tenantOwnership.validate(organizationId, dto);
+    const forcedUnitPriceByIndex = new Map<number, number>();
+    if (opts.keepPartPrices) {
+      dto.items.forEach((i, idx) => {
+        if (i.productId && i.unitPrice != null) forcedUnitPriceByIndex.set(idx, i.unitPrice);
+      });
+    }
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
-      await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
+      await this.pricing.priceLines(organizationId, dto.items, undefined, {
+        customerId: dto.customerId,
+        userId,
+        forcedUnitPriceByIndex,
+      });
     const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
 
     try {
@@ -217,7 +229,16 @@ constructor(
           });
           if (!workOrder) throw new NotFoundException('Work order not found');
           if (workOrder.status === 'CANCELLED') throw new BadRequestException('A cancelled work order cannot be invoiced');
+          if (workOrder.status === 'ESTIMATE') throw new BadRequestException('Record the customer’s approval before invoicing');
           if (workOrder.invoices.length > 0) throw new BadRequestException('This work order has already been invoiced');
+          // Invoicing closes the job — its status is locked from here until
+          // the invoice is voided, so it can't be left Queued/In Progress.
+          if (workOrder.status !== 'DONE') {
+            await tx.workOrder.update({
+              where: { id: opts.workOrderId },
+              data: { status: 'DONE', completedAt: new Date() },
+            });
+          }
         }
 
         if (dto.vehicleId && dto.odometer != null) {
@@ -363,10 +384,25 @@ constructor(
     try {
       return await this.prisma.$transaction(async (tx) => {
         const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
+        // A custom part price already on this draft (set by an admin, or
+        // carried from a quotation/order/work order) stays when someone
+        // else saves it — only a newly typed custom price needs an admin.
+        const forcedUnitPriceByIndex = new Map<number, number>();
+        const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { posPricingEnabled: true } });
+        if (org?.posPricingEnabled) {
+          dto.items!.forEach((i, idx) => {
+            if (!i.productId || i.unitPrice == null) return;
+            const kept = invoice.items.some(
+              (old) => old.productId === i.productId && old.priceLevelId == null && Number(old.unitPrice) === i.unitPrice,
+            );
+            if (kept) forcedUnitPriceByIndex.set(idx, i.unitPrice);
+          });
+        }
         const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, dto.items!, tx, {
             customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
             userId,
+            forcedUnitPriceByIndex,
           });
 
         const resolvedVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId;

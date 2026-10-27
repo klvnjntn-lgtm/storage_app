@@ -7,6 +7,8 @@ import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { WorkOrdersService } from './work-orders.service';
 import {
+  ApproveWorkOrderDto,
+  CreateRecommendationDto,
   CreateWorkOrderDto,
   CreateWorkOrderInvoiceDto,
   SetWorkOrderStatusDto,
@@ -24,8 +26,8 @@ export class WorkOrdersController {
   // Readable by every member (unlike /organization/settings), so the nav
   // and vehicle pages can tell whether to offer work orders.
   @Get('config')
-  async config(@CurrentOrg() orgId: string) {
-    return { enabled: await this.workOrders.isEnabled(orgId) };
+  config(@CurrentOrg() orgId: string) {
+    return this.workOrders.config(orgId);
   }
 
   // Names only — /payroll/employees is admin-only since it carries pay.
@@ -42,6 +44,11 @@ export class WorkOrdersController {
     @Query('vehicleId') vehicleId?: string,
   ) {
     return this.workOrders.list(orgId, { status, q, vehicleId });
+  }
+
+  @Get(':id/print')
+  printView(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.workOrders.printView(orgId, id);
   }
 
   @Get(':id')
@@ -62,6 +69,22 @@ export class WorkOrdersController {
   @Patch(':id/status')
   setStatus(@CurrentOrg() orgId: string, @Param('id') id: string, @Body() dto: SetWorkOrderStatusDto) {
     return this.workOrders.setStatus(orgId, id, dto.status);
+  }
+
+  @Post(':id/approve')
+  approve(@CurrentOrg() orgId: string, @Req() req, @Param('id') id: string, @Body() dto: ApproveWorkOrderDto) {
+    return this.workOrders.approve(orgId, req.user.sub, id, dto.note);
+  }
+
+  // The customer approval link's secret; the page builds the URL.
+  @Post(':id/approval-link')
+  approvalLink(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.workOrders.approvalLink(orgId, id);
+  }
+
+  @Post(':id/recommendations')
+  addRecommendation(@CurrentOrg() orgId: string, @Param('id') id: string, @Body() dto: CreateRecommendationDto) {
+    return this.workOrders.addRecommendation(orgId, id, dto);
   }
 
   @Post(':id/invoice')

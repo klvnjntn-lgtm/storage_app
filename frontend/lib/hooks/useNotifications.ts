@@ -15,8 +15,11 @@ export type NotificationType =
   | 'DEVICE_APPROVED'
   | 'DEVICE_REJECTED'
   | 'DEVICE_REVOKED'
+  | 'DEVICE_BLOCKED_ATTEMPT'
   | 'ACCOUNT_LOCKED'
-  | 'ACCOUNT_UNLOCKED';
+  | 'ACCOUNT_UNLOCKED'
+  | 'WORK_ORDER_APPROVED'
+  | 'WORK_ORDER_DECLINED';
 
 export type AppNotification = {
   id: string;

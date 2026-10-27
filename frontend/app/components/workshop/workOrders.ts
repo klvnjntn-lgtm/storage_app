@@ -4,9 +4,18 @@
 // can show or hide its link without a reload.
 export const WORK_ORDERS_CHANGED = 'waresys:work-orders-changed';
 
-export type WorkOrderStatus = 'QUEUED' | 'IN_PROGRESS' | 'WAITING_PARTS' | 'DONE' | 'CANCELLED';
+export type WorkOrderStatus = 'ESTIMATE' | 'QUEUED' | 'IN_PROGRESS' | 'WAITING_PARTS' | 'DONE' | 'CANCELLED';
 
-export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['QUEUED', 'IN_PROGRESS', 'WAITING_PARTS', 'DONE', 'CANCELLED'];
+export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['ESTIMATE', 'QUEUED', 'IN_PROGRESS', 'WAITING_PARTS', 'DONE', 'CANCELLED'];
+
+// Work recommended on a job for a later visit — a vehicle reminder.
+export type Recommendation = {
+  id: string;
+  note: string;
+  dueDate: string;
+  status: 'PENDING' | 'COMPLETED' | 'DELETED';
+  followUpWorkOrderId: string | null;
+};
 
 export type WorkOrderItem = {
   id: string;
@@ -29,6 +38,8 @@ export type WorkOrder = {
   complaint: string | null;
   notes: string | null;
   estimatedTotal: string;
+  approvedAt: string | null;
+  approvalNote: string | null;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -38,6 +49,9 @@ export type WorkOrder = {
   items: WorkOrderItem[];
   invoices: { id: string; invoiceNumber: string | null; status: string; total: string; createdAt: string }[];
   invoicedId: string | null;
+  recommendations: Recommendation[];
+  // The reminder this job was started from, if any.
+  followedUp: { id: string; note: string; sourceWorkOrder: { id: string; number: string } | null }[];
 };
 
 export type Mechanic = { id: string; name: string; position: string | null };
@@ -86,6 +100,8 @@ export function toPayloadLines(lines: DraftLine[]) {
 
 export function statusStyle(status: WorkOrderStatus): string {
   switch (status) {
+    case 'ESTIMATE':
+      return 'bg-purple-50 text-purple-700 border-purple-300';
     case 'QUEUED':
       return 'bg-gray-50 text-gray-700 border-gray-300';
     case 'IN_PROGRESS':

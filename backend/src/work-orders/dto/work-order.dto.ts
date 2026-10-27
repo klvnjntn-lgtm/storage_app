@@ -1,7 +1,9 @@
 import { InvoiceFormat, WorkOrderStatus } from '@prisma/client';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsISO8601,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -78,6 +80,18 @@ export class CreateWorkOrderDto {
   @ValidateNested({ each: true })
   @Type(() => WorkOrderLineInput)
   items?: WorkOrderLineInput[];
+
+  // Save as an estimate awaiting the customer's approval instead of
+  // checking the car straight in.
+  @IsOptional()
+  @IsBoolean()
+  asEstimate?: boolean;
+
+  // Started from this vehicle's pending reminder (recommended work):
+  // the reminder is completed and linked to the new job.
+  @IsOptional()
+  @IsString()
+  fromReminderId?: string;
 }
 
 export class UpdateWorkOrderDto {
@@ -112,6 +126,43 @@ export class UpdateWorkOrderDto {
 export class SetWorkOrderStatusDto {
   @IsEnum(WorkOrderStatus)
   status: WorkOrderStatus;
+}
+
+export class ApproveWorkOrderDto {
+  // How the go-ahead was given, e.g. "Signed SPK", "By phone — Budi".
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string;
+}
+
+export class CreateRecommendationDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(300)
+  note: string;
+
+  @IsISO8601()
+  dueDate: string;
+}
+
+// The customer's answer on the approval page.
+export class RespondToEstimateDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+
+  // The estimate's version as shown to them (see publicEstimate).
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  version: string;
 }
 
 export class CreateWorkOrderInvoiceDto {

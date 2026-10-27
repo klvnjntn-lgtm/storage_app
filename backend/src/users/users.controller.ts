@@ -30,7 +30,10 @@ export class UsersController {
     return this.usersService.removeMember(organizationId, user.sub, id);
   }
 
+  // Staff see the driver list to handle their phones (DevicesController);
+  // locking, renaming and access hours stay admin-only.
   @Get('drivers')
+  @Roles('ADMIN', 'USER')
   listDrivers(@CurrentOrg() organizationId: string) {
     return this.usersService.listDrivers(organizationId);
   }

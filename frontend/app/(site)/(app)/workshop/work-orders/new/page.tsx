@@ -16,6 +16,8 @@ import { toPayloadLines } from '@/app/components/workshop/workOrders';
 import { lineProblem } from '@/app/components/workshop/lineProblem';
 
 type PickedVehicle = { id: string; plateNumber: string; vehicleModel: string; odometer?: number | null; customer: { name: string } };
+// /vehicles/search returns a flat customerName and no odometer.
+type SearchResult = { id: string; plateNumber: string; vehicleModel: string; customerName: string };
 
 // useSearchParams() needs a Suspense boundary (same as NewInvoicePage).
 export default function NewWorkOrderPageWrapper() {
@@ -33,20 +35,41 @@ function NewWorkOrderPage() {
 
   const [vehicle, setVehicle] = useState<PickedVehicle | null>(null);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PickedVehicle[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [form, setForm] = useState<WorkOrderFormValue>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Opened from a vehicle's page: ?vehicleId=…
-  const initialVehicleId = searchParams.get('vehicleId');
-  useEffect(() => {
-    if (!initialVehicleId) return;
-    apiFetch(`/vehicles/${initialVehicleId}`)
+  function loadVehicle(id: string) {
+    apiFetch(`/vehicles/${id}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((v) => v && setVehicle(v))
       .catch(() => {});
+  }
+
+  // Opened from a vehicle's page: ?vehicleId=…
+  const initialVehicleId = searchParams.get('vehicleId');
+  useEffect(() => {
+    if (initialVehicleId) loadVehicle(initialVehicleId);
   }, [initialVehicleId]);
+
+  // Started from recommended work (a vehicle reminder): ?reminderId=… —
+  // its note becomes the complaint, and saving completes the reminder.
+  const reminderId = searchParams.get('reminderId');
+  const [reminderNote, setReminderNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!reminderId) return;
+    apiFetch('/reminders')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list: { id: string; note: string; status: string }[]) => {
+        // Already done (e.g. a second tab) — start a plain job instead.
+        const r = list.find((x) => x.id === reminderId && x.status === 'PENDING');
+        if (!r) return;
+        setReminderNote(r.note);
+        setForm((f) => (f.complaint ? f : { ...f, complaint: r.note }));
+      })
+      .catch(() => {});
+  }, [reminderId]);
 
   useEffect(() => {
     const q = query.trim();
@@ -62,7 +85,7 @@ function NewWorkOrderPage() {
     };
   }, [query]);
 
-  async function save() {
+  async function save(asEstimate: boolean) {
     if (!vehicle) return;
     const problem = lineProblem(form.lines, t);
     if (problem) {
@@ -74,7 +97,13 @@ function NewWorkOrderPage() {
     try {
       const res = await apiFetch('/work-orders', {
         method: 'POST',
-        body: JSON.stringify({ vehicleId: vehicle.id, ...formToPayload(form), items: toPayloadLines(form.lines) }),
+        body: JSON.stringify({
+          vehicleId: vehicle.id,
+          ...formToPayload(form),
+          items: toPayloadLines(form.lines),
+          asEstimate,
+          ...(reminderNote && reminderId && { fromReminderId: reminderId }),
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -124,14 +153,14 @@ function NewWorkOrderPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setVehicle(v);
+                        loadVehicle(v.id);
                         setQuery('');
                         setResults([]);
                       }}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
                     >
                       <span className="font-medium">{v.plateNumber}</span>
-                      <span className="text-gray-500"> · {v.vehicleModel} · {v.customer.name}</span>
+                      <span className="text-gray-500"> · {v.vehicleModel} · {v.customerName}</span>
                     </button>
                   </li>
                 ))}
@@ -148,7 +177,11 @@ function NewWorkOrderPage() {
         <button type="button" className={btnSecondary} onClick={() => router.back()}>
           {t('workshop.workOrders.cancel')}
         </button>
-        <button type="button" className={btnPrimary} disabled={!vehicle || saving} onClick={save}>
+        {/* Estimate: priced and printed for the customer's go-ahead first. */}
+        <button type="button" className={btnSecondary} disabled={!vehicle || saving} onClick={() => save(true)}>
+          {t('workshop.workOrders.saveEstimate')}
+        </button>
+        <button type="button" className={btnPrimary} disabled={!vehicle || saving} onClick={() => save(false)}>
           {saving ? t('workshop.workOrders.saving') : t('workshop.workOrders.create')}
         </button>
       </div>

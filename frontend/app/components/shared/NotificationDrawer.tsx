@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Car, Truck, ShieldAlert } from 'lucide-react';
+import { Bell, Car, Truck, ShieldAlert, Smartphone } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useNotifications, type AppNotification } from '@/lib/hooks/useNotifications';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import type { PendingDevice } from '@/lib/hooks/usePendingDevices';
 
 const DUE_SOON_DAYS = 7;
 
@@ -19,8 +20,19 @@ function daysUntil(dueDate: string) {
 // `enabled` gates whether the bell renders at all (hasWorkshopRms ||
 // hasDelivery, see AppShell.tsx); `remindersEnabled` additionally gates the
 // vehicle-reminders fetch specifically, since /reminders is module-gated to
-// WORKSHOP_RMS and a delivery-only org shouldn't call it.
-export default function NotificationDrawer({ enabled, remindersEnabled }: { enabled: boolean; remindersEnabled: boolean }) {
+// WORKSHOP_RMS and a delivery-only org shouldn't call it. `pendingDevices`:
+// drivers' phones waiting for approval (usePendingDevices, fetched by
+// AppShell for its sidebar badge too) — shown as reminders that stay until
+// each is handled on the Drivers page.
+export default function NotificationDrawer({
+  enabled,
+  remindersEnabled,
+  pendingDevices = [],
+}: {
+  enabled: boolean;
+  remindersEnabled: boolean;
+  pendingDevices?: PendingDevice[];
+}) {
   const router = useRouter();
   const { t } = useLanguage();
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -52,7 +64,7 @@ export default function NotificationDrawer({ enabled, remindersEnabled }: { enab
     return d >= 0 && d <= DUE_SOON_DAYS;
   });
   const attention = [...overdue, ...dueSoon];
-  const count = attention.length + unreadCount;
+  const count = pendingDevices.length + attention.length + unreadCount;
 
   function openPanel() {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -144,6 +156,26 @@ export default function NotificationDrawer({ enabled, remindersEnabled }: { enab
           )}
 
           <div className="flex flex-col gap-2">
+            {pendingDevices.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => {
+                  setOpen(false);
+                  router.push('/delivery/drivers');
+                }}
+                className="text-left border border-amber-300 rounded-xl p-2.5 bg-amber-50 shadow-sm hover:border-amber-400 transition-colors"
+              >
+                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                  <Smartphone size={13} strokeWidth={2} className="text-amber-700 shrink-0" />
+                  <span className="text-xs font-semibold text-amber-900">
+                    {t('shared.notificationDrawer.phoneWaiting')}
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900">
+                  {t('shared.notificationDrawer.phoneWaitingBody', { name: d.user.displayName || d.user.email })}
+                </p>
+              </button>
+            ))}
             {notifications.map((n) => (
               <button
                 key={n.id}

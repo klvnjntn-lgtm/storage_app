@@ -160,6 +160,26 @@ describe('member and device guards (database)', () => {
     await expect(users.setRole(orgId, adminId, adminId, 'USER')).rejects.toThrow(/own role/);
   });
 
+  it('tells the office when a blocked phone tries again, and lets it be approved again', async () => {
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-a')).toBe('OK');
+    const phone = await prisma.device.findFirstOrThrow({ where: { userId: driverId, deviceId: 'phone-a' } });
+    await devices.revoke(orgId, phone.id);
+
+    const notifySpy = notifications.notifyOrgStaff as jest.Mock;
+    notifySpy.mockClear();
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-a')).toBe('REJECTED');
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-a')).toBe('REJECTED');
+    // Told once, not on every retry.
+    expect(notifySpy.mock.calls.filter((c) => c[1] === 'DEVICE_BLOCKED_ATTEMPT')).toHaveLength(1);
+    const blocked = await prisma.device.findUniqueOrThrow({ where: { id: phone.id } });
+    expect(blocked.lastBlockedAttemptAt).not.toBeNull();
+
+    await devices.approve(orgId, phone.id, adminId);
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-a')).toBe('OK');
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+  });
+
   it('auto-approves only a driver’s very first device, so a revoke sticks', async () => {
     expect(await devices.registerOrCheck(orgId, driverId, 'phone-1')).toBe('OK');
     const first = await prisma.device.findFirstOrThrow({ where: { userId: driverId, deviceId: 'phone-1' } });

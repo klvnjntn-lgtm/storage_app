@@ -1,4 +1,5 @@
-export type StockAtLocation = { locationId: string; locationName: string; quantity: number };
+// held: units on hand reserved for open work orders (not sellable here).
+export type StockAtLocation = { locationId: string; locationName: string; quantity: number; held?: number };
 
 export type ProductSearchResult = {
   id: string;
@@ -205,6 +206,8 @@ export type Reminder = {
     vehicleModel: string;
     customer: { id: string; name: string };
   };
+  // The work order that recommended this (Recommended work), if any.
+  sourceWorkOrder?: { id: string; number: string } | null;
 };
 
 export type StatementLine = {

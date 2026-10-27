@@ -1,10 +1,22 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceFormat, InvoiceStatus, Prisma, WorkOrderStatus } from '@prisma/client';
+import { createHash, randomBytes } from 'crypto';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InvoiceFormat, InvoiceStatus, Prisma, ReminderStatus, WorkOrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { InvoiceService } from '../invoice/invoice.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { normalizePlate } from '../lib/plate';
+import { escapeLike } from '../common/text/escape-like';
 import {
+  CreateRecommendationDto,
   CreateWorkOrderDto,
   UpdateWorkOrderDto,
   WorkOrderLineInput,
@@ -24,6 +36,14 @@ const DETAIL_INCLUDE = {
     orderBy: { createdAt: 'desc' },
     select: { id: true, invoiceNumber: true, status: true, total: true, createdAt: true },
   },
+  // Work recommended on this job for a later visit (vehicle reminders).
+  recommendations: {
+    where: { status: { not: ReminderStatus.DELETED } },
+    orderBy: { dueDate: 'asc' },
+    select: { id: true, note: true, dueDate: true, status: true, followUpWorkOrderId: true },
+  },
+  // The reminder this job was started from, if any.
+  followedUp: { select: { id: true, note: true, sourceWorkOrder: { select: { id: true, number: true } } } },
 } satisfies Prisma.WorkOrderInclude;
 
 type WorkOrderDetail = Prisma.WorkOrderGetPayload<{ include: typeof DETAIL_INCLUDE }>;
@@ -32,6 +52,9 @@ function withInvoiced(wo: WorkOrderDetail) {
   const live = wo.invoices.find((inv) => inv.status !== InvoiceStatus.VOID);
   return { ...wo, invoicedId: live?.id ?? null };
 }
+
+// How long a customer approval link stays valid.
+const APPROVAL_LINK_DAYS = 30;
 
 // Job cards for the workshop: a vehicle checks in, a mechanic works
 // through QUEUED → IN_PROGRESS (→ WAITING_PARTS) → DONE, and the job
@@ -44,6 +67,7 @@ export class WorkOrdersService {
     private numbering: DocumentNumberingService,
     private pricing: LineItemPricingService,
     private invoices: InvoiceService,
+    private notifications: NotificationsService,
   ) {}
 
   async isEnabled(organizationId: string): Promise<boolean> {
@@ -52,6 +76,14 @@ export class WorkOrdersService {
       select: { workOrdersEnabled: true },
     });
     return org?.workOrdersEnabled ?? false;
+  }
+
+  async config(organizationId: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { workOrdersEnabled: true, posPricingEnabled: true },
+    });
+    return { enabled: org?.workOrdersEnabled ?? false, posPricingEnabled: org?.posPricingEnabled ?? false };
   }
 
   private async assertEnabled(organizationId: string) {
@@ -76,6 +108,7 @@ export class WorkOrdersService {
         ? (filters.status as WorkOrderStatus)
         : undefined;
     const q = filters.q?.trim();
+    const plate = q ? normalizePlate(q) : '';
     const rows = await this.prisma.workOrder.findMany({
       where: {
         organizationId,
@@ -83,9 +116,10 @@ export class WorkOrdersService {
         ...(filters.vehicleId && { vehicleId: filters.vehicleId }),
         ...(q && {
           OR: [
-            { number: { contains: q, mode: 'insensitive' } },
-            { vehicle: { plateNumber: { contains: q, mode: 'insensitive' } } },
-            { customer: { name: { contains: q, mode: 'insensitive' } } },
+            { number: { contains: escapeLike(q), mode: 'insensitive' } },
+            // Spacing-insensitive, like /vehicles/search: "B1234XY" finds "B 1234 XY".
+            ...(plate ? [{ vehicle: { plateNormalized: { contains: escapeLike(plate) } } }] : []),
+            { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
           ],
         }),
       },
@@ -103,6 +137,62 @@ export class WorkOrdersService {
     return withInvoiced(wo);
   }
 
+  // The job plus the workshop's letterhead, for the printed SPK.
+  async printView(organizationId: string, id: string) {
+    const [workOrder, org] = await Promise.all([
+      this.getOne(organizationId, id),
+      this.prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { name: true, address: true, phone: true, logoUrl: true },
+      }),
+    ]);
+    return {
+      workOrder,
+      pricing: await this.priceForPrint(organizationId, workOrder),
+      business: {
+        name: org?.name ?? '',
+        address: org?.address ?? null,
+        phone: org?.phone ?? null,
+        logoUrl: org?.logoUrl ?? null,
+      },
+    };
+  }
+
+  // Today's price per line, for the printed estimate. Part prices on the
+  // card were approved when it was saved, so they're kept as-is here (no
+  // admin check against whoever prints). null if a line can no longer be
+  // priced (e.g. a product since archived) — the print then shows quantities.
+  private async priceForPrint(organizationId: string, wo: Awaited<ReturnType<WorkOrdersService['getOne']>>) {
+    if (wo.items.length === 0) return null;
+    const forcedUnitPriceByIndex = new Map<number, number>();
+    wo.items.forEach((i, idx) => {
+      if (i.productId && i.unitPrice != null) forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
+    });
+    try {
+      const priced = await this.pricing.priceLines(
+        organizationId,
+        wo.items.map((i) => ({
+          productId: i.productId ?? undefined,
+          description: i.description ?? undefined,
+          locationId: i.locationId ?? undefined,
+          quantity: Number(i.quantity),
+          unitPrice: i.unitPrice != null ? Number(i.unitPrice) : undefined,
+        })),
+        undefined,
+        { customerId: wo.customerId, forcedUnitPriceByIndex },
+      );
+      return {
+        lines: priced.items.map((l) => ({ unitPrice: l.unitPrice, lineTotal: l.lineTotal })),
+        subtotal: priced.subtotal,
+        discountAmount: priced.discountAmount,
+        taxAmount: priced.taxAmount,
+        total: Math.round((priced.subtotal - priced.discountAmount + priced.taxAmount) * 100) / 100,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async create(organizationId: string, userId: string, dto: CreateWorkOrderDto) {
     await this.assertEnabled(organizationId);
     const vehicle = await this.prisma.vehicle.findFirst({
@@ -111,16 +201,22 @@ export class WorkOrdersService {
     });
     if (!vehicle) throw new NotFoundException('Vehicle not found');
     if (dto.mechanicId) await this.assertMechanic(organizationId, dto.mechanicId);
-    const items = dto.items ?? [];
+    const items = await this.dropIgnoredPartPrices(organizationId, dto.items ?? []);
     const estimatedTotal = await this.estimate(organizationId, items, vehicle.customerId, userId);
 
     const created = await this.prisma.$transaction(async (tx) => {
       if (dto.odometer != null) await this.applyOdometer(tx, organizationId, vehicle.id, dto.odometer);
       const number = await this.numbering.nextSequential(tx, organizationId, 'WORK_ORDER', 'WO');
-      return tx.workOrder.create({
+      const job = await tx.workOrder.create({
         data: {
           organizationId,
           number,
+          // A job checked straight in is approved at check-in; an estimate
+          // waits for approve(). approvedAt also tells a reopened job which
+          // of the two to go back to (see setStatus).
+          status: dto.asEstimate ? WorkOrderStatus.ESTIMATE : WorkOrderStatus.QUEUED,
+          approvedAt: dto.asEstimate ? null : new Date(),
+          approvedById: dto.asEstimate ? null : userId,
           customerId: vehicle.customerId,
           vehicleId: vehicle.id,
           mechanicId: dto.mechanicId ?? null,
@@ -133,6 +229,21 @@ export class WorkOrdersService {
         },
         select: { id: true },
       });
+      if (dto.fromReminderId) {
+        // Only this vehicle's own pending reminder; claimed atomically so it
+        // can't start two jobs.
+        const claimed = await tx.vehicleReminder.updateMany({
+          where: {
+            id: dto.fromReminderId,
+            organizationId,
+            vehicleId: vehicle.id,
+            status: ReminderStatus.PENDING,
+          },
+          data: { status: ReminderStatus.COMPLETED, completedAt: new Date(), followUpWorkOrderId: job.id },
+        });
+        if (claimed.count === 0) throw new BadRequestException('That reminder is not pending for this vehicle');
+      }
+      return job;
     });
     return this.getOne(organizationId, created.id);
   }
@@ -140,8 +251,9 @@ export class WorkOrdersService {
   async update(organizationId: string, userId: string, id: string, dto: UpdateWorkOrderDto) {
     const wo = await this.getEditable(organizationId, id);
     if (dto.mechanicId) await this.assertMechanic(organizationId, dto.mechanicId);
+    const items = dto.items !== undefined ? await this.dropIgnoredPartPrices(organizationId, dto.items) : undefined;
     const estimatedTotal =
-      dto.items !== undefined ? await this.estimate(organizationId, dto.items, wo.customerId, userId) : undefined;
+      items !== undefined ? await this.estimate(organizationId, items, wo.customerId, userId) : undefined;
 
     await this.prisma.$transaction(async (tx) => {
       // Same lock InvoiceService.createDraft() takes: an edit racing an
@@ -156,7 +268,7 @@ export class WorkOrdersService {
       if (dto.odometer != null && dto.odometer !== wo.odometer) {
         await this.applyOdometer(tx, organizationId, wo.vehicleId, dto.odometer);
       }
-      if (dto.items !== undefined) {
+      if (items !== undefined) {
         await tx.workOrderItem.deleteMany({ where: { workOrderId: id } });
       }
       await tx.workOrder.update({
@@ -166,9 +278,9 @@ export class WorkOrdersService {
           ...(dto.odometer !== undefined && { odometer: dto.odometer }),
           ...(dto.complaint !== undefined && { complaint: dto.complaint?.trim() || null }),
           ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
-          ...(dto.items !== undefined && {
+          ...(items !== undefined && {
             estimatedTotal,
-            items: { create: dto.items.map(toItemData) },
+            items: { create: items.map(toItemData) },
           }),
         },
       });
@@ -176,8 +288,19 @@ export class WorkOrdersService {
     return this.getOne(organizationId, id);
   }
 
-  async setStatus(organizationId: string, id: string, status: WorkOrderStatus) {
+  async setStatus(organizationId: string, id: string, requested: WorkOrderStatus) {
     const wo = await this.getEditable(organizationId, id, { allowCancelled: true });
+    // An estimate only moves on by approve() (or is cancelled = declined),
+    // and nothing moves back into ESTIMATE — except reopening a cancelled
+    // job that was never approved, which returns to being an estimate.
+    if (requested === WorkOrderStatus.ESTIMATE) {
+      throw new BadRequestException('A job can’t be turned back into an estimate');
+    }
+    if (wo.status === WorkOrderStatus.ESTIMATE && requested !== WorkOrderStatus.CANCELLED) {
+      throw new BadRequestException('Record the customer’s approval first');
+    }
+    const status =
+      wo.status === WorkOrderStatus.CANCELLED && !wo.approvedAt ? WorkOrderStatus.ESTIMATE : requested;
     if (wo.status === status) return this.getOne(organizationId, id);
     const now = new Date();
     await this.prisma.workOrder.update({
@@ -193,6 +316,159 @@ export class WorkOrdersService {
     return this.getOne(organizationId, id);
   }
 
+  // The customer's go-ahead on an estimate: it becomes a normal queued job
+  // (and from then on holds its parts' stock).
+  async approve(organizationId: string, userId: string, id: string, note?: string) {
+    await this.getEditable(organizationId, id);
+    await this.decideEstimate(organizationId, id, true, { userId, note });
+    return this.getOne(organizationId, id);
+  }
+
+  // Approve (→ QUEUED) or decline (→ CANCELLED) an estimate — by staff, or
+  // by the customer through the link (no userId; `version` must match the
+  // estimate they were shown, see respondToEstimate). Claimed on status so
+  // two answers can't both win.
+  private async decideEstimate(
+    organizationId: string,
+    id: string,
+    approve: boolean,
+    by: { userId?: string; note?: string },
+  ) {
+    const claimed = await this.prisma.workOrder.updateMany({
+      where: { id, organizationId, status: WorkOrderStatus.ESTIMATE },
+      data: approve
+        ? {
+            status: WorkOrderStatus.QUEUED,
+            approvedAt: new Date(),
+            approvedById: by.userId ?? null,
+            approvalNote: by.note?.trim() || null,
+          }
+        : { status: WorkOrderStatus.CANCELLED, approvalNote: by.note?.trim() || null },
+    });
+    if (claimed.count === 0) throw new BadRequestException('Only an estimate can be approved or declined');
+  }
+
+  // ── Customer approval link ───────────────────────────────────────────
+
+  // The secret for /estimate/<token>. Reused while valid, so a link already
+  // sent to the customer keeps working when staff copy it again.
+  async approvalLink(organizationId: string, id: string) {
+    const wo = await this.getEditable(organizationId, id);
+    if (wo.status !== WorkOrderStatus.ESTIMATE) throw new BadRequestException('Only an estimate can be sent for approval');
+    if (wo.approvalToken && wo.approvalTokenExpiresAt && wo.approvalTokenExpiresAt > new Date()) {
+      return { token: wo.approvalToken, expiresAt: wo.approvalTokenExpiresAt };
+    }
+    const token = randomBytes(24).toString('base64url');
+    const expiresAt = new Date(Date.now() + APPROVAL_LINK_DAYS * 24 * 60 * 60 * 1000);
+    await this.prisma.workOrder.update({
+      where: { id },
+      data: { approvalToken: token, approvalTokenExpiresAt: expiresAt },
+    });
+    return { token, expiresAt };
+  }
+
+  private async byApprovalToken(token: string) {
+    const wo = await this.prisma.workOrder.findUnique({
+      where: { approvalToken: token },
+      select: { id: true, organizationId: true, approvalTokenExpiresAt: true },
+    });
+    if (!wo) throw new NotFoundException('This link is not valid');
+    if (!wo.approvalTokenExpiresAt || wo.approvalTokenExpiresAt < new Date()) {
+      throw new GoneException('This link has expired — ask the workshop for a new one');
+    }
+    if (!(await this.isEnabled(wo.organizationId))) throw new NotFoundException('This link is not valid');
+    return wo;
+  }
+
+  // What the customer sees: no internal notes, mechanic or phone numbers.
+  async publicEstimate(token: string) {
+    const { id, organizationId, approvalTokenExpiresAt } = await this.byApprovalToken(token);
+    const { workOrder: wo, pricing, business } = await this.printView(organizationId, id);
+    return {
+      business,
+      number: wo.number,
+      createdAt: wo.createdAt,
+      status: wo.status,
+      approvedAt: wo.approvedAt,
+      customerName: wo.customer.name,
+      vehicle: { plateNumber: wo.vehicle.plateNumber, vehicleModel: wo.vehicle.vehicleModel },
+      complaint: wo.complaint,
+      lines: wo.items.map((i, idx) => ({
+        name: i.product?.name ?? i.description ?? '',
+        isPart: !!i.productId,
+        quantity: Number(i.quantity),
+        unitPrice: pricing?.lines[idx]?.unitPrice ?? null,
+        lineTotal: pricing?.lines[idx]?.lineTotal ?? null,
+      })),
+      subtotal: pricing?.subtotal ?? null,
+      discountAmount: pricing?.discountAmount ?? 0,
+      taxAmount: pricing?.taxAmount ?? 0,
+      total: pricing?.total ?? Number(wo.estimatedTotal),
+      expiresAt: approvalTokenExpiresAt,
+      // A fingerprint of what the customer is shown, echoed back on
+      // approve/decline: if staff changed the estimate since, it's refused.
+      version: createHash('sha256')
+        .update(
+          JSON.stringify([
+            wo.complaint,
+            wo.items.map((i) => [i.productId, i.description, String(i.quantity), i.unitPrice?.toString() ?? null]),
+            pricing?.total ?? null,
+          ]),
+        )
+        .digest('hex')
+        .slice(0, 16),
+    };
+  }
+
+  async respondToEstimate(
+    token: string,
+    approve: boolean,
+    dto: { name: string; reason?: string; version: string },
+  ) {
+    const { id, organizationId } = await this.byApprovalToken(token);
+    const current = await this.publicEstimate(token);
+    if (current.status === WorkOrderStatus.ESTIMATE && current.version !== dto.version) {
+      throw new ConflictException('This estimate was updated — please reload to see the latest version');
+    }
+    const name = dto.name.trim();
+    const note = approve
+      ? `Approved online by ${name}`
+      : `Declined online by ${name}${dto.reason?.trim() ? `: ${dto.reason.trim()}` : ''}`;
+    await this.decideEstimate(organizationId, id, approve, { note });
+
+    const wo = await this.prisma.workOrder.findUniqueOrThrow({
+      where: { id },
+      select: { number: true, vehicle: { select: { plateNumber: true } } },
+    });
+    await this.notifications.notifyOrgStaff(
+      organizationId,
+      approve ? 'WORK_ORDER_APPROVED' : 'WORK_ORDER_DECLINED',
+      approve
+        ? `Estimate ${wo.number} (${wo.vehicle.plateNumber}) was approved`
+        : `Estimate ${wo.number} (${wo.vehicle.plateNumber}) was declined`,
+      { body: note, link: `/workshop/work-orders/${id}` },
+    );
+    return this.publicEstimate(token);
+  }
+
+  // Work spotted on this job for a later visit, kept as a reminder on the
+  // vehicle. Allowed at any stage — it's usually noted when the job ends.
+  async addRecommendation(organizationId: string, id: string, dto: CreateRecommendationDto) {
+    const wo = await this.getOne(organizationId, id);
+    const dueDate = new Date(dto.dueDate);
+    if (Number.isNaN(dueDate.getTime())) throw new BadRequestException('Invalid due date');
+    await this.prisma.vehicleReminder.create({
+      data: {
+        organizationId,
+        vehicleId: wo.vehicleId,
+        note: dto.note.trim(),
+        dueDate,
+        sourceWorkOrderId: wo.id,
+      },
+    });
+    return this.getOne(organizationId, id);
+  }
+
   // Makes a draft invoice from the job's lines. Product lines are priced
   // afresh by the invoice (today's price, the customer's level); labour
   // lines keep the price on the job card. The invoice side locks the work
@@ -202,6 +478,9 @@ export class WorkOrdersService {
     if (wo.items.length === 0) throw new BadRequestException('Add at least one part or labour line first');
 
     const firstPart = wo.items.find((i) => i.productId && i.locationId);
+    // A part price on the card was allowed when the job was saved; it only
+    // carries over while POS pricing is still on (see dropIgnoredPartPrices).
+    const { posPricingEnabled } = await this.config(organizationId);
     const invoice = await this.invoices.createDraft(
       organizationId,
       userId,
@@ -225,10 +504,11 @@ export class WorkOrdersService {
           description: i.description ?? undefined,
           locationId: i.locationId ?? undefined,
           quantity: Number(i.quantity),
-          unitPrice: i.unitPrice != null ? Number(i.unitPrice) : undefined,
+          unitPrice:
+            i.unitPrice != null && (!i.productId || posPricingEnabled) ? Number(i.unitPrice) : undefined,
         })),
       },
-      { workOrderId: id },
+      { workOrderId: id, keepPartPrices: posPricingEnabled },
     );
     return { invoiceId: invoice.id };
   }
@@ -257,6 +537,13 @@ export class WorkOrdersService {
       select: { id: true },
     });
     if (!found) throw new BadRequestException('Mechanic not found');
+  }
+
+  // Without POS pricing the invoice ignores a typed part price and uses
+  // the catalogue's, so don't keep one on the job card either.
+  private async dropIgnoredPartPrices(organizationId: string, items: WorkOrderLineInput[]) {
+    if ((await this.config(organizationId)).posPricingEnabled) return items;
+    return items.map((i) => (i.productId ? { ...i, unitPrice: undefined } : i));
   }
 
   // Prices the lines exactly as the invoice would today, which also

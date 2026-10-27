@@ -52,6 +52,7 @@ export class VehicleRemindersService {
             customer: { select: { id: true, name: true } },
           },
         },
+        sourceWorkOrder: { select: { id: true, number: true } },
       },
       orderBy: { dueDate: 'asc' },
     });

@@ -1841,13 +1841,20 @@ model VehicleReminder {
   dueDate        DateTime
   status         ReminderStatus @default(PENDING)
   completedAt    DateTime?
+  // Recommended on this job ("pads at 20%, replace next visit")…
+  sourceWorkOrderId   String?
+  // …and the job that later did it (completing the reminder).
+  followUpWorkOrderId String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   organization   Organization   @relation(fields: [organizationId], references: [id])
   vehicle        Vehicle        @relation(fields: [vehicleId], references: [id])
+  sourceWorkOrder   WorkOrder? @relation("ReminderSourceWorkOrder", fields: [sourceWorkOrderId], references: [id], onDelete: SetNull)
+  followUpWorkOrder WorkOrder? @relation("ReminderFollowUpWorkOrder", fields: [followUpWorkOrderId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status, dueDate])
   @@index([vehicleId])
+  @@index([sourceWorkOrderId])
 }
 
 model InvoiceItemTax {
@@ -1988,6 +1995,7 @@ enum NotificationType {
   DEVICE_APPROVED
   DEVICE_REJECTED
   DEVICE_REVOKED
+  DEVICE_BLOCKED_ATTEMPT
   ACCOUNT_LOCKED
   ACCOUNT_UNLOCKED
   BILLING_PAYMENT_RECEIVED
@@ -1997,6 +2005,8 @@ enum NotificationType {
   APPROVAL_REQUESTED
   APPROVAL_DECIDED
   WA_BALANCE_LOW
+  WORK_ORDER_APPROVED
+  WORK_ORDER_DECLINED
 }
 
 // A browser/device a DRIVER has logged in from. `deviceId` is a
@@ -2018,6 +2028,10 @@ model Device {
   approvedAt       DateTime?
   approvedByUserId String?
   approvedBy       User?        @relation("DeviceApprovedBy", fields: [approvedByUserId], references: [id])
+  // Last time this phone tried to sign in while rejected or revoked — shown
+  // to the office (who can approve it again) and used to notify them at
+  // most once an hour per phone.
+  lastBlockedAttemptAt DateTime?
 
   @@unique([userId, deviceId])
   @@index([userId, status])
@@ -3161,6 +3175,9 @@ model PartInterchange {
 }
 
 enum WorkOrderStatus {
+  // Priced and waiting for the customer's go-ahead: holds no stock and
+  // can't be invoiced until approved (→ QUEUED).
+  ESTIMATE
   QUEUED
   IN_PROGRESS
   WAITING_PARTS
@@ -3185,6 +3202,16 @@ model WorkOrder {
   // Sum of the lines as priced at the last save — an estimate for the
   // customer; the invoice reprices product lines when it is created.
   estimatedTotal Decimal         @default(0) @db.Decimal(12, 2)
+  // The customer's go-ahead on an estimate: when, recorded by whom, and how
+  // (e.g. "Signed SPK", "By phone — Budi").
+  approvedAt     DateTime?
+  approvedById   String?
+  approvalNote   String?
+  // Secret for the customer's approval page (/estimate/<token>), shared by
+  // staff by hand (e.g. pasted into WhatsApp). Reused while valid so a link
+  // already sent keeps working; expires 30 days after it was made.
+  approvalToken          String?   @unique
+  approvalTokenExpiresAt DateTime?
   createdById    String?
   startedAt      DateTime?
   completedAt    DateTime?
@@ -3197,6 +3224,9 @@ model WorkOrder {
   mechanic     Employee?       @relation(fields: [mechanicId, organizationId], references: [id, organizationId])
   items        WorkOrderItem[]
   invoices     Invoice[]
+  // Work this job recommended for later, and reminders this job followed up.
+  recommendations VehicleReminder[] @relation("ReminderSourceWorkOrder")
+  followedUp      VehicleReminder[] @relation("ReminderFollowUpWorkOrder")
 
   @@unique([organizationId, number])
   @@index([organizationId, status])

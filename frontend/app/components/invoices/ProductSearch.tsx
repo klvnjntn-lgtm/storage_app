@@ -522,7 +522,10 @@ export function ProductSearch({
                     }`}
                   >
                     <MapPin size={10} strokeWidth={2} className="shrink-0" />
-                    <span className="truncate">{s.locationName}: {s.quantity}</span>
+                    <span className="truncate">
+                      {s.locationName}: {s.quantity}
+                      {!!s.held && <span className="text-amber-700"> · {t('sales.productSearch.heldForJobs', { qty: s.held })}</span>}
+                    </span>
                   </span>
                 ))}
               </div>

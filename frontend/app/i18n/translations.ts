@@ -259,7 +259,7 @@ const base = {
         reason: {
           hours: 'You can only use the app during your working hours. Try again when your shift starts.',
           devicePending: 'This is a new phone. The office must approve it first — ask your admin, then sign in again.',
-          deviceRejected: 'This phone is not allowed for your account. Ask your admin for help.',
+          deviceRejected: 'This phone is not allowed for your account. The office has been told — ask them to approve it again.',
           deviceMissing: 'This browser cannot be identified. Turn off private/incognito mode and try again.',
           elsewhere: 'You were signed out because your account was used on another phone.',
           locked: 'Your account is locked. Ask your admin for help.',
@@ -562,7 +562,7 @@ const base = {
         reason: {
           hours: 'Aplikasi hanya bisa dipakai saat jam kerja Anda. Coba lagi saat shift dimulai.',
           devicePending: 'Ini HP baru. Kantor harus menyetujuinya dulu — minta admin Anda, lalu masuk lagi.',
-          deviceRejected: 'HP ini tidak diizinkan untuk akun Anda. Minta bantuan admin.',
+          deviceRejected: 'HP ini tidak diizinkan untuk akun Anda. Kantor sudah diberi tahu — minta mereka menyetujuinya lagi.',
           deviceMissing: 'Browser ini tidak bisa dikenali. Matikan mode privat/incognito lalu coba lagi.',
           elsewhere: 'Anda dikeluarkan karena akun Anda dipakai di HP lain.',
           locked: 'Akun Anda dikunci. Minta bantuan admin.',

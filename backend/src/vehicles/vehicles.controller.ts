@@ -23,8 +23,14 @@ export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
   @Get('vehicles')
-  listAll(@CurrentOrg() orgId: string, @Query('q') q?: string) {
-    return this.vehiclesService.listAll(orgId, q);
+  listAll(
+    @CurrentOrg() orgId: string,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const paging = page === undefined ? undefined : { page: Number(page) || 1, pageSize: Number(pageSize) || 20 };
+    return this.vehiclesService.listAll(orgId, q, paging);
   }
 
   // ── Vehicle Lookup (/vehicles/search) ─────────────────────────────────

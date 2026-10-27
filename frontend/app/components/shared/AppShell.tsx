@@ -65,6 +65,7 @@ import { CSRF_HEADERS, clearSession } from '@/lib/session';
 import { ensurePushSubscription } from '@/lib/push';
 import { DESKTOP_HOME, isDesktopRoute, useIsDesktopApp } from '@/lib/desktop';
 import NotificationDrawer from '@/app/components/shared/NotificationDrawer';
+import { usePendingDevices } from '@/lib/hooks/usePendingDevices';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import MediaLibraryModal, { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
@@ -166,6 +167,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
   const [hasWarehouseOps, setHasWarehouseOps] = useState(false);
   const [hasDelivery, setHasDelivery] = useState(false);
+  // Drivers' phones waiting for approval — sidebar badge and bell reminders.
+  const pendingDevices = usePendingDevices(hasDelivery && (profile?.role === 'ADMIN' || profile?.role === 'USER'));
   const [showAvatarLibrary, setShowAvatarLibrary] = useState(false);
   const [avatarUpdating, setAvatarUpdating] = useState(false);
   const [avatarError, setAvatarError] = useState('');
@@ -553,7 +556,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
       { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
       { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
-      ...(profile?.role === 'ADMIN'
+      // Staff handle drivers' phones too; locking and access hours on that
+      // page stay admin-only.
+      ...(profile?.role === 'ADMIN' || profile?.role === 'USER'
         ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
         : []),
     ],
@@ -650,7 +655,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const activeTab = bottomTabs
     .filter((tab) => pathname === tab.href || pathname.startsWith(`${tab.href}/`))
     .sort((x, y) => y.href.length - x.href.length)[0]?.href;
-  const pendingBadgeInMore = !!pendingOrders && !bottomTabs.some((tab) => tab.href === '/upload-order');
+
+  // Counts shown next to a sidebar link: orders waiting to import, phones
+  // waiting for approval. A collapsed group shows its children's total.
+  const navBadges: Record<string, number> = {
+    '/upload-order': pendingOrders ?? 0,
+    '/delivery/drivers': pendingDevices.length,
+  };
+  const badgeFor = (item: NavItem): number =>
+    item.children ? item.children.reduce((n, c) => n + badgeFor(c), 0) : (navBadges[item.href] ?? 0);
+  // The "More" tab carries the counts for links not on the bottom bar.
+  const moreBadge = Object.entries(navBadges)
+    .filter(([href]) => !bottomTabs.some((tab) => tab.href === href))
+    .reduce((n, [, c]) => n + c, 0);
+  const badgeClass =
+    'flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold';
 
   // A render function, not a component: declaring a component inside
   // AppShell gives it a new identity every render, which remounts every
@@ -684,6 +703,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Icon size={18} strokeWidth={2} aria-hidden="true" className={active ? 'text-white' : 'text-gray-500'} />
             <span>{label}</span>
+            {!isOpen && badgeFor(item) > 0 && <span className={`ml-auto ${badgeClass}`}>{badgeFor(item)}</span>}
             {isOpen ? (
               <ChevronDown size={16} strokeWidth={2} aria-hidden="true" className="ml-auto" />
             ) : (
@@ -709,11 +729,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         <Icon size={18} strokeWidth={2} aria-hidden="true" className={active ? 'text-white' : 'text-gray-500'} />
         <span>{label}</span>
-        {href === '/upload-order' && !!pendingOrders && (
-          <span className="ml-auto flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">
-            {pendingOrders}
-          </span>
-        )}
+        {badgeFor(item) > 0 && <span className={`ml-auto ${badgeClass}`}>{badgeFor(item)}</span>}
       </Link>
     );
   };
@@ -759,7 +775,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }}
     >
       <TourProvider enabledModules={enabledModules}>
-      <NotificationDrawer enabled={hasWorkshopRms || hasDelivery} remindersEnabled={hasWorkshopRms} />
+      <NotificationDrawer
+        enabled={hasWorkshopRms || hasDelivery}
+        remindersEnabled={hasWorkshopRms}
+        pendingDevices={pendingDevices}
+      />
 
       <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0">
         {/* Header */}
@@ -892,9 +912,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               {!activeTab && <span aria-hidden="true" className="absolute top-0 inset-x-4 h-0.5 rounded-b bg-blue-600" />}
               <span className="relative">
                 <Menu size={20} strokeWidth={!activeTab ? 2.25 : 2} aria-hidden="true" />
-                {pendingBadgeInMore && (
+                {moreBadge > 0 && (
                   <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center border-2 border-white">
-                    {pendingOrders}
+                    {moreBadge}
                   </span>
                 )}
               </span>

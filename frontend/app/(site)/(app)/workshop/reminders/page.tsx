@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Bell, Check, Clock, Trash2, Car } from 'lucide-react';
+import { Bell, Check, Clock, Trash2, Car, Wrench } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { toCalendarDateString, formatDMY } from '@/lib/dates';
@@ -98,6 +98,15 @@ export default function RemindersPage() {
     load();
   }, []);
 
+  // "Start job" turns a reminder into a work order — only when they're on.
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
+  useEffect(() => {
+    apiFetch('/work-orders/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((c) => setWorkOrdersEnabled(!!c?.enabled))
+      .catch(() => {});
+  }, []);
+
   async function complete(id: string) {
     setBusyId(id);
     try {
@@ -177,11 +186,23 @@ export default function RemindersPage() {
               </span>
             </div>
             <p className="text-sm text-gray-700 mt-1">{r.note}</p>
-            <p className="text-xs text-gray-400 mt-0.5">{r.vehicle.customer.name}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {r.vehicle.customer.name}
+              {r.sourceWorkOrder && ` · ${t('workshop.reminders.fromJob', { number: r.sourceWorkOrder.number })}`}
+            </p>
           </div>
 
           {r.status === 'PENDING' && (
             <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              {workOrdersEnabled && (
+                <button
+                  onClick={() => router.push(`/workshop/work-orders/new?vehicleId=${r.vehicle.id}&reminderId=${r.id}`)}
+                  title={t('workshop.reminders.startJob')}
+                  className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50 hover:border-blue-300 text-blue-700 transition-colors"
+                >
+                  <Wrench size={14} strokeWidth={2} />
+                </button>
+              )}
               <button data-tour="rem-complete"
                 onClick={() => complete(r.id)}
                 disabled={busyId === r.id}

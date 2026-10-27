@@ -17,8 +17,10 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { DevicesService } from '../auth/devices.service';
 
+// Office staff (USER) handle drivers' phones too — approving one is
+// day-to-day dispatch work, not account administration.
 @UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'USER')
 @Controller()
 export class DevicesController {
   constructor(private readonly devicesService: DevicesService) {}

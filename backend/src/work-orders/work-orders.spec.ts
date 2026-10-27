@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, WorkOrderStatus } from '@prisma/client';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +9,9 @@ import { ChartOfAccountsSeedService } from '../accounting/chart-of-accounts-seed
 import { InvoiceService } from '../invoice/invoice.service';
 import { WorkOrdersModule } from './work-orders.module';
 import { WorkOrdersService } from './work-orders.service';
+import { VehiclesModule } from '../vehicles/vehicles.module';
+import { VehiclesService } from '../vehicles/vehicles.service';
+import { heldWorkOrderItemsWhere } from '../stock/work-order-holds';
 
 // InvoiceService imports puppeteer (ESM-only) for PDF rendering.
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -32,7 +35,7 @@ describe('Workshop work orders', () => {
   const PRICE = 150_000;
 
   beforeAll(async () => {
-    module = await Test.createTestingModule({ imports: [PrismaModule, WorkOrdersModule] }).compile();
+    module = await Test.createTestingModule({ imports: [PrismaModule, WorkOrdersModule, VehiclesModule] }).compile();
     prisma = module.get(PrismaService);
     workOrders = module.get(WorkOrdersService);
     invoices = module.get(InvoiceService);
@@ -126,7 +129,11 @@ describe('Workshop work orders', () => {
     expect(Number(invoice.total)).toBe(4 * PRICE + 50_000);
     expect(invoice.items).toHaveLength(2);
 
-    expect((await workOrders.getOne(orgId, wo.id)).invoicedId).toBe(invoiceId);
+    const invoiced = await workOrders.getOne(orgId, wo.id);
+    expect(invoiced.invoicedId).toBe(invoiceId);
+    // Invoicing closes the job even if nobody moved it to Done.
+    expect(invoiced.status).toBe(WorkOrderStatus.DONE);
+    expect(invoiced.completedAt).not.toBeNull();
     await expect(workOrders.createInvoice(orgId, userId, wo.id)).rejects.toThrow('already been invoiced');
     await expect(workOrders.update(orgId, userId, wo.id, { notes: 'x' })).rejects.toThrow(BadRequestException);
 
@@ -166,6 +173,238 @@ describe('Workshop work orders', () => {
     const otherOrg = (await prisma.organization.create({ data: { name: `WO other ${randomUUID()}` } })).id;
     const stranger = (await prisma.employee.create({ data: { organizationId: otherOrg, name: 'X', baseSalary: 0 } })).id;
     await expect(workOrders.create(orgId, userId, { vehicleId, mechanicId: stranger })).rejects.toThrow('Mechanic');
+  });
+
+  it('prints the job with the workshop letterhead', async () => {
+    const wo = await newJob(59_000);
+    const view = await workOrders.printView(orgId, wo.id);
+    expect(view.workOrder.number).toBe(wo.number);
+    expect(view.workOrder.items).toHaveLength(2);
+    expect(view.business.name).toMatch(/^WO /);
+  });
+
+  it('finds a job by plate regardless of spacing', async () => {
+    const wo = await newJob(60_000);
+    const found = await workOrders.list(orgId, { q: 'b1234xy' });
+    expect(found.map((w) => w.id)).toContain(wo.id);
+  });
+
+  it('keeps a typed part price only with POS pricing on', async () => {
+    const line = { productId, locationId: rackId, quantity: 1, unitPrice: 99_000 };
+    const off = await workOrders.create(orgId, userId, { vehicleId, items: [line] });
+    expect(off.items[0].unitPrice).toBeNull();
+    expect(Number(off.estimatedTotal)).toBe(PRICE);
+
+    await prisma.organization.update({ where: { id: orgId }, data: { posPricingEnabled: true } });
+    try {
+      expect((await workOrders.config(orgId)).posPricingEnabled).toBe(true);
+      const on = await workOrders.create(orgId, userId, { vehicleId, items: [line] });
+      expect(Number(on.items[0].unitPrice)).toBe(99_000);
+      expect(Number(on.estimatedTotal)).toBe(99_000);
+    } finally {
+      await prisma.organization.update({ where: { id: orgId }, data: { posPricingEnabled: false } });
+    }
+  });
+
+  it('lets a non-admin invoice and re-save a job an admin priced', async () => {
+    await prisma.organization.update({
+      where: { id: orgId },
+      data: { posPricingEnabled: true, priceLevelOverrideRequiresAdmin: true },
+    });
+    try {
+      const wo = await workOrders.create(orgId, userId, {
+        vehicleId,
+        items: [{ productId, locationId: rackId, quantity: 1, unitPrice: 99_000 }],
+      });
+      const cashier = (
+        await prisma.user.create({
+          data: { email: `wo-c-${randomUUID()}@example.com`, password: 'x', role: 'USER', organizationId: orgId },
+        })
+      ).id;
+      const { invoiceId } = await workOrders.createInvoice(orgId, cashier, wo.id);
+      const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      expect(Number(invoice.total)).toBe(99_000);
+
+      // The editor re-sends the lines: the price already there is kept…
+      const line = { productId, locationId: rackId, quantity: 2, unitPrice: 99_000 };
+      const saved = await invoices.updateDraft(orgId, invoiceId, { items: [line] }, cashier);
+      expect(Number(saved.total)).toBe(198_000);
+      // …but a new custom price still needs an admin.
+      await expect(
+        invoices.updateDraft(orgId, invoiceId, { items: [{ ...line, unitPrice: 50_000 }] }, cashier),
+      ).rejects.toThrow(ForbiddenException);
+    } finally {
+      await prisma.organization.update({
+        where: { id: orgId },
+        data: { posPricingEnabled: false, priceLevelOverrideRequiresAdmin: false },
+      });
+    }
+  });
+
+  it('blocks deleting a vehicle with work orders, but not one with only reminders', async () => {
+    const vehicles = module.get(VehiclesService);
+    const booked = await prisma.vehicle.create({
+      data: { organizationId: orgId, customerId, plateNumber: 'B 8 Z', plateNormalized: 'B8Z', vehicleModel: 'Brio' },
+    });
+    await workOrders.create(orgId, userId, { vehicleId: booked.id });
+    await expect(vehicles.remove(orgId, booked.id)).rejects.toThrow('work order');
+
+    const spare = await prisma.vehicle.create({
+      data: { organizationId: orgId, customerId, plateNumber: 'B 9 Z', plateNormalized: 'B9Z', vehicleModel: 'Jazz' },
+    });
+    await prisma.vehicleReminder.create({
+      data: { organizationId: orgId, vehicleId: spare.id, note: 'Service', dueDate: new Date() },
+    });
+    await vehicles.remove(orgId, spare.id);
+    expect(await prisma.vehicle.findUnique({ where: { id: spare.id } })).toBeNull();
+  });
+
+  it('holds its parts: other sales can’t take them, its own invoice can, cancelling frees them', async () => {
+    const categoryId = (await prisma.category.create({ data: { name: `Brakes ${randomUUID()}`, organizationId: orgId } })).id;
+    const pads = (
+      await prisma.product.create({
+        data: { name: 'Brake pads', sku: `PAD-${randomUUID().slice(0, 8)}`, categoryId, organizationId: orgId, sellingPrice: 80_000 },
+      })
+    ).id;
+    await prisma.stock.create({ data: { productId: pads, locationId: rackId, organizationId: orgId, quantity: 3 } });
+    const onHand = async () =>
+      Number((await prisma.stock.findUniqueOrThrow({ where: { productId_locationId: { productId: pads, locationId: rackId } } })).quantity);
+    const sell = async (quantity: number) => {
+      const draft = await invoices.createDraft(orgId, userId, {
+        format: 'A4',
+        customerName: 'Walk-in',
+        items: [{ productId: pads, locationId: rackId, quantity }],
+      } as never);
+      await invoices.issue(orgId, draft.id, userId, 'ADMIN');
+      const item = await prisma.invoiceItem.findFirstOrThrow({ where: { invoiceId: draft.id } });
+      return Number(item.fulfilledQuantity);
+    };
+
+    // A job holds 2 of the 3: a walk-in sale gets only the free one (BLOCK).
+    const job = await workOrders.create(orgId, userId, {
+      vehicleId,
+      items: [{ productId: pads, locationId: rackId, quantity: 2 }],
+    });
+    expect(await sell(3)).toBe(1);
+    expect(await onHand()).toBe(2);
+
+    // The job's own invoice takes what it held; the hold ends once issued.
+    const { invoiceId } = await workOrders.createInvoice(orgId, userId, job.id);
+    await invoices.issue(orgId, invoiceId, userId, 'ADMIN');
+    expect(await onHand()).toBe(0);
+
+    // Cancelling a job releases its hold.
+    await prisma.stock.update({
+      where: { productId_locationId: { productId: pads, locationId: rackId } },
+      data: { quantity: 1 },
+    });
+    const other = await workOrders.create(orgId, userId, {
+      vehicleId,
+      items: [{ productId: pads, locationId: rackId, quantity: 1 }],
+    });
+    expect(await sell(1)).toBe(0);
+    await workOrders.setStatus(orgId, other.id, WorkOrderStatus.CANCELLED);
+    expect(await sell(1)).toBe(1);
+  });
+
+  it('waits as an estimate until approved: no hold, no invoice, no work', async () => {
+    const est = await workOrders.create(orgId, userId, {
+      vehicleId,
+      asEstimate: true,
+      items: [{ productId, locationId: rackId, quantity: 1 }],
+    });
+    expect(est.status).toBe(WorkOrderStatus.ESTIMATE);
+    expect(est.approvedAt).toBeNull();
+    const held = await prisma.workOrderItem.count({ where: { ...heldWorkOrderItemsWhere(orgId), workOrderId: est.id } });
+    expect(held).toBe(0);
+    await expect(workOrders.setStatus(orgId, est.id, WorkOrderStatus.IN_PROGRESS)).rejects.toThrow('approval');
+    await expect(workOrders.createInvoice(orgId, userId, est.id)).rejects.toThrow('approval');
+
+    // The printed estimate carries today's prices.
+    const print = await workOrders.printView(orgId, est.id);
+    expect(print.pricing?.lines[0].unitPrice).toBe(PRICE);
+    expect(print.pricing?.total).toBe(PRICE);
+
+    // Declined, then reopened: still an estimate.
+    await workOrders.setStatus(orgId, est.id, WorkOrderStatus.CANCELLED);
+    expect((await workOrders.setStatus(orgId, est.id, WorkOrderStatus.QUEUED)).status).toBe(WorkOrderStatus.ESTIMATE);
+
+    const approved = await workOrders.approve(orgId, userId, est.id, 'Signed SPK');
+    expect(approved.status).toBe(WorkOrderStatus.QUEUED);
+    expect(approved.approvedAt).not.toBeNull();
+    expect(approved.approvalNote).toBe('Signed SPK');
+    await expect(workOrders.approve(orgId, userId, est.id)).rejects.toThrow('Only an estimate');
+    await expect(workOrders.setStatus(orgId, est.id, WorkOrderStatus.ESTIMATE)).rejects.toThrow();
+  });
+
+  it('lets the customer approve an estimate through the link', async () => {
+    const est = await workOrders.create(orgId, userId, {
+      vehicleId,
+      asEstimate: true,
+      notes: 'internal: customer haggles',
+      items: [{ productId, locationId: rackId, quantity: 2 }],
+    });
+    const link = await workOrders.approvalLink(orgId, est.id);
+    expect(link.token.length).toBeGreaterThanOrEqual(32);
+    // Copying again gives the same link, so one already sent keeps working.
+    expect((await workOrders.approvalLink(orgId, est.id)).token).toBe(link.token);
+
+    const view = await workOrders.publicEstimate(link.token);
+    expect(view.total).toBe(2 * PRICE);
+    expect(JSON.stringify(view)).not.toContain('haggles');
+
+    // Changed after the customer opened it: their answer is refused.
+    await workOrders.update(orgId, userId, est.id, { items: [{ productId, locationId: rackId, quantity: 3 }] });
+    await expect(
+      workOrders.respondToEstimate(link.token, true, { name: 'Budi', version: view.version }),
+    ).rejects.toThrow(ConflictException);
+
+    const fresh = await workOrders.publicEstimate(link.token);
+    const answered = await workOrders.respondToEstimate(link.token, true, { name: 'Budi', version: fresh.version });
+    expect(answered.status).toBe(WorkOrderStatus.QUEUED);
+    const wo = await workOrders.getOne(orgId, est.id);
+    expect(wo.approvalNote).toBe('Approved online by Budi');
+    expect(wo.approvedById).toBeNull();
+    const note = await prisma.notification.findFirst({ where: { userId, type: 'WORK_ORDER_APPROVED' } });
+    expect(note?.link).toBe(`/workshop/work-orders/${est.id}`);
+
+    // Answered once only.
+    await expect(
+      workOrders.respondToEstimate(link.token, false, { name: 'Budi', version: fresh.version }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(workOrders.approvalLink(orgId, est.id)).rejects.toThrow('Only an estimate');
+  });
+
+  it('records a decline from the link, and refuses bad or expired links', async () => {
+    const est = await workOrders.create(orgId, userId, { vehicleId, asEstimate: true });
+    const { token } = await workOrders.approvalLink(orgId, est.id);
+    const view = await workOrders.publicEstimate(token);
+    await workOrders.respondToEstimate(token, false, { name: 'Budi', reason: 'Too expensive', version: view.version });
+    const wo = await workOrders.getOne(orgId, est.id);
+    expect(wo.status).toBe(WorkOrderStatus.CANCELLED);
+    expect(wo.approvalNote).toBe('Declined online by Budi: Too expensive');
+
+    await expect(workOrders.publicEstimate('nope')).rejects.toThrow(NotFoundException);
+    await prisma.workOrder.update({ where: { id: est.id }, data: { approvalTokenExpiresAt: new Date(Date.now() - 1000) } });
+    await expect(workOrders.publicEstimate(token)).rejects.toThrow(GoneException);
+  });
+
+  it('leaves recommended work as a reminder that can start the next job', async () => {
+    const wo = await newJob(62_000);
+    const withRec = await workOrders.addRecommendation(orgId, wo.id, {
+      note: 'Brake pads at 20% — replace',
+      dueDate: '2027-01-15',
+    });
+    expect(withRec.recommendations).toHaveLength(1);
+    const reminderId = withRec.recommendations[0].id;
+
+    const next = await workOrders.create(orgId, userId, { vehicleId, fromReminderId: reminderId });
+    expect(next.followedUp[0].sourceWorkOrder?.number).toBe(wo.number);
+    const reminder = await prisma.vehicleReminder.findUniqueOrThrow({ where: { id: reminderId } });
+    expect(reminder.status).toBe('COMPLETED');
+    expect(reminder.followUpWorkOrderId).toBe(next.id);
+    // A reminder starts one job only.
+    await expect(workOrders.create(orgId, userId, { vehicleId, fromReminderId: reminderId })).rejects.toThrow('not pending');
   });
 
   it('is unavailable while the org has work orders turned off', async () => {
