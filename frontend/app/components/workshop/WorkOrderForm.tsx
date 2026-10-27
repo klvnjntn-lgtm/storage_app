@@ -1,22 +1,41 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Car, Plus, Trash2, Wrench, Package } from 'lucide-react';
+import { Car, Plus, Trash2, Wrench, Package, Building2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { ProductPicker, useLocations } from '@/app/components/shared/ProductPicker';
 import { Card, inputCls } from '@/app/components/shared/PageFrame';
 import type { DraftLine, Mechanic } from './workOrders';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
+import { useBranches } from '@/lib/hooks/useBranches';
 
 export type WorkOrderFormValue = {
   mechanicId: string;
   odometer: string;
   complaint: string;
   notes: string;
+  // Multi-branch workshops: the branch doing the job ('' = default).
+  branchId: string;
+  // Formal-estimate details for fleet/company customers ('' = none).
+  validUntil: string;
+  customerPoNumber: string;
+  paymentTerms: string;
   lines: DraftLine[];
 };
 
-export const EMPTY_FORM: WorkOrderFormValue = { mechanicId: '', odometer: '', complaint: '', notes: '', lines: [] };
+export const EMPTY_FORM: WorkOrderFormValue = {
+  mechanicId: '',
+  odometer: '',
+  complaint: '',
+  notes: '',
+  branchId: '',
+  validUntil: '',
+  customerPoNumber: '',
+  paymentTerms: '',
+  lines: [],
+};
 
 let keySeq = 0;
 const newKey = () => `new-${++keySeq}`;
@@ -61,7 +80,13 @@ export default function WorkOrderForm({
   const { t } = useLanguage();
   const mechanics = useMechanics();
   const locations = useLocations();
+  // Only warehouse orgs pick where a part comes from; the rest use CENTRE.
+  const warehouseOps = useWarehouseOps();
+  const { branches, multiBranch } = useBranches();
   const posPricing = usePosPricing();
+  // Retail jobs rarely need these, so they stay folded away unless used.
+  const [showFormal, setShowFormal] = useState(false);
+  const formalOpen = showFormal || !!(value.validUntil || value.customerPoNumber || value.paymentTerms);
   const set = (patch: Partial<WorkOrderFormValue>) => onChange({ ...value, ...patch });
 
   function updateLine(key: string, patch: Partial<DraftLine>) {
@@ -92,6 +117,24 @@ export default function WorkOrderForm({
               <span className="text-xs text-gray-400 mt-1 block">{t('workshop.workOrders.noMechanics')}</span>
             )}
           </label>
+          {multiBranch && (
+            <label className="block">
+              <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.branch')}</span>
+              <select
+                className={`${inputCls} mt-1`}
+                value={value.branchId}
+                disabled={readOnly}
+                onChange={(e) => set({ branchId: e.target.value })}
+              >
+                <option value="">{t('workshop.workOrders.defaultBranch')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block">
             <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.odometer')}</span>
             <input
@@ -127,6 +170,59 @@ export default function WorkOrderForm({
             />
           </label>
         </div>
+
+        {formalOpen ? (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5 mb-2">
+              <Building2 size={13} />
+              {t('workshop.workOrders.formalDetails')}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="block">
+                <span className="text-xs text-gray-600">{t('workshop.workOrders.validUntil')}</span>
+                <input
+                  type="date"
+                  className={`${inputCls} mt-1`}
+                  value={value.validUntil}
+                  disabled={readOnly}
+                  onChange={(e) => set({ validUntil: e.target.value })}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-gray-600">{t('workshop.workOrders.customerPo')}</span>
+                <input
+                  className={`${inputCls} mt-1`}
+                  value={value.customerPoNumber}
+                  maxLength={100}
+                  disabled={readOnly}
+                  onChange={(e) => set({ customerPoNumber: e.target.value })}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-gray-600">{t('workshop.workOrders.paymentTerms')}</span>
+                <input
+                  className={`${inputCls} mt-1`}
+                  value={value.paymentTerms}
+                  maxLength={200}
+                  disabled={readOnly}
+                  placeholder={t('workshop.workOrders.paymentTermsPlaceholder')}
+                  onChange={(e) => set({ paymentTerms: e.target.value })}
+                />
+              </label>
+            </div>
+          </div>
+        ) : (
+          !readOnly && (
+            <button
+              type="button"
+              onClick={() => setShowFormal(true)}
+              className="mt-3 text-xs text-blue-700 hover:underline flex items-center gap-1.5"
+            >
+              <Building2 size={13} />
+              {t('workshop.workOrders.addFormalDetails')}
+            </button>
+          )
+        )}
       </Card>
 
       <Card title={t('workshop.workOrders.partsAndLabour')}>
@@ -142,20 +238,22 @@ export default function WorkOrderForm({
                       {l.name}
                       {l.sku && <span className="text-xs text-gray-500">{l.sku}</span>}
                     </p>
-                    <select
-                      className={`${inputCls} mt-1.5`}
-                      value={l.locationId}
-                      disabled={readOnly}
-                      aria-label={t('workshop.workOrders.location')}
-                      onChange={(e) => updateLine(l.key, { locationId: e.target.value })}
-                    >
-                      <option value="">{t('workshop.workOrders.pickLocation')}</option>
-                      {locations.map((loc) => (
-                        <option key={loc.id} value={loc.id}>
-                          {loc.name}
-                        </option>
-                      ))}
-                    </select>
+                    {warehouseOps && (
+                      <select
+                        className={`${inputCls} mt-1.5`}
+                        value={l.locationId}
+                        disabled={readOnly}
+                        aria-label={t('workshop.workOrders.location')}
+                        onChange={(e) => updateLine(l.key, { locationId: e.target.value })}
+                      >
+                        <option value="">{t('workshop.workOrders.pickLocation')}</option>
+                        {locations.map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </>
                 ) : (
                   <label className="block">
@@ -231,7 +329,11 @@ export default function WorkOrderForm({
                         productId: p.id,
                         name: p.name,
                         sku: p.sku,
-                        locationId: locations.length === 1 ? locations[0].id : '',
+                        locationId: warehouseOps
+                          ? locations.length === 1
+                            ? locations[0].id
+                            : ''
+                          : (defaultLocation(locations)?.id ?? ''),
                         quantity: 1,
                         unitPrice: null,
                       },
@@ -265,6 +367,10 @@ export function formToPayload(value: WorkOrderFormValue) {
     odometer: value.odometer === '' ? null : Number(value.odometer),
     complaint: value.complaint,
     notes: value.notes,
+    ...(value.branchId && { branchId: value.branchId }),
+    validUntil: value.validUntil || null,
+    customerPoNumber: value.customerPoNumber,
+    paymentTerms: value.paymentTerms,
   };
 }
 

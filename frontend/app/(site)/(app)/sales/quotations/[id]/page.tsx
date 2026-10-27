@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
 import { QuotationPrintView, toQuotationView } from '@/lib/mappers/quotation-mapper';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
@@ -34,6 +35,7 @@ export default function QuotationDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
 
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   // Flat print-shaped data for the paper preview — separate fetch from
@@ -199,8 +201,8 @@ export default function QuotationDetailPage() {
                 {quotation.quotationNumber ?? t('sales.quotationDetail.unissuedDraft')}
               </h1>
               <p className="text-xs text-gray-500">
-                {quotation.customer?.name ?? quotation.customerName ?? t('sales.quotationDetail.noCustomer')} ·{' '}
-                {quotation.location?.name ?? '—'}
+                {quotation.customer?.name ?? quotation.customerName ?? t('sales.quotationDetail.noCustomer')}
+                {warehouseOps && ` · ${quotation.location?.name ?? '—'}`}
               </p>
             </div>
 

@@ -31,13 +31,6 @@ export default function WorkshopHome() {
       gradient: 'from-sky-500 to-blue-700',
     },
     {
-      title: t('workshop.overview.lookupCardTitle'),
-      description: t('workshop.overview.lookupCardDescription'),
-      href: '/workshop/vehicles/search',
-      icon: Search,
-      gradient: 'from-blue-600 to-indigo-800',
-    },
-    {
       title: t('workshop.overview.partsCardTitle'),
       description: t('workshop.overview.partsCardDescription'),
       href: '/workshop/parts',
@@ -104,12 +97,12 @@ export default function WorkshopHome() {
 
   function goToLookup(plateOverride?: string) {
     const trimmed = (plateOverride ?? quickPlate).trim();
-    router.push(trimmed ? `/workshop/vehicles/search?q=${encodeURIComponent(trimmed)}` : '/workshop/vehicles/search');
+    router.push(trimmed ? `/workshop/vehicles?query=${encodeURIComponent(trimmed)}` : '/workshop/vehicles');
   }
 
   function selectResult(r: SearchResult) {
     setDropdownOpen(false);
-    goToLookup(r.plateNumber);
+    router.push(`/workshop/vehicles/${r.id}`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

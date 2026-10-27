@@ -178,6 +178,8 @@ export type InvoiceView = {
   businessLogoUrl: string | null;
   businessAddress: string | null;
   businessPhone: string | null;
+  // Multi-branch businesses: the branch that made the sale.
+  branchName?: string | null;
 
   bankName: string | null;
   bankAccountNumber: string | null;

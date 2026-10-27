@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Undo2, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { PurchaseOrderDetail } from './types';
 import { SerialButton, SerialPicker } from '@/app/components/shared/SerialPicker';
@@ -32,7 +34,10 @@ export function PurchaseReturnDialog({
   const [items, setItems] = useState<ReturnableItem[] | null>(null);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
-  const [locationId, setLocationId] = useState(po.locationId ?? '');
+  const [pickedLocationId, setLocationId] = useState(po.locationId ?? '');
+  // Only warehouse orgs choose a location; the rest always use CENTRE.
+  const warehouseOps = useWarehouseOps();
+  const locationId = warehouseOps ? pickedLocationId : (defaultLocation(locations)?.id ?? '');
   const [reason, setReason] = useState('');
   const [serials, setSerials] = useState<Record<string, string[]>>({});
   const [picking, setPicking] = useState<ReturnableItem | null>(null);
@@ -136,19 +141,23 @@ export function PurchaseReturnDialog({
       </div>
       <p className="text-xs text-gray-500 mb-3">{t('purchasing.returns.dialogDescription')}</p>
 
-      <label className="text-xs text-gray-500 mb-1 block">{t('purchasing.returns.fromLocation')}</label>
-      <select
-        value={locationId}
-        onChange={(e) => setLocationId(e.target.value)}
-        className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-3"
-      >
-        <option value="">—</option>
-        {locations.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.name}
-          </option>
-        ))}
-      </select>
+      {warehouseOps && (
+        <>
+          <label className="text-xs text-gray-500 mb-1 block">{t('purchasing.returns.fromLocation')}</label>
+          <select
+            value={pickedLocationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-3"
+          >
+            <option value="">—</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
       {items && items.length === 0 && <p className="text-sm text-gray-500 mb-3">{t('purchasing.returns.noneReturnable')}</p>}
       {items && items.length > 0 && (

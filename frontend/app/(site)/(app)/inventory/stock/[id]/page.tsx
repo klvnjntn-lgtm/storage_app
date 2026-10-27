@@ -403,14 +403,7 @@ const eventColor = (type: string) => {
                   ))}
                 </select>
               </div>
-            ) : (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.location')}</span>
-                <span className="border-2 border-gray-200 bg-gray-50 rounded-md p-2 w-44 text-gray-700 text-sm">
-                  {centreLocation?.name ?? 'CENTRE'}
-                </span>
-              </div>
-            )}
+            ) : null}
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.qtyInOut')}</label>
@@ -477,7 +470,15 @@ const eventColor = (type: string) => {
           </div>
         </section>
 
-        {/* STOCK BY LOCATION */}
+        {/* STOCK BY LOCATION — warehouse orgs; everyone else has only the
+            hidden CENTRE, so just the total. */}
+        {!hasWarehouseModule ? (
+          <p className="text-sm">
+            <span className="text-xs px-2 py-1 rounded-md bg-blue-600/10 text-blue-800 border border-blue-600/20">
+              {t('inventory.stockDetail.totalPcs', { total: totalStock })}
+            </span>
+          </p>
+        ) : (
         <section>
           <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
             {t('inventory.stockDetail.stockByLocation')}
@@ -508,6 +509,7 @@ const eventColor = (type: string) => {
             </table>
           </div>
         </section>
+        )}
 
         {/* COST HISTORY — admin only, like cost itself */}
         {isAdmin && (

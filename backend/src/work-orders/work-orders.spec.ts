@@ -389,6 +389,40 @@ describe('Workshop work orders', () => {
     await expect(workOrders.publicEstimate(token)).rejects.toThrow(GoneException);
   });
 
+  it('carries formal-estimate details to the invoice, and expires for the customer', async () => {
+    const est = await workOrders.create(orgId, userId, {
+      vehicleId,
+      asEstimate: true,
+      validUntil: '2020-01-31',
+      customerPoNumber: 'PO-FLEET-77',
+      paymentTerms: 'Net 30',
+      items: [{ description: 'Labour: service', quantity: 1, unitPrice: 100_000 }],
+    });
+    expect(est.customerPoNumber).toBe('PO-FLEET-77');
+
+    // Past its validity the customer can't approve through the link…
+    const { token } = await workOrders.approvalLink(orgId, est.id);
+    const view = await workOrders.publicEstimate(token);
+    expect(view.customerPoNumber).toBe('PO-FLEET-77');
+    await expect(
+      workOrders.respondToEstimate(token, true, { name: 'Fleet manager', version: view.version }),
+    ).rejects.toThrow('no longer valid');
+
+    // …staff can extend it, or approve it themselves.
+    await workOrders.update(orgId, userId, est.id, { validUntil: '2099-12-31' });
+    const fresh = await workOrders.publicEstimate(token);
+    await workOrders.respondToEstimate(token, true, { name: 'Fleet manager', version: fresh.version });
+
+    const { invoiceId } = await workOrders.createInvoice(orgId, userId, est.id);
+    const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    expect(invoice.customerPoNumber).toBe('PO-FLEET-77');
+    expect(invoice.paymentTerms).toBe('Net 30');
+
+    // Clearing a field with ''.
+    const other = await workOrders.create(orgId, userId, { vehicleId, asEstimate: true, paymentTerms: 'COD' });
+    expect((await workOrders.update(orgId, userId, other.id, { paymentTerms: '' })).paymentTerms).toBeNull();
+  });
+
   it('leaves recommended work as a reminder that can start the next job', async () => {
     const wo = await newJob(62_000);
     const withRec = await workOrders.addRecommendation(orgId, wo.id, {

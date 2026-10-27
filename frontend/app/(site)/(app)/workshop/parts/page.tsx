@@ -8,7 +8,7 @@ import { Wrench, Search, Car, Copy, Check, ShieldCheck, Users, CircleHelp, ListF
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartSearchLinks } from './PartMedia';
+import { FitmentBadge, PartSearchLinks } from './PartMedia';
 
 
 type Facets = { brands: { brand: string; models: string[] }[] };
@@ -19,7 +19,7 @@ type ItemSummary = {
   itemType: string;
   item: string;
   specs: Counted[];
-  oems: { number: string; normalized: string; sellers: number; genuine: boolean }[];
+  oems: { number: string; normalized: string; sellers: number; genuine: boolean; fitment: string }[];
   brands: Counted[];
   confidence: Confidence;
   sellers: number;
@@ -342,6 +342,7 @@ function PartsCatalogInner() {
                                 {t('workshop.partsEpc.genuine')}
                               </span>
                             )}
+                            <FitmentBadge fitment={mainOem.fitment} />
                             {i.oems.slice(1, 3).map((o) => (
                               <Link
                                 key={o.normalized}

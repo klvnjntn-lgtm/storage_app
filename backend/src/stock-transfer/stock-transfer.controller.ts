@@ -20,7 +20,9 @@ import {
   ReceiveStockTransferDto,
 } from './dto/stock-transfer.dto';
 
-@RequireModule(ModuleKey.WAREHOUSE_OPS, ModuleKey.INVOICE_POS)
+// Moving stock between locations: locations are a WAREHOUSE_OPS feature
+// (every other org has just its CENTRE).
+@RequireModule(ModuleKey.WAREHOUSE_OPS)
 @Controller('stock-transfers')
 export class StockTransferController {
   constructor(

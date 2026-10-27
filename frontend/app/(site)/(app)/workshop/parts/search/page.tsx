@@ -10,7 +10,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartSearchLinks } from '../PartMedia';
+import { FitmentBadge, PartSearchLinks } from '../PartMedia';
 
 
 type Facets = {
@@ -37,6 +37,7 @@ type PartRow = {
   spec: string;
   sellers: number;
   exampleUrl: string;
+  fitment: string;
   // equivalentVia: set when the product is stocked under an interchangeable OEM number, e.g.
   // "Sakura C-1109 (Oil Filter)" — fits the same way, but isn't necessarily the identical part.
   inStock: { productId: string; name: string; quantity: number; oem: string; equivalentVia: string | null }[];
@@ -462,6 +463,11 @@ function PartsCatalogPageInner() {
                           </span>
                         ) : (
                           <span className="text-gray-400">—</span>
+                        )}
+                        {r.oemNumber && (
+                          <div className="mt-1">
+                            <FitmentBadge fitment={r.fitment} />
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 align-top whitespace-nowrap">

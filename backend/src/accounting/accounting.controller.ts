@@ -283,20 +283,20 @@ export class AccountingController {
   async getTrialBalance(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
-    @Query('locationId') locationId?: string,
+    @Query('branchId') branchId?: string,
   ) {
     const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(await this.getOrgTimezone(organizationId));
-    return this.reports.getTrialBalance(organizationId, asOfDate, locationId); // 400s if locationId is set
+    return this.reports.getTrialBalance(organizationId, asOfDate, branchId); // 400s if branchId is set
   }
 
   @Get('reports/balance-sheet')
   async getBalanceSheet(
     @CurrentOrg() organizationId: string,
     @Query('asOf') asOf?: string,
-    @Query('locationId') locationId?: string,
+    @Query('branchId') branchId?: string,
   ) {
     const asOfDate = asOf ? parseDateOnly(asOf, 'asOf') : todayBusinessDate(await this.getOrgTimezone(organizationId));
-    return this.reports.getBalanceSheet(organizationId, asOfDate, locationId); // 400s if locationId is set
+    return this.reports.getBalanceSheet(organizationId, asOfDate, branchId); // 400s if branchId is set
   }
 
   @Get('reports/profit-loss')
@@ -304,7 +304,7 @@ export class AccountingController {
     @CurrentOrg() organizationId: string,
     @Query('from') from: string,
     @Query('to') to: string,
-    @Query('locationId') locationId?: string,
+    @Query('branchId') branchId?: string,
   ) {
     if (!from || !to) {
       throw new BadRequestException('from and to query params are required (YYYY-MM-DD)');
@@ -313,7 +313,7 @@ export class AccountingController {
     const toDate = parseDateOnly(to, 'to');
     if (fromDate > toDate) throw new BadRequestException('"from" must be on or before "to"');
 
-    return this.reports.getProfitAndLoss(organizationId, fromDate, toDate, locationId);
+    return this.reports.getProfitAndLoss(organizationId, fromDate, toDate, branchId);
   }
 
   @Get('reports/cash-flow')
@@ -399,7 +399,7 @@ export class AccountingController {
   // organization, so anything user-supplied has to be checked here.
   private async assertManualLinesBelongToOrg(
     organizationId: string,
-    lines: { accountId: string; locationId?: string }[],
+    lines: { accountId: string; locationId?: string; branchId?: string }[],
   ) {
     const accountIds = [...new Set(lines.map((l) => l.accountId))];
     const accounts = await this.prisma.chartOfAccount.count({
@@ -418,6 +418,16 @@ export class AccountingController {
       });
       if (locations !== locationIds.length) {
         throw new BadRequestException('One or more locations do not belong to this organization');
+      }
+    }
+
+    const branchIds = [...new Set(lines.map((l) => l.branchId).filter((x): x is string => !!x))];
+    if (branchIds.length > 0) {
+      const branches = await this.prisma.branch.count({
+        where: { id: { in: branchIds }, organizationId },
+      });
+      if (branches !== branchIds.length) {
+        throw new BadRequestException('One or more branches do not belong to this organization');
       }
     }
   }

@@ -13,6 +13,7 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { PurchaseOrderListItem, PurchaseOrderStatus } from '@/app/components/purchase-orders/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
@@ -65,6 +66,7 @@ const PAGE_SIZE_DEFAULT = 20;
 export default function PurchaseOrdersListPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
   const STATUS_OPTIONS = useStatusOptions(t);
   const statusLabel = useStatusLabel(t);
 
@@ -304,7 +306,7 @@ export default function PurchaseOrdersListPage() {
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {po.supplier?.name ?? '—'}
-                    {po.location?.name ? ` · ${po.location.name}` : ''} ·{' '}
+                    {warehouseOps && po.location?.name ? ` · ${po.location.name}` : ''} ·{' '}
                     {formatDMY(parseCalendarDate(po.createdAt))}
                   </p>
                 </div>

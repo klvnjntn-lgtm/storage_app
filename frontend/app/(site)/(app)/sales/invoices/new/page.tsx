@@ -33,6 +33,9 @@ import {
   NO_BANK_ACCOUNT,
   stockAtLineLocation,
 } from '@/lib/invoice-cart';
+import { defaultLocation } from '@/lib/locations';
+import { rememberBranchId, rememberedBranchId, useBranches } from '@/lib/hooks/useBranches';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import {
@@ -138,6 +141,16 @@ function NewInvoicePage() {
   // Employee (sales/cashier) picker. '' means unset — omitted from the
   // payload, so the invoice carries no employee.
   const [employeeId, setEmployeeId] = useState<string>('');
+  // Multi-branch businesses pick the selling branch; a till keeps its last.
+  const [branchId, setBranchIdState] = useState<string>(() => rememberedBranchId());
+  const setBranchId = (id: string) => {
+    setBranchIdState(id);
+    rememberBranchId(id);
+  };
+  // A remembered branch since archived (or from another business on this
+  // device) isn't sent — the backend picks the default instead.
+  const { branches } = useBranches();
+  const activeBranchId = branches.some((b) => b.id === branchId) ? branchId : '';
 
   // The current draft's id — a ref, not state, because it's read after
   // awaits where a state value would be stale — and the autosave request
@@ -151,6 +164,7 @@ function NewInvoicePage() {
   const loadedDraftIdRef = useRef<string | null | undefined>(undefined);
 
   const { locations, taxRates, bankAccounts, employees } = useInvoiceReferenceData();
+  const warehouseOps = useWarehouseOps();
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -190,7 +204,7 @@ function NewInvoicePage() {
     formatRef.current = format;
     printDataRef.current = printData;
     servicesRef.current = services;
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId, activeBranchId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -316,6 +330,7 @@ function NewInvoicePage() {
     // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
     setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
     setEmployeeId(draft.employeeId ?? '');
+    if (draft.branchId) setBranchIdState(draft.branchId);
 
     const restoredCart: Record<string, CartLine> = {};
     for (const item of draft.items) {
@@ -412,7 +427,15 @@ function NewInvoicePage() {
     },
   ): boolean {
     setError('');
-    const placed = cartOps.resolveCartTarget(cart, product, details.quantity, locationFilter, allowOversell);
+    // Without warehouse ops everything comes from CENTRE, unasked.
+    const placed = cartOps.resolveCartTarget(
+      cart,
+      product,
+      details.quantity,
+      warehouseOps ? locationFilter : (defaultLocation(locations) ?? null),
+      allowOversell,
+      { locationHidden: !warehouseOps },
+    );
     if (!placed.ok) {
       setError(t(placed.error, placed.vars));
       return false;
@@ -512,6 +535,7 @@ function NewInvoicePage() {
       hasWorkshopRms,
       bankAccountId,
       employeeId,
+      branchId: activeBranchId,
     });
 
   function adoptDraftId(id: string) {
@@ -598,7 +622,7 @@ function NewInvoicePage() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId, activeBranchId]);
 
   useEffect(() => {
     return () => {
@@ -771,8 +795,11 @@ function NewInvoicePage() {
         businessLegalName: issued.businessLegalName,
         businessNpwp: issued.businessNpwp,
         businessLogoUrl: issued.businessLogoUrl,
-        businessAddress: issued.locationAddress ?? null,
-        businessPhone: issued.locationPhone ?? null,
+        // The selling branch's address/phone when it has its own (the
+        // backend picks), else the business's.
+        businessAddress: issued.businessAddress ?? null,
+        businessPhone: issued.businessPhone ?? null,
+        branchName: issued.branchName ?? null,
         bankName: issued.bankName,
         bankAccountNumber: issued.bankAccountNumber,
         bankAccountName: issued.bankAccountName,
@@ -891,7 +918,8 @@ function NewInvoicePage() {
             <div>
               <p className="font-semibold">{t('sales.invoicesNew.invoicePrintedTitle', { number: printData.invoiceNumber ?? '' })}</p>
               <p className="text-sm">
-                {formatIDR(printData.total)} · {printData.locationName}
+                {formatIDR(printData.total)}
+                {warehouseOps && ` · ${printData.locationName}`}
               </p>
             </div>
 
@@ -1004,6 +1032,8 @@ function NewInvoicePage() {
             employees={employees}
             employeeId={employeeId}
             onChangeEmployeeId={setEmployeeId}
+            branchId={branchId}
+            onChangeBranchId={setBranchId}
           />
         </div>
       </div>

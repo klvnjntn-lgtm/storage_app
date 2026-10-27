@@ -1,7 +1,7 @@
 'use client';
 
 import { formatIDR } from '@/lib/format';
-import { formatDMY } from '@/lib/dates';
+import { formatDMY, parseCalendarDate } from '@/lib/dates';
 import { resolveUploadUrl } from '@/lib/assets';
 import { useLanguage } from '@/app/context/LanguageContext';
 import type { WorkOrder } from './workOrders';
@@ -17,7 +17,14 @@ export type SpkPrintView = {
     taxAmount: number;
     total: number;
   } | null;
-  business: { name: string; address: string | null; phone: string | null; logoUrl: string | null };
+  business: {
+    name: string;
+    legalName: string | null;
+    npwp: string | null;
+    address: string | null;
+    phone: string | null;
+    logoUrl: string | null;
+  };
 };
 
 // The printed job card. An approved job prints as the SPK (Surat Perintah
@@ -32,10 +39,17 @@ export function SpkA4Template({ view }: { view: SpkPrintView }) {
   const s = (key: string) => t(`workshop.workOrders.spk.${key}`);
 
   const details: [string, string | null][] = [
-    [s('customer'), [wo.customer.name, wo.customer.phone].filter(Boolean).join(' · ')],
+    [s('customer'), [wo.customer.name, wo.customer.companyName, wo.customer.phone].filter(Boolean).join(' · ')],
+    // Company customers: what their finance team files the estimate under.
+    ...(wo.customer.npwp ? [[s('customerNpwp'), wo.customer.npwp] as [string, string]] : []),
+    ...(wo.customer.address && (wo.customer.companyName || wo.customer.npwp)
+      ? [[s('address'), wo.customer.address] as [string, string]]
+      : []),
     [s('vehicle'), `${wo.vehicle.plateNumber} · ${wo.vehicle.vehicleModel}`],
     [s('odometer'), wo.odometer != null ? `${wo.odometer.toLocaleString('id-ID')} km` : null],
     [s('mechanic'), wo.mechanic?.name ?? null],
+    ...(wo.customerPoNumber ? [[s('customerPo'), wo.customerPoNumber] as [string, string]] : []),
+    ...(wo.paymentTerms ? [[s('paymentTerms'), wo.paymentTerms] as [string, string]] : []),
   ];
 
   return (
@@ -48,8 +62,12 @@ export function SpkA4Template({ view }: { view: SpkPrintView }) {
           )}
           <div>
             <h2 className="text-2xl font-bold leading-tight">{business.name}</h2>
+            {business.legalName && business.legalName !== business.name && (
+              <p className="text-xs text-gray-600">{business.legalName}</p>
+            )}
             {business.address && <p className="text-xs text-gray-600">{business.address}</p>}
             {business.phone && <p className="text-xs text-gray-600">{business.phone}</p>}
+            {business.npwp && <p className="text-xs text-gray-600">NPWP: {business.npwp}</p>}
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -60,6 +78,11 @@ export function SpkA4Template({ view }: { view: SpkPrintView }) {
           <p className="text-gray-600">
             {s('date')} {formatDMY(new Date(wo.createdAt))}
           </p>
+          {isEstimate && wo.validUntil && (
+            <p className="text-gray-600">
+              {s('validUntil')} {formatDMY(parseCalendarDate(wo.validUntil))}
+            </p>
+          )}
         </div>
       </div>
 

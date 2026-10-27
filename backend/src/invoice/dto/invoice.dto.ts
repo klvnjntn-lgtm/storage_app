@@ -130,6 +130,13 @@ export class CreateDraftInvoiceDto {
   @IsNotEmpty()
   locationId?: string;
 
+  // The branch making the sale (multi-branch businesses). Left out: the
+  // stock location's branch, else the business's first.
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  branchId?: string;
+
   @IsOptional()
   @IsDateString()
   dueDate?: string;
@@ -188,6 +195,11 @@ employeeId?: string;
 }
 
 export class UpdateDraftInvoiceDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  branchId?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -20,6 +21,8 @@ type FixedAsset = {
   category: string | null;
   locationId: string | null;
   location?: { name: string } | null;
+  branchId?: string | null;
+  branch?: { name: string } | null;
   acquisitionDate: string;
   cost: number;
   salvageValue: number;
@@ -32,7 +35,6 @@ type FixedAsset = {
   disposalProceeds: number | null;
 };
 
-type Location = { id: string; name: string };
 type BankAccount = { id: string; bankName: string; accountNumber: string; accountName: string; archivedAt: string | null };
 
 function formatIDR(amount: number): string {
@@ -55,7 +57,9 @@ const STATUS_META: Record<FixedAsset['status'], { labelKey: string; color: strin
 export default function FixedAssetsPage() {
   const dialog = useDialog();
   const { t, language } = useLanguage();
-  const [locations, setLocations] = useState<Location[] | null>(null);
+  // Assets are booked to a branch (P&L by branch); asked only of
+  // multi-branch businesses.
+  const { branches, multiBranch } = useBranches();
   const [bankAccounts, setBankAccounts] = useState<BankAccount[] | null>(null);
 
   const [assets, setAssets] = useState<{ data: FixedAsset[]; total: number; page: number; pageSize: number } | null>(null);
@@ -76,7 +80,7 @@ export default function FixedAssetsPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
-    name: '', category: '', locationId: '', acquisitionDate: todayISO(),
+    name: '', category: '', branchId: '', acquisitionDate: todayISO(),
     cost: '', salvageValue: '0', usefulLifeMonths: '36',
   });
   const [saving, setSaving] = useState(false);
@@ -96,11 +100,6 @@ export default function FixedAssetsPage() {
 
   const [runningDep, setRunningDep] = useState(false);
   const [depMessage, setDepMessage] = useState<string | null>(null);
-
-  async function loadLocations() {
-    const res = await apiFetch('/locations');
-    if (res.ok) setLocations(await res.json());
-  }
 
   async function loadBankAccounts() {
     if (bankAccounts !== null) return; // fetch once, lazily
@@ -133,7 +132,6 @@ export default function FixedAssetsPage() {
   }
 
   useEffect(() => {
-    loadLocations();
   }, []);
 
   // FIX — see ledger/page.tsx's identical fix: merges what were two
@@ -185,7 +183,7 @@ export default function FixedAssetsPage() {
         body: JSON.stringify({
           name: form.name.trim(),
           category: form.category.trim() || undefined,
-          locationId: form.locationId || undefined,
+          branchId: form.branchId || undefined,
           acquisitionDate: form.acquisitionDate,
           cost,
           salvageValue,
@@ -197,7 +195,7 @@ export default function FixedAssetsPage() {
         setFormError(body?.message ?? t('accounting.fixedAssets.requestFailed', { status: res.status }));
         return;
       }
-      setForm({ name: '', category: '', locationId: '', acquisitionDate: todayISO(), cost: '', salvageValue: '0', usefulLifeMonths: '36' });
+      setForm({ name: '', category: '', branchId: '', acquisitionDate: todayISO(), cost: '', salvageValue: '0', usefulLifeMonths: '36' });
       setShowAdd(false);
       setPage(1);
       await loadAssets();
@@ -454,19 +452,21 @@ export default function FixedAssetsPage() {
                 />
               </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.locationOptional')}</label>
-              <select
-                value={form.locationId}
-                onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))}
-                className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
-              >
-                <option value="">{t('accounting.fixedAssets.unassigned')}</option>
-                {(locations ?? []).map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-            </div>
+            {multiBranch && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.branchOptional')}</label>
+                <select
+                  value={form.branchId}
+                  onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+                  className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                >
+                  <option value="">{t('accounting.expenses.wholeBusiness')}</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
@@ -557,7 +557,7 @@ export default function FixedAssetsPage() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 truncate mt-0.5">
-                          {[asset.category, asset.location?.name].filter(Boolean).join(' · ') || '—'}
+                          {[asset.category, multiBranch ? asset.branch?.name : null].filter(Boolean).join(' · ') || '—'}
                         </p>
                         <p className="text-[11px] text-gray-400 mt-0.5">
                           {t('accounting.fixedAssets.acquiredOn', { date: new Date(asset.acquisitionDate).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }) })}

@@ -1,4 +1,4 @@
-// Shared bits for the parts catalogue pages: the "search elsewhere" links.
+// Shared bits for the parts catalogue pages: the "search elsewhere" links and the fitment badge.
 'use client';
 
 import { Search, Image as ImageIcon } from 'lucide-react';
@@ -20,6 +20,29 @@ export function PartSearchLinks({ query, compact = false }: { query: string; com
         <ImageIcon size={12} />
         {!compact && 'Google'}
       </a>
+    </span>
+  );
+}
+
+// How we know a number fits the car: the car maker lists it, a maker of the same group (Toyota/Daihatsu)
+// uses it, or only sellers say it fits. Parts often fit other cars, so seller claims stay, labelled.
+const FITMENT_STYLE: Record<string, string> = {
+  maker: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  group: 'bg-sky-50 text-sky-700 border-sky-200',
+  seller: 'bg-gray-50 text-gray-500 border-gray-200',
+};
+
+export function FitmentBadge({ fitment }: { fitment?: string }) {
+  const { t } = useLanguage();
+  if (!fitment || !FITMENT_STYLE[fitment]) return null;
+  const key = fitment === 'maker' ? 'Maker' : fitment === 'group' ? 'Group' : 'Seller';
+  return (
+    <span
+      className={`inline-block whitespace-nowrap rounded border px-1.5 text-[11px] font-medium ${FITMENT_STYLE[fitment]}`}
+      title={t(`workshop.partsCatalog.fitment${key}Hint`)}
+    >
+      {fitment === 'maker' && '✓ '}
+      {t(`workshop.partsCatalog.fitment${key}`)}
     </span>
   );
 }

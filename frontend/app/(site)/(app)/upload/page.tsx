@@ -8,6 +8,7 @@ import { UploadCloud, Download, AlertCircle, CheckCircle2, Trash2 } from 'lucide
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import React from 'react'
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -112,6 +113,7 @@ export default function ImportPage() {
   const { profile } = useAuth();
     const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
   const router = useRouter();
 
   function rowErrorMessage(r: Row): string | null {
@@ -144,7 +146,7 @@ export default function ImportPage() {
   const [mode, setMode] = useState<ImportMode | null>(null);
 
   const invalidCount = rows.filter((r) => !isRowValid(r, mode)).length;
-  const blankLocationCount = rows.filter((r) => !r.location?.toString().trim()).length;
+  const blankLocationCount = warehouseOps ? rows.filter((r) => !r.location?.toString().trim()).length : 0;
   const canImport = rows.length > 0 && invalidCount === 0 && !columnError && !loading && mode !== null;
 
   function handleDownloadTemplate() {
@@ -154,7 +156,7 @@ export default function ImportPage() {
         name: 'Ball Joint',
         category: 'BJ',
         brand: 'Toyota',
-        location: 'Rack A1',
+        ...(warehouseOps && { location: 'Rack A1' }),
         qty: 5,
         sellingPrice: 150000,
         costPrice: 100000,
@@ -205,8 +207,10 @@ export default function ImportPage() {
 
       const headers = Object.keys(json[0]);
 
+      // The location column is for warehouse orgs; the rest import into
+      // CENTRE and needn't have one.
       const missing = REQUIRED_COLUMNS.filter(
-        (c) => !headers.includes(c)
+        (c) => (c !== 'location' || warehouseOps) && !headers.includes(c)
       );
 
       if (missing.length) {
@@ -284,7 +288,7 @@ export default function ImportPage() {
     try {
       const payload = rows.map((r) => ({
         ...r,
-        location: r.location?.toString().trim() || 'Unassigned',
+        location: warehouseOps ? r.location?.toString().trim() || 'Unassigned' : '',
       }));
 
       const res = await apiFetch(`/stock/import`, {
@@ -674,15 +678,17 @@ export default function ImportPage() {
                       </div>
                     </div>
 
-                    <div className="mb-2">
-                      <label className="text-[10px] font-semibold text-gray-500">{t('admin.database.entities.location.label')}</label>
-                      <input
-                        value={r.location}
-                        onChange={(e) => updateRow(i, 'location', e.target.value)}
-                        placeholder={t('upload.uploadPage.unassigned')}
-                        className={`${fieldClass} ${blankLocation ? 'text-gray-400 italic' : ''}`}
-                      />
-                    </div>
+                    {warehouseOps && (
+                      <div className="mb-2">
+                        <label className="text-[10px] font-semibold text-gray-500">{t('admin.database.entities.location.label')}</label>
+                        <input
+                          value={r.location}
+                          onChange={(e) => updateRow(i, 'location', e.target.value)}
+                          placeholder={t('upload.uploadPage.unassigned')}
+                          className={`${fieldClass} ${blankLocation ? 'text-gray-400 italic' : ''}`}
+                        />
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-3 gap-2">
                       <div>
@@ -736,7 +742,9 @@ export default function ImportPage() {
                     <th className="text-left px-3 py-2 font-semibold">{t('common.name')}</th>
                     <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.category.label')}</th>
                     <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.brand.label')}</th>
-                    <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.location.label')}</th>
+                    {warehouseOps && (
+                      <th className="text-left px-3 py-2 font-semibold">{t('admin.database.entities.location.label')}</th>
+                    )}
                     <th className="text-left px-3 py-2 font-semibold">{t('common.quantity')}</th>
                     <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadPage.sellPrice')}</th>
                     <th className="text-left px-3 py-2 font-semibold">{t('upload.uploadPage.costPrice')}</th>
@@ -791,18 +799,20 @@ export default function ImportPage() {
                               className="w-full bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none text-gray-600"
                             />
                           </td>
-                          <td className="px-1 py-1">
-                            <input
-                              value={r.location}
-                              onChange={(e) => updateRow(i, 'location', e.target.value)}
-                              placeholder={t('upload.uploadPage.unassigned')}
-                              className={`w-full bg-transparent border rounded px-2 py-1 text-sm outline-none ${
-                                blankLocation
-                                  ? 'border-blue-500/20 text-gray-400 italic'
-                                  : 'border-transparent focus:border-blue-500/40 focus:bg-white'
-                              }`}
-                            />
-                          </td>
+                          {warehouseOps && (
+                            <td className="px-1 py-1">
+                              <input
+                                value={r.location}
+                                onChange={(e) => updateRow(i, 'location', e.target.value)}
+                                placeholder={t('upload.uploadPage.unassigned')}
+                                className={`w-full bg-transparent border rounded px-2 py-1 text-sm outline-none ${
+                                  blankLocation
+                                    ? 'border-blue-500/20 text-gray-400 italic'
+                                    : 'border-transparent focus:border-blue-500/40 focus:bg-white'
+                                }`}
+                              />
+                            </td>
+                          )}
                           <td className="px-1 py-1">
                             <input
                               type="number"
@@ -841,7 +851,7 @@ export default function ImportPage() {
                         </tr>
                         {rowError && (
                           <tr className="bg-red-50">
-                            <td colSpan={9} className="px-3 pb-2 -mt-1 text-xs text-red-700">
+                            <td colSpan={warehouseOps ? 9 : 8} className="px-3 pb-2 -mt-1 text-xs text-red-700">
                               {rowError}
                             </td>
                           </tr>

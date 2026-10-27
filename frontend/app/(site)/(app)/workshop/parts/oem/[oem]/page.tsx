@@ -8,7 +8,7 @@ import { display } from '@/lib/fonts';
 import { Hash, ArrowLeft, Copy, Check, ShieldCheck, Users, CircleHelp } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { PartSearchLinks } from '../../PartMedia';
+import { FitmentBadge, PartSearchLinks } from '../../PartMedia';
 
 
 type Confidence = 'verified' | 'confirmed' | 'unverified';
@@ -18,7 +18,7 @@ type PartNumber = {
   itemTypes: string[];
   genuine: boolean;
   brands: string[];
-  cars: { carBrand: string; model: string; generation: string; yearFrom: number | null; yearTo: number | null; confidence: Confidence; sellers: number }[];
+  cars: { carBrand: string; model: string; generation: string; yearFrom: number | null; yearTo: number | null; confidence: Confidence; sellers: number; fitment: string }[];
   equivalents: { number: string; via: string }[];
   inStock: { productId: string; name: string; quantity: number; oem: string; equivalentVia: string | null }[];
 };
@@ -179,7 +179,8 @@ export default function PartNumberPage() {
                           <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
                             {c.yearFrom ? `${c.yearFrom}–${c.yearTo ?? t('workshop.partsEpc.present')}` : '—'}
                           </td>
-                          <td className="px-4 py-2.5 text-right">
+                          <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                            <FitmentBadge fitment={c.fitment} />{' '}
                             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${conf.cls}`}>
                               <ConfIcon size={12} />
                               {t(`workshop.partsEpc.confidence.${c.confidence}`)}

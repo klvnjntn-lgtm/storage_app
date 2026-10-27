@@ -19,6 +19,7 @@ import { PaymentsModule } from './payment.module';
 import { PaymentService } from './payment.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { AccountingReportsService } from '../accounting/accounting-reports.service';
+import { endOfBusinessDay, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 import { ChartOfAccountsSeedService } from '../accounting/chart-of-accounts-seed.service';
 
 // InvoiceService imports puppeteer (ESM-only) for PDF rendering.
@@ -201,7 +202,10 @@ describe('Refunds and customer credit', () => {
 
   it('keeps AR aging reconciled while customers hold credit', async () => {
     await invoiceWithCredit(await customer());
-    const aging = await reports.getARAging(orgId, new Date());
+    // As the endpoint does: the end of today in the business's timezone —
+    // a bare now() misses today's entries before 07:00 WIB.
+    const tz = resolveTimezone(await prisma.organization.findUnique({ where: { id: orgId } }));
+    const aging = await reports.getARAging(orgId, endOfBusinessDay(todayBusinessDate(tz), tz));
     expect(aging.customerCredits).toBeGreaterThan(0);
     expect(aging.reconciliation.matches).toBe(true);
   });

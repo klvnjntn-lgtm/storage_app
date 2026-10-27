@@ -36,12 +36,12 @@ export type ProfitAndLossReport = {
   totalOperatingExpenses: number;
   netProfit: number;
   netMargin: number; // percent
-  // Only present when locationId was passed. Revenue/expense lines that
-  // carry no locationId at all (payroll always, plus any expense entered
-  // without picking a location) can't be attributed to the filtered
-  // location, so they're never counted in the totals above — but they're
-  // surfaced here rather than silently dropped, so a per-location P&L
-  // doesn't read as "these costs don't exist."
+  // Only present when branchId was passed. Revenue/expense lines that
+  // carry no branch at all (payroll always, plus any expense entered
+  // without picking a branch) can't be attributed to the filtered branch,
+  // so they're never counted in the totals above — but they're surfaced
+  // here rather than silently dropped, so a per-branch P&L doesn't read as
+  // "these costs don't exist."
   unallocated?: {
     revenue: ProfitAndLossLine[];
     operatingExpenses: ProfitAndLossLine[];
@@ -208,10 +208,10 @@ export class AccountingReportsService {
   // carry no locationId, so a location-filtered trial balance can never
   // balance. Reject the filter rather than return wrong numbers.
   // ---------------------------------------------------------------------
-  async getTrialBalance(organizationId: string, asOf: Date, locationId?: string): Promise<TrialBalanceReport> {
-    if (locationId) {
+  async getTrialBalance(organizationId: string, asOf: Date, branchId?: string): Promise<TrialBalanceReport> {
+    if (branchId) {
       throw new BadRequestException(
-        'Trial Balance is organization-wide and cannot be filtered by location. Use the Profit & Loss report for per-location results.',
+        'Trial Balance is organization-wide and cannot be filtered by branch. Use the Profit & Loss report for per-branch results.',
       );
     }
 
@@ -384,10 +384,10 @@ export class AccountingReportsService {
   // ---------------------------------------------------------------------
   // Balance Sheet — organization-wide only, same reason as Trial Balance.
   // ---------------------------------------------------------------------
-  async getBalanceSheet(organizationId: string, asOf: Date, locationId?: string): Promise<BalanceSheetReport> {
-    if (locationId) {
+  async getBalanceSheet(organizationId: string, asOf: Date, branchId?: string): Promise<BalanceSheetReport> {
+    if (branchId) {
       throw new BadRequestException(
-        'Balance Sheet is organization-wide and cannot be filtered by location. Use the Profit & Loss report for per-location results.',
+        'Balance Sheet is organization-wide and cannot be filtered by branch. Use the Profit & Loss report for per-branch results.',
       );
     }
 
@@ -830,18 +830,19 @@ async getARAging(
   }
 
   // ---------------------------------------------------------------------
-  // Profit & Loss — the only report with a location filter. Only lines
-  // whose locationId was set at posting time (revenue, COGS, inventory
-  // adjustments, location-tagged expenses) count toward the filtered
-  // totals; anything with no locationId (payroll always, plus any expense
-  // entered without a location) is broken out separately under
-  // `unallocated` rather than silently excluded — see ProfitAndLossReport.
+  // Profit & Loss — the only report with a branch filter. Only lines
+  // whose branchId was set at posting time (revenue and COGS from the
+  // invoice's branch, stock postings from their location's branch,
+  // branch-tagged expenses) count toward the filtered totals; anything with
+  // no branch (payroll always, plus any expense entered without one) is
+  // broken out separately under `unallocated` rather than silently
+  // excluded — see ProfitAndLossReport.
   // ---------------------------------------------------------------------
   async getProfitAndLoss(
     organizationId: string,
     from: Date,
     to: Date,
-    locationId?: string,
+    branchId?: string,
   ): Promise<ProfitAndLossReport> {
     const lines = await this.prisma.journalEntryLine.findMany({
       where: {
@@ -855,17 +856,17 @@ async getARAging(
       select: {
         debit: true,
         credit: true,
-        locationId: true,
+        branchId: true,
         account: { select: { id: true, code: true, name: true, type: true, systemKey: true } },
       },
     });
 
-    const scoped = locationId ? lines.filter((l) => l.locationId === locationId) : lines;
+    const scoped = branchId ? lines.filter((l) => l.branchId === branchId) : lines;
     const main = this.summarizePnlLines(scoped);
 
-    const unallocated = locationId
+    const unallocated = branchId
       ? (() => {
-          const u = this.summarizePnlLines(lines.filter((l) => l.locationId == null));
+          const u = this.summarizePnlLines(lines.filter((l) => l.branchId == null));
           return {
             revenue: u.revenue,
             operatingExpenses: u.operatingExpenses,

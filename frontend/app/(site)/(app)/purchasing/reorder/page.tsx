@@ -9,6 +9,8 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, useLocations, useSuppliers, type PickedProduct } from '@/app/components/shared/ProductPicker';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
 
 type Line = {
   productId: string;
@@ -33,6 +35,7 @@ export default function ReorderPage() {
   const isAdmin = user?.role === 'ADMIN';
   const suppliers = useSuppliers();
   const locations = useLocations();
+  const warehouseOps = useWarehouseOps();
 
   const [showAll, setShowAll] = useState(false);
   const [rows, setRows] = useState<Line[] | null>(null);
@@ -87,7 +90,11 @@ export default function ReorderPage() {
     setBusy(true);
     const res = await apiFetch('/reorder/purchase-orders', {
       method: 'POST',
-      body: JSON.stringify({ locationId: locationId || undefined, items }),
+      // Without warehouse ops the POs go to CENTRE, unasked.
+      body: JSON.stringify({
+        locationId: (warehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
+        items,
+      }),
     });
     const body = await res.json().catch(() => null);
     setBusy(false);
@@ -174,14 +181,16 @@ export default function ReorderPage() {
           {t('reorder.showAll')}
         </label>
         <div className="flex items-center gap-2">
-          <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className={`${inputCls} w-auto`} aria-label={t('reorder.deliverTo')}>
-            <option value="">{t('reorder.deliverTo')}</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
+          {warehouseOps && (
+            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className={`${inputCls} w-auto`} aria-label={t('reorder.deliverTo')}>
+              <option value="">{t('reorder.deliverTo')}</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button className={btnPrimary} disabled={busy || selected.length === 0} onClick={createPos}>
             <ShoppingCart size={14} /> {t('reorder.createPos', { n: selected.length })}
           </button>

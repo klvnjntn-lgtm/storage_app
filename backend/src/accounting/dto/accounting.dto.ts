@@ -81,6 +81,11 @@ class ManualJournalLineDto {
   @IsOptional()
   @IsString()
   locationId?: string;
+
+  // The branch the line counts toward in the P&L by branch.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 export class CreateManualJournalEntryDto {

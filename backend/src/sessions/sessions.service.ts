@@ -1137,6 +1137,10 @@ if (session.type === SessionType.FULFILLMENT) {
         date: new Date(),
         memo: `COGS for pick session ${sessionId}`,
         lines: [{ productId, quantity: qty, unitCost: pickCost, locationId: fromLocationId ?? null }],
+        // Booked where the invoice's sale was, like its revenue.
+        branchId: session.invoiceId
+          ? (await tx.invoice.findUnique({ where: { id: session.invoiceId }, select: { branchId: true } }))?.branchId
+          : undefined,
       },
       tx,
     );

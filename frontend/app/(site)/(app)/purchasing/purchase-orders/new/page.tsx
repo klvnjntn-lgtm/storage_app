@@ -10,6 +10,7 @@ import { formatIDR } from '@/lib/format';
 import { POProductSearch } from '@/app/components/purchase-orders/POProductSearch';
 import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker';
 import { Supplier } from '@/app/components/suppliers/types';
+import { defaultLocation } from '@/lib/locations';
 import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from '@/app/components/purchase-orders/types';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -239,7 +240,7 @@ function PurchaseOrderFormPageInner() {
       throw new Error(t('purchasing.purchaseOrderNew.newProductValidation'));
     }
     return {
-      locationId: locationId || undefined,
+      locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
       discountAmount: clampedDiscount,
       taxRateId: taxRateId || undefined,
@@ -270,7 +271,7 @@ function PurchaseOrderFormPageInner() {
       (l) => l.name.trim() && l.sku.trim() && l.category.trim(),
     );
     return {
-      locationId: locationId || undefined,
+      locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
       discountAmount: clampedDiscount,
       taxRateId: taxRateId || undefined,

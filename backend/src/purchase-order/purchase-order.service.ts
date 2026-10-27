@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { warehouseOpsActiveInclude } from '../organization-module/warehouse-ops-active';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
@@ -526,7 +527,16 @@ export class PurchaseOrderService {
     const po = await this.prisma.purchaseOrder.findFirst({
       where: { id, organizationId },
       include: {
-        organization: { select: { name: true, legalName: true, address: true, phone: true, logoUrl: true } },
+        organization: {
+          select: {
+            name: true,
+            legalName: true,
+            address: true,
+            phone: true,
+            logoUrl: true,
+            modules: warehouseOpsActiveInclude(),
+          },
+        },
         location: { select: { name: true, address: true } },
         supplier: { select: { name: true, address: true, phone: true, npwp: true } },
         taxRate: { select: { name: true, percentage: true } },
@@ -549,8 +559,10 @@ export class PurchaseOrderService {
       businessPhone: po.organization.phone,
       businessLogoUrl: po.organization.logoUrl,
 
-      locationName: po.location?.name ?? '',
-      locationAddress: po.location?.address ?? null,
+      // Deliver-to: the location for warehouse orgs; everyone else's stock
+      // sits on a CENTRE they never see, so it's the business itself.
+      locationName: po.organization.modules?.length ? (po.location?.name ?? '') : po.organization.name,
+      locationAddress: po.organization.modules?.length ? (po.location?.address ?? null) : po.organization.address,
 
       supplierName: po.supplier?.name ?? null,
       supplierAddress: po.supplier?.address ?? null,

@@ -4,6 +4,8 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { findOrCreateCentre } from '../organization-module/warehouse-ops-active';
+import { ensureDefaultBranch, resolveBranchId } from '../branches/resolve-branch';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { PlanLimitsService } from '../billing/plan-limits.service';
@@ -18,11 +20,17 @@ export class LocationService {
   ) {}
 
   async findAll(organizationId: string) {
-    const rows = await this.prisma.location.findMany({
+    let rows = await this.prisma.location.findMany({
       where: { organizationId, archivedAt: null }, // hide archived by default
       orderBy: { name: 'asc' },
       include: { _count: { select: { stocks: true } } },
     });
+    // Every org has at least its CENTRE, which forms use when they don't ask
+    // (orgs without WAREHOUSE_OPS never see or choose a location).
+    if (rows.length === 0) {
+      const centre = await findOrCreateCentre(this.prisma, organizationId);
+      rows = [{ ...centre, _count: { stocks: 0 } }];
+    }
 
     return rows.map(({ _count, ...rest }) => ({
       ...rest,
@@ -67,9 +75,20 @@ export class LocationService {
 
     await this.planLimits.assertCanAdd(organizationId, 'locations');
 
+    // Starts in the first branch; setBranch() moves it.
+    const branch = await ensureDefaultBranch(this.prisma, organizationId);
     return this.prisma.location.create({
-      data: { id, name: normalized, organizationId },
+      data: { id, name: normalized, organizationId, branchId: branch.id },
     });
+  }
+
+  // Which branch a stock location belongs to — stock postings without a
+  // document of their own (adjustments, receipts) are booked there.
+  async setBranch(organizationId: string, id: string, branchId: string) {
+    const location = await this.prisma.location.findFirst({ where: { id, organizationId } });
+    if (!location) throw new NotFoundException('Location not found');
+    const resolved = await resolveBranchId(this.prisma, organizationId, { branchId });
+    return this.prisma.location.update({ where: { id }, data: { branchId: resolved } });
   }
 
   async rename(organizationId: string, id: string, name: string) {

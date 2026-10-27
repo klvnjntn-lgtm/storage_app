@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, PackageCheck, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { PurchaseOrderDetail } from './types';
@@ -39,7 +41,10 @@ export function ReceiveGoodsDialog({
   // (what a barcode scanner produces).
   const [serials, setSerials] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
-  const [locationId, setLocationId] = useState(po.locationId ?? '');
+  const [pickedLocationId, setLocationId] = useState(po.locationId ?? '');
+  // Only warehouse orgs choose a location; the rest always use CENTRE.
+  const warehouseOps = useWarehouseOps();
+  const locationId = warehouseOps ? pickedLocationId : (defaultLocation(locations)?.id ?? '');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -151,19 +156,23 @@ export function ReceiveGoodsDialog({
 
       <p className="text-xs text-gray-500 mb-3">{t('purchasing.purchaseOrderDetail.receiveDescription')}</p>
 
-      <label className="text-xs text-gray-500 mb-1 block">{t('purchasing.purchaseOrderDetail.receiveLocation')}</label>
-      <select
-        value={locationId}
-        onChange={(e) => setLocationId(e.target.value)}
-        className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-3"
-      >
-        <option value="">—</option>
-        {locations.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.name}
-          </option>
-        ))}
-      </select>
+      {warehouseOps && (
+        <>
+          <label className="text-xs text-gray-500 mb-1 block">{t('purchasing.purchaseOrderDetail.receiveLocation')}</label>
+          <select
+            value={pickedLocationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 mb-3"
+          >
+            <option value="">—</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
       {items === null && !error && (
         <p className="text-sm text-gray-500 mb-3">{t('purchasing.purchaseOrderDetail.loading')}</p>

@@ -12,6 +12,9 @@ export type JournalLineInput = {
   credit?: number;
   description?: string;
   locationId?: string;
+  // The branch the line is reported under. When left out it's the
+  // location's branch (stock postings), else the line has none.
+  branchId?: string;
 };
 
 export type PostEntryInput = {
@@ -184,6 +187,18 @@ export class JournalService {
     const count = await tx.journalEntry.count({ where: { organizationId, fiscalPeriodId: fiscalPeriod.id } });
     const entryNumber = this.buildEntryNumber(fiscalPeriod.year, fiscalPeriod.month, count + 1);
 
+    const missing = [...new Set(input.lines.filter((l) => !l.branchId && l.locationId).map((l) => l.locationId!))];
+    const branchOfLocation = new Map(
+      missing.length === 0
+        ? []
+        : (
+            await tx.location.findMany({
+              where: { id: { in: missing }, organizationId },
+              select: { id: true, branchId: true },
+            })
+          ).map((l) => [l.id, l.branchId] as const),
+    );
+
     return tx.journalEntry.create({
       data: {
         organizationId,
@@ -202,6 +217,7 @@ export class JournalService {
             credit: l.credit ?? 0,
             description: l.description,
             locationId: l.locationId,
+            branchId: l.branchId ?? (l.locationId ? branchOfLocation.get(l.locationId) : undefined) ?? null,
           })),
         },
       },
@@ -288,6 +304,7 @@ export class JournalService {
             credit: l.debit, // swapped
             description: l.description,
             locationId: l.locationId,
+            branchId: l.branchId,
           })),
         },
       },

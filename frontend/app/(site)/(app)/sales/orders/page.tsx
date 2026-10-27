@@ -7,6 +7,7 @@ import { FileSpreadsheet, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
 
@@ -64,6 +65,7 @@ const STATUS_OPTIONS = [
 export default function SalesOrdersPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
 
   // Seeded from the URL so pressing the browser's Back button from an
   // order's detail page restores the same filters/search/page instead of
@@ -323,7 +325,8 @@ export default function SalesOrdersPage() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {o.location?.name ?? '—'} · {o.items.length}{' '}
+                    {warehouseOps && `${o.location?.name ?? '—'} · `}
+                    {o.items.length}{' '}
                     {t(o.items.length === 1 ? 'sales.orders.itemSingular' : 'sales.orders.itemPlural')}
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
                     {formatDMY(new Date(o.confirmedAt ?? o.createdAt))}

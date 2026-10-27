@@ -9,6 +9,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 
 import { LocationModule } from './location/location.module';
+import { BranchesModule } from './branches/branches.module';
 import { ProductModule } from './product/product.module';
 import { BrandModule } from './brand/brand.module';
 import { StockModule } from './stock/stock.module';
@@ -96,6 +97,7 @@ import { SerialsModule } from './serials/serials.module';
     AuthModule,
     CategoryModule,
     LocationModule,
+    BranchesModule,
     ProductModule,
     SupplierModule,
     StockModule,

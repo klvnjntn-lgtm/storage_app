@@ -9,6 +9,7 @@ import {
   driverSignedAt,
   movePhotoToFailure,
 } from '../delivery-routes/driver-proof';
+import { warehouseOpsActiveInclude } from '../organization-module/warehouse-ops-active';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
@@ -1177,6 +1178,10 @@ export class DeliveryOrderService {
             date: new Date(),
             memo: `Return against delivery order ${deliveryOrder.doNumber ?? deliveryOrder.id}`,
             lines: costedReturnLines,
+            // Back to the branch the sale was booked to, when it was invoiced.
+            branchId: resolvedInvoiceId
+              ? (await tx.invoice.findUnique({ where: { id: resolvedInvoiceId }, select: { branchId: true } }))?.branchId
+              : undefined,
           },
           tx,
         );
@@ -1319,6 +1324,7 @@ export class DeliveryOrderService {
             address: true,
             phone: true,
             logoUrl: true,
+            modules: warehouseOpsActiveInclude(),
           },
         },
         location: { select: { name: true, address: true } },
@@ -1344,8 +1350,13 @@ export class DeliveryOrderService {
       businessLogoUrl: deliveryOrder.organization.logoUrl,
       invoiceNumber: deliveryOrder.invoice?.invoiceNumber ?? null,
 
-      locationName: deliveryOrder.location?.name ?? '',
-      locationAddress: deliveryOrder.location?.address ?? null,
+      // Ship-from: see PurchaseOrderService.mapForPrint.
+      locationName: deliveryOrder.organization.modules?.length
+        ? (deliveryOrder.location?.name ?? '')
+        : deliveryOrder.organization.name,
+      locationAddress: deliveryOrder.organization.modules?.length
+        ? (deliveryOrder.location?.address ?? null)
+        : deliveryOrder.organization.address,
 
       salesOrderNumber: deliveryOrder.salesOrder?.orderNumber ?? null,
 

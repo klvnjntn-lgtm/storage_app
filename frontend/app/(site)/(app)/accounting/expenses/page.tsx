@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -33,6 +34,8 @@ type Expense = {
   status: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
   paidAt: string | null;
   paymentMethod: string | null;
+  branchId?: string | null;
+  branch?: { name: string } | null;
 };
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -87,7 +90,10 @@ export default function ExpensesPage() {
   const [categoryError, setCategoryError] = useState<string | null>(null);
 
   const [showAddExpense, setShowAddExpense] = useState(false);
-  const [expenseForm, setExpenseForm] = useState({ categoryId: '', description: '', amount: '', expenseDate: todayISO(), dueDate: '' });
+  const [expenseForm, setExpenseForm] = useState({ categoryId: '', description: '', amount: '', expenseDate: todayISO(), dueDate: '', branchId: '' });
+  // Expenses are booked to a branch (P&L by branch); asked only of
+  // multi-branch businesses. Left empty: overhead for the whole business.
+  const { branches, multiBranch } = useBranches();
   const [expenseSaving, setExpenseSaving] = useState(false);
   const [expenseError, setExpenseError] = useState<string | null>(null);
 
@@ -97,7 +103,7 @@ export default function ExpensesPage() {
   const [payError, setPayError] = useState<string | null>(null);
 
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [editExpenseForm, setEditExpenseForm] = useState({ description: '', dueDate: '' });
+  const [editExpenseForm, setEditExpenseForm] = useState({ description: '', dueDate: '', branchId: '' });
   const [editExpenseSaving, setEditExpenseSaving] = useState(false);
   const [editExpenseError, setEditExpenseError] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
@@ -232,6 +238,7 @@ export default function ExpensesPage() {
           amount,
           expenseDate: expenseForm.expenseDate,
           dueDate: expenseForm.dueDate || undefined,
+          branchId: expenseForm.branchId || undefined,
         }),
       });
       if (!res.ok) {
@@ -239,7 +246,7 @@ export default function ExpensesPage() {
         setExpenseError(body?.message ?? t('accounting.expenses.requestFailed', { status: res.status }));
         return;
       }
-      setExpenseForm({ categoryId: '', description: '', amount: '', expenseDate: todayISO(), dueDate: '' });
+      setExpenseForm({ categoryId: '', description: '', amount: '', expenseDate: todayISO(), dueDate: '', branchId: '' });
       setShowAddExpense(false);
       setPage(1);
       await loadExpenses();
@@ -253,7 +260,11 @@ export default function ExpensesPage() {
   function openEditExpense(exp: Expense) {
     setEditingExpenseId(exp.id);
     setEditExpenseError(null);
-    setEditExpenseForm({ description: exp.description ?? '', dueDate: exp.dueDate ? exp.dueDate.slice(0, 10) : '' });
+    setEditExpenseForm({
+      description: exp.description ?? '',
+      dueDate: exp.dueDate ? exp.dueDate.slice(0, 10) : '',
+      branchId: exp.branchId ?? '',
+    });
   }
 
   async function handleSaveExpenseEdit(id: string) {
@@ -266,6 +277,8 @@ export default function ExpensesPage() {
         body: JSON.stringify({
           description: editExpenseForm.description.trim() || undefined,
           dueDate: editExpenseForm.dueDate || undefined,
+          // '' moves it back to the whole business.
+          ...(multiBranch && { branchId: editExpenseForm.branchId }),
         }),
       });
       if (!res.ok) {
@@ -611,6 +624,21 @@ export default function ExpensesPage() {
                 />
               </div>
             </div>
+            {multiBranch && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">{t('accounting.expenses.branch')}</label>
+                <select
+                  value={expenseForm.branchId}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, branchId: e.target.value }))}
+                  className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                >
+                  <option value="">{t('accounting.expenses.wholeBusiness')}</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">{t('accounting.expenses.descriptionOptional')}</label>
               <input
@@ -672,7 +700,10 @@ export default function ExpensesPage() {
                     <div className="p-3 flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold truncate">{exp.category.name}</span>
+                          <span className="text-sm font-semibold truncate">
+                            {exp.category.name}
+                            {multiBranch && exp.branch && <span className="font-normal text-gray-500"> · {exp.branch.name}</span>}
+                          </span>
                           <span className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 flex items-center gap-1 shrink-0 ${meta.color}`}>
                             <StatusIcon size={10} strokeWidth={2} />
                             {t(meta.labelKey)}
@@ -745,6 +776,21 @@ export default function ExpensesPage() {
                             onChange={(v) => setEditExpenseForm((f) => ({ ...f, dueDate: v }))}
                           />
                         </div>
+                        {multiBranch && (
+                          <div className="flex flex-col gap-1 w-full sm:w-1/2">
+                            <label className="text-[11px] font-semibold text-gray-600">{t('accounting.expenses.branch')}</label>
+                            <select
+                              value={editExpenseForm.branchId}
+                              onChange={(e) => setEditExpenseForm((f) => ({ ...f, branchId: e.target.value }))}
+                              className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+                            >
+                              <option value="">{t('accounting.expenses.wholeBusiness')}</option>
+                              {branches.map((b) => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         <p className="text-[10px] text-gray-400">
                           {t('accounting.expenses.editRestrictionNote')}
                         </p>

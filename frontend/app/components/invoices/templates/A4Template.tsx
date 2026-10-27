@@ -46,6 +46,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
             <h2 className="text-2xl font-bold leading-tight text-black">
               {invoice.businessName ?? invoice.locationName}
             </h2>
+            {invoice.branchName && <p className="text-sm font-semibold text-black">{invoice.branchName}</p>}
 
             {invoice.businessAddress && (
               <p className="text-xs text-black">

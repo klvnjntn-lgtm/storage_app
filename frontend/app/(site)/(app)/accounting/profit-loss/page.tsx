@@ -7,6 +7,7 @@ import { display } from '@/lib/fonts';
 import { Scale, DollarSign, PackageSearch, Percent, Info, Receipt, MapPin } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
@@ -33,13 +34,12 @@ type ProfitAndLossReport = {
   totalOperatingExpenses: number;
   netProfit: number;
   netMargin: number;
-  // Only present when a location filter is applied — revenue/expense lines
-  // (payroll, expenses with no location picked) that can't be attributed
-  // to that location, surfaced separately instead of silently missing.
+  // Only present when a branch filter is applied — revenue/expense lines
+  // (payroll, expenses with no branch picked) that can't be attributed
+  // to that branch, surfaced separately instead of silently missing.
   unallocated?: UnallocatedSection;
 };
 
-type Location = { id: string; name: string };
 
 function formatIDR(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -81,30 +81,20 @@ export default function ProfitAndLossPage() {
   const { t } = useLanguage();
   const [from, setFrom] = useState(defaultFrom());
   const [to, setTo] = useState(defaultTo());
-  const [locationId, setLocationId] = useState('');
-  const [locations, setLocations] = useState<Location[]>([]);
+  // Per-branch P&L; the filter only shows for multi-branch businesses.
+  const [branchId, setBranchId] = useState('');
+  const { branches, multiBranch } = useBranches();
 
   const [report, setReport] = useState<ProfitAndLossReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  async function loadLocations() {
-    try {
-      const res = await apiFetch('/locations');
-      if (!res.ok) return;
-      const data = await res.json();
-      setLocations(Array.isArray(data) ? data : []);
-    } catch (e) {
-      // Non-fatal — the location filter just won't have options.
-    }
-  }
 
   async function loadReport() {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ from, to });
-      if (locationId) params.set('locationId', locationId);
+      if (branchId) params.set('branchId', branchId);
       const res = await apiFetch(`/accounting/reports/profit-loss?${params}`);
 
       if (!res.ok) {
@@ -124,13 +114,9 @@ export default function ProfitAndLossPage() {
   }
 
   useEffect(() => {
-    loadLocations();
-  }, []);
-
-  useEffect(() => {
     loadReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, locationId]);
+  }, [from, to, branchId]);
 
   const hasExpenses = !!report && report.operatingExpenses.length > 0;
   const hasMultipleRevenueLines = !!report && report.revenue.length > 1;
@@ -173,22 +159,24 @@ export default function ProfitAndLossPage() {
             }}
           />
 
-          <div className="flex flex-col gap-1 min-w-0">
-            <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-              <MapPin size={12} strokeWidth={2} />
-              {t('accounting.profitLoss.location')}
-            </label>
-            <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-              className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500 bg-white"
-            >
-              <option value="">{t('accounting.profitLoss.allLocations')}</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </select>
-          </div>
+          {multiBranch && (
+            <div className="flex flex-col gap-1 min-w-0">
+              <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
+                <MapPin size={12} strokeWidth={2} />
+                {t('accounting.profitLoss.branch')}
+              </label>
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className="border-2 border-gray-300 rounded-md p-2.5 sm:p-2 text-sm w-full min-w-0 sm:w-auto outline-none focus:border-blue-500 bg-white"
+              >
+                <option value="">{t('accounting.profitLoss.allBranches')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {error && (

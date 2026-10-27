@@ -22,6 +22,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
@@ -81,6 +82,7 @@ type GoodsReceiptRow = {
 
 export default function PurchaseOrderDetailPage() {
   const dialog = useDialog();
+  const warehouseOps = useWarehouseOps();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -243,7 +245,8 @@ export default function PurchaseOrderDetailPage() {
                 {po.poNumber ?? t('purchasing.purchaseOrderDetail.unissuedDraft')}
               </h1>
               <p className="text-xs text-gray-500">
-                {printView?.supplierName ?? t('purchasing.purchaseOrderDetail.noSupplier')} · {printView?.locationName ?? '—'}
+                {printView?.supplierName ?? t('purchasing.purchaseOrderDetail.noSupplier')}
+                {warehouseOps && ` · ${printView?.locationName ?? '—'}`}
               </p>
               <span
                 className={`inline-block mt-1 text-xs font-semibold px-2 py-1 rounded-full ${statusBadgeClasses(po.status)}`}
@@ -356,7 +359,7 @@ export default function PurchaseOrderDetailPage() {
                     {r.returnNumber ?? r.id.slice(0, 8)} <span className="text-red-700 tabular-nums">−{formatIDR(Number(r.total))}</span>
                   </span>
                   <span className="text-xs text-gray-500">
-                    {formatDMY(new Date(r.createdAt))} · {r.location?.name ?? '—'} ·{' '}
+                    {formatDMY(new Date(r.createdAt))} · {warehouseOps && `${r.location?.name ?? '—'} · `}
                     {r.items
                       .map((i) => `${po.items.find((p) => p.id === i.purchaseOrderItemId)?.product?.name ?? '?'} × ${i.quantity}`)
                       .join(', ')}
@@ -378,7 +381,7 @@ export default function PurchaseOrderDetailPage() {
                 <li key={r.id} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="font-medium">{r.receiptNumber ?? r.id.slice(0, 8)}</span>
                   <span className="text-xs text-gray-500">
-                    {formatDMY(new Date(r.createdAt))} · {r.location?.name ?? '—'} ·{' '}
+                    {formatDMY(new Date(r.createdAt))} · {warehouseOps && `${r.location?.name ?? '—'} · `}
                     {r.items
                       .map((i) => `${po.items.find((p) => p.id === i.purchaseOrderItemId)?.product?.name ?? '?'} × ${i.quantity}`)
                       .join(', ')}

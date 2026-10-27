@@ -286,6 +286,7 @@ model Organization {
   invoices                     Invoice[]
   locations                    Location[]
   modules                      OrganizationModule[]
+  branches                     Branch[]
   taxRates                     OrganizationTaxRate[]
   products                     Product[]
   sessions                     Session[]
@@ -448,6 +449,11 @@ model Location {
 
   organizationId      String
   archivedAt          DateTime?
+  // The branch this stock location belongs to (WAREHOUSE_OPS orgs can have
+  // several per branch); stock postings with no document of their own are
+  // booked to it.
+  branchId            String?
+  branch              Branch?              @relation(fields: [branchId], references: [id])
   address             String?
   phone               String?
   fromEvents          Event[]              @relation("FromLocation")
@@ -1508,6 +1514,10 @@ model Invoice {
   fulfillmentPath   FulfillmentPath?
 
   locationId       String?
+  // Which branch made the sale: its revenue and cost are booked there,
+  // whichever location the stock came from.
+  branchId         String?
+  branch           Branch?                @relation(fields: [branchId], references: [id])
   format           InvoiceFormat
   status           InvoiceStatus @default(DRAFT)
   customerName     String?
@@ -2348,6 +2358,8 @@ model Expense {
   organizationId String
   categoryId     String
   locationId     String?
+  branchId       String?
+  branch         Branch?                  @relation(fields: [branchId], references: [id])
   description    String?
   amount         Decimal                  @db.Decimal(12, 2)
   amountPaid     Decimal                  @default(0) @db.Decimal(12, 2) // FIX — tracks partial payments; see ExpensePayment
@@ -2418,6 +2430,8 @@ model FixedAsset {
   name                    String
   category                String?
   locationId              String?
+  branchId                String?
+  branch                  Branch?            @relation(fields: [branchId], references: [id])
   acquisitionDate         DateTime           @db.Date
   cost                    Decimal            @db.Decimal(14, 2)
   salvageValue            Decimal            @default(0) @db.Decimal(14, 2)
@@ -2611,6 +2625,10 @@ model JournalEntryLine {
   credit         Decimal @default(0) @db.Decimal(14, 2)
   description    String?
   locationId     String?
+  // Per-branch reporting (P&L by branch). locationId stays as the stock
+  // location the line came from.
+  branchId       String?
+  branch         Branch?        @relation(fields: [branchId], references: [id])
 
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id])
   account      ChartOfAccount @relation(fields: [accountId], references: [id])
@@ -3150,6 +3168,11 @@ model PartCatalogEntry {
   spec          String   @default("") // bulb type, spark plug code, battery size, wiper lengths (H4, BKR6E, NS40ZL, 24" + 14")
   sources       String   @default("")
   exampleUrl    String   @default("")
+  // How we know the number fits this car: "maker" (the car maker's own catalogue or store lists it), "group"
+  // (a maker of the same group uses it, e.g. Toyota/Daihatsu), "seller" (only shop titles say so — a part
+  // often fits other cars), "" (no number). fitmentRank sorts them: 3 / 2 / 1 / 0.
+  fitment       String   @default("")
+  fitmentRank   Int      @default(0)
   lastSeen      DateTime
   syncedAt      DateTime @default(now())
 
@@ -3196,6 +3219,8 @@ model WorkOrder {
   customerId     String
   vehicleId      String
   mechanicId     String?
+  // The branch doing the job; its invoice is booked there.
+  branchId       String?
   odometer       Int?
   complaint      String?
   notes          String?
@@ -3207,6 +3232,11 @@ model WorkOrder {
   approvedAt     DateTime?
   approvedById   String?
   approvalNote   String?
+  // Formal-estimate details fleet customers ask for: how long the price
+  // holds, their PO reference and payment terms (both carried to the invoice).
+  validUntil       DateTime? @db.Date
+  customerPoNumber String?
+  paymentTerms     String?
   // Secret for the customer's approval page (/estimate/<token>), shared by
   // staff by hand (e.g. pasted into WhatsApp). Reused while valid so a link
   // already sent keeps working; expires 30 days after it was made.
@@ -3222,6 +3252,7 @@ model WorkOrder {
   customer     Customer        @relation(fields: [customerId, organizationId], references: [id, organizationId])
   vehicle      Vehicle         @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
   mechanic     Employee?       @relation(fields: [mechanicId, organizationId], references: [id, organizationId])
+  branch       Branch?         @relation(fields: [branchId], references: [id])
   items        WorkOrderItem[]
   invoices     Invoice[]
   // Work this job recommended for later, and reminders this job followed up.
@@ -3269,4 +3300,29 @@ model PartWorkshopEvidence {
   @@unique([carBrand, model, item, kind, valueNormalized])
   @@index([carBrand, model])
   @@index([syncedAt])
+}
+
+// A branch of the business (a shop, a workshop, an office): what accounting
+// splits by — P&L, expenses and fixed assets per branch. Independent of
+// stock locations, which are a WAREHOUSE_OPS feature (everyone else keeps
+// stock on one hidden CENTRE). Every org has at least one; branch choices
+// only appear once it has two.
+model Branch {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  address        String?
+  phone          String?
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  locations    Location[]
+  invoices     Invoice[]
+  expenses     Expense[]
+  fixedAssets  FixedAsset[]
+  journalLines JournalEntryLine[]
+  workOrders   WorkOrder[]
+
+  @@index([organizationId])
 }

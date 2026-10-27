@@ -73,7 +73,26 @@ export type CartTarget = { locationId: string; locationName: string; quantity: n
 // recorded there). Without: whichever location holds the most. Never past
 // the stock there unless the org's stock policy allows overselling.
 export function resolveCartTarget(
-  cart: Cart,
+  // Any cart keyed by cartKey() — invoices, quotations and orders alike.
+  cart: Record<string, { quantity: number }>,
+  product: ProductSearchResult,
+  quantity: number,
+  locationFilter: LocationOption | null,
+  allowOversell: boolean,
+  // Org without warehouse ops: locationFilter is its CENTRE, which the user
+  // never sees — so messages mustn't name it.
+  opts: { locationHidden?: boolean } = {},
+): { ok: true; target: CartTarget; key: string; nextQty: number } | { ok: false; error: string; vars: Record<string, string | number> } {
+  const result = resolveTarget(cart, product, quantity, locationFilter, allowOversell);
+  if (result.ok || !opts.locationHidden) return result;
+  if (result.error === 'sales.invoicesNew.onlyAvailable') {
+    return { ok: false, error: 'sales.invoicesNew.onlyAvailableHere', vars: result.vars };
+  }
+  return { ok: false, error: 'sales.invoicesNew.outOfStock', vars: { name: product.name } };
+}
+
+function resolveTarget(
+  cart: Record<string, { quantity: number }>,
   product: ProductSearchResult,
   quantity: number,
   locationFilter: LocationOption | null,
@@ -321,6 +340,8 @@ export type InvoiceHeaderForm = {
   // '' = untouched, NO_BANK_ACCOUNT = none, otherwise an account id.
   bankAccountId: string;
   employeeId: string;
+  // Multi-branch businesses: the branch making the sale ('' = default).
+  branchId?: string;
 };
 
 // Everything but the items, for both creating and updating a draft.
@@ -343,6 +364,7 @@ export function buildInvoiceHeader(f: InvoiceHeaderForm) {
     // Untouched leaves the backend to pick the org's default account.
     ...(f.bankAccountId !== '' && { bankAccountId: f.bankAccountId === NO_BANK_ACCOUNT ? null : f.bankAccountId }),
     employeeId: f.employeeId || null,
+    ...(f.branchId && { branchId: f.branchId }),
   };
 }
 

@@ -8,6 +8,7 @@ import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner'
 import {
   LayoutDashboard,
   Settings,
+  Store,
   CreditCard,
   MessageCircle,
   KeyRound,
@@ -32,7 +33,6 @@ import {
   Car,
   Bell,
   Wrench,
-  Search,
   ShoppingCart,
   ClipboardList,
   Receipt,
@@ -480,8 +480,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   // Stock pages only mean something to a module that sells, stores or
-  // fits parts — a Delivery-only org has none of them. Transfers, batches
-  // and serials need WAREHOUSE_OPS or INVOICE_POS on the backend too.
+  // fits parts — a Delivery-only org has none of them. Batches and serials
+  // need WAREHOUSE_OPS or INVOICE_POS on the backend too; transfers move
+  // stock between locations, which only WAREHOUSE_OPS orgs have.
   const hasStock = hasInvoicePos || hasWarehouseOps || hasWorkshopRms;
   const hasStockMovement = hasInvoicePos || hasWarehouseOps;
 
@@ -496,13 +497,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Home },
       ...(hasStockMovement
         ? [
-            { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
             { href: '/inventory/batches', label: t('nav.items.batches'), icon: CalendarClock },
             { href: '/inventory/serials', label: t('nav.items.serials'), icon: Hash },
           ]
         : []),
       ...(hasWarehouseOps
         ? [
+            { href: '/inventory/transfers', label: t('nav.items.transfers'), icon: ArrowRightLeft },
             { href: '/inventory/warehouse', label: t('nav.items.warehouse'), icon: Warehouse },
             { href: '/inventory/sessions', label: t('nav.items.sessions'), icon: ClipboardList },
             { href: '/inventory/labels', label: t('nav.items.labels'), icon: Tag, tourId: 'nav-labels' },
@@ -541,7 +542,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ? [{ href: '/workshop/work-orders', label: t('nav.items.workOrders'), icon: ClipboardList }]
         : []),
       { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
-      { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
       { href: '/workshop/parts', label: t('nav.items.partsCatalog'), icon: Wrench },
       { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
     ],
@@ -570,6 +570,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     icon: Settings,
     children: [
       { href: '/settings', label: t('nav.items.settingsGeneral'), icon: Settings },
+      { href: '/settings/branches', label: t('nav.items.branches'), icon: Store },
       { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
       { href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard },
       { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { MapPin, Layers, Award, Search, GitMerge, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
@@ -66,7 +67,11 @@ export default function ReferenceDataPage() {
     },
   };
 
-  const [activeType, setActiveType] = useState<EntityType>('location');
+  // Locations are managed by warehouse orgs only (everyone else has just
+  // their hidden CENTRE), so the page opens on categories.
+  const warehouseOps = useWarehouseOps();
+  const [activeType, setActiveType] = useState<EntityType>('category');
+  const visibleTypes = (Object.keys(ENTITY_CONFIG) as EntityType[]).filter((type) => type !== 'location' || warehouseOps);
   const [items, setItems] = useState<ReferenceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -267,7 +272,7 @@ export default function ReferenceDataPage() {
 
     {/* TYPE TABS */}
     <div className="flex border-2 border-gray-300 rounded-md overflow-hidden w-fit">
-      {(Object.keys(ENTITY_CONFIG) as EntityType[]).map((type) => {
+      {visibleTypes.map((type, index) => {
         const c = ENTITY_CONFIG[type];
         const Icon = c.icon;
         const active = activeType === type;
@@ -277,7 +282,7 @@ export default function ReferenceDataPage() {
             onClick={() => setActiveType(type)}
             className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold ${
               active ? 'bg-black text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
-            } ${type !== 'location' ? 'border-l-2 border-gray-300' : ''}`}
+            } ${index > 0 ? 'border-l-2 border-gray-300' : ''}`}
           >
             <Icon size={16} strokeWidth={2} />
             {c.plural}

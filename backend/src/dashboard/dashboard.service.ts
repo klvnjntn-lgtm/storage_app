@@ -83,9 +83,12 @@ export class DashboardService {
             ...(isAdmin ? {} : { requestedById: user.sub }),
           },
         }),
-        this.prisma.stockTransfer.count({
-          where: { organizationId, status: StockTransferStatus.IN_TRANSIT },
-        }),
+        // Transfers move stock between locations — WAREHOUSE_OPS only.
+        warehouse
+          ? this.prisma.stockTransfer.count({
+              where: { organizationId, status: StockTransferStatus.IN_TRANSIT },
+            })
+          : Promise.resolve(null),
         selling
           ? this.prisma.purchaseOrder.count({
               where: { organizationId, status: PurchaseOrderStatus.DRAFT },

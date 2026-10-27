@@ -15,6 +15,11 @@ export class CreateFixedAssetDto {
   @IsUUID()
   locationId?: string;
 
+  // The branch it's booked to (P&L by branch). Left out: unallocated.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsDateString()
   acquisitionDate: string;
 

@@ -1,3 +1,4 @@
+import { resolveBranchId } from '../branches/resolve-branch';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { runSerializable } from '../prisma/serializable';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,7 +46,7 @@ export class ExpensesService {
     const [data, total] = await this.prisma.$transaction([
       this.prisma.expense.findMany({
         where,
-        include: { category: true, location: { select: { name: true } } },
+        include: { category: true, location: { select: { name: true } }, branch: { select: { name: true } } },
         orderBy: { expenseDate: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -59,7 +60,7 @@ export class ExpensesService {
   async get(organizationId: string, id: string) {
     const expense = await this.prisma.expense.findFirst({
       where: { id, organizationId },
-      include: { category: true, location: { select: { name: true } } },
+      include: { category: true, location: { select: { name: true } }, branch: { select: { name: true } } },
     });
     if (!expense) throw new NotFoundException('Expense not found');
     return expense;
@@ -88,6 +89,7 @@ export class ExpensesService {
           organizationId,
           categoryId: dto.categoryId,
           locationId: dto.locationId,
+          branchId: await expenseBranchId(tx, organizationId, dto),
           description: dto.description?.trim(),
           amount: dto.amount,
           expenseDate: new Date(dto.expenseDate),
@@ -112,7 +114,7 @@ export class ExpensesService {
 async update(
   organizationId: string,
   id: string,
-  dto: { description?: string; dueDate?: string; locationId?: string },
+  dto: { description?: string; dueDate?: string; locationId?: string; branchId?: string },
 ) {
   const expense = await this.get(organizationId, id);
   if (expense.status === ExpenseStatus.PAID) {
@@ -131,8 +133,27 @@ async update(
         ...(dto.description !== undefined && { description: dto.description.trim() }),
         ...(dto.dueDate !== undefined && { dueDate: dto.dueDate ? new Date(dto.dueDate) : null }),
         ...(dto.locationId !== undefined && { locationId: dto.locationId || null }),
+        ...(dto.branchId !== undefined && {
+          branchId: dto.branchId ? await resolveBranchId(tx, organizationId, { branchId: dto.branchId }) : null,
+        }),
       },
     });
+
+    // Same for the branch tag, which the P&L by branch reads.
+    if (dto.branchId !== undefined) {
+      await tx.journalEntryLine.updateMany({
+        where: {
+          debit: { gt: 0 },
+          journalEntry: {
+            organizationId,
+            sourceType: JournalSourceType.EXPENSE,
+            sourceId: id,
+            status: JournalEntryStatus.POSTED,
+          },
+        },
+        data: { branchId: updated.branchId },
+      });
+    }
 
     // Keep the ledger's location tag in step. Only the expense (debit) line
     // carries a location; the payable line is untagged. This changes a
@@ -305,4 +326,20 @@ async update(
       return tx.expense.delete({ where: { id } });
     });
   }
+}
+
+// An expense's (or asset's) branch: the one chosen, else its location's,
+// else none — overhead that belongs to no one branch.
+export async function expenseBranchId(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  dto: { branchId?: string | null; locationId?: string | null },
+): Promise<string | null> {
+  if (dto.branchId) return resolveBranchId(tx, organizationId, { branchId: dto.branchId });
+  if (!dto.locationId) return null;
+  const location = await tx.location.findFirst({
+    where: { id: dto.locationId, organizationId },
+    select: { branchId: true },
+  });
+  return location?.branchId ?? null;
 }

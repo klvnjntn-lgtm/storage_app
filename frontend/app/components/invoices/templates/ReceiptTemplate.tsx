@@ -27,6 +27,7 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
         <p className="font-bold">
           {invoice.businessName ?? invoice.locationName}
         </p>
+        {invoice.branchName && <p>{invoice.branchName}</p>}
 
         {invoice.businessAddress && (
           <p>{invoice.businessAddress}</p>

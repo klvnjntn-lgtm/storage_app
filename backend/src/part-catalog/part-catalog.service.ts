@@ -143,6 +143,8 @@ export class PartCatalogService {
       this.prisma.partCatalogEntry.findMany({
         where,
         orderBy: [
+          // Numbers the car maker lists for the car first, then its maker group's, then sellers' claims.
+          { fitmentRank: 'desc' },
           { yearFrom: { sort: 'asc', nulls: 'last' } },
           { sellers: 'desc' },
           { listingsSeen: 'desc' },
@@ -175,15 +177,17 @@ export class PartCatalogService {
     };
   }
 
-  // Rows from maker data (Sakura, NGK, Astra Otoshop) or genuine listings count as verified; otherwise
-  // 3+ distinct shops agreeing is "confirmed", and less is "unverified".
+  // Rows from maker data (Sakura, NGK, Astra Otoshop, the car maker's own catalogue) or genuine listings count
+  // as verified; otherwise 3+ distinct shops agreeing is "confirmed", and less is "unverified".
   private confidenceOf(row: {
     sources: string;
     origin: string;
     sellers: number;
+    fitment: string;
   }): Confidence {
     if (
       /sakura|ngk|astraotoshop/.test(row.sources) ||
+      row.fitment === 'maker' ||
       row.origin === 'Official'
     )
       return 'verified';
@@ -230,6 +234,8 @@ export class PartCatalogService {
         sellers: true,
         sources: true,
         thumbKey: true,
+        fitment: true,
+        fitmentRank: true,
       },
     });
 
@@ -249,6 +255,8 @@ export class PartCatalogService {
           normalized: string;
           sellers: number;
           genuine: boolean;
+          fitment: string;
+          fitmentRank: number;
         }
       >;
       brands: Map<string, number>;
@@ -290,9 +298,15 @@ export class PartCatalogService {
           normalized: r.oemNormalized,
           sellers: 0,
           genuine: false,
+          fitment: '',
+          fitmentRank: 0,
         };
         o.sellers += r.sellers;
         o.genuine ||= r.origin === 'Official';
+        if (r.fitmentRank > o.fitmentRank) {
+          o.fitment = r.fitment;
+          o.fitmentRank = r.fitmentRank;
+        }
         acc.oems.set(r.oemNormalized, o);
       }
       if (r.partBrand)
@@ -303,10 +317,13 @@ export class PartCatalogService {
     }
 
     const summaries = [...items.values()].map((a) => {
-      // Genuine numbers first, then the most-confirmed; specs and brands by how many shops list them.
+      // Numbers the car maker lists first, then genuine ones, then the most-confirmed; specs and brands
+      // by how many shops list them.
       const oems = [...a.oems.values()].sort(
         (x, y) =>
-          Number(y.genuine) - Number(x.genuine) || y.sellers - x.sellers,
+          y.fitmentRank - x.fitmentRank ||
+          Number(y.genuine) - Number(x.genuine) ||
+          y.sellers - x.sellers,
       );
       const byCount = (m: Map<string, number>) =>
         [...m]
@@ -457,6 +474,8 @@ export class PartCatalogService {
         sellers: true,
         sources: true,
         thumbKey: true,
+        fitment: true,
+        fitmentRank: true,
       },
       orderBy: [{ carBrand: 'asc' }, { model: 'asc' }, { yearFrom: 'asc' }],
     });
@@ -471,8 +490,14 @@ export class PartCatalogService {
       const key = `${r.carBrand}|${r.model}|${generation}`;
       const conf = this.confidenceOf(r);
       const prev = cars.get(key) as
-        | { confidence: Confidence; sellers: number }
+        | {
+            confidence: Confidence;
+            sellers: number;
+            fitment: string;
+            fitmentRank: number;
+          }
         | undefined;
+      const better = !prev || r.fitmentRank > prev.fitmentRank;
       cars.set(key, {
         carBrand: r.carBrand,
         model: r.model,
@@ -482,6 +507,8 @@ export class PartCatalogService {
         sellers: (prev?.sellers ?? 0) + r.sellers,
         confidence:
           prev && rank[prev.confidence] >= rank[conf] ? prev.confidence : conf,
+        fitment: better ? r.fitment : prev.fitment,
+        fitmentRank: better ? r.fitmentRank : prev.fitmentRank,
       });
     }
     const count = (values: string[]) => {

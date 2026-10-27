@@ -6,6 +6,8 @@ import { Hash, Search } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatDMY } from '@/lib/dates';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, useLocations, type PickedProduct } from '@/app/components/shared/ProductPicker';
@@ -47,6 +49,9 @@ export default function SerialsPage() {
   const { user } = useCurrentUser();
   const isAdmin = user?.role === 'ADMIN';
   const locations = useLocations();
+  // Only warehouse orgs see or choose locations; the rest use CENTRE.
+  const warehouseOps = useWarehouseOps();
+  const hiddenLocationId = defaultLocation(locations)?.id ?? '';
 
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -82,7 +87,11 @@ export default function SerialsPage() {
     if (!selected) return;
     const res = await apiFetch(`/serials/${selected.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: fix.status, locationId: fix.locationId || undefined, note: fix.note.trim() }),
+      body: JSON.stringify({
+        status: fix.status,
+        locationId: (warehouseOps ? fix.locationId : fix.status === 'IN_STOCK' ? hiddenLocationId : '') || undefined,
+        note: fix.note.trim(),
+      }),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) {
@@ -99,7 +108,11 @@ export default function SerialsPage() {
     const serialNumbers = reg.serials.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
     const res = await apiFetch('/serials', {
       method: 'POST',
-      body: JSON.stringify({ productId: reg.product.id, locationId: reg.locationId, serialNumbers }),
+      body: JSON.stringify({
+        productId: reg.product.id,
+        locationId: warehouseOps ? reg.locationId : hiddenLocationId,
+        serialNumbers,
+      }),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) {
@@ -137,7 +150,7 @@ export default function SerialsPage() {
                   <th className={thCls}>{t('serials.serial')}</th>
                   <th className={thCls}>{t('serials.product')}</th>
                   <th className={thCls}>{t('common.status')}</th>
-                  <th className={thCls}>{t('serials.location')}</th>
+                  {warehouseOps && <th className={thCls}>{t('serials.location')}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -148,7 +161,7 @@ export default function SerialsPage() {
                     <td className={tdCls}>
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLE[r.status]}`}>{t(`serials.status.${r.status}`)}</span>
                     </td>
-                    <td className={tdCls}>{r.location?.name ?? '—'}</td>
+                    {warehouseOps && <td className={tdCls}>{r.location?.name ?? '—'}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -160,7 +173,7 @@ export default function SerialsPage() {
       {selected && (
         <Card title={`${selected.product.name} · ${selected.serialNumber}`}>
           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLE[selected.status]}`}>{t(`serials.status.${selected.status}`)}</span>
-          {selected.location && <span className="ml-2 text-sm text-gray-600">{selected.location.name}</span>}
+          {warehouseOps && selected.location && <span className="ml-2 text-sm text-gray-600">{selected.location.name}</span>}
           <ol className="mt-3 space-y-2 text-sm">
             {selected.receipt && (
               <li>
@@ -198,7 +211,7 @@ export default function SerialsPage() {
                   </option>
                 ))}
               </select>
-              {fix.status === 'IN_STOCK' && (
+              {warehouseOps && fix.status === 'IN_STOCK' && (
                 <select required value={fix.locationId} onChange={(e) => setFix({ ...fix, locationId: e.target.value })} className={inputCls}>
                   <option value="">{t('serials.location')}</option>
                   {locations.map((l) => (
@@ -249,14 +262,16 @@ export default function SerialsPage() {
               ) : (
                 <ProductPicker onPick={(p) => setReg({ ...reg, product: p })} placeholder={t('serials.pickProduct')} />
               )}
-              <select required value={reg.locationId} onChange={(e) => setReg({ ...reg, locationId: e.target.value })} className={inputCls}>
-                <option value="">{t('serials.location')}</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
+              {warehouseOps && (
+                <select required value={reg.locationId} onChange={(e) => setReg({ ...reg, locationId: e.target.value })} className={inputCls}>
+                  <option value="">{t('serials.location')}</option>
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <textarea
                 required
                 rows={4}

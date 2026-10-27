@@ -11,6 +11,7 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import { toCalendarDateString } from '@/lib/dates';
 import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -70,11 +71,14 @@ function todayISO() {
   return toCalendarDateString(new Date());
 }
 
-type ManualLine = { accountId: string; side: 'debit' | 'credit'; amount: string; description: string };
+// branchId: the branch the line counts toward in the P&L ('' = none).
+type ManualLine = { accountId: string; side: 'debit' | 'credit'; amount: string; description: string; branchId: string };
 
 export default function JournalPage() {
   const dialog = useDialog();
     const { t } = useLanguage();
+  // Multi-branch businesses can tag a line with a branch (P&L by branch).
+  const { branches, multiBranch } = useBranches();
     const { profile } = useAuth();
   const isAdmin = profile?.role === 'ADMIN';
 
@@ -109,8 +113,8 @@ export default function JournalPage() {
   const [manualDate, setManualDate] = useState(todayISO());
   const [manualMemo, setManualMemo] = useState('');
   const [manualLines, setManualLines] = useState<ManualLine[]>([
-    { accountId: '', side: 'debit', amount: '', description: '' },
-    { accountId: '', side: 'credit', amount: '', description: '' },
+    { accountId: '', side: 'debit', amount: '', description: '', branchId: '' },
+    { accountId: '', side: 'credit', amount: '', description: '', branchId: '' },
   ]);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
@@ -193,7 +197,7 @@ export default function JournalPage() {
   }
 
   function addManualLine() {
-    setManualLines((ls) => [...ls, { accountId: '', side: 'debit', amount: '', description: '' }]);
+    setManualLines((ls) => [...ls, { accountId: '', side: 'debit', amount: '', description: '', branchId: '' }]);
   }
   function removeManualLine(index: number) {
     setManualLines((ls) => ls.filter((_, i) => i !== index));
@@ -244,6 +248,7 @@ export default function JournalPage() {
             debit: l.side === 'debit' ? Number(l.amount) : undefined,
             credit: l.side === 'credit' ? Number(l.amount) : undefined,
             description: l.description.trim() || undefined,
+            branchId: l.branchId || undefined,
           })),
         }),
       });
@@ -255,8 +260,8 @@ export default function JournalPage() {
       setShowManual(false);
       setManualMemo('');
       setManualLines([
-        { accountId: '', side: 'debit', amount: '', description: '' },
-        { accountId: '', side: 'credit', amount: '', description: '' },
+        { accountId: '', side: 'debit', amount: '', description: '', branchId: '' },
+        { accountId: '', side: 'credit', amount: '', description: '', branchId: '' },
       ]);
       await loadEntries();
     } catch {
@@ -332,7 +337,7 @@ export default function JournalPage() {
             <div className="flex flex-col gap-2">
               <label className="text-xs font-semibold text-gray-600">{t('accounting.journal.lines')}</label>
               {manualLines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
+                <div key={idx} className={`grid ${multiBranch ? 'grid-cols-[1fr_auto_auto_auto_auto]' : 'grid-cols-[1fr_auto_auto_auto]'} gap-2 items-center`}>
                   <select
                     value={line.accountId}
                     onChange={(e) => updateManualLine(idx, { accountId: e.target.value })}
@@ -359,6 +364,19 @@ export default function JournalPage() {
                     onChange={(e) => updateManualLine(idx, { amount: e.target.value })}
                     className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white w-24"
                   />
+                  {multiBranch && (
+                    <select
+                      value={line.branchId}
+                      aria-label={t('accounting.journal.branch')}
+                      onChange={(e) => updateManualLine(idx, { branchId: e.target.value })}
+                      className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white w-28"
+                    >
+                      <option value="">{t('accounting.journal.noBranch')}</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <button aria-label={t('common.remove')}
                     type="button"
                     onClick={() => removeManualLine(idx)}

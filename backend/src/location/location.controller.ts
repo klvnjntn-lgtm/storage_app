@@ -17,11 +17,13 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModuleKey } from '@prisma/client';
 
-// No @RequireModule / @RequireAnyModule anywhere in this controller —
-// intentional. Locations are core infrastructure, not gated behind
-// INVOICE_POS / WORKSHOP_RMS. Any authenticated org member (or ADMIN,
-// per-route below) can manage them regardless of module entitlements.
+// Reading is open to every member: every org has at least its CENTRE
+// location, which forms use without asking. Managing locations (adding,
+// renaming, merging, deleting) is a WAREHOUSE_OPS feature — without it an
+// org's stock all sits on CENTRE, which its users never see.
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('locations')
 export class LocationController {
@@ -34,6 +36,7 @@ export class LocationController {
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Post()
   create(@CurrentOrg() organizationId: string, @Body('name') name: string) {
     return this.locationService.create(organizationId, name);
@@ -41,6 +44,7 @@ export class LocationController {
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Patch(':id')
   rename(
     @CurrentOrg() organizationId: string,
@@ -52,6 +56,15 @@ export class LocationController {
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
+  @Patch(':id/branch')
+  setBranch(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body('branchId') branchId: string) {
+    return this.locationService.setBranch(organizationId, id, branchId);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Post('merge')
   merge(@CurrentOrg() organizationId: string, @Body() dto: MergeDto) {
     return this.locationService.merge(organizationId, dto.sourceIds, dto.targetId);
@@ -59,6 +72,7 @@ export class LocationController {
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
+  @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Delete(':id')
   delete(@CurrentOrg() organizationId: string, @Param('id') id: string) {
     return this.locationService.delete(organizationId, id);

@@ -1,3 +1,4 @@
+import { resolveBranchId } from '../branches/resolve-branch';
 import { BadRequestException, Injectable, ForbiddenException, NotFoundException, } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
@@ -67,6 +68,9 @@ export type InvoicePrintView = {
   vehicleOdometer: number | null;
   businessAddress: string | null;
   businessPhone: string | null;
+  // The selling branch, for multi-branch businesses (else null); its
+  // address/phone are used above when it has them.
+  branchName: string | null;
   customerPoNumber: string | null;
 
   employeeId: string | null;      // NEW
@@ -154,9 +158,12 @@ const invoiceDetailInclude = {
       logoUrl: true,
       address: true,
       phone: true,
+      // Branch details only print once there's more than one branch.
+      branches: { where: { archivedAt: null }, select: { id: true } },
     },
   },
   location: { select: { name: true, address: true, phone: true } },
+  branch: { select: { id: true, name: true, address: true, phone: true } },
   customer: true,
   vehicle: true,
   employee: { select: { id: true, name: true, position: true } }, // NEW
@@ -248,11 +255,16 @@ constructor(
         const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
 
         await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
+        const branchId = await resolveBranchId(tx, organizationId, {
+          branchId: dto.branchId,
+          locationId: dto.locationId ?? dto.items.find((i) => i.locationId)?.locationId,
+        });
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
             userId,
             locationId: dto.locationId,
+            branchId,
             format: dto.format,
             odometer: dto.odometer ?? null,
             customerName: dto.customerName,
@@ -346,6 +358,7 @@ constructor(
           return tx.invoice.update({
             where: { id: invoice.id },
             data: {
+              ...(dto.branchId && { branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId }) }),
               format: dto.format ?? invoice.format,
               customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
               customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
@@ -431,6 +444,7 @@ constructor(
         return tx.invoice.update({
           where: { id: invoice.id },
           data: {
+            ...(dto.branchId && { branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId }) }),
             format: dto.format ?? invoice.format,
             customerName: dto.customerName !== undefined ? dto.customerName : invoice.customerName,
             customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
@@ -716,6 +730,7 @@ async issue(
             date: new Date(),
             memo: `COGS for invoice ${invoiceNumber}`,
             lines: costedLines,
+            branchId: invoice.branchId,
           },
           tx,
         );
@@ -1168,6 +1183,7 @@ async issue(
     invoice: Prisma.InvoiceGetPayload<{ include: typeof invoiceDetailInclude }>,
   ): InvoicePrintView {
     const toNumber = (d: Decimal) => Number(d);
+    const multiBranch = invoice.organization.branches.length > 1;
 
     return {
       id: invoice.id,
@@ -1179,8 +1195,9 @@ async issue(
       deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })),
 
       vehicleId: invoice.vehicleId ?? null,
-      businessAddress: invoice.organization.address,
-      businessPhone: invoice.organization.phone,
+      businessAddress: (multiBranch ? invoice.branch?.address : null) || invoice.organization.address,
+      businessPhone: (multiBranch ? invoice.branch?.phone : null) || invoice.organization.phone,
+      branchName: multiBranch ? (invoice.branch?.name ?? null) : null,
       paymentTerms: invoice.paymentTerms,
       notes: invoice.notes,
       customerPoNumber: invoice.customerPoNumber,
@@ -1929,6 +1946,7 @@ async editIssuedInvoice(
               date: new Date(),
               memo: `COGS for invoice ${invoice.invoiceNumber ?? invoice.id} (edited)`,
               lines: costedLines,
+              branchId: invoice.branchId,
             },
             tx,
           );
@@ -2067,7 +2085,7 @@ async recostInvoiceItem(
   return this.prisma.$transaction(async (tx) => {
     const item = await tx.invoiceItem.findFirst({
       where: { id: itemId, invoiceId, invoice: { organizationId } },
-      include: { invoice: { select: { status: true } } },
+      include: { invoice: { select: { status: true, branchId: true } } },
     });
     if (!item) throw new NotFoundException('Invoice item not found');
     // A voided invoice's COGS is already reversed; correcting it would post
@@ -2107,6 +2125,7 @@ async recostInvoiceItem(
           memo: `Cost correction for invoice item ${itemId}`,
           deltaAmount,
           locationId: item.locationId,
+          branchId: item.invoice.branchId,
         },
         tx,
       );
@@ -2413,6 +2432,8 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             organizationId,
             userId,
             locationId: quotation.locationId,
+            // The draft can be moved to another branch before it's issued.
+            branchId: await resolveBranchId(tx, organizationId, { locationId: quotation.locationId }),
             format: 'A4',
             customerName: quotation.customerName,
             customerId: quotation.customerId,
@@ -2536,6 +2557,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             organizationId,
             userId,
             locationId: order.locationId,
+            branchId: await resolveBranchId(tx, organizationId, { locationId: order.locationId }),
             format: 'A4',
             customerName: order.customerName,
             customerId: order.customerId,

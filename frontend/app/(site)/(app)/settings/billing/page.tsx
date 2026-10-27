@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ComingSoon, ErrorNote, PageFrame, UsageBar, btnPrimary, thCls, tdCls } from '@/app/components/shared/PageFrame';
 
@@ -61,6 +62,9 @@ export default function BillingPage() {
 function BillingPageInner() {
   const { authorized, loading: authLoading } = useRequireAdmin();
   const { t } = useLanguage();
+  // The locations allowance only matters to warehouse orgs; everyone else
+  // has just their hidden CENTRE.
+  const warehouseOps = useWarehouseOps();
   const search = useSearchParams();
   const returnedPayment = search.get('payment');
 
@@ -186,7 +190,7 @@ function BillingPageInner() {
 
             {limited && (
               <div className="mt-4 grid sm:grid-cols-2 gap-4">
-                {RESOURCES.map((r) => (
+                {RESOURCES.filter((r) => r !== 'locations' || warehouseOps).map((r) => (
                   <div key={r}>
                     <div className="flex justify-between text-sm">
                       <span>{t(`billing.resource.${r}`)}</span>

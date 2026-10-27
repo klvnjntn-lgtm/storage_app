@@ -10,6 +10,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/templates/DeliveryOrderA4Template';
 import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
 import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
@@ -36,6 +37,7 @@ export default function DeliveryOrderDetailPage() {
   const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -241,7 +243,8 @@ export default function DeliveryOrderDetailPage() {
                 </span>
               </div>
               <p className="text-xs text-gray-500">
-                {order.customerName ?? t('sales.deliveryOrderDetail.noCustomer')} · {order.location?.name ?? '—'}
+                {order.customerName ?? t('sales.deliveryOrderDetail.noCustomer')}
+                {warehouseOps && ` · ${order.location?.name ?? '—'}`}
                 {order.salesOrder?.orderNumber && (
                   <>
                     {' '}

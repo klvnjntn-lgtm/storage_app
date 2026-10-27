@@ -13,6 +13,7 @@ import { DocumentNumberingService } from '../shared/documents/document-numbering
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { resolveBranchId } from '../branches/resolve-branch';
 import { normalizePlate } from '../lib/plate';
 import { escapeLike } from '../common/text/escape-like';
 import {
@@ -23,9 +24,10 @@ import {
 } from './dto/work-order.dto';
 
 const DETAIL_INCLUDE = {
-  customer: { select: { id: true, name: true, phone: true } },
+  customer: { select: { id: true, name: true, phone: true, companyName: true, npwp: true, address: true } },
   vehicle: { select: { id: true, plateNumber: true, vehicleModel: true, odometer: true } },
   mechanic: { select: { id: true, name: true } },
+  branch: { select: { id: true, name: true } },
   items: {
     orderBy: { sortOrder: 'asc' },
     include: { product: { select: { id: true, name: true, sku: true, sellingPrice: true } } },
@@ -143,7 +145,7 @@ export class WorkOrdersService {
       this.getOne(organizationId, id),
       this.prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { name: true, address: true, phone: true, logoUrl: true },
+        select: { name: true, legalName: true, npwp: true, address: true, phone: true, logoUrl: true },
       }),
     ]);
     return {
@@ -151,6 +153,8 @@ export class WorkOrdersService {
       pricing: await this.priceForPrint(organizationId, workOrder),
       business: {
         name: org?.name ?? '',
+        legalName: org?.legalName ?? null,
+        npwp: org?.npwp ?? null,
         address: org?.address ?? null,
         phone: org?.phone ?? null,
         logoUrl: org?.logoUrl ?? null,
@@ -207,6 +211,10 @@ export class WorkOrdersService {
     const created = await this.prisma.$transaction(async (tx) => {
       if (dto.odometer != null) await this.applyOdometer(tx, organizationId, vehicle.id, dto.odometer);
       const number = await this.numbering.nextSequential(tx, organizationId, 'WORK_ORDER', 'WO');
+      const branchId = await resolveBranchId(tx, organizationId, {
+        branchId: dto.branchId,
+        locationId: items.find((i) => i.productId && i.locationId)?.locationId,
+      });
       const job = await tx.workOrder.create({
         data: {
           organizationId,
@@ -220,9 +228,11 @@ export class WorkOrdersService {
           customerId: vehicle.customerId,
           vehicleId: vehicle.id,
           mechanicId: dto.mechanicId ?? null,
+          branchId,
           odometer: dto.odometer ?? null,
           complaint: dto.complaint?.trim() || null,
           notes: dto.notes?.trim() || null,
+          ...formalFields(dto),
           estimatedTotal,
           createdById: userId,
           items: { create: items.map(toItemData) },
@@ -278,6 +288,8 @@ export class WorkOrdersService {
           ...(dto.odometer !== undefined && { odometer: dto.odometer }),
           ...(dto.complaint !== undefined && { complaint: dto.complaint?.trim() || null }),
           ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
+          ...formalFields(dto),
+          ...(dto.branchId && { branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId }) }),
           ...(items !== undefined && {
             estimatedTotal,
             items: { create: items.map(toItemData) },
@@ -391,6 +403,11 @@ export class WorkOrdersService {
       status: wo.status,
       approvedAt: wo.approvedAt,
       customerName: wo.customer.name,
+      customerCompany: wo.customer.companyName,
+      customerNpwp: wo.customer.npwp,
+      validUntil: wo.validUntil,
+      customerPoNumber: wo.customerPoNumber,
+      paymentTerms: wo.paymentTerms,
       vehicle: { plateNumber: wo.vehicle.plateNumber, vehicleModel: wo.vehicle.vehicleModel },
       complaint: wo.complaint,
       lines: wo.items.map((i, idx) => ({
@@ -429,6 +446,9 @@ export class WorkOrdersService {
     const current = await this.publicEstimate(token);
     if (current.status === WorkOrderStatus.ESTIMATE && current.version !== dto.version) {
       throw new ConflictException('This estimate was updated — please reload to see the latest version');
+    }
+    if (approve && current.validUntil && endOfDay(current.validUntil) < new Date()) {
+      throw new BadRequestException('This estimate is no longer valid — ask the workshop for an updated one');
     }
     const name = dto.name.trim();
     const note = approve
@@ -499,6 +519,9 @@ export class WorkOrdersService {
         employeeId: wo.mechanicId ?? undefined,
         locationId: firstPart?.locationId ?? undefined,
         notes: wo.complaint ? `${wo.number}: ${wo.complaint}` : wo.number,
+        branchId: wo.branchId ?? undefined,
+        customerPoNumber: wo.customerPoNumber ?? undefined,
+        paymentTerms: wo.paymentTerms ?? undefined,
         items: wo.items.map((i) => ({
           productId: i.productId ?? undefined,
           description: i.description ?? undefined,
@@ -589,4 +612,18 @@ function toItemData(line: WorkOrderLineInput, index: number) {
     unitPrice: line.unitPrice ?? null,
     sortOrder: index,
   };
+}
+
+// Only the formal-estimate fields the request actually sent; '' clears one.
+function formalFields(dto: { validUntil?: string | null; customerPoNumber?: string | null; paymentTerms?: string | null }) {
+  return {
+    ...(dto.validUntil !== undefined && { validUntil: dto.validUntil ? new Date(dto.validUntil) : null }),
+    ...(dto.customerPoNumber !== undefined && { customerPoNumber: dto.customerPoNumber?.trim() || null }),
+    ...(dto.paymentTerms !== undefined && { paymentTerms: dto.paymentTerms?.trim() || null }),
+  };
+}
+
+// A DATE column holds midnight UTC; the estimate is good through that day.
+function endOfDay(date: Date) {
+  return new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
 }

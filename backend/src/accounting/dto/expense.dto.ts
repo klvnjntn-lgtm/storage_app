@@ -32,6 +32,11 @@ export class CreateExpenseDto {
   @IsUUID()
   locationId?: string;
 
+  // The branch it's booked to (P&L by branch). Left out: unallocated.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   description?: string;

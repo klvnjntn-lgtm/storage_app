@@ -1,6 +1,6 @@
 'use client';
 
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound } from 'lucide-react';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound, Store } from 'lucide-react';
 import { SerialButton } from '@/app/components/shared/SerialPicker';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine, TaxRate } from './types';
@@ -8,6 +8,8 @@ import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
+import { useBranches } from '@/lib/hooks/useBranches';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
@@ -112,6 +114,8 @@ export function CartPanel({
   employees,
   employeeId,
   onChangeEmployeeId,
+  branchId,
+  onChangeBranchId,
 }: {
   format: InvoiceFormat;
   cartLines: CartLineWithTotals[];
@@ -197,9 +201,15 @@ export function CartPanel({
   employees: Employee[];
   employeeId: string;
   onChangeEmployeeId: (id: string) => void;
+  // The selling branch — only asked of multi-branch businesses.
+  branchId?: string;
+  onChangeBranchId?: (id: string) => void;
 }) {
   const { t } = useLanguage();
   const svc = services ?? [];
+  // Where stock comes from is shown to warehouse orgs only.
+  const warehouseOps = useWarehouseOps();
+  const { branches, multiBranch } = useBranches();
   const hasEmptyServicePrice = svc.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = svc.some((s) => !s.description.trim());
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
@@ -212,6 +222,7 @@ export function CartPanel({
   return (
     <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
+        warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
@@ -229,6 +240,7 @@ export function CartPanel({
             </span>
           )}
         </div>
+        )
       ) : (
         <p className="text-xs text-gray-400 mb-3">
           {t('sales.invoiceCart.addItemsHint')}
@@ -248,6 +260,27 @@ export function CartPanel({
           className="w-full"
         />
       </div>
+
+      {multiBranch && onChangeBranchId && (
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <Store size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.invoiceCart.branchLabel')}
+          </label>
+          <select
+            value={branches.some((b) => b.id === branchId) ? branchId : ''}
+            onChange={(e) => onChangeBranchId(e.target.value)}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          >
+            <option value="">{t('sales.invoiceCart.branchDefault')}</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {employees.length > 0 && (
         <div className="mb-3">
@@ -516,10 +549,12 @@ export function CartPanel({
                       instead of forcing a single line that could widen
                       the panel. */}
                   <p className="text-sm break-words leading-snug">{line.product.name}</p>
-                  <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
-                    <MapPin size={10} strokeWidth={2} className="shrink-0" />
-                    <span className="truncate">{line.locationName}</span>
-                  </div>
+                  {warehouseOps && (
+                    <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
+                      <MapPin size={10} strokeWidth={2} className="shrink-0" />
+                      <span className="truncate">{line.locationName}</span>
+                    </div>
+                  )}
                   {line.product.trackSerials && onPickSerials && (
                     <div className="mt-1">
                       <SerialButton

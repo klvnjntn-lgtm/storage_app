@@ -79,6 +79,8 @@ export class PostingRulesService {
                 credit: netRevenue,
                 description: 'Net revenue',
                 locationId: invoice.locationId ?? undefined, // FIX
+                // Booked to the branch that made the sale.
+                branchId: invoice.branchId ?? undefined,
               }]
             : []),
           ...(taxPayable && Number(invoice.taxAmount) > 0
@@ -140,6 +142,9 @@ export class PostingRulesService {
       date: Date;
       memo: string;
       lines: { productId: string; quantity: number; unitCost: number | null; locationId?: string | null }[];
+      // The selling invoice's branch, for every line; else each line goes
+      // to its location's branch.
+      branchId?: string | null;
     },
     tx?: Prisma.TransactionClient,
   ) {
@@ -172,8 +177,8 @@ export class PostingRulesService {
       const rounded = this.round2(amount);
       if (rounded === 0) return [];
       return [
-        { accountId: cogs, debit: rounded, description: 'Cost of goods sold', locationId: locationId ?? undefined },
-        { accountId: inventory, credit: rounded, description: 'Inventory shipped', locationId: locationId ?? undefined },
+        { accountId: cogs, debit: rounded, description: 'Cost of goods sold', locationId: locationId ?? undefined, branchId: params.branchId ?? undefined },
+        { accountId: inventory, credit: rounded, description: 'Inventory shipped', locationId: locationId ?? undefined, branchId: params.branchId ?? undefined },
       ];
     });
     if (lines.length === 0) return null;
@@ -200,7 +205,7 @@ export class PostingRulesService {
   // postCogs. delta < 0: reverses the excess (Dr Inventory, Cr COGS).
   async postCogsCorrection(
     organizationId: string,
-    params: { sourceId: string; date: Date; memo: string; deltaAmount: number; locationId?: string | null },
+    params: { sourceId: string; date: Date; memo: string; deltaAmount: number; locationId?: string | null; branchId?: string | null },
     tx?: Prisma.TransactionClient,
   ) {
     const rounded = this.round2(params.deltaAmount);
@@ -215,12 +220,12 @@ export class PostingRulesService {
     const amount = Math.abs(rounded);
     const lines = rounded > 0
       ? [
-          { accountId: cogs, debit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined },
-          { accountId: inventory, credit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined },
+          { accountId: cogs, debit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined, branchId: params.branchId ?? undefined },
+          { accountId: inventory, credit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined, branchId: params.branchId ?? undefined },
         ]
       : [
-          { accountId: inventory, debit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined },
-          { accountId: cogs, credit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined },
+          { accountId: inventory, debit: amount, description: 'Inventory (correction)', locationId: params.locationId ?? undefined, branchId: params.branchId ?? undefined },
+          { accountId: cogs, credit: amount, description: 'Cost of goods sold (correction)', locationId: params.locationId ?? undefined, branchId: params.branchId ?? undefined },
         ];
 
     return this.journal.postEntry(
@@ -468,6 +473,7 @@ export class PostingRulesService {
             accountId: expenseAccount,
             debit: Number(expense.amount),
             locationId: expense.locationId ?? undefined, // FIX
+            branchId: expense.branchId ?? undefined,
           },
           { accountId: payable, credit: Number(expense.amount) },
         ],
@@ -575,6 +581,9 @@ export class PostingRulesService {
       date: Date;
       memo: string;
       lines: { productId: string; quantity: number; unitCost: number | null; locationId?: string | null }[];
+      // The selling invoice's branch, for every line; else each line goes
+      // to its location's branch.
+      branchId?: string | null;
     },
     tx?: Prisma.TransactionClient,
   ) {
@@ -603,8 +612,8 @@ export class PostingRulesService {
       const rounded = this.round2(amount);
       if (rounded === 0) return [];
       return [
-        { accountId: inventory, debit: rounded, description: 'Inventory returned', locationId: locationId ?? undefined },
-        { accountId: cogs, credit: rounded, description: 'Reversal of cost of goods sold', locationId: locationId ?? undefined },
+        { accountId: inventory, debit: rounded, description: 'Inventory returned', locationId: locationId ?? undefined, branchId: params.branchId ?? undefined },
+        { accountId: cogs, credit: rounded, description: 'Reversal of cost of goods sold', locationId: locationId ?? undefined, branchId: params.branchId ?? undefined },
       ];
     });
     if (lines.length === 0) return null;
@@ -687,7 +696,7 @@ export class PostingRulesService {
     const credited = await db.invoice.update({
       where: { id: params.invoiceId },
       data: { creditedAmount: { increment: totalReversal } },
-      select: { total: true, amountPaid: true, creditedAmount: true },
+      select: { total: true, amountPaid: true, creditedAmount: true, branchId: true },
     });
     // A return can be what settles an invoice (e.g. 100 invoiced, 70 paid,
     // 30 returned), so re-derive paymentStatus against the net total the
@@ -725,7 +734,13 @@ export class PostingRulesService {
           // transaction — the same class of bug fixed in postCogs()/
           // postCogsReturn() above, just on the revenue side.
           ...(revenueReversal > 0
-            ? [{ accountId: revenue, debit: revenueReversal, description: 'Revenue reversed for return' }]
+            ? [{
+                accountId: revenue,
+                debit: revenueReversal,
+                description: 'Revenue reversed for return',
+                // Off the same branch the sale was booked to.
+                branchId: credited.branchId ?? undefined,
+              }]
             : []),
           ...(taxPayable && taxReversal > 0
             ? [{ accountId: taxPayable, debit: taxReversal, description: 'Sales tax reversed for return' }]
@@ -865,7 +880,7 @@ export class PostingRulesService {
         sourceType: JournalSourceType.FIXED_ASSET_PURCHASE,
         sourceId: `${asset.id}:acquired`,
         lines: [
-          { accountId: fixedAssets, debit: cost, description: 'Fixed asset cost', locationId: asset.locationId ?? undefined },
+          { accountId: fixedAssets, debit: cost, description: 'Fixed asset cost', locationId: asset.locationId ?? undefined, branchId: asset.branchId ?? undefined },
           { accountId: payable, credit: cost, description: 'Fixed asset payable' },
         ],
       },
@@ -914,7 +929,7 @@ export class PostingRulesService {
   // caught-up period a no-op instead of a double post, not this method.
   async postFixedAssetDepreciation(
     organizationId: string,
-    params: { sourceId: string; date: Date; assetId: string; assetName: string; locationId?: string | null; amount: number },
+    params: { sourceId: string; date: Date; assetId: string; assetName: string; locationId?: string | null; branchId?: string | null; amount: number },
     tx?: Prisma.TransactionClient,
   ) {
     const db = this.db(tx);
@@ -934,7 +949,7 @@ export class PostingRulesService {
         sourceType: JournalSourceType.FIXED_ASSET_DEPRECIATION,
         sourceId: params.sourceId,
         lines: [
-          { accountId: depreciationExpense, debit: amount, description: 'Depreciation expense', locationId: params.locationId ?? undefined },
+          { accountId: depreciationExpense, debit: amount, description: 'Depreciation expense', locationId: params.locationId ?? undefined, branchId: params.branchId ?? undefined },
           { accountId: accumulatedDepreciation, credit: amount, description: 'Accumulated depreciation' },
         ],
       },
@@ -983,14 +998,14 @@ export class PostingRulesService {
       throw new BadRequestException('A payment method is required to record disposal proceeds');
     }
 
-    const lines: { accountId: string; debit?: number; credit?: number; description?: string; locationId?: string }[] = [];
+    const lines: { accountId: string; debit?: number; credit?: number; description?: string; locationId?: string; branchId?: string }[] = [];
     if (accumulatedDep > 0) {
       lines.push({ accountId: accumulatedDepreciationAcct, debit: accumulatedDep, description: 'Clear accumulated depreciation' });
     }
     if (proceeds > 0 && cash) {
       lines.push({ accountId: cash, debit: proceeds, description: 'Disposal proceeds received' });
     }
-    lines.push({ accountId: fixedAssets, credit: cost, description: 'Remove asset cost', locationId: asset.locationId ?? undefined });
+    lines.push({ accountId: fixedAssets, credit: cost, description: 'Remove asset cost', locationId: asset.locationId ?? undefined, branchId: asset.branchId ?? undefined });
     if (gain > 0 && gainAcct) lines.push({ accountId: gainAcct, credit: gain, description: 'Gain on disposal' });
     if (loss > 0 && lossAcct) lines.push({ accountId: lossAcct, debit: loss, description: 'Loss on disposal' });
 

@@ -19,6 +19,9 @@ import {
   ServiceLine,
   TaxRate,
 } from '@/app/components/quotations/types';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
+import { resolveCartTarget } from '@/lib/invoice-cart';
 import { useLanguage } from '@/app/context/LanguageContext';
 import type { BankAccountRow, TaxRateRow } from '@/lib/api-types';
 
@@ -96,6 +99,7 @@ function QuotationFormPageInner() {
   const [results, setResults] = useState<ProductSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
+  const warehouseOps = useWarehouseOps();
 
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [editingPriceKey, setEditingPriceKey] = useState<string | null>(null);
@@ -307,9 +311,6 @@ function QuotationFormPageInner() {
     performSearch(query, loc);
   }
 
-  function cartKey(productId: string, locId: string) {
-    return `${productId}__${locId}`;
-  }
 
   function stockAtLineLocation(line: CartLine): number {
     return line.product.stockByLocation.find((s) => s.locationId === line.locationId)?.quantity ?? 0;
@@ -327,40 +328,22 @@ function QuotationFormPageInner() {
     },
   ): boolean {
     setError('');
-    let target;
-    if (locationFilter) {
-      target = product.stockByLocation.find((s) => s.locationId === locationFilter.id);
-      if (!target || target.quantity <= 0) {
-        setError(
-          t('sales.quotationsNew.notStockedAtLocation', {
-            product: product.name,
-            location: locationFilter.name,
-          }),
-        );
-        return false;
-      }
-    } else {
-      target = [...product.stockByLocation].sort((a, b) => b.quantity - a.quantity)[0];
-      if (!target || target.quantity <= 0) {
-        setError(t('sales.quotationsNew.noStockAnyLocation', { product: product.name }));
-        return false;
-      }
-    }
-
-    const resolvedTarget = target;
-    const key = cartKey(product.id, resolvedTarget.locationId);
-    const existing = cart[key];
-    const nextQty = (existing?.quantity ?? 0) + details.quantity;
-    if (nextQty > resolvedTarget.quantity) {
-      setError(
-        t('sales.quotationsNew.onlyAvailable', {
-          qty: resolvedTarget.quantity,
-          product: product.name,
-          location: resolvedTarget.locationName,
-        }),
-      );
+    // Same rules as the invoice cart, minus overselling. Without warehouse
+    // ops everything comes from CENTRE, unasked.
+    const placed = resolveCartTarget(
+      cart,
+      product,
+      details.quantity,
+      warehouseOps ? locationFilter : (defaultLocation(locations) ?? null),
+      false,
+      { locationHidden: !warehouseOps },
+    );
+    if (!placed.ok) {
+      setError(t(placed.error, placed.vars));
       return false;
     }
+    const { target: resolvedTarget, key, nextQty } = placed;
+    const existing = cart[key];
 
     setCart((prev) => ({
       ...prev,

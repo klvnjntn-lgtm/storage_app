@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { DiscountType, LocationOption, ProductSearchResult, TaxRate } from './types';
 import { formatIDR } from '@/lib/format';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { resolveLinePrice, usePriceLevels } from '@/lib/price-levels';
@@ -81,6 +82,8 @@ export function ProductSearch({
   const priceAtBase = (product: ProductSearchResult) =>
     resolveLinePrice(product, basePriceLevelId ?? defaultLevelId, defaultLevelId);
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
+  // Location filter and per-location stock are for warehouse orgs only.
+  const warehouseOps = useWarehouseOps();
   const locationDropdownRef = useRef<HTMLDivElement>(null);
   // Grid view is the only place a product's photo shows up here — the list
   // rows stay text-only/compact, matching how this search looked before
@@ -192,65 +195,67 @@ export function ProductSearch({
           </button>
         </div>
 
-        <div className="relative" ref={locationDropdownRef}>
-          <button data-tour="sales-location-filter"
-            onClick={() => setLocationDropdownOpen((v) => !v)}
-            className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 sm:py-1.5 rounded-lg border transition-colors ${
-              locationFilter
-                ? 'border-blue-600/30 bg-blue-600/10 text-blue-700'
-                : 'border-blue-500/20 text-gray-500 hover:border-blue-500/40 hover:text-blue-700'
-            }`}
-          >
-            <MapPin size={12} strokeWidth={2} />
-            {locationFilter ? locationFilter.name : t('sales.productSearch.allLocations')}
-            <ChevronDown
-              size={12}
-              strokeWidth={2.5}
-              className={`transition-transform ${locationDropdownOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
+        {warehouseOps && (
+          <div className="relative" ref={locationDropdownRef}>
+            <button data-tour="sales-location-filter"
+              onClick={() => setLocationDropdownOpen((v) => !v)}
+              className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 sm:py-1.5 rounded-lg border transition-colors ${
+                locationFilter
+                  ? 'border-blue-600/30 bg-blue-600/10 text-blue-700'
+                  : 'border-blue-500/20 text-gray-500 hover:border-blue-500/40 hover:text-blue-700'
+              }`}
+            >
+              <MapPin size={12} strokeWidth={2} />
+              {locationFilter ? locationFilter.name : t('sales.productSearch.allLocations')}
+              <ChevronDown
+                size={12}
+                strokeWidth={2.5}
+                className={`transition-transform ${locationDropdownOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
 
-          {locationDropdownOpen && (
-            <div className="absolute right-0 z-10 mt-1.5 w-56 max-w-[calc(100vw-2rem)] bg-white border border-blue-500/20 rounded-xl shadow-lg overflow-hidden">
-              <button
-                onClick={() => {
-                  setLocationDropdownOpen(false);
-                  onSelectLocationFilter(null);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50 border-b border-gray-100"
-              >
-                <MapPinOff size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
-                <span className={!locationFilter ? 'font-semibold text-blue-700' : 'text-gray-700'}>
-                  {t('sales.productSearch.allLocations')}
-                </span>
-                {!locationFilter && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
-              </button>
+            {locationDropdownOpen && (
+              <div className="absolute right-0 z-10 mt-1.5 w-56 max-w-[calc(100vw-2rem)] bg-white border border-blue-500/20 rounded-xl shadow-lg overflow-hidden">
+                <button
+                  onClick={() => {
+                    setLocationDropdownOpen(false);
+                    onSelectLocationFilter(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50 border-b border-gray-100"
+                >
+                  <MapPinOff size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
+                  <span className={!locationFilter ? 'font-semibold text-blue-700' : 'text-gray-700'}>
+                    {t('sales.productSearch.allLocations')}
+                  </span>
+                  {!locationFilter && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
+                </button>
 
-              <div className="max-h-64 overflow-y-auto">
-                {locations.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">{t('sales.productSearch.noLocationsFound')}</p>}
-                {locations.map((loc) => {
-                  const selected = locationFilter?.id === loc.id;
-                  return (
-                    <button
-                      key={loc.id}
-                      onClick={() => {
-                        setLocationDropdownOpen(false);
-                        onSelectLocationFilter(selected ? null : loc);
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50"
-                    >
-                      <MapPin size={14} strokeWidth={2} className={`shrink-0 ${selected ? 'text-blue-600' : 'text-gray-400'}`} />
-                      <span className={`break-words ${selected ? 'font-semibold text-blue-700' : 'text-gray-700'}`}>
-                        {loc.name}
-                      </span>
-                      {selected && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
-                    </button>
-                  );
-                })}
+                <div className="max-h-64 overflow-y-auto">
+                  {locations.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">{t('sales.productSearch.noLocationsFound')}</p>}
+                  {locations.map((loc) => {
+                    const selected = locationFilter?.id === loc.id;
+                    return (
+                      <button
+                        key={loc.id}
+                        onClick={() => {
+                          setLocationDropdownOpen(false);
+                          onSelectLocationFilter(selected ? null : loc);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-left hover:bg-blue-50/60 active:bg-blue-50"
+                      >
+                        <MapPin size={14} strokeWidth={2} className={`shrink-0 ${selected ? 'text-blue-600' : 'text-gray-400'}`} />
+                        <span className={`break-words ${selected ? 'font-semibold text-blue-700' : 'text-gray-700'}`}>
+                          {loc.name}
+                        </span>
+                        {selected && <Check size={14} strokeWidth={2.5} className="ml-auto text-blue-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div data-tour="sales-product-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
@@ -512,7 +517,20 @@ export function ProductSearch({
 
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {product.stockByLocation.length === 0 && <span className="text-xs text-gray-400">{t('sales.productSearch.noStockRecorded')}</span>}
-                {product.stockByLocation.map((s) => (
+                {!warehouseOps && product.stockByLocation.length > 0 && (
+                  <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border border-blue-500/20 text-blue-700 bg-blue-600/5">
+                    {t('sales.productSearch.stockQty', {
+                      qty: product.stockByLocation.reduce((sum, l) => sum + l.quantity, 0),
+                    })}
+                    {(() => {
+                      const held = product.stockByLocation.reduce((sum, l) => sum + (l.held ?? 0), 0);
+                      return held > 0 ? (
+                        <span className="text-amber-700"> · {t('sales.productSearch.heldForJobs', { qty: held })}</span>
+                      ) : null;
+                    })()}
+                  </span>
+                )}
+                {warehouseOps && product.stockByLocation.map((s) => (
                   <span
                     key={s.locationId}
                     className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border max-w-full ${

@@ -11,6 +11,7 @@ import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format'
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -208,6 +209,7 @@ function CustomerFilterPicker({
 export default function InvoicesPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
 
   function statusOptionLabel(value: (typeof STATUS_OPTIONS)[number]): string {
     switch (value) {
@@ -704,7 +706,8 @@ export default function InvoicesPage() {
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {inv.location?.name ?? '—'} · {inv.items.length}{' '}
+                      {warehouseOps && `${inv.location?.name ?? '—'} · `}
+                      {inv.items.length}{' '}
                       {t(inv.items.length === 1 ? 'sales.invoicesList.itemCountOne' : 'sales.invoicesList.itemCountOther')}
                       {inv.customerName ? ` · ${inv.customerName}` : ''} ·{' '}
                       {formatDMY(displayDateFor(inv))}

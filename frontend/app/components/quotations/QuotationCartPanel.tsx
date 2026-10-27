@@ -1,5 +1,6 @@
 'use client';
 
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, CalendarClock, FileSignature, Landmark } from 'lucide-react';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, ServiceLine, TaxRate } from './types';
@@ -120,9 +121,13 @@ export function QuotationCartPanel({
   const hasUnpricedCatalogItem =
     !posPricingEnabled && cartLines.some((line) => line.product.sellingPrice == null);
 
+  // Where stock comes from is shown to warehouse orgs only.
+  const warehouseOps = useWarehouseOps();
+
   return (
     <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
+        warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
           {distinctLocationNames.length === 1 ? (
@@ -137,6 +142,7 @@ export function QuotationCartPanel({
             </span>
           )}
         </div>
+        )
       ) : (
         <p className="text-xs text-gray-400 mb-3">{t('sales.quotationCart.addItemsPrompt')}</p>
       )}
@@ -219,10 +225,12 @@ export function QuotationCartPanel({
                       widen the panel); long product names now wrap like
                       a normal paragraph instead. */}
                   <p className="text-sm break-words leading-snug">{line.product.name}</p>
-                  <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
-                    <MapPin size={10} strokeWidth={2} className="shrink-0" />
-                    <span className="truncate">{line.locationName}</span>
-                  </div>
+                  {warehouseOps && (
+                    <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
+                      <MapPin size={10} strokeWidth={2} className="shrink-0" />
+                      <span className="truncate">{line.locationName}</span>
+                    </div>
+                  )}
                   {onChangePriceLevel && (
                     <div className="mt-1">
                       <PriceLevelSelect

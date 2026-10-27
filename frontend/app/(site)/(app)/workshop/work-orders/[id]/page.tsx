@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, Printer, ThumbsUp, Lightbulb, Link2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { formatDMY } from '@/lib/dates';
+import { formatDMY, parseCalendarDate } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, btnDanger } from '@/app/components/shared/PageFrame';
 import WorkOrderForm, { VehicleBadge, formToPayload, type WorkOrderFormValue } from '@/app/components/workshop/WorkOrderForm';
@@ -27,6 +27,11 @@ function toForm(wo: WorkOrder): WorkOrderFormValue {
     odometer: wo.odometer != null ? String(wo.odometer) : '',
     complaint: wo.complaint ?? '',
     notes: wo.notes ?? '',
+    branchId: wo.branchId ?? '',
+    // A DATE column arrives as midnight UTC; the date part is the date.
+    validUntil: wo.validUntil ? wo.validUntil.slice(0, 10) : '',
+    customerPoNumber: wo.customerPoNumber ?? '',
+    paymentTerms: wo.paymentTerms ?? '',
     lines: toDraftLines(wo.items),
   };
 }
@@ -45,6 +50,8 @@ export default function WorkOrderDetailPage() {
   const [wo, setWo] = useState<WorkOrder | null>(null);
   const [form, setForm] = useState<WorkOrderFormValue | null>(null);
   const [dirty, setDirty] = useState(false);
+  // Read once: "has the estimate lapsed" needn't tick while the page is open.
+  const [now] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -150,6 +157,11 @@ export default function WorkOrderDetailPage() {
   const approvedLater =
     !!wo.approvedAt && new Date(wo.approvedAt).getTime() - new Date(wo.createdAt).getTime() > 60_000;
   const source = wo.followedUp[0];
+  // Past its validity date: the customer's link won't accept an approval.
+  const lapsedOn =
+    isEstimate && wo.validUntil && parseCalendarDate(wo.validUntil).getTime() + 24 * 60 * 60 * 1000 <= now
+      ? formatDMY(parseCalendarDate(wo.validUntil))
+      : null;
 
   // The next sensible moves from each status; DONE can still be reopened.
   // An estimate moves on only by approval (its own button).
@@ -207,6 +219,11 @@ export default function WorkOrderDetailPage() {
         {isEstimate && (
           <p className="mt-3 text-sm text-purple-800 bg-purple-50 border border-purple-200 rounded-md px-3 py-2">
             {t('workshop.workOrders.estimateHint')}
+          </p>
+        )}
+        {lapsedOn && (
+          <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            {t('workshop.workOrders.estimateLapsed', { date: lapsedOn })}
           </p>
         )}
         {source && (

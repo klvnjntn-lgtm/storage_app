@@ -9,6 +9,7 @@ import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { SalesOrderA4Template } from '@/app/components/sales-orders/templates/SalesOrderA4Template';
 import { SalesOrderPrintView, toSalesOrderView } from '@/lib/mappers/sales-order-mapper';
 import { DeliveryOrdersPanel } from '@/app/components/sales-orders/DeliveryOrdersPanel';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
@@ -75,6 +76,7 @@ export default function SalesOrderDetailPage() {
   const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -277,8 +279,8 @@ export default function SalesOrderDetailPage() {
                 </span>
               </div>
               <p className="text-xs text-gray-500">
-                {order.customer?.name ?? order.customerName ?? t('sales.orderDetail.noCustomer')} ·{' '}
-                {order.location?.name ?? '—'}
+                {order.customer?.name ?? order.customerName ?? t('sales.orderDetail.noCustomer')}
+                {warehouseOps && ` · ${order.location?.name ?? '—'}`}
               </p>
             </div>
 

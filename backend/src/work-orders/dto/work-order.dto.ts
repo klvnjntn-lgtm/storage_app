@@ -75,6 +75,27 @@ export class CreateWorkOrderDto {
   @MaxLength(2000)
   notes?: string | null;
 
+  // The branch doing the job (multi-branch workshops); left out on create:
+  // the parts' location's branch, else the first.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
+  // Formal-estimate details (fleet customers).
+  @IsOptional()
+  @IsISO8601()
+  validUntil?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  customerPoNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  paymentTerms?: string | null;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -114,6 +135,27 @@ export class UpdateWorkOrderDto {
   @IsString()
   @MaxLength(2000)
   notes?: string | null;
+
+  // The branch doing the job (multi-branch workshops); left out on create:
+  // the parts' location's branch, else the first.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
+  // Formal-estimate details (fleet customers).
+  @IsOptional()
+  @IsISO8601()
+  validUntil?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  customerPoNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  paymentTerms?: string | null;
 
   // Replaces every line when present.
   @IsOptional()

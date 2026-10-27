@@ -42,6 +42,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
             <h2 className="text-xl font-bold leading-tight text-black">
               {invoice.businessName ?? invoice.locationName}
             </h2>
+            {invoice.branchName && <p className="text-[11px] font-semibold text-black">{invoice.branchName}</p>}
             {invoice.businessAddress && <p className="text-[11px] text-black">{invoice.businessAddress}</p>}
             {invoice.businessPhone && <p className="text-[11px] text-black">{invoice.businessPhone}</p>}
             {invoice.businessNpwp && (

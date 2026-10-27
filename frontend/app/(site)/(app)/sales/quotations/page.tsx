@@ -9,6 +9,7 @@ import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -100,6 +101,7 @@ function quotationStatusLabel(t: (key: string) => string, status: QuotationStatu
 export default function QuotationsPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const warehouseOps = useWarehouseOps();
 
   // Seeded from the URL so pressing the browser's Back button from a
   // quotation's detail page restores the same filters/search/page instead
@@ -391,7 +393,8 @@ export default function QuotationsPage() {
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {q.location?.name ?? '—'} · {q.items.length}{' '}
+                      {warehouseOps && `${q.location?.name ?? '—'} · `}
+                      {q.items.length}{' '}
                       {t(q.items.length === 1 ? 'sales.quotations.item' : 'sales.quotations.items')}
                       {q.customerName ? ` · ${q.customerName}` : ''} ·{' '}
                       {formatDMY(new Date(q.sentAt ?? q.createdAt))}

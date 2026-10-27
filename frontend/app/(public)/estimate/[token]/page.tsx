@@ -4,18 +4,30 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { formatIDR } from '@/lib/format';
-import { formatDMY } from '@/lib/dates';
+import { formatDMY, parseCalendarDate } from '@/lib/dates';
 import { resolveUploadUrl } from '@/lib/assets';
 import { CSRF_HEADERS } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 type Estimate = {
-  business: { name: string; address: string | null; phone: string | null; logoUrl: string | null };
+  business: {
+    name: string;
+    legalName: string | null;
+    npwp: string | null;
+    address: string | null;
+    phone: string | null;
+    logoUrl: string | null;
+  };
   number: string;
   createdAt: string;
   status: 'ESTIMATE' | 'QUEUED' | 'IN_PROGRESS' | 'WAITING_PARTS' | 'DONE' | 'CANCELLED';
   approvedAt: string | null;
   customerName: string;
+  customerCompany: string | null;
+  customerNpwp: string | null;
+  validUntil: string | null;
+  customerPoNumber: string | null;
+  paymentTerms: string | null;
   vehicle: { plateNumber: string; vehicleModel: string };
   complaint: string | null;
   lines: { name: string; isPart: boolean; quantity: number; unitPrice: number | null; lineTotal: number | null }[];
@@ -149,6 +161,9 @@ export default function EstimateApprovalPage() {
   }
 
   const logoUrl = resolveUploadUrl(estimate.business.logoUrl);
+  // Good through the whole of its validity date.
+  const validUntil = estimate.validUntil ? parseCalendarDate(estimate.validUntil) : null;
+  const lapsed = !!validUntil && new Date(validUntil.getTime() + 24 * 60 * 60 * 1000) <= new Date();
   const open = estimate.status === 'ESTIMATE';
   const declined = estimate.status === 'CANCELLED';
 
@@ -165,6 +180,7 @@ export default function EstimateApprovalPage() {
           <h1 className="text-lg font-bold leading-tight">{estimate.business.name}</h1>
           {estimate.business.address && <p className="text-xs text-gray-600">{estimate.business.address}</p>}
           {estimate.business.phone && <p className="text-xs text-gray-600">{estimate.business.phone}</p>}
+          {estimate.business.npwp && <p className="text-xs text-gray-600">NPWP: {estimate.business.npwp}</p>}
         </div>
       </header>
 
@@ -179,8 +195,38 @@ export default function EstimateApprovalPage() {
             <p className="font-mono font-semibold">{estimate.vehicle.plateNumber}</p>
             <p className="text-xs text-gray-600">{estimate.vehicle.vehicleModel}</p>
             <p className="text-xs text-gray-600">{estimate.customerName}</p>
+            {estimate.customerCompany && <p className="text-xs text-gray-600">{estimate.customerCompany}</p>}
           </div>
         </div>
+
+        {(estimate.customerPoNumber || estimate.paymentTerms || estimate.customerNpwp || validUntil) && (
+          <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            {estimate.customerPoNumber && (
+              <>
+                <dt className="text-gray-500">{p('poNumber')}</dt>
+                <dd>{estimate.customerPoNumber}</dd>
+              </>
+            )}
+            {estimate.paymentTerms && (
+              <>
+                <dt className="text-gray-500">{p('paymentTerms')}</dt>
+                <dd>{estimate.paymentTerms}</dd>
+              </>
+            )}
+            {estimate.customerNpwp && (
+              <>
+                <dt className="text-gray-500">{p('customerNpwp')}</dt>
+                <dd>{estimate.customerNpwp}</dd>
+              </>
+            )}
+            {validUntil && (
+              <>
+                <dt className="text-gray-500">{p('estimateValidUntil')}</dt>
+                <dd className={lapsed ? 'text-red-700 font-medium' : ''}>{formatDMY(validUntil)}</dd>
+              </>
+            )}
+          </dl>
+        )}
 
         {estimate.complaint && (
           <div className="mt-3">
@@ -235,7 +281,9 @@ export default function EstimateApprovalPage() {
 
       {error && <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">{error}</p>}
 
-      {open ? (
+      {open && lapsed ? (
+        <p className="mt-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">{p('lapsed')}</p>
+      ) : open ? (
         mode ? (
           <section className="mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
             <p className="text-sm font-semibold">{mode === 'approve' ? p('confirmApprove') : p('confirmDecline')}</p>

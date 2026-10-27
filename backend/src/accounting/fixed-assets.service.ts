@@ -1,3 +1,4 @@
+import { expenseBranchId } from './expenses.service';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { runSerializable } from '../prisma/serializable';
 import { DepreciationMethod, FixedAssetStatus, JournalSourceType, PaymentMethod, Prisma } from '@prisma/client';
@@ -76,7 +77,7 @@ export class FixedAssetsService {
     const [data, total] = await this.prisma.$transaction([
       this.prisma.fixedAsset.findMany({
         where,
-        include: { location: { select: { name: true } } },
+        include: { location: { select: { name: true } }, branch: { select: { name: true } } },
         orderBy: { acquisitionDate: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -92,6 +93,7 @@ export class FixedAssetsService {
       where: { id, organizationId },
       include: {
         location: { select: { name: true } },
+        branch: { select: { name: true } },
         payments: { orderBy: { createdAt: 'desc' } },
       },
     });
@@ -122,6 +124,7 @@ export class FixedAssetsService {
           name: dto.name.trim(),
           category: dto.category?.trim(),
           locationId: dto.locationId,
+          branchId: await expenseBranchId(tx, organizationId, dto),
           acquisitionDate: parseDateOnly(dto.acquisitionDate, 'acquisitionDate'),
           cost: dto.cost,
           salvageValue,
@@ -269,6 +272,7 @@ export class FixedAssetsService {
             assetId: asset.id,
             assetName: asset.name,
             locationId: asset.locationId,
+            branchId: asset.branchId,
             amount,
           },
           tx,

@@ -7,6 +7,8 @@ import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
 import { heldWorkOrderItemsWhere } from './work-order-holds';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { ensureDefaultBranch } from '../branches/resolve-branch';
+import { findOrCreateCentre, isWarehouseOpsActive } from '../organization-module/warehouse-ops-active';
 import { PlanLimitsService } from '../billing/plan-limits.service';
 
 function slugify(value: string): string {
@@ -490,6 +492,8 @@ export class StockService {
     // 12345 or a location like "1" is a number, and calling .trim() on it
     // threw, rejecting the row with "row.sku?.trim is not a function".
     const text = (v: string | number | null | undefined) => (v == null ? '' : String(v).trim());
+    // Only warehouse orgs import per location; the rest import into CENTRE.
+    const warehouseOps = await isWarehouseOpsActive(this.prisma, orgId);
 
     for (const rawRow of rows) {
       const row = {
@@ -504,7 +508,7 @@ export class StockService {
         if (
           !row.sku?.trim() ||
           !row.name?.trim() ||
-          !row.location?.trim() ||
+          (warehouseOps && !row.location?.trim()) ||
           row.qty == null
         ) {
           rejected.push({ ...row, reason: 'missing fields' });
@@ -524,11 +528,15 @@ export class StockService {
             { userId, sourceId: `import:${batch.id}` },
           );
 
+          // Without warehouse ops everything goes to CENTRE, whatever the
+          // file's location column says (those orgs have no other location).
           const locationId = `${orgId}_${slugify(row.location)}`;
 
-          let location = await tx.location.findFirst({
-            where: { id: locationId, organizationId: orgId },    // 🔒
-          });
+          let location = warehouseOps
+            ? await tx.location.findFirst({
+                where: { id: locationId, organizationId: orgId },    // 🔒
+              })
+            : await findOrCreateCentre(tx, orgId);
 
           if (!location) {
             // A new location here counts against the plan like one made
@@ -539,6 +547,7 @@ export class StockService {
                 id: locationId,
                 name: row.location,
                 organizationId: orgId,                            // 🔒
+                branchId: (await ensureDefaultBranch(tx, orgId)).id,
               },
             });
           }

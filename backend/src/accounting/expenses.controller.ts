@@ -89,7 +89,7 @@ export class ExpensesController {
   update(
     @CurrentOrg() organizationId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { description?: string; dueDate?: string; locationId?: string },
+    @Body() dto: { description?: string; dueDate?: string; locationId?: string; branchId?: string },
   ) {
     return this.expensesService.update(organizationId, id, dto);
   }

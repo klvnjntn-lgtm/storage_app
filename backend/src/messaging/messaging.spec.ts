@@ -1,3 +1,4 @@
+import { resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
 import { mkdtempSync } from 'fs';
@@ -145,7 +146,9 @@ describe('Messaging (database)', () => {
         issuedAt: new Date(),
         total,
         subtotal: total,
-        dueDate: new Date(Date.now() + dueInDays * 864e5),
+        // Stored like a picked due date: midnight UTC of the business day
+        // (a bare now() lands on yesterday before 07:00 WIB).
+        dueDate: new Date(todayBusinessDate(resolveTimezone(null)).getTime() + dueInDays * 864e5),
       },
     });
   }

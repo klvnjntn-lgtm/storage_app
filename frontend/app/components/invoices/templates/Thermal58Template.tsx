@@ -31,6 +31,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
         <p className="font-bold">
           {invoice.businessName ?? invoice.locationName}
         </p>
+        {invoice.branchName && <p>{invoice.branchName}</p>}
 
         {invoice.businessPhone && (
           <p>{invoice.businessPhone}</p>

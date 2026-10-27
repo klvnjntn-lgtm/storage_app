@@ -16,6 +16,7 @@ export type InvoicePrintView = {
   businessLogoUrl: string | null;
   businessAddress: string | null;
   businessPhone: string | null;
+  branchName?: string | null;
   bankName: string | null;
   bankAccountNumber: string | null;
   bankAccountName: string | null;
@@ -144,6 +145,7 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
     businessLogoUrl: invoice.businessLogoUrl,
     businessAddress: invoice.businessAddress ?? invoice.locationAddress ?? null,
     businessPhone: invoice.businessPhone ?? invoice.locationPhone ?? null,
+    branchName: invoice.branchName ?? null,
     bankName: invoice.bankName,
     bankAccountNumber: invoice.bankAccountNumber,
     bankAccountName: invoice.bankAccountName,

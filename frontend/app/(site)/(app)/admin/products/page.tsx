@@ -10,6 +10,8 @@ import { apiFetch } from '@/lib/apifetch';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import Pagination from '@/app/components/shared/Pagination';
 import SortableTh from '@/app/components/shared/SortableTh';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ComboBox from '@/app/components/shared/ComboBox';
 import { errorMessage } from '@/lib/api-error';
@@ -188,7 +190,11 @@ export default function ProductsPage() {
   const [editFieldErrors, setEditFieldErrors] = useState<FieldErrors>({});
 
   // Stock adjustment fields, part of the same row-edit form.
-  const [editStockLocationId, setEditStockLocationId] = useState('');
+  const [pickedStockLocationId, setEditStockLocationId] = useState('');
+  // Only warehouse orgs choose where a stock adjustment lands; the rest
+  // adjust their CENTRE stock without being asked.
+  const warehouseOps = useWarehouseOps();
+  const editStockLocationId = warehouseOps ? pickedStockLocationId : (defaultLocation(locations)?.id ?? '');
   const [editStockDelta, setEditStockDelta] = useState('');
   const [editStockReason, setEditStockReason] = useState(DEFAULT_ADJUST_REASON);
 
@@ -1238,12 +1244,13 @@ export default function ProductsPage() {
 
                                 <div className="w-px self-stretch bg-blue-500/15 hidden md:block" />
 
+                                {warehouseOps && (
                                 <div className="flex flex-col gap-1">
                                   <label className="text-xs font-semibold text-gray-500">
                                     {t('admin.products.adjustStockLocationLabel')}
                                   </label>
                                   <select
-                                    value={editStockLocationId}
+                                    value={pickedStockLocationId}
                                     onChange={(e) => setEditStockLocationId(e.target.value)}
                                     className={`${rowFieldClass()} w-40`}
                                   >
@@ -1255,6 +1262,7 @@ export default function ProductsPage() {
                                     ))}
                                   </select>
                                 </div>
+                                )}
                                 <div className="flex flex-col gap-1">
                                   <label className="text-xs font-semibold text-gray-500">
                                     {t('admin.products.qtyLabel')}
