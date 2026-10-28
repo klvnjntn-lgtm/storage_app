@@ -43,7 +43,7 @@ class UpdateBranchDto {
 }
 
 // Not module-gated: any business can have branches (unlike stock
-// locations). Every member can list them, for the pickers; admins manage.
+// locations). Every member can list them, for the pickers; MASTER manages.
 @UseGuards(JwtAuthGuard, OrgGuard)
 @Controller('branches')
 export class BranchesController {
@@ -55,28 +55,28 @@ export class BranchesController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Post()
   create(@CurrentOrg() orgId: string, @Body() dto: CreateBranchDto) {
     return this.branches.create(orgId, dto);
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Patch(':id')
   update(@CurrentOrg() orgId: string, @Param('id') id: string, @Body() dto: UpdateBranchDto) {
     return this.branches.update(orgId, id, dto);
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Post(':id/archive')
   archive(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.branches.archive(orgId, id);
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Post(':id/restore')
   restore(@CurrentOrg() orgId: string, @Param('id') id: string) {
     return this.branches.restore(orgId, id);

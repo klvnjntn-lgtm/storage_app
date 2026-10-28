@@ -8,6 +8,7 @@ import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, Switch, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 type ApiKey = {
   id: string;
@@ -174,7 +175,7 @@ export default function IntegrationsPage() {
                       {k.name} <span className="block font-mono text-xs text-gray-500">{k.prefix}…</span>
                     </td>
                     <td className={tdCls}>
-                      {k.role === 'ADMIN' ? t('integrations.roleAdmin') : t('integrations.roleUser')}
+                      {isAdminRole(k.role) ? t('integrations.roleAdmin') : t('integrations.roleUser')}
                       {k.readOnly && ` · ${t('integrations.readOnly')}`}
                     </td>
                     <td className={tdCls}>{k.revokedAt ? t('integrations.revoked') : k.lastUsedAt ? formatDMYTime(new Date(k.lastUsedAt)) : t('integrations.never')}</td>

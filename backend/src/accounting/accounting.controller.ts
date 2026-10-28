@@ -28,6 +28,8 @@ import { CashStatementService } from './cash-statement.service';
 import { endOfBusinessDay, parseDateOnly, resolveTimezone, todayBusinessDate } from './business-date';
 import { CreateAccountDto, CreateManualJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { isAdminRole } from '../auth/roles';
+import { filterBranchId } from '../auth/branch-scope';
 
 const AGING_BUCKETS: AgingBucket[] = ['current', '1-30', '31-60', '61-90', '90+'];
 
@@ -68,8 +70,9 @@ function parseEntryDate(value: string): Date {
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
-// The books and every financial report are admin-only; listPeriods below is the one exception.
-@Roles('ADMIN')
+// The books cover every branch, so they're MASTER-only. Exceptions: the
+// P&L, which a branch ADMIN gets for their own branch, and listPeriods.
+@Roles('MASTER')
 @Controller('accounting')
 export class AccountingController {
   constructor(
@@ -85,7 +88,7 @@ export class AccountingController {
   // Writes that change the books' structure or history are admin-only.
   // Reads are left at module-level access, as before.
   private assertAdmin(req: any) {
-    if (req?.user?.role !== 'ADMIN') {
+    if (!isAdminRole(req?.user?.role)) {
       throw new ForbiddenException('Only an administrator can perform this action');
     }
   }
@@ -110,6 +113,8 @@ export class AccountingController {
     return this.seedService.seedDefaults(organizationId);
   }
 
+  // The chart itself, for pickers (expenses): not branch data.
+  @Roles('ADMIN')
   @Get('accounts')
   listAccounts(@CurrentOrg() organizationId: string) {
     return this.accountsService.list(organizationId);
@@ -299,13 +304,16 @@ export class AccountingController {
     return this.reports.getBalanceSheet(organizationId, asOfDate, branchId); // 400s if branchId is set
   }
 
+  @Roles('ADMIN')
   @Get('reports/profit-loss')
   getProfitAndLoss(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('from') from: string,
     @Query('to') to: string,
-    @Query('branchId') branchId?: string,
+    @Query('branchId') requestedBranchId?: string,
   ) {
+    const branchId = filterBranchId(req.user, requestedBranchId);
     if (!from || !to) {
       throw new BadRequestException('from and to query params are required (YYYY-MM-DD)');
     }

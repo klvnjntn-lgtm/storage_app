@@ -22,6 +22,7 @@ import { formatIDR } from '@/lib/format';
 import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
+import { CatalogCarCard } from '@/app/components/workshop/CatalogCarCard';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -55,6 +56,10 @@ type VehicleDetail = {
   vehicleModel: string;
   vin: string | null;
   odometer: number | null;
+  carBrand?: string | null;
+  carModel?: string | null;
+  carYear?: number | null;
+  engine?: string | null;
   customer: { id: string; name: string; companyName: string | null; phone: string | null };
   invoices: VehicleInvoice[];
 };
@@ -350,6 +355,7 @@ export default function VehicleDetailPage() {
 
         {vehicle && (
           <>
+            <CatalogCarCard vehicle={vehicle} onSaved={(car) => setVehicle((prev) => (prev ? { ...prev, ...car } : prev))} />
             {/* Service stats — lifetime, unaffected by filters below */}
             <div data-tour="veh-stats" className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
               <div className="border-2 border-gray-300 rounded-md p-2.5 sm:p-3 min-w-0 bg-white">

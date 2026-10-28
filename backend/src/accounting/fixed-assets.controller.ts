@@ -16,11 +16,14 @@ import {
   RecordFixedAssetPaymentDto,
   RunDepreciationDto,
 } from './dto/fixed-asset.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
 // Money going out — admin-only, reads included.
 @Roles('ADMIN')
+@BranchRecord('fixedAsset')
 @Controller('fixed-assets')
 export class FixedAssetsController {
   constructor(
@@ -31,12 +34,15 @@ export class FixedAssetsController {
   @Get()
   list(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('status') status?: FixedAssetStatus,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('branchId') branchId?: string,
   ) {
     return this.fixedAssetsService.list(organizationId, {
       status,
+      branchId: filterBranchId(req.user, branchId),
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });
@@ -49,7 +55,9 @@ export class FixedAssetsController {
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Body() dto: CreateFixedAssetDto, @Req() req) {
-    return this.fixedAssetsService.create(organizationId, dto, req.user.sub);
+    return this.fixedAssetsService.create(
+      organizationId, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) }, req.user.sub,
+    );
   }
 
   @Post(':id/payments')
@@ -84,7 +92,8 @@ export class FixedAssetsController {
   // convention as the report endpoints in accounting.controller.ts use for
   // their own default `asOf`/`to`.
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  // Depreciates every branch's assets at once: MASTER only.
+  @Roles('MASTER')
   @Post('run-depreciation')
   async runDepreciation(@CurrentOrg() organizationId: string, @Body() dto: RunDepreciationDto) {
     const org = await this.prisma.organization.findUnique({

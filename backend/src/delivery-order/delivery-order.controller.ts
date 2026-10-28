@@ -20,6 +20,8 @@ import { RescheduleDeliveryOrderDto } from './dto/delivery-order-reschedule.dto'
 import type { Response } from 'express';
 import { DeliveryProofService } from './delivery-proof.service';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { filterBranchId } from '../auth/branch-scope';
 
 // Staff-only by default. There's no global DRIVER restriction, so without
 // this class-level @Roles a DRIVER JWT could list, ship, cancel, return or
@@ -29,6 +31,7 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 @UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
 @Roles('ADMIN', 'USER')
 @RequireModule(ModuleKey.INVOICE_POS, ModuleKey.DELIVERY_DMS)
+@BranchRecord('deliveryOrder')
 @Controller('delivery-orders')
 export class DeliveryOrderController {
   constructor(
@@ -38,19 +41,22 @@ export class DeliveryOrderController {
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreateDeliveryOrderDto) {
-    return this.deliveryOrderService.create(organizationId, req.user.sub, dto);
+    return this.deliveryOrderService.create(organizationId, req.user.sub, dto, filterBranchId(req.user));
   }
 
   @Get()
   list(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('salesOrderId') salesOrderId?: string,
     @Query('status') status?: DeliveryOrderStatus,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('branchId') branchId?: string,
   ) {
     return this.deliveryOrderService.list(organizationId, {
       salesOrderId, status,
+      branchId: filterBranchId(req.user, branchId),
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });
@@ -252,6 +258,7 @@ export class DeliveryOrderController {
     return this.deliveryOrderService.cancel(organizationId, id, req.user.sub);
   }
 
+  @BranchRecord('invoice', 'invoiceId')
   @Post('from-invoice/:invoiceId')
   createFromInvoice(@CurrentOrg() organizationId: string, @Param('invoiceId') invoiceId: string, @Req() req) {
     return this.deliveryOrderService.createFromInvoice(organizationId, req.user.sub, invoiceId);

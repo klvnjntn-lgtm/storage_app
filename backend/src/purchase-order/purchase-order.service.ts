@@ -12,6 +12,7 @@ import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { escapeLike } from '../common/text/escape-like';
+import { lineMatches } from '../common/text/document-search';
 
 export type PurchaseOrderPrintView = {
   id: string;
@@ -454,6 +455,8 @@ export class PurchaseOrderService {
         { supplier: { name: { contains: escapeLike(term), mode: 'insensitive' } } },
         // The supplier's own invoice number (imported Accurate purchases carry it here).
         { supplierBills: { some: { billNumber: { contains: escapeLike(term), mode: 'insensitive' } } } },
+        // What was ordered.
+        { items: lineMatches(term) },
       ];
     }
 

@@ -12,6 +12,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -23,7 +24,7 @@ export default function SuppliersListPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
 
   // Seeded from the URL so pressing the browser's Back button from a
   // supplier's edit page restores the same search/filter/page instead of

@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
@@ -27,15 +28,20 @@ export class BankAccountController {
   constructor(private readonly bankAccounts: BankAccountService) {}
 
   @Get()
-  list(@CurrentOrg() orgId: string, @Query('includeArchived') includeArchived?: string) {
-    return this.bankAccounts.list(orgId, includeArchived === 'true');
+  list(
+    @CurrentOrg() orgId: string,
+    @Req() req,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    return this.bankAccounts.list(orgId, includeArchived === 'true', req.user, branchId);
   }
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Post()
-  create(@CurrentOrg() orgId: string, @Body() dto: CreateBankAccountDto) {
-    return this.bankAccounts.create(orgId, dto);
+  create(@CurrentOrg() orgId: string, @Body() dto: CreateBankAccountDto, @Req() req) {
+    return this.bankAccounts.create(orgId, dto, req.user);
   }
 
   @UseGuards(RolesGuard)
@@ -45,14 +51,15 @@ export class BankAccountController {
     @CurrentOrg() orgId: string,
     @Param('id') id: string,
     @Body() dto: UpdateBankAccountDto,
+    @Req() req,
   ) {
-    return this.bankAccounts.update(orgId, id, dto);
+    return this.bankAccounts.update(orgId, id, dto, req.user);
   }
 
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Delete(':id')
-  archive(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    return this.bankAccounts.archive(orgId, id);
+  archive(@CurrentOrg() orgId: string, @Param('id') id: string, @Req() req) {
+    return this.bankAccounts.archive(orgId, id, req.user);
   }
 }

@@ -4,6 +4,7 @@ import { DiscountType, ModuleKey } from '@prisma/client';
 import { ForbiddenException } from '@nestjs/common';
 import { OrganizationModulesService } from 'src/organization-module/organization-modules.service';
 import { ensureDefaultPriceLevel } from 'src/price-level/default-price-level';
+import { isAdminRole } from '../../auth/roles';
 
 export type PriceableLine = {
   productId?: string;
@@ -235,10 +236,10 @@ export class LineItemPricingService {
 
     // Looked up once, only when the org restricts price overrides to admins.
     const actorIsAdmin = org.priceLevelOverrideRequiresAdmin
-      ? (options.userId
+      ? isAdminRole((options.userId
           ? await client.user.findFirst({ where: { id: options.userId, organizationId }, select: { role: true } })
           : null
-        )?.role === 'ADMIN'
+        )?.role)
       : true;
 
     // A line picking a level other than the customer's is an override.

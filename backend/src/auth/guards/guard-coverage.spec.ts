@@ -127,7 +127,11 @@ describe('guard coverage', () => {
         const cls = (r.cls as { name: string }).name;
         return (ADMIN_CONTROLLERS.includes(cls) || ADMIN_ROUTES.includes(r.name)) && !EXCEPTIONS.includes(r.name);
       })
-      .filter((r) => JSON.stringify(meta<string[]>(ROLES_KEY, r)) !== JSON.stringify(['ADMIN']))
+      .filter((r) => {
+        // ADMIN (which MASTER also passes) or MASTER alone.
+        const roles = JSON.stringify(meta<string[]>(ROLES_KEY, r));
+        return roles !== JSON.stringify(['ADMIN']) && roles !== JSON.stringify(['MASTER']);
+      })
       .map((r) => r.name);
     expect(notAdminOnly).toEqual([]);
     // Every listed route must exist, so a rename can't silently drop it.

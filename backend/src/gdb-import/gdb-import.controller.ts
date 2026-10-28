@@ -61,7 +61,8 @@ const VALID_TARGETS: GdbImportTarget[] = [
 // Admin-only: a confirmed import bulk-writes products, invoices and
 // purchase orders (and their ledger entries) into the organization.
 @UseGuards(RolesGuard)
-@Roles('ADMIN')
+// Imports into the whole business, so MASTER only.
+@Roles('MASTER')
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('integrations/accurate-gdb')
 export class GdbImportController {

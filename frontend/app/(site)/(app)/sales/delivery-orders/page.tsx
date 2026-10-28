@@ -1,6 +1,7 @@
 // app/(app)/sales/delivery-orders/page.tsx
 'use client';
 
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -48,6 +49,8 @@ export default function DeliveryOrdersPage() {
   // instead of resetting to page 1 with no filters.
   const [from, setFrom] = useState<string | null>(() => getInitialParam('from', '') || null);
   const [to, setTo] = useState<string | null>(() => getInitialParam('to', '') || null);
+  // MASTER's branch filter ('' = every branch); see BranchFilter.
+  const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
   const [statusFilter, setStatusFilter] = useState<'ALL' | DeliveryOrderStatus>(() =>
     getInitialParam('status', 'ALL')
   );
@@ -70,6 +73,7 @@ export default function DeliveryOrdersPage() {
   const [total, setTotal] = useState(0);
 
   useSyncQueryParams({
+    branchId: branchFilter || null,
     search: debouncedSearch,
     status: statusFilter !== 'ALL' ? statusFilter : null,
     from,
@@ -81,9 +85,10 @@ export default function DeliveryOrdersPage() {
 
   const hasDateRange = Boolean(from && to);
   const activeFilterCount =
-    (hasDateRange ? 1 : 0) + (statusFilter !== 'ALL' ? 1 : 0) + (debouncedSearch ? 1 : 0);
+    (hasDateRange ? 1 : 0) + (statusFilter !== 'ALL' ? 1 : 0) + (debouncedSearch ? 1 : 0) + (branchFilter ? 1 : 0);
 
   function clearFilters() {
+    setBranchFilter('');
     setFrom(null);
     setTo(null);
     setStatusFilter('ALL');
@@ -101,6 +106,7 @@ export default function DeliveryOrdersPage() {
         params.set('dateField', dateField);
       }
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (branchFilter) params.set('branchId', branchFilter);
       if (debouncedSearch) params.set('search', debouncedSearch);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
@@ -134,7 +140,7 @@ export default function DeliveryOrdersPage() {
   // and so a `page` restored from the URL (e.g. via the browser's Back
   // button) doesn't get reset to 1 on mount — the ref starts equal to the
   // initial filtersKey, so the reset branch only fires on an actual change.
-  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${debouncedSearch}`;
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${debouncedSearch}|${branchFilter}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -251,6 +257,8 @@ export default function DeliveryOrdersPage() {
               </div>
             </div>
           </div>
+
+          <BranchFilter className="mt-3" value={branchFilter} onChange={setBranchFilter} />
 
           {activeFilterCount > 0 && (
             <div className="flex items-center justify-end gap-3 mt-3 pt-3 border-t border-blue-500/10">

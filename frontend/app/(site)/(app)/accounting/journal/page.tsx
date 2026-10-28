@@ -15,6 +15,7 @@ import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -80,7 +81,7 @@ export default function JournalPage() {
   // Multi-branch businesses can tag a line with a branch (P&L by branch).
   const { branches, multiBranch } = useBranches();
     const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
 
   const [entries, setEntries] = useState<{ data: JournalEntry[]; total: number; page: number; pageSize: number } | null>(null);
   const [accounts, setAccounts] = useState<Account[] | null>(null);

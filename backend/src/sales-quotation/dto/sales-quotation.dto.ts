@@ -74,6 +74,12 @@ export class QuotationLineItemDto {
 }
 
 export class CreateSalesQuotationDto {
+  // The branch it belongs to; left out: the location's branch, else the first. Branch staff always
+  // get their own.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   // FIX — was @IsString() @IsNotEmpty() with no @IsOptional(), which
   // rejected any request that omitted locationId even though the field
   // is typed `?` and the frontend explicitly supports service-only

@@ -24,6 +24,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { formatDMYTime } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 type SessionItem = {
   id: number;
@@ -133,7 +134,7 @@ export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const typeLabel = (type: string) => t(`inventory.sessionTypeLabels.${type}`) || type;

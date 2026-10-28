@@ -14,6 +14,8 @@ import { useDialog } from '@/app/components/shared/DialogProvider';
 
 
 const DUE_SOON_DAYS = 7;
+// Within this many km of a km target counts as due soon.
+const DUE_SOON_KM = 500;
 
 function daysBetween(a: Date, b: Date) {
   const ms = a.getTime() - b.getTime();
@@ -157,12 +159,15 @@ export default function RemindersPage() {
   const pending = reminders.filter((r) => r.status === 'PENDING');
   const completed = reminders.filter((r) => r.status === 'COMPLETED');
 
-  const overdue = pending.filter((r) => daysBetween(new Date(r.dueDate), new Date()) < 0);
+  // A reminder is due by date or by km, whichever comes first: a car past its km target is overdue
+  // even if the date is months away, and one within 500 km is due soon.
+  const overdue = pending.filter((r) => r.dueByKm || daysBetween(new Date(r.dueDate), new Date()) < 0);
   const dueSoon = pending.filter((r) => {
+    if (overdue.includes(r)) return false;
     const d = daysBetween(new Date(r.dueDate), new Date());
-    return d >= 0 && d <= DUE_SOON_DAYS;
+    return (d >= 0 && d <= DUE_SOON_DAYS) || (r.kmToGo != null && r.kmToGo <= DUE_SOON_KM);
   });
-  const upcoming = pending.filter((r) => daysBetween(new Date(r.dueDate), new Date()) > DUE_SOON_DAYS);
+  const upcoming = pending.filter((r) => !overdue.includes(r) && !dueSoon.includes(r));
 
   // Plain render helpers, not components: defined inside the page, a
   // component would be a new type every render and remount — closing the
@@ -186,6 +191,13 @@ export default function RemindersPage() {
               </span>
             </div>
             <p className="text-sm text-gray-700 mt-1">{r.note}</p>
+            {r.dueOdometer != null && (
+              <p className={`text-xs mt-0.5 ${r.dueByKm ? 'text-red-700 font-medium' : 'text-gray-500'}`}>
+                {t('workshop.reminders.dueKm', { km: r.dueOdometer.toLocaleString('id-ID') })}
+                {r.vehicle.odometer != null &&
+                  ` · ${t('workshop.reminders.lastReading', { km: r.vehicle.odometer.toLocaleString('id-ID') })}`}
+              </p>
+            )}
             <p className="text-xs text-gray-400 mt-0.5">
               {r.vehicle.customer.name}
               {r.sourceWorkOrder && ` · ${t('workshop.reminders.fromJob', { number: r.sourceWorkOrder.number })}`}

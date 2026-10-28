@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
+import { isAdminRole } from '../auth/roles';
 
 // The platform console reaches across every organization, so getting in
 // takes all of these, checked live on every request:
@@ -79,7 +80,7 @@ export class PlatformOwnerGuard implements CanActivate {
       !user.isPlatformOwner ||
       !user.active ||
       user.removedAt ||
-      user.role !== 'ADMIN' ||
+      !isAdminRole(user.role) ||
       !user.currentSessionId ||
       !owners.has(user.email.toLowerCase())
     ) {

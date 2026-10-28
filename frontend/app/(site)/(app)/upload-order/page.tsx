@@ -7,6 +7,7 @@ import { UploadCloud, AlertCircle, CheckCircle2, PlugZap, Database } from 'lucid
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
+import { isAdminRole, isMasterRole } from '@/lib/roles';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -130,7 +131,9 @@ export default function ImportOrdersPage() {
   // The Accurate GDB import is admin-only on the backend (it bulk-writes
   // products, invoices and POs), so only admins see its toggle.
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
+  // The Accurate GDB import loads into the whole business: MASTER only.
+  const isMaster = isMasterRole(profile?.role);
 
   // ── CSV state ──────────────────────────────────────────────
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -435,7 +438,7 @@ export default function ImportOrdersPage() {
               <UploadCloud size={16} strokeWidth={2} />
               {t('upload.uploadOrderPage.csvFileButton')}
             </button>
-            {isAdmin && (
+            {isMaster && (
             <button
               onClick={() => handleModeChange('gdb')}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${

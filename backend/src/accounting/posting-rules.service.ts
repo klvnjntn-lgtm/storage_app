@@ -525,8 +525,20 @@ export class PostingRulesService {
     const db = this.db(tx);
     const payroll = await db.payroll.findFirstOrThrow({
       where: { id: payrollId, organizationId },
-      include: { items: { include: { components: { include: { component: true } } } } },
+      include: {
+        items: {
+          include: { components: { include: { component: true } }, employee: { select: { branchId: true } } },
+        },
+      },
     });
+
+    // Salary expense is booked to each employee's branch, so the P&L by
+    // branch carries its staff cost; staff with no branch stay untagged.
+    const grossByBranch = new Map<string | null, number>();
+    for (const item of payroll.items) {
+      const key = item.employee.branchId ?? null;
+      grossByBranch.set(key, (grossByBranch.get(key) ?? 0) + Number(item.grossPay));
+    }
 
     const totalGross = payroll.items.reduce((sum, i) => sum + Number(i.grossPay), 0);
     const totalNet = payroll.items.reduce((sum, i) => sum + Number(i.netPay), 0);
@@ -555,7 +567,14 @@ export class PostingRulesService {
         sourceType: JournalSourceType.PAYROLL,
         sourceId: payroll.id,
         lines: [
-          { accountId: salaryExpense, debit: totalGross, description: 'Gross salary expense' },
+          ...[...grossByBranch.entries()]
+            .filter(([, amount]) => amount > 0)
+            .map(([branchId, amount]) => ({
+              accountId: salaryExpense,
+              debit: amount,
+              description: 'Gross salary expense',
+              ...(branchId && { branchId }),
+            })),
           { accountId: payrollPayable, credit: totalNet, description: 'Net pay owed to employees' },
           ...[...deductionTotals.entries()].map(([accountId, amount]) => ({
             accountId,

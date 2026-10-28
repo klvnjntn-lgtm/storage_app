@@ -30,8 +30,8 @@ import {
 export class OrgTransferController {
   constructor(private readonly transfer: OrgTransferService) {}
 
-  // Everything the business has, so admins only.
-  @Roles('ADMIN')
+  // Everything the business has, so the business-wide MASTER only.
+  @Roles('MASTER')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(200)
   @Post('export')

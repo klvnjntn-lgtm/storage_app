@@ -26,6 +26,7 @@ import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { isAdminRole } from '@/lib/roles';
 
 
 function statusBadgeClasses(status: string) {
@@ -103,7 +104,7 @@ export default function PurchaseOrderDetailPage() {
   // Bumped after a receipt/return so the match panel re-reads its totals.
   const [refreshKey, setRefreshKey] = useState(0);
   const { user } = useCurrentUser();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
 
   async function load() {
     setLoading(true);

@@ -1,6 +1,7 @@
 // app/(app)/sales/invoices/page.tsx
 'use client';
 
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -35,6 +36,9 @@ type InvoiceListItem = {
   issuedAt: string | null;
   location: { name: string } | null;
   items: { id: number }[];
+  employee?: { name: string } | null;
+  vehicle?: { plateNumber: string } | null;
+  vehiclePlateNumber?: string | null;
 };
 
 function statusStyle(status: string) {
@@ -282,6 +286,17 @@ export default function InvoicesPage() {
   // actual filter sent to the server is customerId.
   const [customerId, setCustomerId] = useState<string | null>(() => getInitialParam('customerId', '') || null);
   const [customerName, setCustomerName] = useState<string | null>(() => getInitialParam('customerName', '') || null);
+  // MASTER's branch filter ('' = every branch); see BranchFilter.
+  const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
+  // Who sold it (the invoice's Employee).
+  const [salespersonFilter, setSalespersonFilter] = useState<string>(() => getInitialParam('employeeId', ''));
+  const [salespeople, setSalespeople] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    apiFetch('/invoices/salespeople')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list) => setSalespeople(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, []);
 
   // Search by invoice number or customer name. `search` is what the input
   // shows immediately; `debouncedSearch` is what actually drives the
@@ -323,6 +338,8 @@ export default function InvoicesPage() {
     payment: paymentFilter !== 'ALL' ? paymentFilter : null,
     customerId,
     customerName: customerId ? customerName : null,
+    branchId: branchFilter || null,
+    employeeId: salespersonFilter || null,
     from,
     to,
     dateField: from && to ? dateField : null,
@@ -336,6 +353,8 @@ export default function InvoicesPage() {
     (statusFilter !== 'ALL' ? 1 : 0) +
     (paymentFilter !== 'ALL' ? 1 : 0) +
     (customerId ? 1 : 0) +
+    (branchFilter ? 1 : 0) +
+    (salespersonFilter ? 1 : 0) +
     (debouncedSearch ? 1 : 0);
 
   function clearFilters() {
@@ -345,6 +364,8 @@ export default function InvoicesPage() {
     setPaymentFilter('ALL');
     setCustomerId(null);
     setCustomerName(null);
+    setBranchFilter('');
+    setSalespersonFilter('');
     setSearch('');
   }
 
@@ -362,6 +383,8 @@ export default function InvoicesPage() {
       }
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (customerId) params.set('customerId', customerId);
+      if (branchFilter) params.set('branchId', branchFilter);
+      if (salespersonFilter) params.set('employeeId', salespersonFilter);
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (paymentFilter === 'OVERDUE') {
         params.set('overdue', 'true');
@@ -415,7 +438,7 @@ export default function InvoicesPage() {
   // URL (e.g. via the browser's Back button) back to 1 on mount: the ref
   // starts equal to the initial filtersKey, so the reset branch only ever
   // fires on an actual change, never on the first render.
-  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${customerId}|${debouncedSearch}`;
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${customerId}|${branchFilter}|${salespersonFilter}|${debouncedSearch}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -598,6 +621,28 @@ export default function InvoicesPage() {
               </div>
             </div>
 
+            <BranchFilter value={branchFilter} onChange={setBranchFilter} />
+
+            {salespeople.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
+                  {t('sales.invoicesList.salespersonLabel')}
+                </p>
+                <select
+                  value={salespersonFilter}
+                  onChange={(e) => setSalespersonFilter(e.target.value)}
+                  className="w-full sm:w-auto text-sm border border-blue-500/20 rounded-md px-2.5 py-1.5 bg-white outline-none focus:border-blue-500/50"
+                >
+                  <option value="">{t('sales.invoicesList.allSalespeople')}</option>
+                  {salespeople.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Payment */}
             <div>
               <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
@@ -709,7 +754,9 @@ export default function InvoicesPage() {
                       {warehouseOps && `${inv.location?.name ?? '—'} · `}
                       {inv.items.length}{' '}
                       {t(inv.items.length === 1 ? 'sales.invoicesList.itemCountOne' : 'sales.invoicesList.itemCountOther')}
-                      {inv.customerName ? ` · ${inv.customerName}` : ''} ·{' '}
+                      {inv.customerName ? ` · ${inv.customerName}` : ''}
+                      {(inv.vehiclePlateNumber ?? inv.vehicle?.plateNumber) ? ` · ${inv.vehiclePlateNumber ?? inv.vehicle?.plateNumber}` : ''}
+                      {inv.employee?.name ? ` · ${inv.employee.name}` : ''} ·{' '}
                       {formatDMY(displayDateFor(inv))}
                       {inv.dueDate && (
                         <span className={overdue ? 'text-red-600 font-medium' : ''}>

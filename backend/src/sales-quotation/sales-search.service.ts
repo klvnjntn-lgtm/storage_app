@@ -57,6 +57,8 @@ export class SalesSearchService {
     page = 1,
     limit = 20,
     type?: SalesSearchResultType,
+    // A branch member only finds their branch's invoices.
+    branchId?: string,
   ): Promise<SalesSearchPage> {
     const q = rawQuery.trim();
     if (q.length === 0) {
@@ -67,6 +69,7 @@ export class SalesSearchService {
       this.prisma.salesQuotation.findMany({
         where: {
           organizationId,
+          branchId,
           OR: [
             { quotationNumber: { contains: escapeLike(q), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
@@ -88,6 +91,7 @@ export class SalesSearchService {
       this.prisma.salesOrder.findMany({
         where: {
           organizationId,
+          branchId,
           OR: [
             { orderNumber: { contains: escapeLike(q), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
@@ -109,6 +113,7 @@ export class SalesSearchService {
       this.prisma.invoice.findMany({
         where: {
           organizationId,
+          branchId,
           OR: [
             { invoiceNumber: { contains: escapeLike(q), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(q), mode: 'insensitive' } },
@@ -130,6 +135,7 @@ export class SalesSearchService {
       this.prisma.deliveryOrder.findMany({
         where: {
           organizationId,
+          branchId,
           OR: [
             { doNumber: { contains: escapeLike(q), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(q), mode: 'insensitive' } },

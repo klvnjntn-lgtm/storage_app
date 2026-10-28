@@ -40,6 +40,8 @@ import { PlanLimitsService } from '../billing/plan-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assertSerialCount, normalizeSerials, restoreInvoiceSerials, takeSerials } from '../serials/serial-moves';
 import { escapeLike } from '../common/text/escape-like';
+import { isAdminRole } from '../auth/roles';
+import { lineMatches, plateMatches } from '../common/text/document-search';
 
 const MM_TO_PX = 96 / 25.4;
 
@@ -252,13 +254,12 @@ constructor(
           await this.applyOdometerReading(tx, organizationId, dto.vehicleId, dto.odometer);
         }
 
-        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
-
         await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
         const branchId = await resolveBranchId(tx, organizationId, {
           branchId: dto.branchId,
           locationId: dto.locationId ?? dto.items.find((i) => i.locationId)?.locationId,
         });
+        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx, branchId);
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -347,12 +348,14 @@ constructor(
         return await this.prisma.$transaction(async (tx) => {
           const invoice = await this.getDraftOrThrow(organizationId, invoiceId, tx);
           const resolvedVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId;
-          if (resolvedVehicleId && dto.odometer != null) {
+          // An unchanged reading isn't re-checked: the car may have been back since with a higher one
+          // (same rule as WorkOrdersService.update).
+          if (resolvedVehicleId && dto.odometer != null && (dto.odometer !== invoice.odometer || resolvedVehicleId !== invoice.vehicleId)) {
             await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
           }
 
           const bank = dto.bankAccountId !== undefined
-            ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+            ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx, dto.branchId ?? invoice.branchId)
             : null;
 
           return tx.invoice.update({
@@ -419,12 +422,12 @@ constructor(
           });
 
         const resolvedVehicleId = dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId;
-        if (resolvedVehicleId && dto.odometer != null) {
+        if (resolvedVehicleId && dto.odometer != null && (dto.odometer !== invoice.odometer || resolvedVehicleId !== invoice.vehicleId)) {
           await this.applyOdometerReading(tx, organizationId, resolvedVehicleId, dto.odometer);
         }
 
         const bank = dto.bankAccountId !== undefined
-          ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+          ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx, dto.branchId ?? invoice.branchId)
           : null;
 
         const existingItemIds = (
@@ -552,7 +555,7 @@ async issue(
   ]);
   const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
-  if (confirmOversell && org.stockOverrideRequiresAdmin && issuedByUserRole !== 'ADMIN') {
+  if (confirmOversell && org.stockOverrideRequiresAdmin && !isAdminRole(issuedByUserRole)) {
     throw new ForbiddenException('Only an admin can confirm selling below available stock');
   }
   // Warehouse-ops orgs never reach fulfill() below at all (decreasesStockHere
@@ -780,11 +783,13 @@ async issue(
     from: Date,
     to: Date,
     locationId?: string,
+    branchId?: string,
   ) {
     const invoices = await this.prisma.invoice.findMany({
       where: {
         organizationId,
         locationId,
+        branchId,
         status: InvoiceStatus.ISSUED,
         issuedAt: { gte: from, lte: to },
       },
@@ -886,9 +891,11 @@ async issue(
     to: Date,
     vehicleIds?: string[],
     limit = 10,
+    branchId?: string,
   ) {
     const baseInvoiceWhere = {
       organizationId,
+      ...(branchId && { branchId }),
       status: InvoiceStatus.ISSUED,
       issuedAt: { gte: from, lte: to },
     };
@@ -1010,6 +1017,8 @@ async issue(
       paymentStatus?: PaymentStatus;
       overdue?: boolean;
       search?: string;
+      branchId?: string;
+      employeeId?: string;
     },
   ): Promise<{ data: any[]; total: number; page: number; pageSize: number }> {
     const dateFilter = filters.from || filters.to
@@ -1036,13 +1045,25 @@ async issue(
           }
       : undefined;
 
+    // One box for whatever the cashier remembers: number, customer, the
+    // car's plate (typed any way), the salesperson, or a product sold.
     const searchTerm = filters.search?.trim();
+    const plate = searchTerm ? plateMatches(searchTerm) : null;
     const searchCondition: Prisma.InvoiceWhereInput | undefined = searchTerm
       ? {
           OR: [
             { invoiceNumber: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
             { customer: { name: { contains: escapeLike(searchTerm), mode: 'insensitive' } } },
+            { employee: { name: { contains: escapeLike(searchTerm), mode: 'insensitive' } } },
+            { items: lineMatches(searchTerm) },
+            ...(plate
+              ? [
+                  { vehicle: plate },
+                  // The plate as printed, for invoices whose vehicle was since edited.
+                  { vehiclePlateNumber: { contains: escapeLike(searchTerm), mode: 'insensitive' as const } },
+                ]
+              : []),
           ],
         }
       : undefined;
@@ -1051,7 +1072,9 @@ async issue(
       organizationId,
       status: filters.status,
       locationId: filters.locationId,
+      branchId: filters.branchId,
       customerId: filters.customerId,
+      employeeId: filters.employeeId,
       ...(!filters.overdue && filters.paymentStatus ? { paymentStatus: filters.paymentStatus } : {}),
       ...overdueFilter,
       AND: [dateCondition, searchCondition].filter(
@@ -1065,7 +1088,12 @@ async issue(
     const [data, total] = await this.prisma.$transaction([
       this.prisma.invoice.findMany({
         where,
-        include: { items: true, location: true },
+        include: {
+          items: true,
+          location: true,
+          employee: { select: { name: true } },
+          vehicle: { select: { plateNumber: true } },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -1416,6 +1444,7 @@ async getCustomerStatement(
   from: Date,
   to: Date,
   vehicleIds?: string[],
+  branchId?: string,
 ) {
   const customer = await this.prisma.customer.findFirst({
     where: { id: customerId, organizationId },
@@ -1452,8 +1481,11 @@ async getCustomerStatement(
     bankAccountName: defaultBank?.accountName ?? null,
   };
 
-  const vehicleFilter =
-    vehicleIds && vehicleIds.length > 0 ? { vehicleId: { in: vehicleIds } } : {};
+  // Also holds the branch, for a branch member's statement of their sales.
+  const vehicleFilter = {
+    ...(vehicleIds && vehicleIds.length > 0 && { vehicleId: { in: vehicleIds } }),
+    ...(branchId && { branchId }),
+  };
 
   const [priorInvoices, periodInvoices] = await Promise.all([
     this.prisma.invoice.findMany({
@@ -1719,12 +1751,12 @@ async editIssuedInvoice(
       });
     const newTotal = this.round2(subtotal - discountAmount + taxAmount);
 
-    if (invoice.vehicleId && dto.odometer != null) {
+    if (invoice.vehicleId && dto.odometer != null && dto.odometer !== invoice.odometer) {
       await this.applyOdometerReading(tx, organizationId, invoice.vehicleId, dto.odometer);
     }
 
     const bank = dto.bankAccountId !== undefined
-      ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx)
+      ? await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx, invoice.branchId)
       : null;
 
     const session = hasWarehouseOps
@@ -2059,12 +2091,29 @@ async editIssuedInvoice(
     });
   }
 
-  async getOverdueCount(organizationId: string): Promise<number> {
+  // The invoice list's salesperson filter: anyone who has sold, plus
+  // current staff. Names only, so it's safe for every member.
+  async salespeople(organizationId: string, branchId?: string) {
+    return this.prisma.employee.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { archivedAt: null, ...(branchId && { OR: [{ branchId }, { branchId: null }] }) },
+          { invoices: { some: { branchId } } },
+        ],
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getOverdueCount(organizationId: string, branchId?: string): Promise<number> {
     const todayUtcMidnight = await this.businessToday(organizationId);
 
     return this.prisma.invoice.count({
       where: {
         organizationId,
+        branchId,
         status: InvoiceStatus.ISSUED,
         paymentStatus: { not: 'PAID' },
         dueDate: { lt: todayUtcMidnight },
@@ -2357,7 +2406,8 @@ async voidInvoice(
   });
 }
 
-async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string) {
+// branchId: a branch member's own branch, which the draft is booked to.
+async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string, branchId?: string) {
     try {
       return await this.prisma.$transaction(async (tx) => {
         // Lock the quotation row for the duration of this transaction so a
@@ -2433,7 +2483,10 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             userId,
             locationId: quotation.locationId,
             // The draft can be moved to another branch before it's issued.
-            branchId: await resolveBranchId(tx, organizationId, { locationId: quotation.locationId }),
+            branchId: await resolveBranchId(tx, organizationId, {
+              branchId: branchId ?? quotation.branchId,
+              locationId: quotation.locationId,
+            }),
             format: 'A4',
             customerName: quotation.customerName,
             customerId: quotation.customerId,
@@ -2474,7 +2527,7 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
     }
   }
 
-  async createDraftFromSalesOrder(organizationId: string, userId: string, salesOrderId: string) {
+  async createDraftFromSalesOrder(organizationId: string, userId: string, salesOrderId: string, branchId?: string) {
     const enabledModules = await this.orgModulesService.getEnabledModules(organizationId);
     const hasWarehouseOps = enabledModules.includes(ModuleKey.WAREHOUSE_OPS);
 
@@ -2550,14 +2603,18 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             forcedPriceLevelIdByIndex,
             allowArchivedTaxRates: true,
           });
-        const bank = await this.bankAccounts.resolve(organizationId, undefined, tx);
+        const bookedBranchId = await resolveBranchId(tx, organizationId, {
+          branchId: branchId ?? order.branchId,
+          locationId: order.locationId,
+        });
+        const bank = await this.bankAccounts.resolve(organizationId, undefined, tx, bookedBranchId);
         await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
             userId,
             locationId: order.locationId,
-            branchId: await resolveBranchId(tx, organizationId, { locationId: order.locationId }),
+            branchId: bookedBranchId,
             format: 'A4',
             customerName: order.customerName,
             customerId: order.customerId,

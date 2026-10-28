@@ -12,6 +12,8 @@ import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { escapeLike } from '../common/text/escape-like';
+import { lineMatches, memberMatches } from '../common/text/document-search';
+import { resolveBranchId } from '../branches/resolve-branch';
 
 // bank* fields removed from organization.select — SalesQuotation now
 // carries its own snapshot columns (bankAccountId/bankName/
@@ -158,12 +160,14 @@ export class SalesQuotationService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx);
+        const branchId = await resolveBranchId(tx, organizationId, { branchId: dto.branchId, locationId: dto.locationId });
+        const bank = await this.bankAccounts.resolve(organizationId, dto.bankAccountId, tx, branchId);
 
         const quotation = await tx.salesQuotation.create({
           data: {
             organizationId,
             userId,
+            branchId,
             locationId: dto.locationId,
             customerId: dto.customerId,
             customerName: dto.customerName,
@@ -703,6 +707,7 @@ export class SalesQuotationService {
       search?: string;
       page?: number;
       pageSize?: number;
+      branchId?: string;
     },
   ): Promise<{ data: any[]; total: number; page: number; pageSize: number }> {
     let dateFilter: { gte?: Date; lte?: Date } | undefined;
@@ -724,6 +729,9 @@ export class SalesQuotationService {
             { quotationNumber: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
             { customerName: { contains: escapeLike(searchTerm), mode: 'insensitive' } },
             { customer: { name: { contains: escapeLike(searchTerm), mode: 'insensitive' } } },
+            // What was quoted, and who quoted it.
+            { items: lineMatches(searchTerm) },
+            { user: memberMatches(searchTerm) },
           ],
         }
       : undefined;
@@ -731,6 +739,7 @@ export class SalesQuotationService {
     const where: Prisma.SalesQuotationWhereInput = {
       organizationId,
       status: filters.status,
+      branchId: filters.branchId,
       AND: [dateCondition, searchCondition].filter(
         (c): c is Prisma.SalesQuotationWhereInput => c !== undefined,
       ),

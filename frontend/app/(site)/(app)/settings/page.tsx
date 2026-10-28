@@ -15,6 +15,7 @@ import InvoiceNumberingSettings from '@/app/components/settings/InvoiceNumbering
 import ExportBusinessSettings from '@/app/components/settings/ExportBusinessSettings';
 import TaxRatesSection from '@/app/components/settings/TaxRatesSection';
 import BankAccountsSection from '@/app/components/settings/BankAccountsSection';
+import { isAdminRole } from '@/lib/roles';
 
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -87,7 +88,7 @@ export default function SettingsPage() {
       if (!authError) router.replace('/login');
       return;
     }
-    if (profile.role !== 'ADMIN') {
+    if (!isAdminRole(profile.role)) {
       // FIX — was '/stock', which doesn't exist (real route is
       // '/inventory/stock'); every non-admin who landed on /settings got
       // bounced to a 404 instead of a working page.
@@ -96,7 +97,7 @@ export default function SettingsPage() {
   }, [authLoading, profile, authError, router]);
 
   useEffect(() => {
-    if (authLoading || profile?.role !== 'ADMIN') return;
+    if (authLoading || !isAdminRole(profile?.role)) return;
 
     apiFetch('/organization/settings')
       .then((res) => res.json())
@@ -334,7 +335,7 @@ export default function SettingsPage() {
   // Block render until we've confirmed the user is an admin — avoids
   // flashing the settings form (and firing its data requests) for anyone
   // else while the redirect in the effect above is in flight.
-  if (authLoading || profile?.role !== 'ADMIN') {
+  if (authLoading || !isAdminRole(profile?.role)) {
     return null;
   }
 

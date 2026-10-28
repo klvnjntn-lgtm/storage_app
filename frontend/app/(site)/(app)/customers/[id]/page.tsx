@@ -23,6 +23,7 @@ import { formatDMYTime } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { isAdminRole } from '@/lib/roles';
 
 
 type CustomerInvoice = {
@@ -73,7 +74,7 @@ export default function CustomerDetailPage() {
   const hasDelivery = useHasModule('DELIVERY_DMS');
   const { t, language } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
   const dateLocale = language === 'id' ? 'id-ID' : 'en-US';
 
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);

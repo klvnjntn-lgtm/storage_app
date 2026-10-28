@@ -10,6 +10,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import type { MediaAsset } from '@/app/components/shared/MediaLibraryModal';
 import { formatDMY } from '@/lib/dates';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { isAdminRole } from '@/lib/roles';
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB — mirrors MediaLibraryModal's limit
@@ -49,7 +50,7 @@ export default function MediaLibraryPage() {
       if (!authError) router.replace('/login');
       return;
     }
-    if (profile.role !== 'ADMIN') {
+    if (!isAdminRole(profile.role)) {
       router.replace('/inventory/stock');
     }
   }, [authLoading, profile, authError, router]);
@@ -59,7 +60,7 @@ export default function MediaLibraryPage() {
   }, [search, mimeType]);
 
   useEffect(() => {
-    if (authLoading || profile?.role !== 'ADMIN') return;
+    if (authLoading || !isAdminRole(profile?.role)) return;
 
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -152,7 +153,7 @@ export default function MediaLibraryPage() {
 
   useEscapeToClose(!!deleteTarget && !deleting, () => setDeleteTarget(null));
 
-  if (authLoading || profile?.role !== 'ADMIN') {
+  if (authLoading || !isAdminRole(profile?.role)) {
     return null;
   }
 

@@ -21,7 +21,8 @@ import { SubscriptionCheckoutDto } from './dto/billing.dto';
 // Plan, usage and paying for a subscription. Admin-only: it shows what the
 // business pays and lets them spend money. Reachable while suspended so an
 // org cut off for non-payment can still pay its way back.
-@Roles('ADMIN')
+// The business's plan and payments: MASTER only.
+@Roles('MASTER')
 @AllowSuspendedOrg()
 @Controller('billing')
 export class BillingController {

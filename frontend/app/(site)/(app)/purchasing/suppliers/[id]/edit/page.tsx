@@ -10,6 +10,7 @@ import { SupplierForm } from '@/app/components/suppliers/SupplierForm';
 import { emptySupplierFormValues, SupplierFormValues } from '@/app/components/suppliers/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
+import { isAdminRole } from '@/lib/roles';
 
 
 export default function EditSupplierPage() {
@@ -21,7 +22,7 @@ export default function EditSupplierPage() {
   const [values, setValues] = useState<SupplierFormValues>(emptySupplierFormValues);
   const [isActive, setIsActive] = useState(true);
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');

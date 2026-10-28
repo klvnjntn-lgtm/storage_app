@@ -55,7 +55,7 @@ export class LocationController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @RequireModule(ModuleKey.WAREHOUSE_OPS)
   @Patch(':id/branch')
   setBranch(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body('branchId') branchId: string) {

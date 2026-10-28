@@ -1,5 +1,7 @@
 'use client';
 
+import { useMechanics } from '@/app/components/workshop/WorkOrderForm';
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -27,6 +29,10 @@ export default function WorkOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('OPEN');
   const [q, setQ] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
+  // The mechanic responsible for the job.
+  const [mechanicFilter, setMechanicFilter] = useState('');
+  const mechanics = useMechanics();
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +43,8 @@ export default function WorkOrdersPage() {
         const params = new URLSearchParams();
         if (q.trim()) params.set('q', q.trim());
         if (filter !== 'OPEN' && filter !== 'ALL') params.set('status', filter);
+        if (branchFilter) params.set('branchId', branchFilter);
+        if (mechanicFilter) params.set('mechanicId', mechanicFilter);
         const res = await apiFetch(`/work-orders?${params}`);
         const body = await res.json().catch(() => null);
         if (cancelled) return;
@@ -59,7 +67,7 @@ export default function WorkOrdersPage() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [filter, q, t]);
+  }, [filter, q, branchFilter, mechanicFilter, t]);
 
   const filters: Filter[] = ['OPEN', ...WORK_ORDER_STATUSES, 'ALL'];
 
@@ -85,6 +93,22 @@ export default function WorkOrdersPage() {
             placeholder={t('workshop.workOrders.searchPlaceholder')}
           />
         </div>
+        {mechanics.length > 0 && (
+          <select
+            aria-label={t('workshop.workOrders.mechanic')}
+            value={mechanicFilter}
+            onChange={(e) => setMechanicFilter(e.target.value)}
+            className={`${inputCls} sm:w-48`}
+          >
+            <option value="">{t('workshop.workOrders.allMechanics')}</option>
+            {mechanics.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <BranchFilter value={branchFilter} onChange={setBranchFilter} selectClassName={`${inputCls} sm:w-48`} />
       </div>
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {filters.map((f) => (

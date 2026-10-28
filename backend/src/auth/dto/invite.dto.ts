@@ -10,6 +10,12 @@ export class InviteDto {
   password!: string;
 
   @IsOptional()
-  @IsIn(['ADMIN', 'USER', 'DRIVER'])
-  role?: 'ADMIN' | 'USER' | 'DRIVER';
+  @IsIn(['MASTER', 'ADMIN', 'USER', 'DRIVER'])
+  role?: 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER';
+
+  // For an ADMIN or USER: the branch they'll work at. A MASTER chooses; a
+  // branch ADMIN's invites always go to their own branch.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }

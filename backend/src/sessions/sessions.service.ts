@@ -10,6 +10,7 @@ import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
 import { assertSerialCount, landSessionSerials, normalizeSerials, takeSerials } from '../serials/serial-moves';
+import { isAdminRole } from '../auth/roles';
 
 const RETURN_REASONS = [
   'DAMAGED',
@@ -268,7 +269,7 @@ export class SessionsService {
 
   async summary(organizationId: string, user: JwtPayload, query: SummaryQuery = {}) {
     const canSeeCostPrice =
-      user.role === 'ADMIN' &&
+      isAdminRole(user.role) &&
           (await this.organizationModulesService.isModuleEnabled(organizationId, ModuleKey.INVOICE_POS));
 
     // No `page` → legacy full-array response (admin/products still reads

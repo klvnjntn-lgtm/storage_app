@@ -18,6 +18,8 @@ export class RolesGuard implements CanActivate {
     }
 
     const { user } = context.switchToHttp().getRequest();
+    // MASTER outranks ADMIN: anything an admin may do, it may too.
+    if (user?.role === 'MASTER' && requiredRoles.includes('ADMIN')) return true;
     return requiredRoles.includes(user?.role);
   }
 }

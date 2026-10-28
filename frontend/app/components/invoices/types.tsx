@@ -107,6 +107,8 @@ export type BankAccount = {
   accountNumber: string;
   accountName: string;
   isDefault?: boolean;
+  // Null = shared by every branch; else only for that branch's documents.
+  branchId?: string | null;
 };
 
 // A selectable Employee, as returned by GET /payroll/employees.
@@ -206,10 +208,15 @@ export type Reminder = {
     id: string;
     plateNumber: string;
     vehicleModel: string;
+    odometer?: number | null;
     customer: { id: string; name: string };
   };
   // The work order that recommended this (Recommended work), if any.
   sourceWorkOrder?: { id: string; number: string } | null;
+  // Also due at this odometer reading; dueByKm once the car's last reading reached it.
+  dueOdometer?: number | null;
+  dueByKm?: boolean;
+  kmToGo?: number | null;
 };
 
 export type StatementLine = {

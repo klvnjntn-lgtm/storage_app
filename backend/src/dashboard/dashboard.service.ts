@@ -18,6 +18,7 @@ import {
   todayBusinessDate,
   wallTimeOnBusinessDay,
 } from '../accounting/business-date';
+import { isAdminRole } from '../auth/roles';
 
 const DAY = 86_400_000;
 const SERIES_DAYS = 14;
@@ -40,7 +41,7 @@ export class DashboardService {
     private batches: BatchesService,
   ) {}
 
-  async summary(organizationId: string, user: { sub: string; role: string }) {
+  async summary(organizationId: string, user: { sub: string; role: string; branchId?: string | null }) {
     const [org, enabled] = await Promise.all([
       this.prisma.organization.findUniqueOrThrow({
         where: { id: organizationId },
@@ -49,7 +50,7 @@ export class DashboardService {
       this.modules.getEnabledModules(organizationId),
     ]);
     const tz = resolveTimezone(org);
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = isAdminRole(user.role);
     const selling = enabled.includes(ModuleKey.INVOICE_POS);
     const warehouse = enabled.includes(ModuleKey.WAREHOUSE_OPS);
 
@@ -105,8 +106,12 @@ export class DashboardService {
     };
     if (!isAdmin || !selling) return { operations, finance: null };
 
+    // A branch ADMIN sees their branch's sales; payables stay business-wide
+    // (purchasing isn't split by branch).
+    const branchId = user.branchId ?? undefined;
     const issued = (from: Date, to?: Date): Prisma.InvoiceWhereInput => ({
       organizationId,
+      branchId,
       status: InvoiceStatus.ISSUED,
       issuedAt: { gte: from, ...(to && { lte: to }) },
     });
@@ -124,6 +129,7 @@ export class DashboardService {
       this.prisma.invoice.findMany({
         where: {
           organizationId,
+          branchId,
           status: InvoiceStatus.ISSUED,
           paymentStatus: { not: 'PAID' },
           dueDate: { lt: today },
@@ -135,6 +141,7 @@ export class DashboardService {
         FROM "Invoice"
         WHERE "organizationId" = ${organizationId}
           AND status = 'ISSUED'
+          ${branchId ? Prisma.sql`AND "branchId" = ${branchId}` : Prisma.empty}
           AND "issuedAt" >= ${seriesStart}
           AND "issuedAt" <= ${endOfBusinessDay(today, tz)}
         GROUP BY 1`,

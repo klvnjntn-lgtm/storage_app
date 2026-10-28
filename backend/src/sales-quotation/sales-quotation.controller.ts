@@ -22,21 +22,25 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SalesQuotationService } from './sales-quotation.service';
 import { CreateSalesQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+@BranchRecord('salesQuotation')
 @Controller('sales-quotations')
 export class SalesQuotationController {
   constructor(private quotationService: SalesQuotationService) {}
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreateSalesQuotationDto) {
-    return this.quotationService.create(organizationId, req.user.sub, dto);
+    return this.quotationService.create(organizationId, req.user.sub, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) });
   }
 
   @Get()
   list(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('status') status?: SalesQuotationStatus,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -44,9 +48,11 @@ export class SalesQuotationController {
     @Query('dateField') dateField?: 'sent' | 'created',
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('branchId') branchId?: string,
   ) {
     return this.quotationService.list(organizationId, {
       status,
+      branchId: filterBranchId(req.user, branchId),
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
       search,

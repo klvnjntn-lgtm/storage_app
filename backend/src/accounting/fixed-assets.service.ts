@@ -68,11 +68,11 @@ export class FixedAssetsService {
 
   async list(
     organizationId: string,
-    filters: { status?: FixedAssetStatus; page?: number; pageSize?: number },
+    filters: { status?: FixedAssetStatus; page?: number; pageSize?: number; branchId?: string },
   ) {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
-    const where = { organizationId, status: filters.status };
+    const where = { organizationId, status: filters.status, branchId: filters.branchId };
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.fixedAsset.findMany({
@@ -160,8 +160,17 @@ export class FixedAssetsService {
       if (!dto.bankAccountId) {
         throw new BadRequestException(`bankAccountId is required for payment method ${method}`);
       }
+      // Only a shared account or the document's own branch's.
+      const branchId = (
+        await this.prisma.fixedAsset.findFirst({ where: { id: assetId, organizationId }, select: { branchId: true } })
+      )?.branchId;
       const bankAccount = await this.prisma.organizationBankAccount.findFirst({
-        where: { id: dto.bankAccountId, organizationId, archivedAt: null },
+        where: {
+          id: dto.bankAccountId,
+          organizationId,
+          archivedAt: null,
+          ...(branchId && { OR: [{ branchId: null }, { branchId }] }),
+        },
       });
       if (!bankAccount) {
         throw new BadRequestException('bankAccountId does not refer to an active bank account for this organization');

@@ -8,6 +8,7 @@ import { Landmark, CheckCircle2, Plus, X, Loader2, AlertTriangle } from 'lucide-
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { isAdminRole } from '@/lib/roles';
 
 
 type Account = {
@@ -32,7 +33,7 @@ const TYPE_LABEL_KEY: Record<Account['type'], string> = {
 export default function AccountingSetupPage() {
     const { t } = useLanguage();
     const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
 
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);

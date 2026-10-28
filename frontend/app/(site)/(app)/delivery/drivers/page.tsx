@@ -14,6 +14,7 @@ import { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicke
 import TimeInput from '@/app/components/shared/TimeInput';
 import { formatDMYTime } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 
 type Driver = { id: string; email: string; displayName: string | null; active: boolean; teamId: string | null; createdAt: string };
@@ -91,7 +92,7 @@ export default function DriversAdminPage() {
 
   // Admins and office staff: staff handle drivers' phones; locking,
   // renaming and access hours are admin-only (hidden below for staff).
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
   const canManage = isAdmin || user?.role === 'USER';
   useEffect(() => {
     if (!userLoading && !canManage) {

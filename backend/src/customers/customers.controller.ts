@@ -18,6 +18,8 @@ import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { isAdminRole } from '../auth/roles';
+import { filterBranchId } from '../auth/branch-scope';
 
 // Customers are usable under INVOICE_POS, WORKSHOP_RMS or DELIVERY_DMS
 // (a delivery-only org picks route stops from its customer list).
@@ -63,8 +65,8 @@ export class CustomersController {
   }
 
   @Get(':id')
-  findOne(@CurrentOrg() organizationId: string, @Param('id') id: string) {
-    return this.customersService.getWithInvoices(organizationId, id);
+  findOne(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
+    return this.customersService.getWithInvoices(organizationId, id, filterBranchId(req.user));
   }
 
   @Post()
@@ -89,7 +91,7 @@ export class CustomersController {
   ) {
     // Clearing a location unlocks the pin for the next driver's GPS, so
     // only an admin may do it; anyone who can edit customers can move it.
-    if ((dto.latitude === null || dto.longitude === null) && req.user?.role !== 'ADMIN') {
+    if ((dto.latitude === null || dto.longitude === null) && !isAdminRole(req.user?.role)) {
       throw new ForbiddenException("Only an administrator can clear a customer's location");
     }
     return this.customersService.update(organizationId, id, dto);

@@ -24,6 +24,8 @@ import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { WebhooksService } from '../api-access/webhooks.service';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { bookingBranchId, filterBranchId, scopedBranchId } from '../auth/branch-scope';
 // Gated to INVOICE_POS only (not listed alongside WORKSHOP_RMS like
 // Customers/Payments) — deliberate: invoices are the INVOICE_POS
 // feature itself, and since WORKSHOP_RMS depends on INVOICE_POS being
@@ -32,6 +34,7 @@ import { WebhooksService } from '../api-access/webhooks.service';
 // check inside InvoiceService.priceLines().
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+@BranchRecord('invoice')
 @Controller('invoices')
 export class InvoiceController {
   constructor(
@@ -40,7 +43,7 @@ export class InvoiceController {
   ) {}
 
   @Get()
-  async list(@CurrentOrg() organizationId: string, @Query() query: ListInvoicesQueryDto) {
+  async list(@CurrentOrg() organizationId: string, @Query() query: ListInvoicesQueryDto, @Req() req) {
     // invoiceDate is a calendar-date column, so it compares against plain
     // dates; issuedAt/createdAt are instants and need the org's business day.
     const bounds =
@@ -62,6 +65,8 @@ export class InvoiceController {
       paymentStatus: query.paymentStatus,
       overdue: query.overdue,
       search: query.search,
+      branchId: filterBranchId(req.user, query.branchId),
+      employeeId: query.employeeId,
     });
   }
 
@@ -72,9 +77,11 @@ export class InvoiceController {
   }
 
   @Get('reports')
-  async getReports(@CurrentOrg() organizationId: string, @Query() query: RevenueReportQueryDto) {
+  async getReports(@CurrentOrg() organizationId: string, @Query() query: RevenueReportQueryDto, @Req() req) {
     const { gte, lte } = await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
-    return this.invoiceService.getRevenueReport(organizationId, gte!, lte!, query.locationId);
+    return this.invoiceService.getRevenueReport(
+      organizationId, gte!, lte!, query.locationId, filterBranchId(req.user, query.branchId),
+    );
   }
 
   // Top customers / top products / top vehicles, for the Sales Insights
@@ -84,11 +91,14 @@ export class InvoiceController {
   async getTopReport(
     @CurrentOrg() organizationId: string,
     @Query() query: TopReportQueryDto,
+    @Req() req,
     @Query('vehicleId') vehicleId?: string | string[],
   ) {
     const vehicleIds = vehicleId ? (Array.isArray(vehicleId) ? vehicleId : [vehicleId]) : undefined;
     const { gte, lte } = await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
-    return this.invoiceService.getTopReport(organizationId, gte!, lte!, vehicleIds, query.limit);
+    return this.invoiceService.getTopReport(
+      organizationId, gte!, lte!, vehicleIds, query.limit, filterBranchId(req.user, query.branchId),
+    );
   }
 
   // Non-admin-safe: only the derived, POS-relevant behaviour (never the
@@ -107,9 +117,15 @@ export class InvoiceController {
   // Must come before @Get(':id') — otherwise Nest matches "overdue-count"
   // as the :id param and this route is unreachable (same trap as
   // /statement and /:id/draft below).
+  // Must come before @Get(':id'), like overdue-count below.
+  @Get('salespeople')
+  salespeople(@CurrentOrg() organizationId: string, @Req() req) {
+    return this.invoiceService.salespeople(organizationId, filterBranchId(req.user));
+  }
+
   @Get('overdue-count')
-  async getOverdueCount(@CurrentOrg() organizationId: string) {
-    const count = await this.invoiceService.getOverdueCount(organizationId);
+  async getOverdueCount(@CurrentOrg() organizationId: string, @Req() req) {
+    const count = await this.invoiceService.getOverdueCount(organizationId, filterBranchId(req.user));
     return { count };
   }
 
@@ -122,6 +138,7 @@ export class InvoiceController {
     @Query('customerId') customerId: string,
     @Query('from') from: string,
     @Query('to') to: string,
+    @Req() req,
     @Query('vehicleId') vehicleId?: string | string[],
   ) {
     if (!customerId || !from || !to) {
@@ -130,7 +147,7 @@ export class InvoiceController {
     const vehicleIds = vehicleId ? (Array.isArray(vehicleId) ? vehicleId : [vehicleId]) : undefined;
     const bounds = await this.invoiceService.businessDayBounds(organizationId, from, to);
     return this.invoiceService.getCustomerStatement(
-      organizationId, customerId, bounds.gte!, bounds.lte!, vehicleIds,
+      organizationId, customerId, bounds.gte!, bounds.lte!, vehicleIds, filterBranchId(req.user),
     );
   }
 
@@ -213,7 +230,7 @@ export class InvoiceController {
     return this.invoiceService.createDraft(
       organizationId,
       req.user.sub,
-      dto,
+      { ...dto, branchId: bookingBranchId(req.user, dto.branchId) },
     );
   }
 
@@ -222,18 +239,23 @@ export class InvoiceController {
   // quotationId, calls quotationService.markConvertedToInvoice) but had
   // no route, so the frontend's "Convert to Invoice" button 404'd.
   // Mirrors SalesOrderController's from-quotation/:quotationId pattern.
+  @BranchRecord('salesQuotation', 'quotationId')
   @Post('from-quotation/:quotationId')
   createFromQuotation(
     @CurrentOrg() organizationId: string,
     @Req() req,
     @Param('quotationId') quotationId: string,
   ) {
-    return this.invoiceService.createDraftFromQuotation(organizationId, req.user.sub, quotationId);
+    return this.invoiceService.createDraftFromQuotation(
+      organizationId, req.user.sub, quotationId, scopedBranchId(req.user) ?? undefined,
+    );
   }
 
   @Patch(':id')
   updateDraft(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: UpdateDraftInvoiceDto, @Req() req) {
-    return this.invoiceService.updateDraft(organizationId, id, dto, req.user.sub);
+    return this.invoiceService.updateDraft(
+      organizationId, id, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) }, req.user.sub,
+    );
   }
 
   // NOTE: discardDraft's signature grew a userId param (needed so
@@ -281,12 +303,15 @@ async print(
     void this.webhooks?.emit(organizationId, 'invoice.voided', { id, reason: dto.reason });
     return voided;
   }
+  @BranchRecord('salesOrder', 'orderId')
   @Post('from-order/:orderId')
 createFromSalesOrder(
   @CurrentOrg() organizationId: string,
   @Req() req,
   @Param('orderId') orderId: string,
 ) {
-  return this.invoiceService.createDraftFromSalesOrder(organizationId, req.user.sub, orderId);
+  return this.invoiceService.createDraftFromSalesOrder(
+    organizationId, req.user.sub, orderId, scopedBranchId(req.user) ?? undefined,
+  );
 }
 }

@@ -165,6 +165,12 @@ model Vehicle {
   plateNormalized String // FIX — uppercase, separator-stripped form of plateNumber (e.g. "BP1234XX"), computed at write time by normalizePlate(); used only for format-agnostic lookup matching, never displayed
   vehicleModel    String
   vin             String?
+  // The car as the parts catalogue knows it (PartCatalogEntry.carBrand/model), so a plate opens straight
+  // to its parts. vehicleModel stays the free text printed on documents.
+  carBrand        String?
+  carModel        String?
+  carYear         Int?
+  engine          String? // engine code / size as the counter writes it, e.g. "1NR-VE 1.3"
   salesOrders     SalesOrder[]
 
   odometer       Int?
@@ -368,6 +374,11 @@ model User {
   currentSessionId        String?
   avatarUrl               String?
   displayName             String? // admin-set label for drivers; UI only, falls back to email
+  // The branch an ADMIN or USER works at; they only see its records
+  // (auth/branch-scope.ts). Null = the org's first branch. MASTER and
+  // DRIVER ignore it.
+  branchId                String?
+  branch                  Branch?        @relation(fields: [branchId], references: [id])
   teamId                  String? // only meaningful for role=DRIVER; a team has at most one driver (TeamsService.assignDriver) and that driver works the team's routes
   team                    Team?          @relation(fields: [teamId], references: [id])
   mediaAssets             MediaAsset[]
@@ -403,6 +414,7 @@ model User {
   pushSubscriptions PushSubscription[]
 
   @@index([organizationId])
+  @@index([branchId])
 }
 
 // Org-scoped library of every uploaded image. Consumers (Product.image,
@@ -916,6 +928,9 @@ model SalesQuotation {
   id               String                        @id @default(uuid())
   quotationNumber  String?
   organizationId   String
+  // The branch it belongs to (branch staff only see their own); carried to what it becomes.
+  branchId         String?
+  branch           Branch?                       @relation(fields: [branchId], references: [id])
   locationId       String?
   status           SalesQuotationStatus          @default(DRAFT)
   invoices         Invoice[]
@@ -1024,6 +1039,9 @@ model SalesOrder {
   id             String           @id @default(uuid())
   orderNumber    String?
   organizationId String
+  // The branch it belongs to (branch staff only see their own); carried to what it becomes.
+  branchId       String?
+  branch         Branch?          @relation(fields: [branchId], references: [id])
   locationId     String?
   status         SalesOrderStatus @default(DRAFT)
   confirmedAt    DateTime?
@@ -1161,6 +1179,9 @@ model DeliveryOrder {
   id             String              @id @default(uuid())
   doNumber       String?
   organizationId String
+  // The branch it belongs to (branch staff only see their own); carried to what it becomes.
+  branchId       String?
+  branch         Branch?             @relation(fields: [branchId], references: [id])
   sessionId      String? // the pack session this was generated from
   locationId     String?
   status         DeliveryOrderStatus @default(PACKED)
@@ -1482,6 +1503,10 @@ model OrganizationBankAccount {
   supplierPayments   SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
   fixedAssetPayments FixedAssetPayment[]
   payrolls           Payroll[] // NEW
+  // Null = shared by every branch; else only offered on that branch's
+  // documents.
+  branchId           String?
+  branch             Branch?             @relation(fields: [branchId], references: [id])
 
   isDefault       Boolean          @default(false)
   createdAt       DateTime         @default(now())
@@ -1517,7 +1542,7 @@ model Invoice {
   // Which branch made the sale: its revenue and cost are booked there,
   // whichever location the stock came from.
   branchId         String?
-  branch           Branch?                @relation(fields: [branchId], references: [id])
+  branch           Branch?       @relation(fields: [branchId], references: [id])
   format           InvoiceFormat
   status           InvoiceStatus @default(DRAFT)
   customerName     String?
@@ -1844,23 +1869,25 @@ model SalesQuotationActivityEvent {
 }
 
 model VehicleReminder {
-  id             String         @id @default(cuid())
-  organizationId String
-  vehicleId      String
-  note           String
-  dueDate        DateTime
-  status         ReminderStatus @default(PENDING)
-  completedAt    DateTime?
+  id                  String         @id @default(cuid())
+  organizationId      String
+  vehicleId           String
+  note                String
+  dueDate             DateTime
+  // Also due once the car's odometer reaches this (km), whichever comes first.
+  dueOdometer         Int?
+  status              ReminderStatus @default(PENDING)
+  completedAt         DateTime?
   // Recommended on this job ("pads at 20%, replace next visit")…
   sourceWorkOrderId   String?
   // …and the job that later did it (completing the reminder).
   followUpWorkOrderId String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  organization   Organization   @relation(fields: [organizationId], references: [id])
-  vehicle        Vehicle        @relation(fields: [vehicleId], references: [id])
-  sourceWorkOrder   WorkOrder? @relation("ReminderSourceWorkOrder", fields: [sourceWorkOrderId], references: [id], onDelete: SetNull)
-  followUpWorkOrder WorkOrder? @relation("ReminderFollowUpWorkOrder", fields: [followUpWorkOrderId], references: [id], onDelete: SetNull)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  organization        Organization   @relation(fields: [organizationId], references: [id])
+  vehicle             Vehicle        @relation(fields: [vehicleId], references: [id])
+  sourceWorkOrder     WorkOrder?     @relation("ReminderSourceWorkOrder", fields: [sourceWorkOrderId], references: [id], onDelete: SetNull)
+  followUpWorkOrder   WorkOrder?     @relation("ReminderFollowUpWorkOrder", fields: [followUpWorkOrderId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status, dueDate])
   @@index([vehicleId])
@@ -2026,18 +2053,18 @@ enum NotificationType {
 // isn't blocked; any later device starts PENDING and blocks login until an
 // admin approves it (see AuthService.login).
 model Device {
-  id               String       @id @default(cuid())
-  userId           String
-  user             User         @relation("UserDevices", fields: [userId], references: [id])
-  deviceId         String
-  label            String?
-  userAgent        String?
-  status           DeviceStatus @default(PENDING)
-  firstSeenAt      DateTime     @default(now())
-  lastSeenAt       DateTime     @default(now())
-  approvedAt       DateTime?
-  approvedByUserId String?
-  approvedBy       User?        @relation("DeviceApprovedBy", fields: [approvedByUserId], references: [id])
+  id                   String       @id @default(cuid())
+  userId               String
+  user                 User         @relation("UserDevices", fields: [userId], references: [id])
+  deviceId             String
+  label                String?
+  userAgent            String?
+  status               DeviceStatus @default(PENDING)
+  firstSeenAt          DateTime     @default(now())
+  lastSeenAt           DateTime     @default(now())
+  approvedAt           DateTime?
+  approvedByUserId     String?
+  approvedBy           User?        @relation("DeviceApprovedBy", fields: [approvedByUserId], references: [id])
   // Last time this phone tried to sign in while rejected or revoked — shown
   // to the office (who can approve it again) and used to notify them at
   // most once an hour per phone.
@@ -2096,6 +2123,9 @@ model PushSubscription {
 }
 
 enum Role {
+  // Business-wide: every branch, every setting. The org's owner.
+  MASTER
+  // Runs one branch (User.branchId): its sales, jobs, expenses and staff.
   ADMIN
   USER
   DRIVER
@@ -2213,6 +2243,9 @@ model Employee {
   archivedAt        DateTime?
   invoices          Invoice[] // NEW — inverse relation
   workOrders        WorkOrder[]
+  // Where their salary is booked in the P&L by branch; null = unassigned.
+  branchId          String?
+  branch            Branch?     @relation(fields: [branchId], references: [id])
 
   organization     Organization              @relation(fields: [organizationId], references: [id])
   salaryComponents EmployeeSalaryComponent[]
@@ -2628,7 +2661,7 @@ model JournalEntryLine {
   // Per-branch reporting (P&L by branch). locationId stays as the stock
   // location the line came from.
   branchId       String?
-  branch         Branch?        @relation(fields: [branchId], references: [id])
+  branch         Branch? @relation(fields: [branchId], references: [id])
 
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id])
   account      ChartOfAccount @relation(fields: [accountId], references: [id])
@@ -2977,6 +3010,8 @@ enum MessageKind {
   PURCHASE_ORDER
   STATEMENT
   PAYMENT_REMINDER
+  // "Your car is ready" for a finished work order.
+  WORK_ORDER_READY
 }
 
 enum MessageStatus {
@@ -3149,32 +3184,39 @@ model ProductSerial {
 // same data. The scraper's `sync` command upserts by scraperId after each run and stamps
 // syncedAt; nothing is deleted, so rows not in the latest sync are simply hidden by the API.
 model PartCatalogEntry {
-  id            Int      @id @default(autoincrement())
-  scraperId     Int      @unique // row id in the scraper's own database — the upsert key
-  carBrand      String
-  model         String
-  generation    String   @default("")
-  yearFrom      Int?
-  yearTo        Int? // null with yearFrom set = still in production
-  itemType      String
-  item          String
-  oemNumber     String   @default("")
-  oemNormalized String   @default("") // uppercase, separators stripped — matches Product.oem regardless of formatting
-  origin        String // Official / Aftermarket / Unknown
-  partBrand     String   @default("")
-  listingsSeen  Int      @default(0)
-  sellers       Int      @default(0) // distinct shops behind listingsSeen — clones from one shop count once
-  thumbKey      String   @default("") // cached photo, "part-thumbs/<sha1>.webp" (served at /uploads/…); "" = none
-  spec          String   @default("") // bulb type, spark plug code, battery size, wiper lengths (H4, BKR6E, NS40ZL, 24" + 14")
-  sources       String   @default("")
-  exampleUrl    String   @default("")
+  id             Int      @id @default(autoincrement())
+  scraperId      Int      @unique // row id in the scraper's own database — the upsert key
+  carBrand       String
+  model          String
+  generation     String   @default("")
+  yearFrom       Int?
+  yearTo         Int? // null with yearFrom set = still in production
+  itemType       String
+  item           String
+  oemNumber      String   @default("")
+  oemNormalized  String   @default("") // uppercase, separators stripped — matches Product.oem regardless of formatting
+  origin         String // Official / Aftermarket / Unknown
+  partBrand      String   @default("")
+  listingsSeen   Int      @default(0)
+  sellers        Int      @default(0) // distinct shops behind listingsSeen — clones from one shop count once
+  thumbKey       String   @default("") // cached photo, "part-thumbs/<sha1>.webp" (served at /uploads/…); "" = none
+  spec           String   @default("") // bulb type, spark plug code, battery size, wiper lengths (H4, BKR6E, NS40ZL, 24" + 14")
+  sources        String   @default("")
+  exampleUrl     String   @default("")
   // How we know the number fits this car: "maker" (the car maker's own catalogue or store lists it), "group"
   // (a maker of the same group uses it, e.g. Toyota/Daihatsu), "seller" (only shop titles say so — a part
   // often fits other cars), "" (no number). fitmentRank sorts them: 3 / 2 / 1 / 0.
-  fitment       String   @default("")
-  fitmentRank   Int      @default(0)
-  lastSeen      DateTime
-  syncedAt      DateTime @default(now())
+  fitment        String   @default("")
+  fitmentRank    Int      @default(0)
+  // What shops ask for this OEM number on Tokopedia (rupiah), over the last 90 days: the quartiles
+  // and median of each shop's price, so one shop's odd listing doesn't move the quote. Same for every
+  // row with the number; null = no priced listing yet.
+  priceLow       Int?
+  priceMedian    Int?
+  priceHigh      Int?
+  pricedListings Int      @default(0)
+  lastSeen       DateTime
+  syncedAt       DateTime @default(now())
 
   @@index([syncedAt])
   @@index([carBrand, model])
@@ -3197,6 +3239,25 @@ model PartInterchange {
   @@index([oemNormalized])
 }
 
+// Words the parts search understands, written by the scraper's sync (replaced whole each sync): kind
+// "brand" / "model" (every name sellers use), "generation" ("grand new avanza"), "chassis" (kode rangka,
+// e.g. F651 — found inside a nomor rangka), "engine" (kode mesin, e.g. 1NR-VE — a nomor mesin starts with
+// its family), "item" (laher roda, wheel bearing). Read-only for the app.
+model PartSearchTerm {
+  id             Int      @id @default(autoincrement())
+  kind           String
+  carBrand       String   @default("")
+  model          String   @default("")
+  generation     String   @default("")
+  itemType       String   @default("")
+  item           String   @default("")
+  term           String
+  termNormalized String // uppercase, letters/digits only
+  syncedAt       DateTime @default(now())
+
+  @@index([kind])
+}
+
 enum WorkOrderStatus {
   // Priced and waiting for the customer's go-ahead: holds no stock and
   // can't be invoiced until approved (→ QUEUED).
@@ -3212,49 +3273,57 @@ enum WorkOrderStatus {
 // invoice. Whether it has been invoiced isn't a status — it's whether a
 // non-void Invoice points at it, so voiding that invoice reopens the job.
 model WorkOrder {
-  id             String          @id @default(uuid())
-  organizationId String
-  number         String
-  status         WorkOrderStatus @default(QUEUED)
-  customerId     String
-  vehicleId      String
-  mechanicId     String?
+  id                     String          @id @default(uuid())
+  organizationId         String
+  number                 String
+  status                 WorkOrderStatus @default(QUEUED)
+  customerId             String
+  vehicleId              String
+  mechanicId             String?
   // The branch doing the job; its invoice is booked there.
-  branchId       String?
-  odometer       Int?
-  complaint      String?
-  notes          String?
+  branchId               String?
+  odometer               Int?
+  complaint              String?
+  notes                  String?
   // Sum of the lines as priced at the last save — an estimate for the
   // customer; the invoice reprices product lines when it is created.
-  estimatedTotal Decimal         @default(0) @db.Decimal(12, 2)
+  estimatedTotal         Decimal         @default(0) @db.Decimal(12, 2)
   // The customer's go-ahead on an estimate: when, recorded by whom, and how
   // (e.g. "Signed SPK", "By phone — Budi").
-  approvedAt     DateTime?
-  approvedById   String?
-  approvalNote   String?
+  approvedAt             DateTime?
+  approvedById           String?
+  approvalNote           String?
   // Formal-estimate details fleet customers ask for: how long the price
   // holds, their PO reference and payment terms (both carried to the invoice).
-  validUntil       DateTime? @db.Date
-  customerPoNumber String?
-  paymentTerms     String?
+  validUntil             DateTime?       @db.Date
+  customerPoNumber       String?
+  paymentTerms           String?
   // Secret for the customer's approval page (/estimate/<token>), shared by
   // staff by hand (e.g. pasted into WhatsApp). Reused while valid so a link
   // already sent keeps working; expires 30 days after it was made.
-  approvalToken          String?   @unique
+  approvalToken          String?         @unique
   approvalTokenExpiresAt DateTime?
-  createdById    String?
-  startedAt      DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdById            String?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  // The car came back for the same problem: the earlier job this one redoes, and why. Counted
+  // against that job's mechanic in the performance report.
+  comebackOfId           String?
+  comebackReason         String?
+  // When the customer was told the car is ready (WhatsApp/email), so it isn't sent twice by mistake.
+  readyNotifiedAt        DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id])
-  customer     Customer        @relation(fields: [customerId, organizationId], references: [id, organizationId])
-  vehicle      Vehicle         @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
-  mechanic     Employee?       @relation(fields: [mechanicId, organizationId], references: [id, organizationId])
-  branch       Branch?         @relation(fields: [branchId], references: [id])
-  items        WorkOrderItem[]
-  invoices     Invoice[]
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  customer        Customer          @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  vehicle         Vehicle           @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  mechanic        Employee?         @relation(fields: [mechanicId, organizationId], references: [id, organizationId])
+  branch          Branch?           @relation(fields: [branchId], references: [id])
+  comebackOf      WorkOrder?        @relation("WorkOrderComeback", fields: [comebackOfId], references: [id])
+  comebacks       WorkOrder[]       @relation("WorkOrderComeback")
+  items           WorkOrderItem[]
+  invoices        Invoice[]
   // Work this job recommended for later, and reminders this job followed up.
   recommendations VehicleReminder[] @relation("ReminderSourceWorkOrder")
   followedUp      VehicleReminder[] @relation("ReminderFollowUpWorkOrder")
@@ -3316,13 +3385,19 @@ model Branch {
   archivedAt     DateTime?
   createdAt      DateTime  @default(now())
 
-  organization Organization       @relation(fields: [organizationId], references: [id])
-  locations    Location[]
-  invoices     Invoice[]
-  expenses     Expense[]
-  fixedAssets  FixedAsset[]
-  journalLines JournalEntryLine[]
-  workOrders   WorkOrder[]
+  organization    Organization              @relation(fields: [organizationId], references: [id])
+  locations       Location[]
+  invoices        Invoice[]
+  expenses        Expense[]
+  fixedAssets     FixedAsset[]
+  journalLines    JournalEntryLine[]
+  workOrders      WorkOrder[]
+  users           User[]
+  bankAccounts    OrganizationBankAccount[]
+  employees       Employee[]
+  salesQuotations SalesQuotation[]
+  salesOrders     SalesOrder[]
+  deliveryOrders  DeliveryOrder[]
 
   @@index([organizationId])
 }

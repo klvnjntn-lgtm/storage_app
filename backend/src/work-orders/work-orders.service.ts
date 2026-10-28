@@ -20,12 +20,15 @@ import {
   CreateRecommendationDto,
   CreateWorkOrderDto,
   UpdateWorkOrderDto,
+  AddWorkOrderLineDto,
   WorkOrderLineInput,
 } from './dto/work-order.dto';
 
 const DETAIL_INCLUDE = {
   customer: { select: { id: true, name: true, phone: true, companyName: true, npwp: true, address: true } },
-  vehicle: { select: { id: true, plateNumber: true, vehicleModel: true, odometer: true } },
+  vehicle: {
+    select: { id: true, plateNumber: true, vehicleModel: true, odometer: true, carBrand: true, carModel: true, carYear: true },
+  },
   mechanic: { select: { id: true, name: true } },
   branch: { select: { id: true, name: true } },
   items: {
@@ -42,10 +45,13 @@ const DETAIL_INCLUDE = {
   recommendations: {
     where: { status: { not: ReminderStatus.DELETED } },
     orderBy: { dueDate: 'asc' },
-    select: { id: true, note: true, dueDate: true, status: true, followUpWorkOrderId: true },
+    select: { id: true, note: true, dueDate: true, dueOdometer: true, status: true, followUpWorkOrderId: true },
   },
   // The reminder this job was started from, if any.
   followedUp: { select: { id: true, note: true, sourceWorkOrder: { select: { id: true, number: true } } } },
+  // The earlier job this one redoes, and jobs that came back to redo this one.
+  comebackOf: { select: { id: true, number: true, completedAt: true, mechanic: { select: { id: true, name: true } } } },
+  comebacks: { select: { id: true, number: true, comebackReason: true, createdAt: true } },
 } satisfies Prisma.WorkOrderInclude;
 
 type WorkOrderDetail = Prisma.WorkOrderGetPayload<{ include: typeof DETAIL_INCLUDE }>;
@@ -94,16 +100,25 @@ export class WorkOrdersService {
     }
   }
 
-  async mechanics(organizationId: string) {
+  // branchId: a branch member's picker — their branch's and unassigned staff.
+  async mechanics(organizationId: string, branchId?: string) {
     await this.assertEnabled(organizationId);
     return this.prisma.employee.findMany({
-      where: { organizationId, archivedAt: null, isActive: true },
+      where: {
+        organizationId,
+        archivedAt: null,
+        isActive: true,
+        ...(branchId && { OR: [{ branchId }, { branchId: null }] }),
+      },
       select: { id: true, name: true, position: true },
       orderBy: { name: 'asc' },
     });
   }
 
-  async list(organizationId: string, filters: { status?: string; q?: string; vehicleId?: string }) {
+  async list(
+    organizationId: string,
+    filters: { status?: string; q?: string; vehicleId?: string; branchId?: string; mechanicId?: string },
+  ) {
     await this.assertEnabled(organizationId);
     const status =
       filters.status && (Object.values(WorkOrderStatus) as string[]).includes(filters.status)
@@ -116,12 +131,16 @@ export class WorkOrdersService {
         organizationId,
         ...(status && { status }),
         ...(filters.vehicleId && { vehicleId: filters.vehicleId }),
+        ...(filters.branchId && { branchId: filters.branchId }),
+        ...(filters.mechanicId && { mechanicId: filters.mechanicId }),
         ...(q && {
           OR: [
             { number: { contains: escapeLike(q), mode: 'insensitive' } },
             // Spacing-insensitive, like /vehicles/search: "B1234XY" finds "B 1234 XY".
             ...(plate ? [{ vehicle: { plateNormalized: { contains: escapeLike(plate) } } }] : []),
             { customer: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
+            { mechanic: { name: { contains: escapeLike(q), mode: 'insensitive' } } },
+            { complaint: { contains: escapeLike(q), mode: 'insensitive' } },
           ],
         }),
       },
@@ -205,6 +224,13 @@ export class WorkOrdersService {
     });
     if (!vehicle) throw new NotFoundException('Vehicle not found');
     if (dto.mechanicId) await this.assertMechanic(organizationId, dto.mechanicId);
+    if (dto.comebackOfId) {
+      const original = await this.prisma.workOrder.findFirst({
+        where: { id: dto.comebackOfId, organizationId, vehicleId: vehicle.id },
+        select: { id: true },
+      });
+      if (!original) throw new BadRequestException('The job this comes back to must be an earlier job on this vehicle');
+    }
     const items = await this.dropIgnoredPartPrices(organizationId, dto.items ?? []);
     const estimatedTotal = await this.estimate(organizationId, items, vehicle.customerId, userId);
 
@@ -229,6 +255,8 @@ export class WorkOrdersService {
           vehicleId: vehicle.id,
           mechanicId: dto.mechanicId ?? null,
           branchId,
+          comebackOfId: dto.comebackOfId ?? null,
+          comebackReason: dto.comebackOfId ? dto.comebackReason?.trim() || null : null,
           odometer: dto.odometer ?? null,
           complaint: dto.complaint?.trim() || null,
           notes: dto.notes?.trim() || null,
@@ -256,6 +284,43 @@ export class WorkOrdersService {
       return job;
     });
     return this.getOne(organizationId, created.id);
+  }
+
+  // Appends one line (from the parts catalogue) through update(), so it gets the same checks — not
+  // after invoicing, prices and holds recomputed.
+  async addLine(organizationId: string, userId: string, id: string, line: AddWorkOrderLineDto) {
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id, organizationId },
+      include: { items: { orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+    let locationId = line.locationId;
+    if (line.productId && !locationId) {
+      const best = await this.prisma.stock.findFirst({
+        where: { organizationId, productId: line.productId },
+        orderBy: { quantity: 'desc' },
+        select: { locationId: true },
+      });
+      locationId =
+        best?.locationId ??
+        (await this.prisma.location.findFirst({ where: { organizationId, archivedAt: null }, select: { id: true } }))?.id;
+    }
+    const existing = wo.items.map((i) => ({
+      ...(i.productId ? { productId: i.productId, locationId: i.locationId ?? undefined } : { description: i.description ?? '' }),
+      ...(i.productId && i.description ? { description: i.description } : {}),
+      quantity: Number(i.quantity),
+      ...(i.unitPrice != null ? { unitPrice: Number(i.unitPrice) } : {}),
+    }));
+    return this.update(organizationId, userId, id, {
+      items: [
+        ...existing,
+        {
+          ...(line.productId ? { productId: line.productId, locationId } : { description: line.description }),
+          quantity: line.quantity,
+          ...(line.unitPrice != null ? { unitPrice: line.unitPrice } : {}),
+        },
+      ],
+    } as UpdateWorkOrderDto);
   }
 
   async update(organizationId: string, userId: string, id: string, dto: UpdateWorkOrderDto) {
@@ -483,6 +548,7 @@ export class WorkOrdersService {
         vehicleId: wo.vehicleId,
         note: dto.note.trim(),
         dueDate,
+        dueOdometer: dto.dueOdometer ?? null,
         sourceWorkOrderId: wo.id,
       },
     });

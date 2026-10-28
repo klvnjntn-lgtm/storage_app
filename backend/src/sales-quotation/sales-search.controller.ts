@@ -1,6 +1,6 @@
 // sales-search.controller.ts
 
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
 import { SalesSearchService, SalesSearchResultType } from './sales-search.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { filterBranchId } from '../auth/branch-scope';
 
 const VALID_TYPES: SalesSearchResultType[] = ['QUOTATION', 'ORDER', 'INVOICE', 'DELIVERY_ORDER'];
 
@@ -20,6 +21,7 @@ export class SalesSearchController {
   @Get()
   search(
     @CurrentOrg() orgId: string,
+    @Req() req,
     @Query('q') q = '',
     @Query('page') page = '1',
     @Query('limit') limit = '20',
@@ -31,6 +33,6 @@ export class SalesSearchController {
       ? (type as SalesSearchResultType)
       : undefined;
 
-    return this.salesSearchService.search(orgId, q, parsedPage, parsedLimit, parsedType);
+    return this.salesSearchService.search(orgId, q, parsedPage, parsedLimit, parsedType, filterBranchId(req.user));
   }
 }

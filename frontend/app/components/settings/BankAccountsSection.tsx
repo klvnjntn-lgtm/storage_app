@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useBranches } from '@/lib/hooks/useBranches';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 // A row from GET /organization/bank-accounts. Same list/default/archive
 // shape as OrgTaxRate — whichever account is flagged isDefault is what
@@ -15,6 +17,8 @@ type OrgBankAccount = {
   accountName: string;
   isDefault: boolean;
   archivedAt: string | null;
+  // Null = shared by every branch.
+  branchId: string | null;
 };
 
 // Bank Accounts — full list, not a single set of fields. Whichever
@@ -26,6 +30,13 @@ type OrgBankAccount = {
 // page through onLoadError.
 export default function BankAccountsSection({ onLoadError }: { onLoadError: (message: string) => void }) {
   const { t } = useLanguage();
+  // MASTER sets the default and which branch an account belongs to; a
+  // branch ADMIN adds and removes their own branch's accounts (the shared
+  // ones are listed, read-only).
+  const { user } = useCurrentUser();
+  const isMaster = user?.role === 'MASTER';
+  const { branches, multiBranch } = useBranches();
+  const [newBranchId, setNewBranchId] = useState('');
 
   // Bank accounts — same list/default/archive CRUD, on
   // /organization/bank-accounts. Whichever account is isDefault prints
@@ -62,7 +73,7 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
       const res = await apiFetch('/organization/bank-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bankName, accountNumber, accountName }),
+        body: JSON.stringify({ bankName, accountNumber, accountName, ...(newBranchId && { branchId: newBranchId }) }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -102,6 +113,26 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
             return isDefault ? { ...b, isDefault: false } : b;
           }) ?? prev,
       );
+    } finally {
+      setSavingBankId(null);
+    }
+  }
+
+  async function setAccountBranch(id: string, branchId: string) {
+    setBankError('');
+    setSavingBankId(id);
+    try {
+      const res = await apiFetch(`/organization/bank-accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchId: branchId || null }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setBankError(data?.message || t('settings.bankAccounts.branchChangeFailed'));
+        return;
+      }
+      setBankAccounts((prev) => prev?.map((b) => (b.id === id ? { ...b, branchId: data.branchId } : b)) ?? prev);
     } finally {
       setSavingBankId(null);
     }
@@ -147,8 +178,31 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
                   {t('settings.default')}
                 </span>
               )}
+              {!isMaster && !account.branchId && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600 font-medium ml-2">
+                  {t('settings.bankAccounts.sharedBranches')}
+                </span>
+              )}
             </div>
+            {(isMaster || account.branchId) && (
             <div className="flex items-center gap-2">
+              {isMaster && multiBranch && (
+                <select
+                  aria-label={t('settings.bankAccounts.branchLabel')}
+                  value={account.branchId ?? ''}
+                  disabled={savingBankId === account.id}
+                  onChange={(e) => setAccountBranch(account.id, e.target.value)}
+                  className="text-xs px-2 py-1.5 sm:py-1 rounded-md border border-blue-500/20 text-gray-600 bg-white disabled:opacity-50"
+                >
+                  <option value="">{t('settings.bankAccounts.sharedBranches')}</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {isMaster && (
               <button
                 type="button"
                 onClick={() => setDefaultBankAccount(account.id, !account.isDefault)}
@@ -157,6 +211,7 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
               >
                 {account.isDefault ? t('settings.unsetDefault') : t('settings.setDefault')}
               </button>
+              )}
               <button
                 type="button"
                 onClick={() => archiveBankAccount(account.id)}
@@ -166,6 +221,7 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
                 {t('common.remove')}
               </button>
             </div>
+            )}
           </div>
         ))}
         {bankAccounts?.length === 0 && (
@@ -192,6 +248,21 @@ export default function BankAccountsSection({ onLoadError }: { onLoadError: (mes
           placeholder={t('settings.bankAccounts.accountHolderPlaceholder')}
           className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all flex-1 min-w-0"
         />
+        {isMaster && multiBranch && (
+          <select
+            aria-label={t('settings.bankAccounts.branchLabel')}
+            value={newBranchId}
+            onChange={(e) => setNewBranchId(e.target.value)}
+            className="border border-blue-500/20 rounded-lg p-2.5 sm:p-2 text-sm bg-white outline-none focus:border-blue-500/50"
+          >
+            <option value="">{t('settings.bankAccounts.sharedBranches')}</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           type="button"
           onClick={addBankAccount}

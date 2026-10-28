@@ -44,6 +44,7 @@ import {
   type ApprovalRequiredError,
 } from '@/app/components/approvals/ApprovalRequiredNotice';
 import { errorMessage } from '@/lib/api-error';
+import { isAdminRole } from '@/lib/roles';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -130,7 +131,7 @@ function NewInvoicePage() {
   } | null>(null);
   const allowOversell =
     !!stockPolicy?.allowNegative &&
-    !(stockPolicy.requiresConfirmation && stockPolicy.overrideRequiresAdmin && profile?.role !== 'ADMIN');
+    !(stockPolicy.requiresConfirmation && stockPolicy.overrideRequiresAdmin && !isAdminRole(profile?.role));
 
 
   // Bank account picker. '' = untouched (backend uses org default),

@@ -75,6 +75,12 @@ export class OrderLineItemDto {
 }
 
 export class CreateSalesOrderDto {
+  // The branch it belongs to; left out: the location's branch, else the first. Branch staff always
+  // get their own.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   locationId?: string;

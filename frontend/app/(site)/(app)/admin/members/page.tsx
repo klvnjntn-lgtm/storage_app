@@ -10,8 +10,8 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { UserAvatar, userLabel } from '@/app/components/shared/UserAvatar';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
-
-type Role = 'ADMIN' | 'USER' | 'DRIVER';
+import { useBranches } from '@/lib/hooks/useBranches';
+import type { Role } from '@/lib/roles';
 
 type Member = {
   id: string;
@@ -22,14 +22,20 @@ type Member = {
   avatarUrl: string | null;
   createdAt: string;
   team: { id: string; name: string } | null;
+  branch: { id: string; name: string } | null;
 };
 
 // seatLimit null = the plan has no seat cap.
 type MembersResponse = { seatLimit: number | null; seatsUsed: number; members: Member[] };
 
-const ROLES: Role[] = ['ADMIN', 'USER', 'DRIVER'];
+// MASTER can hand out any role; a branch ADMIN can't make a MASTER.
+const ALL_ROLES: Role[] = ['MASTER', 'ADMIN', 'USER', 'DRIVER'];
+const BRANCH_ROLES: Role[] = ['ADMIN', 'USER', 'DRIVER'];
+// Roles that work at one branch.
+const branchRole = (r: Role) => r === 'ADMIN' || r === 'USER';
 
 const ROLE_STYLE: Record<Role, string> = {
+  MASTER: 'bg-rose-100 text-rose-800 border-rose-300',
   ADMIN: 'bg-purple-100 text-purple-800 border-purple-300',
   USER: 'bg-blue-100 text-blue-800 border-blue-300',
   DRIVER: 'bg-amber-100 text-amber-800 border-amber-300',
@@ -40,6 +46,9 @@ export default function MembersPage() {
   const { authorized, loading: authLoading } = useRequireAdmin();
   const { user: me } = useCurrentUser();
   const { t } = useLanguage();
+  const isMaster = me?.role === 'MASTER';
+  const ROLES = isMaster ? ALL_ROLES : BRANCH_ROLES;
+  const { branches, multiBranch } = useBranches();
 
   const [data, setData] = useState<MembersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +61,8 @@ export default function MembersPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('USER');
+  // '' = the first branch (MASTER only; a branch ADMIN invites into theirs).
+  const [inviteBranchId, setInviteBranchId] = useState('');
   const [inviting, setInviting] = useState(false);
 
   const [removing, setRemoving] = useState<Member | null>(null);
@@ -120,6 +131,13 @@ export default function MembersPage() {
     run(m.id, `/users/${m.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
   }
 
+  async function changeBranch(m: Member, branchId: string) {
+    if (!branchId || branchId === m.branch?.id) return;
+    const branch = branches.find((b) => b.id === branchId);
+    if (!(await dialog.confirm(t('admin.members.confirmBranchChange', { name: userLabel(m), branch: branch?.name ?? '' })))) return;
+    run(m.id, `/users/${m.id}/branch`, { method: 'PATCH', body: JSON.stringify({ branchId }) });
+  }
+
   async function confirmRemove() {
     if (!removing) return;
     const ok = await run(removing.id, `/users/${removing.id}`, { method: 'DELETE' });
@@ -134,7 +152,12 @@ export default function MembersPage() {
     try {
       const res = await apiFetch('/auth/invite', {
         method: 'POST',
-        body: JSON.stringify({ email: inviteEmail.trim(), password: invitePassword, role: inviteRole }),
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          password: invitePassword,
+          role: inviteRole,
+          ...(isMaster && branchRole(inviteRole) && inviteBranchId && { branchId: inviteBranchId }),
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -227,7 +250,9 @@ export default function MembersPage() {
         {showInvite && !seatsFull && (
           <form
             onSubmit={handleInvite}
-            className="bg-white border border-blue-500/15 rounded-xl p-4 shadow-sm grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end gap-3"
+            className={`bg-white border border-blue-500/15 rounded-xl p-4 shadow-sm grid grid-cols-1 sm:items-end gap-3 ${
+              isMaster && multiBranch ? 'sm:grid-cols-[1fr_1fr_auto_auto_auto]' : 'sm:grid-cols-[1fr_1fr_auto_auto]'
+            }`}
           >
             <label className="block">
               <span className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -271,6 +296,25 @@ export default function MembersPage() {
                 ))}
               </select>
             </label>
+            {isMaster && multiBranch && (
+              <label className="block">
+                <span className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
+                  {t('admin.members.branchLabel')}
+                </span>
+                <select
+                  value={inviteBranchId}
+                  disabled={!branchRole(inviteRole)}
+                  onChange={(e) => setInviteBranchId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm disabled:opacity-50"
+                >
+                  {branches.map((b, i) => (
+                    <option key={b.id} value={i === 0 ? '' : b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               type="submit"
               disabled={inviting || !inviteEmail.trim() || invitePassword.length < 8}
@@ -279,6 +323,10 @@ export default function MembersPage() {
               {inviting ? t('admin.members.inviting') : t('admin.members.inviteSubmit')}
             </button>
           </form>
+        )}
+
+        {!isMaster && me?.branch && multiBranch && (
+          <p className="text-xs text-gray-500">{t('admin.members.branchScopeHint', { branch: me.branch.name })}</p>
         )}
 
         <div className="flex flex-col sm:flex-row gap-2">
@@ -342,6 +390,9 @@ export default function MembersPage() {
                         {m.active ? t('admin.members.active') : t('admin.members.locked')}
                       </span>
                       {m.team && <span className="text-[10px] text-gray-500">{m.team.name}</span>}
+                      {multiBranch && m.branch && branchRole(m.role) && (
+                        <span className="text-[10px] text-gray-500">{m.branch.name}</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -360,6 +411,21 @@ export default function MembersPage() {
                         </option>
                       ))}
                     </select>
+                    {isMaster && multiBranch && branchRole(m.role) && (
+                      <select
+                        aria-label={t('admin.members.changeBranch')}
+                        value={m.branch?.id ?? ''}
+                        disabled={busyId === m.id}
+                        onChange={(e) => changeBranch(m, e.target.value)}
+                        className="col-span-2 sm:col-span-1 text-sm sm:text-xs font-medium rounded-md border border-gray-300 text-gray-700 bg-white px-2 min-h-10 sm:min-h-0 sm:py-1 disabled:opacity-50"
+                      >
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <button
                       disabled={busyId === m.id || (!m.active && seatsFull)}
                       onClick={() => toggleActive(m)}

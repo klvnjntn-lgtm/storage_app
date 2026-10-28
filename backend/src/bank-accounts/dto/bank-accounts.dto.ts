@@ -15,6 +15,12 @@ export class CreateBankAccountDto {
   @MinLength(1)
   @MaxLength(200)
   accountName: string;
+
+  // Null/omitted = shared by every branch. A branch ADMIN's accounts are
+  // always their own branch's.
+  @IsOptional()
+  @IsString()
+  branchId?: string | null;
 }
 
 export class UpdateBankAccountDto {
@@ -39,4 +45,8 @@ export class UpdateBankAccountDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string | null;
 }

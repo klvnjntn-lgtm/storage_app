@@ -29,6 +29,7 @@ import {
   TRIAL_MODULES,
 } from './plans';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
+import { ADMIN_ROLES } from '../auth/roles';
 
 type Tx = Prisma.TransactionClient;
 
@@ -556,7 +557,7 @@ export class BillingService {
 
   private async adminIds(organizationId: string) {
     const admins = await this.prisma.user.findMany({
-      where: { organizationId, role: 'ADMIN', active: true, removedAt: null },
+      where: { organizationId, role: { in: [...ADMIN_ROLES] }, active: true, removedAt: null },
       select: { id: true },
     });
     return admins.map((a) => a.id);

@@ -25,6 +25,11 @@ export class CreateEmployeeDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   baseSalary: number;
+
+  // Where their salary counts in the P&L by branch; omitted = unassigned.
+  @IsOptional()
+  @IsString()
+  branchId?: string | null;
 }
 
 export class UpdateEmployeeDto {
@@ -56,4 +61,8 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string | null;
 }

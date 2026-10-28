@@ -33,7 +33,7 @@ export class VehicleRemindersService {
       throw new BadRequestException('Invalid due date');
     }
     return this.prisma.vehicleReminder.create({
-      data: { organizationId, vehicleId, note: dto.note.trim(), dueDate },
+      data: { organizationId, vehicleId, note: dto.note.trim(), dueDate, dueOdometer: dto.dueOdometer ?? null },
     });
   }
 
@@ -41,7 +41,7 @@ export class VehicleRemindersService {
   // COMPLETED ones so the page can show a completed section instead of
   // losing history entirely the moment something's checked off.
   async listForOrg(organizationId: string) {
-    return this.prisma.vehicleReminder.findMany({
+    const rows = await this.prisma.vehicleReminder.findMany({
       where: { organizationId, status: { not: ReminderStatus.DELETED } },
       include: {
         vehicle: {
@@ -49,6 +49,7 @@ export class VehicleRemindersService {
             id: true,
             plateNumber: true,
             vehicleModel: true,
+            odometer: true,
             customer: { select: { id: true, name: true } },
           },
         },
@@ -56,7 +57,14 @@ export class VehicleRemindersService {
       },
       orderBy: { dueDate: 'asc' },
     });
+    // A reminder with a km target is due once the car's last reading reaches it, even before its date.
+    return rows.map((r) => ({
+      ...r,
+      dueByKm: r.dueOdometer != null && r.vehicle.odometer != null && r.vehicle.odometer >= r.dueOdometer,
+      kmToGo: r.dueOdometer != null && r.vehicle.odometer != null ? r.dueOdometer - r.vehicle.odometer : null,
+    }));
   }
+
 
   async complete(organizationId: string, id: string) {
     await this.getReminderOrThrow(organizationId, id);

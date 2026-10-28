@@ -1,9 +1,10 @@
 'use client';
 
+import { SendDocumentDialog } from '@/app/components/messaging/SendDocumentDialog';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, Printer, ThumbsUp, Lightbulb, Link2 } from 'lucide-react';
+import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, Printer, ThumbsUp, Lightbulb, Link2, Wrench, MessageCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, parseCalendarDate } from '@/lib/dates';
@@ -47,6 +48,7 @@ export default function WorkOrderDetailPage() {
   const router = useRouter();
   const { t } = useLanguage();
 
+  const [readyOpen, setReadyOpen] = useState(false);
   const [wo, setWo] = useState<WorkOrder | null>(null);
   const [form, setForm] = useState<WorkOrderFormValue | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -191,6 +193,25 @@ export default function WorkOrderDetailPage() {
           <span className={`text-xs px-2 py-1 rounded-md border font-medium ${statusStyle(wo.status)}`}>
             {t(`workshop.workOrders.status.${wo.status}`)}
           </span>
+          {/* The parts catalogue on this car; each part found can be added to the job. */}
+          {!locked && (
+            <Link
+              href={`/workshop/parts?${new URLSearchParams({
+                workOrderId: wo.id,
+                ...(wo.vehicle.carBrand && wo.vehicle.carModel
+                  ? {
+                      brand: wo.vehicle.carBrand,
+                      model: wo.vehicle.carModel,
+                      ...(wo.vehicle.carYear ? { year: String(wo.vehicle.carYear) } : {}),
+                    }
+                  : { plate: wo.vehicle.plateNumber }),
+              }).toString()}`}
+              className={btnSecondary}
+            >
+              <Wrench size={14} />
+              {t('workshop.workOrders.findParts')}
+            </Link>
+          )}
           {/* Prints the saved job — unsaved edits aren't on it. */}
           <Link href={`/workshop/work-orders/${wo.id}/print`} className={btnSecondary}>
             <Printer size={14} />
@@ -215,6 +236,52 @@ export default function WorkOrderDetailPage() {
             {wo.completedAt && <span>{t('workshop.workOrders.finishedOn', { date: formatDMY(new Date(wo.completedAt)) })}</span>}
           </div>
         </div>
+        {wo.comebackOf && (
+          <p className="mt-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-md px-3 py-2 flex items-start gap-1.5">
+            <RotateCcw size={14} className="mt-0.5 shrink-0" />
+            <span>
+              <Link className="underline" href={`/workshop/work-orders/${wo.comebackOf.id}`}>
+                {t('workshop.workOrders.comebackOfBadge', { number: wo.comebackOf.number })}
+              </Link>
+              {wo.comebackOf.mechanic && ` · ${wo.comebackOf.mechanic.name}`}
+              {wo.comebackReason && ` — ${wo.comebackReason}`}
+            </span>
+          </p>
+        )}
+        {(wo.comebacks?.length ?? 0) > 0 && (
+          <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-start gap-1.5">
+            <RotateCcw size={14} className="mt-0.5 shrink-0" />
+            <span>
+              {t('workshop.workOrders.comebacksBadge', { numbers: '' })}
+              {wo.comebacks!.map((c, i) => (
+                <span key={c.id}>
+                  {i > 0 && ', '}
+                  <Link className="underline" href={`/workshop/work-orders/${c.id}`}>
+                    {c.number}
+                  </Link>
+                </span>
+              ))}
+            </span>
+          </p>
+        )}
+        {wo.status === 'DONE' && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className={btnSecondary} onClick={() => setReadyOpen(true)}>
+              <MessageCircle size={14} />
+              {t('workshop.workOrders.tellReady')}
+            </button>
+            {wo.readyNotifiedAt && (
+              <span className="text-xs text-gray-500">
+                {t('workshop.workOrders.toldReady', { date: formatDMY(new Date(wo.readyNotifiedAt)) })}
+              </span>
+            )}
+            {/* The car is back for the same problem: a new job that counts as a comeback of this one. */}
+            <Link href={`/workshop/work-orders/new?vehicleId=${wo.vehicleId}&comebackOf=${wo.id}`} className={btnSecondary}>
+              <RotateCcw size={14} />
+              {t('workshop.workOrders.cameBack')}
+            </Link>
+          </div>
+        )}
         {isEstimate && linkNote && <p className="mt-3 text-sm text-green-800">{linkNote}</p>}
         {isEstimate && (
           <p className="mt-3 text-sm text-purple-800 bg-purple-50 border border-purple-200 rounded-md px-3 py-2">
@@ -334,6 +401,21 @@ export default function WorkOrderDetailPage() {
           </div>
         )}
       </div>
+      {readyOpen && (
+        <SendDocumentDialog
+          title={t('workshop.workOrders.readyTitle', { customer: wo.customer.name })}
+          endpoint={`/messaging/work-orders/${wo.id}/ready`}
+          defaultPhone={wo.customer.phone}
+          onClose={() => {
+            setReadyOpen(false);
+            // Only the "told on" date changes; unsaved edits on the form stay.
+            apiFetch(`/work-orders/${wo.id}`)
+              .then((res) => (res.ok ? res.json() : null))
+              .then((fresh: WorkOrder | null) => fresh && setWo((prev) => (prev ? { ...prev, readyNotifiedAt: fresh.readyNotifiedAt } : prev)))
+              .catch(() => {});
+          }}
+        />
+      )}
     </PageFrame>
   );
 }

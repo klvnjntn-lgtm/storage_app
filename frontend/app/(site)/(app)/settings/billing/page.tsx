@@ -60,7 +60,7 @@ export default function BillingPage() {
 }
 
 function BillingPageInner() {
-  const { authorized, loading: authLoading } = useRequireAdmin();
+  const { authorized, loading: authLoading } = useRequireAdmin(['MASTER']);
   const { t } = useLanguage();
   // The locations allowance only matters to warehouse orgs; everyone else
   // has just their hidden CENTRE.

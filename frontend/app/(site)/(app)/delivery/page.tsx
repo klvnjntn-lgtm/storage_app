@@ -6,6 +6,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { HubCard, HubGrid, HubLocked, HubPage, HubSection } from '@/app/components/shared/Hub';
+import { isAdminRole } from '@/lib/roles';
 
 
 // Same "local component + data array" hub shape as inventory/page.tsx and
@@ -23,7 +24,7 @@ export default function DeliveryHome() {
   const { user, loading: userLoading } = useCurrentUser();
   const hasDelivery = useHasModule('DELIVERY_DMS');
 
-  const DELIVERY_ITEMS = DELIVERY_ITEM_DEFS.filter((item) => !item.adminOnly || user?.role === 'ADMIN').map(
+  const DELIVERY_ITEMS = DELIVERY_ITEM_DEFS.filter((item) => !item.adminOnly || isAdminRole(user?.role)).map(
     (item) => ({
       ...item,
       title: t(`delivery.home.items.${item.key}.title`),

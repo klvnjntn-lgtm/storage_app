@@ -56,7 +56,7 @@ export class PaymentService {
   // Amount sanity and bank-account checks shared by payments and refunds.
   // Done BEFORE the Serializable transaction: every extra read inside it
   // widens the window for a serialization failure (P2034).
-  private async validateMoneyMovement(organizationId: string, dto: RecordPaymentDto) {
+  private async validateMoneyMovement(organizationId: string, dto: RecordPaymentDto, invoiceId: string) {
     if (!(dto.amount > 0)) {
       throw new BadRequestException('Amount must be greater than zero');
     }
@@ -68,8 +68,17 @@ export class PaymentService {
       if (!dto.bankAccountId) {
         throw new BadRequestException(`bankAccountId is required for payment method ${method}`);
       }
+      // Only a shared account or the document's own branch's.
+      const branchId = (
+        await this.prisma.invoice.findFirst({ where: { id: invoiceId, organizationId }, select: { branchId: true } })
+      )?.branchId;
       const bankAccount = await this.prisma.organizationBankAccount.findFirst({
-        where: { id: dto.bankAccountId, organizationId, archivedAt: null },
+        where: {
+          id: dto.bankAccountId,
+          organizationId,
+          archivedAt: null,
+          ...(branchId && { OR: [{ branchId: null }, { branchId }] }),
+        },
       });
       if (!bankAccount) {
         throw new BadRequestException('bankAccountId does not refer to an active bank account for this organization');
@@ -130,7 +139,7 @@ export class PaymentService {
   ) {
     if (parts.length === 0) throw new BadRequestException('At least one payment is required');
     const methods: PaymentMethod[] = [];
-    for (const part of parts) methods.push(await this.validateMoneyMovement(organizationId, part));
+    for (const part of parts) methods.push(await this.validateMoneyMovement(organizationId, part, invoiceId));
 
     const updated = await this.serializable(async (tx) => {
       let invoice = await tx.invoice.findFirst({
@@ -210,7 +219,7 @@ export class PaymentService {
   // a paid invoice leaves the customer owed money). Partial refunds are
   // fine; never more than the credit.
   async refund(organizationId: string, invoiceId: string, dto: RecordPaymentDto, userId?: string) {
-    const method = await this.validateMoneyMovement(organizationId, dto);
+    const method = await this.validateMoneyMovement(organizationId, dto, invoiceId);
 
     const updated = await this.serializable(async (tx) => {
       const invoice = await tx.invoice.findFirst({
@@ -269,7 +278,9 @@ export class PaymentService {
   // No journal entry: credit is a negative AR balance on one invoice and
   // the debt a positive one on another — moving between them nets to zero
   // in the AR account. The paired CREDIT_OUT/CREDIT_IN rows record it.
-  async applyCredit(organizationId: string, targetInvoiceId: string, dto: ApplyCreditDto, userId?: string) {
+  // branchId: a branch member may only move credit between their branch's
+  // invoices.
+  async applyCredit(organizationId: string, targetInvoiceId: string, dto: ApplyCreditDto, userId?: string, branchId?: string) {
     if (dto.amount != null && Math.abs(round2(dto.amount) - dto.amount) > 1e-9) {
       throw new BadRequestException('Amount can have at most 2 decimal places');
     }
@@ -295,6 +306,7 @@ export class PaymentService {
           customerId: target.customerId,
           status: InvoiceStatus.ISSUED,
           id: dto.sourceInvoiceId ?? { not: target.id },
+          branchId,
         },
         select: { id: true, total: true, amountPaid: true, creditedAmount: true, invoiceNumber: true },
         orderBy: [{ issuedAt: 'asc' }, { id: 'asc' }],
@@ -376,7 +388,7 @@ export class PaymentService {
   // Credit picture around one invoice: what credit it holds (refundable or
   // applicable elsewhere), what credit the customer holds on other invoices
   // (applicable here), and which of their invoices still have money owed.
-  async getCreditInfo(organizationId: string, invoiceId: string) {
+  async getCreditInfo(organizationId: string, invoiceId: string, branchId?: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id: invoiceId, organizationId },
       select: { id: true, total: true, amountPaid: true, creditedAmount: true, customerId: true },
@@ -385,7 +397,7 @@ export class PaymentService {
 
     const others = invoice.customerId
       ? await this.prisma.invoice.findMany({
-          where: { organizationId, customerId: invoice.customerId, status: InvoiceStatus.ISSUED, id: { not: invoice.id } },
+          where: { organizationId, customerId: invoice.customerId, status: InvoiceStatus.ISSUED, id: { not: invoice.id }, branchId },
           select: { id: true, invoiceNumber: true, issuedAt: true, total: true, amountPaid: true, creditedAmount: true },
           orderBy: { issuedAt: 'asc' },
         })

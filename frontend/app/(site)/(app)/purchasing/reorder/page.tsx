@@ -11,6 +11,7 @@ import { Card, ErrorNote, PageFrame, btnPrimary, inputCls, thCls, tdCls } from '
 import { ProductPicker, useLocations, useSuppliers, type PickedProduct } from '@/app/components/shared/ProductPicker';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
+import { isAdminRole } from '@/lib/roles';
 
 type Line = {
   productId: string;
@@ -32,7 +33,7 @@ export default function ReorderPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const { user } = useCurrentUser();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
   const suppliers = useSuppliers();
   const locations = useLocations();
   const warehouseOps = useWarehouseOps();

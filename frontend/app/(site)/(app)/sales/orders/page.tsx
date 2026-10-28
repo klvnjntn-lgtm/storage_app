@@ -1,5 +1,6 @@
 'use client';
 
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -70,6 +71,8 @@ export default function SalesOrdersPage() {
   // Seeded from the URL so pressing the browser's Back button from an
   // order's detail page restores the same filters/search/page instead of
   // resetting to page 1 with no filters.
+  // MASTER's branch filter ('' = every branch); see BranchFilter.
+  const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
   const [statusFilter, setStatusFilter] = useState<'ALL' | SalesOrderStatus>(() =>
     getInitialParam('status', 'ALL')
   );
@@ -91,15 +94,17 @@ export default function SalesOrdersPage() {
   const [totalOrders, setTotalOrders] = useState(0);
 
   useSyncQueryParams({
+    branchId: branchFilter || null,
     status: statusFilter !== 'ALL' ? statusFilter : null,
     search: debouncedSearch,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== PAGE_SIZE_DEFAULT ? pageSize : null,
   });
 
-  const activeFilterCount = (statusFilter !== 'ALL' ? 1 : 0) + (debouncedSearch ? 1 : 0);
+  const activeFilterCount = (statusFilter !== 'ALL' ? 1 : 0) + (debouncedSearch ? 1 : 0) + (branchFilter ? 1 : 0);
 
   function clearFilters() {
+    setBranchFilter('');
     setStatusFilter('ALL');
     setSearch('');
   }
@@ -110,9 +115,8 @@ export default function SalesOrdersPage() {
     try {
       const params = new URLSearchParams();
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
-      // NOTE: SalesOrderService.list() currently only accepts status/page/
-      // pageSize — search filtering happens client-side below until the
-      // backend supports a `search` param the way quotations do.
+      if (branchFilter) params.set('branchId', branchFilter);
+      if (debouncedSearch) params.set('search', debouncedSearch);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
       const res = await apiFetch(`/sales-orders?${params}`);
@@ -137,14 +141,10 @@ export default function SalesOrdersPage() {
     }
   }
 
-  // FIX — was two separate effects (load-on-every-dep + reset-page-on-
-  // filter-change), firing two requests whenever statusFilter/pageSize
-  // changed. See accounting/ledger/page.tsx's identical fix. Only
-  // statusFilter/pageSize are in the merge key — debouncedSearch isn't,
-  // since it never changes what's fetched (it only filters the
-  // already-fetched page client-side; see loadOrders()'s comment), so it
-  // doesn't need to participate in the fetch-vs-reset ordering at all.
-  const filtersKey = `${statusFilter}|${pageSize}`;
+  // One effect for load and reset-to-page-1, so a filter change fires a
+  // single request (see accounting/ledger/page.tsx). The search runs on the
+  // server — number, customer, plate, product or who took the order.
+  const filtersKey = `${statusFilter}|${pageSize}|${debouncedSearch}|${branchFilter}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -158,27 +158,7 @@ export default function SalesOrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey, page]);
 
-  // A new search term starts the (client-side-only) filtered view back
-  // at page 1, same as the original behavior. Skips the very first run,
-  // or a `page` restored from the URL (e.g. via the browser's Back
-  // button) would get reset to 1 on mount.
-  const isFirstSearchResetRef = useRef(true);
-  useEffect(() => {
-    if (isFirstSearchResetRef.current) {
-      isFirstSearchResetRef.current = false;
-      return;
-    }
-    setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
-
-  const visibleOrders = debouncedSearch
-    ? orders.filter(
-        (o) =>
-          o.orderNumber?.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-          o.customerName?.toLowerCase().includes(debouncedSearch.toLowerCase()),
-      )
-    : orders;
+  const visibleOrders = orders;
 
   return (
     <main
@@ -259,6 +239,8 @@ export default function SalesOrdersPage() {
             </div>
           </div>
 
+          <BranchFilter className="mt-3" value={branchFilter} onChange={setBranchFilter} />
+
           {activeFilterCount > 0 && (
             <div className="flex items-center justify-end gap-3 mt-3 pt-3 border-t border-blue-500/10">
               <button
@@ -282,23 +264,6 @@ export default function SalesOrdersPage() {
 
         {!loading && !error && visibleOrders.length === 0 && (
           <p className="text-sm text-gray-400">{t('sales.orders.noMatch')}</p>
-        )}
-
-        {/* FIX — search only filters the current page client-side (the
-            backend doesn't support a search param here yet, unlike
-            quotations/invoices — see loadOrders()'s own comment), so a
-            matching order sitting on another page never shows and the
-            pagination control below (driven by the server's unfiltered
-            total) doesn't reflect what's actually visible. Surfacing
-            that explicitly rather than silently showing a misleading
-            page count. */}
-        {!loading && !error && debouncedSearch && (
-          <p className="text-xs text-amber-700 -mt-1">
-            {t('sales.orders.searchOnlyPage', {
-              count: visibleOrders.length,
-              matchWord: t(visibleOrders.length === 1 ? 'sales.orders.matchSingular' : 'sales.orders.matchPlural'),
-            })}
-          </p>
         )}
 
         <div className="flex flex-col gap-2">

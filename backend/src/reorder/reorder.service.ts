@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PurchaseOrderService } from '../purchase-order/purchase-order.service';
 import { CreateReorderPosDto, ReorderSettingsDto } from './dto/reorder.dto';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
+import { ADMIN_ROLES } from '../auth/roles';
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -267,7 +268,7 @@ export class ReorderService {
         const admins = await this.prisma.user.findMany({
           where: {
             organizationId,
-            role: 'ADMIN',
+            role: { in: [...ADMIN_ROLES] },
             active: true,
             removedAt: null,
           },

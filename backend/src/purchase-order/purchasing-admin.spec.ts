@@ -58,7 +58,7 @@ describe('Purchase orders, suppliers, members and teams (database)', () => {
         data: {
           email: `a-${randomUUID()}@example.com`,
           password: 'x',
-          role: 'ADMIN',
+          role: 'MASTER',
           organizationId: orgId,
         },
       })
@@ -198,7 +198,8 @@ describe('Purchase orders, suppliers, members and teams (database)', () => {
   });
 
   describe('members', () => {
-    it('never leaves the organization without an active admin', async () => {
+    const master = (sub: string) => ({ sub, role: 'MASTER' });
+    it('never leaves the organization without an active master', async () => {
       const other = await prisma.user.create({
         data: {
           email: `m-${randomUUID()}@example.com`,
@@ -208,23 +209,23 @@ describe('Purchase orders, suppliers, members and teams (database)', () => {
         },
       });
       await expect(
-        users.setRole(orgId, adminId, adminId, 'USER'),
+        users.setRole(orgId, master(adminId), adminId, 'USER'),
       ).rejects.toThrow(/own role/);
-      await expect(users.removeMember(orgId, adminId, adminId)).rejects.toThrow(
+      await expect(users.removeMember(orgId, master(adminId), adminId)).rejects.toThrow(
         /yourself/,
       );
 
-      await users.setRole(orgId, adminId, other.id, 'ADMIN');
-      // Now there's a second admin, so the first can be demoted by them.
-      await users.setRole(orgId, other.id, adminId, 'USER');
+      await users.setRole(orgId, master(adminId), other.id, 'MASTER');
+      // Now there's a second master, so the first can be demoted by them.
+      await users.setRole(orgId, master(other.id), adminId, 'USER');
       await expect(
-        users.setRole(orgId, adminId, other.id, 'USER'),
+        users.setRole(orgId, master(adminId), other.id, 'USER'),
       ).rejects.toThrow();
-      await users.setRole(orgId, other.id, adminId, 'ADMIN');
+      await users.setRole(orgId, master(other.id), adminId, 'MASTER');
 
-      const removed = await users.removeMember(orgId, adminId, other.id);
+      const removed = await users.removeMember(orgId, master(adminId), other.id);
       expect(removed.removed).toBe(true);
-      const members = await users.listMembers(orgId);
+      const members = await users.listMembers(orgId, master(adminId));
       expect(members.members.map((m) => m.id)).not.toContain(other.id);
     });
   });

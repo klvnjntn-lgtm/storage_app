@@ -43,6 +43,7 @@ describe('session cookie (e2e)', () => {
       await prisma.user.deleteMany({ where: { organizationId: orgId } });
       await prisma.priceLevel.deleteMany({ where: { organizationId: orgId } });
       await prisma.organizationModule.deleteMany({ where: { organizationId: orgId } });
+      await prisma.branch.deleteMany({ where: { organizationId: orgId } });
       await prisma.organization.delete({ where: { id: orgId } });
     }
     await app.close();

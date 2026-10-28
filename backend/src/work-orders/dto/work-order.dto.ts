@@ -49,11 +49,48 @@ export class WorkOrderLineInput {
   unitPrice?: number;
 }
 
+// One line added from elsewhere (the parts catalogue). A part may leave the
+// location out: the one holding most of it is used.
+export class AddWorkOrderLineDto {
+  @ValidateIf((o) => !o.description)
+  @IsUUID()
+  productId?: string;
+
+  @ValidateIf((o) => !o.productId)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  locationId?: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  unitPrice?: number;
+}
+
 export class CreateWorkOrderDto {
   // The customer is taken from the vehicle.
   @IsString()
   @IsNotEmpty()
   vehicleId: string;
+
+  // The car came back for the same problem: the earlier job (same vehicle) this one redoes.
+  @IsOptional()
+  @IsUUID()
+  comebackOfId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  comebackReason?: string;
 
   @IsOptional()
   @IsUUID()
@@ -186,6 +223,13 @@ export class CreateRecommendationDto {
 
   @IsISO8601()
   dueDate: string;
+
+  // Also due at this odometer reading (km), whichever comes first.
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  dueOdometer?: number;
 }
 
 // The customer's answer on the approval page.

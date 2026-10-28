@@ -12,6 +12,8 @@ import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { PaymentService } from './payment.service';
 import { RecordPaymentDto, SplitPaymentDto } from './dto/record-payment.dto';
 import { ApplyCreditDto } from './dto/apply-credit.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { filterBranchId } from '../auth/branch-scope';
 
 // Gated to INVOICE_POS OR WORKSHOP_RMS, same as CustomersController —
 // WORKSHOP_RMS depends on INVOICE_POS being active, so any org that
@@ -21,6 +23,7 @@ import { ApplyCreditDto } from './dto/apply-credit.dto';
 // is ever relaxed.
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS)
+@BranchRecord('invoice', 'invoiceId')
 @Controller('invoices/:invoiceId/payments')
 export class PaymentController {
   constructor(
@@ -62,8 +65,8 @@ export class PaymentController {
   // Customer credit held on this invoice, credit the customer holds on
   // other invoices, and their invoices that still have money owed.
   @Get('credit')
-  credit(@CurrentOrg() organizationId: string, @Param('invoiceId') invoiceId: string) {
-    return this.payments.getCreditInfo(organizationId, invoiceId);
+  credit(@CurrentOrg() organizationId: string, @Param('invoiceId') invoiceId: string, @Req() req) {
+    return this.payments.getCreditInfo(organizationId, invoiceId, filterBranchId(req.user));
   }
 
   // Pays the customer's credit on this invoice back to them. Money leaves
@@ -90,7 +93,7 @@ export class PaymentController {
     @Body() dto: ApplyCreditDto,
     @Req() req,
   ) {
-    return this.payments.applyCredit(organizationId, invoiceId, dto, req.user?.sub);
+    return this.payments.applyCredit(organizationId, invoiceId, dto, req.user?.sub, filterBranchId(req.user));
   }
 
   // FIX — reverses a mistaken/duplicate payment.

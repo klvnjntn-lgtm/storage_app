@@ -26,6 +26,7 @@ import { PinStatusBadge, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/compo
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { isAdminRole } from '@/lib/roles';
 
 
 // Columns the (desktop) table can be sorted by. Address is deliberately
@@ -73,7 +74,7 @@ export default function CustomersPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
   // Location pin + driver directions only matter with the delivery module.
   const hasDelivery = useHasModule('DELIVERY_DMS');
   const { levels: priceLevels, defaultLevelId } = usePriceLevels();

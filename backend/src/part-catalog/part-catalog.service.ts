@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { normalizePlate } from '../lib/plate';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ParsedQuery, PartQueryParser } from './part-query';
 
 export type PartCatalogQuery = {
   brand?: string;
@@ -23,6 +25,25 @@ export function normalizeOem(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+// Best catalogue car for a free-text model: the longest model name found as a whole word, preferring
+// one whose brand is named too; a 4-digit year in the text is taken as the year.
+export function guessCar(text: string, brands: { brand: string; models: string[] }[]) {
+  const upper = ` ${text.toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
+  let best: { brand: string; model: string; score: number } | null = null;
+  for (const { brand, models } of brands) {
+    const brandNamed = upper.includes(` ${brand.toUpperCase()} `);
+    for (const model of models) {
+      const key = model.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+      if (!key || !upper.includes(` ${key} `)) continue;
+      const score = key.length + (brandNamed ? 100 : 0);
+      if (!best || score > best.score) best = { brand, model, score };
+    }
+  }
+  if (!best) return null;
+  const year = upper.match(/ (19[5-9]\d|20\d\d) /)?.[1];
+  return { brand: best.brand, model: best.model, year: year ? Number(year) : null, guessed: true };
+}
+
 @Injectable()
 export class PartCatalogService {
   constructor(private readonly prisma: PrismaService) {}
@@ -30,11 +51,19 @@ export class PartCatalogService {
   // Dropdown options: brand → models, item type → items, plus when the data was last refreshed.
   async facets() {
     const where = await this.latestSync();
-    const [vehicles, items, latest] = await Promise.all([
+    const [vehicles, generationRows, items, latest] = await Promise.all([
       this.prisma.partCatalogEntry.groupBy({
         by: ['carBrand', 'model'],
         where,
         orderBy: [{ carBrand: 'asc' }, { model: 'asc' }],
+      }),
+      // Production years per generation, so the year is picked from the years the car was built.
+      this.prisma.partCatalogEntry.groupBy({
+        by: ['carBrand', 'model', 'generation'],
+        where: { ...where, NOT: { yearFrom: null } },
+        _min: { yearFrom: true },
+        _max: { yearTo: true },
+        _count: { yearTo: true, _all: true },
       }),
       this.prisma.partCatalogEntry.groupBy({
         by: ['itemType', 'item'],
@@ -55,8 +84,17 @@ export class PartCatalogService {
     for (const i of items)
       itemTypes.set(i.itemType, [...(itemTypes.get(i.itemType) ?? []), i.item]);
 
+    const thisYear = new Date().getFullYear();
     return {
       brands: [...brands].map(([brand, models]) => ({ brand, models })),
+      generations: generationRows.map((g) => ({
+        brand: g.carBrand,
+        model: g.model,
+        generation: g.generation,
+        yearFrom: g._min.yearFrom!,
+        // A row with no end year means still built.
+        yearTo: g._count.yearTo < g._count._all ? thisYear : (g._max.yearTo ?? thisYear),
+      })),
       itemTypes: [...itemTypes].map(([itemType, items]) => ({
         itemType,
         items,
@@ -64,6 +102,37 @@ export class PartCatalogService {
       totalEntries: latest._count,
       lastUpdated: latest._max.lastSeen,
     };
+  }
+
+  // The counter types a plate: the org's vehicle(s) with it, and the car to open in the catalogue —
+  // what's saved on the vehicle, else a guess from its free-text model ("Avanza 1.3 G 2015"), which
+  // the page shows as a guess for the counter to confirm (and save).
+  async vehicleByPlate(organizationId: string, plate: string) {
+    const normalized = normalizePlate(plate);
+    if (normalized.length < 3) return [];
+    const vehicles = await this.prisma.vehicle.findMany({
+      where: { organizationId, plateNormalized: normalized },
+      select: {
+        id: true,
+        plateNumber: true,
+        vehicleModel: true,
+        carBrand: true,
+        carModel: true,
+        carYear: true,
+        engine: true,
+        odometer: true,
+        customer: { select: { id: true, name: true } },
+      },
+      take: 5,
+    });
+    if (vehicles.length === 0) return [];
+    const { brands } = await this.facets();
+    return vehicles.map((v) => ({
+      ...v,
+      car: v.carBrand && v.carModel
+        ? { brand: v.carBrand, model: v.carModel, year: v.carYear, guessed: false }
+        : guessCar(v.vehicleModel, brands),
+    }));
   }
 
   // Rows the page may show: parts identified by an OEM number or a spec (bulb type, plug code…),
@@ -87,31 +156,45 @@ export class PartCatalogService {
     if (query.item) and.push({ item: query.item });
     if (query.origin) and.push({ origin: query.origin });
     // Confirmations count distinct shops, so one seller's cloned listings can't vouch for a fitment.
-    if (query.minSellers > 1) and.push({ sellers: { gte: query.minSellers } });
-    if (query.year) {
+    const sellersClause: Prisma.PartCatalogEntryWhereInput | null =
+      query.minSellers > 1 ? { sellers: { gte: query.minSellers } } : null;
+    if (sellersClause) and.push(sellersClause);
+    const q = query.q?.trim();
+    let interpretation: ParsedQuery | null = null;
+    if (q) {
+      const parsed = await this.parseQuery(q);
+      if (parsed.recognized) {
+        interpretation = parsed;
+        and.push(...this.parsedFilters(parsed));
+      } else {
+        // Nothing recognised (a spec like "H4", part of a number…): match it as text.
+        const oem = normalizeOem(q);
+        and.push({
+          OR: [
+            ...(oem.length >= 3 ? [{ oemNormalized: { contains: oem } }] : []),
+            { item: { contains: q, mode: 'insensitive' } },
+            { model: { contains: q, mode: 'insensitive' } },
+            { partBrand: { contains: q, mode: 'insensitive' } },
+            { spec: { contains: q, mode: 'insensitive' } },
+          ],
+        });
+      }
+    }
+    // The year box wins over a year typed in the search ("avanza 2006 …").
+    const year = query.year ?? interpretation?.year;
+    let yearClause: Prisma.PartCatalogEntryWhereInput | null = null;
+    if (year) {
       // Rows whose title gave no years are kept (shown after the dated ones) rather than silently hidden.
-      and.push({
+      yearClause = {
         OR: [
           { yearFrom: null },
           {
-            yearFrom: { lte: query.year },
-            OR: [{ yearTo: null }, { yearTo: { gte: query.year } }],
+            yearFrom: { lte: year },
+            OR: [{ yearTo: null }, { yearTo: { gte: year } }],
           },
         ],
-      });
-    }
-    const q = query.q?.trim();
-    if (q) {
-      const oem = normalizeOem(q);
-      and.push({
-        OR: [
-          ...(oem.length >= 3 ? [{ oemNormalized: { contains: oem } }] : []),
-          { item: { contains: q, mode: 'insensitive' } },
-          { model: { contains: q, mode: 'insensitive' } },
-          { partBrand: { contains: q, mode: 'insensitive' } },
-          { spec: { contains: q, mode: 'insensitive' } },
-        ],
-      });
+      };
+      and.push(yearClause);
     }
     // The spec summary is computed before the spec filter, so the chips stay visible while one is picked.
     const summaryWhere: Prisma.PartCatalogEntryWhereInput = {
@@ -155,16 +238,35 @@ export class PartCatalogService {
       }),
     ]);
 
+    // Nothing found: how many rows the year or the shop-count filter hid, so the page can offer to drop it
+    // instead of a dead end ("no Hub Bearing for Avanza in 2006 — 7 in other years").
+    const without = (clause: Prisma.PartCatalogEntryWhereInput | null) =>
+      clause
+        ? this.prisma.partCatalogEntry.count({
+            where: { AND: and.filter((c) => c !== clause) },
+          })
+        : Promise.resolve(null);
+    const [otherYears, fewerSellers] =
+      total === 0
+        ? await Promise.all([without(yearClause), without(sellersClause)])
+        : [null, null];
+
     const inStock = await this.stockByOem(
       organizationId,
       rows.map((r) => r.oemNormalized).filter(Boolean),
     );
+    const parser = await this.parser();
 
     return {
       items: rows.map((r) => ({
         ...r,
         inStock: r.oemNormalized ? (inStock.get(r.oemNormalized) ?? []) : [],
+        // Kode rangka / kode mesin of the row's generation, e.g. F651 / 1NR-VE, 2NR-VE.
+        codes: this.vehicleCodes(parser, r.carBrand, r.model, r.generation),
       })),
+      // How the search box was read, shown as chips: "Toyota Avanza · 2006 · Hub Bearing".
+      interpretation,
+      relax: { otherYears, fewerSellers },
       // Most-confirmed specs for the current filters, e.g. Avanza + Headlamp Bulb → H4 first.
       specSummary: specs.map((g) => ({
         spec: g.spec,
@@ -175,6 +277,99 @@ export class PartCatalogService {
       total,
       totalPages: Math.max(1, Math.ceil(total / query.limit)),
     };
+  }
+
+  // The search vocabulary (PartSearchTerm + part brands), rebuilt only when the scraper has synced since.
+  private parserCache: { syncedAt: number; parser: PartQueryParser } | null =
+    null;
+
+  private async parser(): Promise<PartQueryParser> {
+    const latest = await this.prisma.partSearchTerm.aggregate({
+      _max: { syncedAt: true },
+    });
+    const syncedAt = latest._max.syncedAt?.getTime() ?? 0;
+    if (this.parserCache?.syncedAt === syncedAt) return this.parserCache.parser;
+    const [terms, brands] = await Promise.all([
+      this.prisma.partSearchTerm.findMany(),
+      this.prisma.partCatalogEntry.groupBy({
+        by: ['partBrand'],
+        where: { AND: [await this.latestSync(), { NOT: { partBrand: '' } }] },
+      }),
+    ]);
+    const parser = new PartQueryParser(
+      terms,
+      brands.map((b) => b.partBrand),
+    );
+    this.parserCache = { syncedAt, parser };
+    return parser;
+  }
+
+  private async parseQuery(q: string): Promise<ParsedQuery> {
+    // Words that could be part numbers are checked against the catalogue, so "16510-61J00" reads as one.
+    const candidates = [
+      ...new Set(
+        q
+          .split(/[\s,;]+/)
+          .map(normalizeOem)
+          .filter((n) => n.length >= 5 && /\d/.test(n)),
+      ),
+    ];
+    const known = candidates.length
+      ? await this.prisma.partCatalogEntry.findMany({
+          where: { oemNormalized: { in: candidates } },
+          select: { oemNormalized: true },
+          distinct: ['oemNormalized'],
+        })
+      : [];
+    return (await this.parser()).parse(
+      q,
+      new Set(known.map((k) => k.oemNormalized)),
+    );
+  }
+
+  // The year typed is applied by search() with the year box, so it can be dropped when nothing matches.
+  private parsedFilters(p: ParsedQuery): Prisma.PartCatalogEntryWhereInput[] {
+    const and: Prisma.PartCatalogEntryWhereInput[] = [];
+    if (p.vehicles.length) {
+      and.push({
+        OR: p.vehicles.map((v) => ({
+          carBrand: v.carBrand,
+          ...(v.model ? { model: v.model } : {}),
+          // A generation from a code also keeps the model's rows whose title named no generation, and
+          // rows given it "(via OEM)".
+          ...(v.generations
+            ? {
+                OR: [
+                  { generation: '' },
+                  ...v.generations.flatMap((g) => [
+                    { generation: g },
+                    { generation: `${g} (via OEM)` },
+                  ]),
+                ],
+              }
+            : {}),
+        })),
+      });
+    }
+    if (p.items.length) and.push({ item: { in: p.items.map((i) => i.item) } });
+    if (p.oems.length) and.push({ oemNormalized: { in: p.oems } });
+    if (p.partBrands.length) and.push({ partBrand: { in: p.partBrands } });
+    return and;
+  }
+
+  private vehicleCodes(
+    parser: PartQueryParser,
+    carBrand: string,
+    model: string,
+    generation: string,
+  ) {
+    const gen = generation.replace(/\s*\(via OEM\)$/, '');
+    return (
+      parser.codesByVehicle.get(`${carBrand}|${model}|${gen}`) ?? {
+        chassis: [],
+        engine: [],
+      }
+    );
   }
 
   // Rows from maker data (Sakura, NGK, Astra Otoshop, the car maker's own catalogue) or genuine listings count
@@ -236,6 +431,10 @@ export class PartCatalogService {
         thumbKey: true,
         fitment: true,
         fitmentRank: true,
+        priceLow: true,
+        priceMedian: true,
+        priceHigh: true,
+        pricedListings: true,
       },
     });
 
@@ -257,6 +456,7 @@ export class PartCatalogService {
           genuine: boolean;
           fitment: string;
           fitmentRank: number;
+          price: { low: number; median: number; high: number; listings: number } | null;
         }
       >;
       brands: Map<string, number>;
@@ -300,7 +500,11 @@ export class PartCatalogService {
           genuine: false,
           fitment: '',
           fitmentRank: 0,
+          // Tokopedia asking price for the number (same on every row with it).
+          price: null,
         };
+        if (!o.price && r.priceMedian != null)
+          o.price = { low: r.priceLow ?? r.priceMedian, median: r.priceMedian, high: r.priceHigh ?? r.priceMedian, listings: r.pricedListings };
         o.sellers += r.sellers;
         o.genuine ||= r.origin === 'Official';
         if (r.fitmentRank > o.fitmentRank) {
@@ -376,6 +580,7 @@ export class PartCatalogService {
       organizationId,
       summaries.flatMap((s) => s.oems.slice(0, 3).map((o) => o.normalized)),
     );
+    const parser = await this.parser();
     const categories = new Map<string, unknown[]>();
     for (const s of withWorkshop.sort((x, y) => y.sellers - x.sellers)) {
       const inStock = s.oems.flatMap((o) => stock.get(o.normalized) ?? []);
@@ -392,7 +597,11 @@ export class PartCatalogService {
         brand,
         model,
         year: year ?? null,
-        generations: [...generations].map(([name, y]) => ({ name, ...y })),
+        generations: [...generations].map(([name, y]) => ({
+          name,
+          ...y,
+          codes: this.vehicleCodes(parser, brand, model, name),
+        })),
       },
       categories: [...categories]
         .map(([itemType, list]) => ({ itemType, items: list }))

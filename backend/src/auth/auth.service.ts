@@ -21,6 +21,9 @@ import { ModuleKey } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
 import { TwoFactorService } from './two-factor.service';
 import { PlanLimitsService } from '../billing/plan-limits.service';
+import { isAdminRole } from './roles';
+import { bookingBranchId } from './branch-scope';
+import { resolveBranchId } from '../branches/resolve-branch';
 
 // The desktop app (desktop/) runs its own backend for a single business,
 // with no platform owner to grant modules — it sets this to the modules
@@ -199,7 +202,7 @@ export class AuthService {
           seatLimit: this.license.licensedSeats() ?? undefined,
         }),
         users: {
-          create: { email: normalizedEmail, password: hashed, role: 'ADMIN' },
+          create: { email: normalizedEmail, password: hashed, role: 'MASTER' },
         },
         // AUTO_ENABLE_MODULES grants modules with no expiry, so it's
         // skipped for a self-serve signup: the trial already turns every
@@ -225,12 +228,19 @@ export class AuthService {
   // controller route) — inviterOrgId comes from the caller's own JWT,
   // never from client input, so this can't be used to add users to a
   // different org than the one the caller administers.
+  // A branch ADMIN invites into their own branch and can't make a MASTER;
+  // a MASTER picks the branch (default: the first).
   async invite(
     inviterOrgId: string,
     email: string,
     password: string,
-    role: 'ADMIN' | 'USER' | 'DRIVER' = 'USER',
+    role: 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER' = 'USER',
+    inviter: { role: string; branchId?: string | null } = { role: 'MASTER' },
+    requestedBranchId?: string,
   ) {
+    if (role === 'MASTER' && inviter.role !== 'MASTER') {
+      throw new ForbiddenException('Only a master account can invite another master');
+    }
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -252,6 +262,13 @@ export class AuthService {
 
     await this.planLimits.assertCanAdd(inviterOrgId, 'seats');
 
+    const branchId =
+      role === 'ADMIN' || role === 'USER'
+        ? await resolveBranchId(this.prisma, inviterOrgId, {
+            branchId: bookingBranchId(inviter, requestedBranchId ?? null),
+          })
+        : null;
+
     const hashed = await bcrypt.hash(password, 10);
 
     if (restoring) {
@@ -260,6 +277,7 @@ export class AuthService {
         data: {
           password: hashed,
           role,
+          branchId,
           active: true,
           removedAt: null,
           currentSessionId: null,
@@ -273,6 +291,7 @@ export class AuthService {
         email: normalizedEmail,
         password: hashed,
         role,
+        branchId,
         organizationId: inviterOrgId,
       },
       select: { id: true, email: true, role: true },
@@ -554,7 +573,9 @@ export class AuthService {
     return { accessToken };
   }
 
-  async me(userId: string) {
+  // branchId: the branch the request was scoped to (jwt.strategy.ts) —
+  // the member's own, or the first when theirs was archived.
+  async me(userId: string, branchId?: string | null) {
     const user = await this.prisma.user.findUnique({
       where: {
         id: userId,
@@ -587,9 +608,13 @@ export class AuthService {
       isPlatformOwner &&
       active &&
       !removedAt &&
-      user.role === 'ADMIN' &&
+      isAdminRole(user.role) &&
       platformOwnerEmails().has(user.email.toLowerCase());
-    return { ...profile, platformOwner };
+    // Null = every branch (MASTER, DRIVER).
+    const branch = branchId
+      ? await this.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true } })
+      : null;
+    return { ...profile, platformOwner, branch };
   }
 
   async updateAvatar(userId: string, avatarUrl: string | null | undefined) {

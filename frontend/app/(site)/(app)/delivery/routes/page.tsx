@@ -12,6 +12,7 @@ import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delive
 import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { toCalendarDateString } from '@/lib/dates';
 import { useSyncQueryParams } from '@/lib/useQuerySync';
+import { isAdminRole } from '@/lib/roles';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -66,7 +67,7 @@ function DeliveryRoutesPageInner() {
   const searchParams = useSearchParams();
   const { t } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
 
   // Date and filters live in the URL, so opening a route and pressing
   // Back returns to the same day (and ?date= works from "Optimize all

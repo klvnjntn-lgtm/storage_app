@@ -33,6 +33,8 @@ export default function Recommendations({
   const { t } = useLanguage();
   const [note, setNote] = useState('');
   const [dueDate, setDueDate] = useState(defaultDue);
+  // Optional: also due at this km ("oil at 45.000 km or in 3 months").
+  const [dueKm, setDueKm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +45,7 @@ export default function Recommendations({
     try {
       const res = await apiFetch(`/work-orders/${workOrderId}/recommendations`, {
         method: 'POST',
-        body: JSON.stringify({ note: note.trim(), dueDate }),
+        body: JSON.stringify({ note: note.trim(), dueDate, ...(dueKm && { dueOdometer: Number(dueKm) }) }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -53,6 +55,7 @@ export default function Recommendations({
       onChange(body);
       setNote('');
       setDueDate(defaultDue());
+      setDueKm('');
     } catch {
       setError(t('workshop.workOrders.serverError'));
     } finally {
@@ -70,7 +73,10 @@ export default function Recommendations({
             <li key={r.id} className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-sm">{r.note}</p>
-                <p className="text-xs text-gray-500">{t('workshop.workOrders.dueOn', { date: formatDMY(new Date(r.dueDate)) })}</p>
+                <p className="text-xs text-gray-500">
+                  {t('workshop.workOrders.dueOn', { date: formatDMY(new Date(r.dueDate)) })}
+                  {r.dueOdometer != null && ` · ${t('workshop.reminders.dueKm', { km: r.dueOdometer.toLocaleString('id-ID') })}`}
+                </p>
               </div>
               {r.status === 'PENDING' ? (
                 <Link
@@ -106,6 +112,16 @@ export default function Recommendations({
           value={dueDate}
           aria-label={t('workshop.workOrders.dueDate')}
           onChange={(e) => setDueDate(e.target.value)}
+        />
+        <input
+          type="number"
+          min={0}
+          inputMode="numeric"
+          className={`${inputCls} sm:w-40`}
+          value={dueKm}
+          placeholder={t('workshop.workOrders.dueAtKm')}
+          aria-label={t('workshop.workOrders.dueAtKm')}
+          onChange={(e) => setDueKm(e.target.value.replace(/\D/g, ''))}
         />
         <button type="button" className={btnSecondary} disabled={busy || !note.trim() || !dueDate} onClick={add}>
           <Plus size={14} />

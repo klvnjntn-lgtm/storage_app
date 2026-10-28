@@ -21,6 +21,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { ReceiveBatchPicker, ReturnInvoicePicker } from '@/app/components/warehouse/SessionStartPickers';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 type Mode = 'RECEIVE' | 'RETURNS' | 'MOVE' | 'FULFILLMENT';
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -249,7 +250,7 @@ export default function Warehouse() {
       </div>
 
       {picker === 'RECEIVE' && (
-        <ReceiveBatchPicker isAdmin={profile?.role === 'ADMIN'} onClose={() => setPicker(null)} />
+        <ReceiveBatchPicker isAdmin={isAdminRole(profile?.role)} onClose={() => setPicker(null)} />
       )}
       {picker === 'RETURNS' && <ReturnInvoicePicker onClose={() => setPicker(null)} />}
     </div>

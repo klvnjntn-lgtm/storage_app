@@ -9,6 +9,8 @@ import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { DevicesService } from './devices.service';
 import { CSRF_HEADER, CSRF_HEADER_VALUE, readSessionCookie } from './session-cookie';
+import { isAdminRole } from './roles';
+import { effectiveBranchId } from './branch-scope';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LAST_ACTIVE_RESOLUTION_MS = 5 * 60 * 1000;
@@ -79,6 +81,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           select: { dayOfWeek: true, startTime: true, endTime: true },
         },
         organization: { select: { timezone: true, require2faForAdmins: true } },
+        branch: { select: { archivedAt: true } },
       },
     });
 
@@ -98,7 +101,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // set it up: only the /auth routes (profile, logout, 2FA setup) work
     // until they do. The frontend sends them to the security page.
     if (
-      user.role === 'ADMIN' &&
+      isAdminRole(user.role) &&
       user.organization.require2faForAdmins &&
       !user.totpEnabledAt &&
       !req.path.startsWith('/auth/')
@@ -146,6 +149,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       role: user.role,
       organizationId: user.organizationId,
+      // Null for MASTER/DRIVER; see auth/branch-scope.ts.
+      branchId: await effectiveBranchId(this.prisma, user),
     };
   }
 }

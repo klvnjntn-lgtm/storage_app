@@ -29,12 +29,14 @@ import {
   UpdateSalaryComponentTypeDto,
 } from './dto/salary-component.dto';
 import { CreatePayrollDto, MarkPayrollPaidDto, VoidPayrollDto } from './dto/payroll.dto';
+import { scopedBranchId } from '../auth/branch-scope';
 
 // Payroll exposes salary data end-to-end, and there's no HR-specific role
 // to fall back to (schema only has ADMIN/USER) — so the whole controller,
 // including reads, is ADMIN-only rather than just its mutations.
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
-@Roles('ADMIN')
+// Every branch's staff and salaries: MASTER only, not a branch's ADMIN.
+@Roles('MASTER')
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('payroll')
 export class PayrollController {
@@ -46,8 +48,17 @@ export class PayrollController {
 
   // --- Employees ---
 
+  // Also the salesperson picker on invoices, so a branch ADMIN gets their
+  // branch's (and unassigned) staff — names only, no pay.
+  @Roles('ADMIN')
   @Get('employees')
-  listEmployees(@CurrentOrg() organizationId: string, @Query('includeArchived') includeArchived?: string) {
+  listEmployees(
+    @CurrentOrg() organizationId: string,
+    @Req() req,
+    @Query('includeArchived') includeArchived?: string,
+  ) {
+    const branchId = scopedBranchId(req.user);
+    if (branchId) return this.employeesService.listForBranch(organizationId, branchId);
     return this.employeesService.list(organizationId, includeArchived === 'true');
   }
 
@@ -58,6 +69,7 @@ export class PayrollController {
 
   @Post('employees')
   createEmployee(@CurrentOrg() organizationId: string, @Body() dto: CreateEmployeeDto) {
+    // MASTER-only (class @Roles), so any branch may be given.
     return this.employeesService.create(organizationId, dto);
   }
 

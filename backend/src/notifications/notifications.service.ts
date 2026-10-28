@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from './push.service';
+import { STAFF_ROLES } from '../auth/roles';
 
 export type CreateNotificationOptions = {
   body?: string;
@@ -101,7 +102,7 @@ export class NotificationsService {
     opts: CreateNotificationOptions = {},
   ) {
     const staff = await this.prisma.user.findMany({
-      where: { organizationId, role: { in: ['ADMIN', 'USER'] }, active: true },
+      where: { organizationId, role: { in: [...STAFF_ROLES] }, active: true },
       select: { id: true },
     });
     return this.createMany(

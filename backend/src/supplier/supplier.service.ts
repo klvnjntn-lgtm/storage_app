@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
 import { escapeLike } from '../common/text/escape-like';
+import { isAdminRole } from '../auth/roles';
 
 @Injectable()
 export class SupplierService {
@@ -18,7 +19,7 @@ export class SupplierService {
     // Activating/deactivating is admin-only, same as PATCH :id/deactivate —
     // otherwise this general update would sidestep that gate. The edit form
     // always sends isActive, so only an actual change is refused.
-    if (dto.isActive !== undefined && dto.isActive !== current.isActive && actorRole !== 'ADMIN') {
+    if (dto.isActive !== undefined && dto.isActive !== current.isActive && !isAdminRole(actorRole)) {
       throw new ForbiddenException('Only an admin can activate or deactivate a supplier');
     }
     return this.prisma.supplier.update({

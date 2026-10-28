@@ -48,7 +48,7 @@ type Vars = Record<string, unknown> & { business: string; note?: string };
 
 export function messageText(
   lang: MessageLanguage,
-  kind: 'invoice' | 'purchaseOrder' | 'statement' | 'reminder',
+  kind: 'invoice' | 'purchaseOrder' | 'statement' | 'reminder' | 'workOrderReady',
   v: Vars,
 ): Rendered {
   const id = lang === 'id';
@@ -159,5 +159,23 @@ export function messageText(
         ),
       };
     }
+    case 'workOrderReady':
+      return {
+        subject: id
+          ? `Kendaraan ${v.plate} sudah selesai — ${v.business}`
+          : `Your car ${v.plate} is ready — ${v.business}`,
+        ...wrap(
+          [
+            id
+              ? `Yth. ${esc(v.customer) || 'Pelanggan'},`
+              : `Dear ${esc(v.customer) || 'customer'},`,
+            id
+              ? `Pekerjaan untuk kendaraan <b>${esc(v.plate)}</b> (${esc(v.number)}) sudah selesai dan siap diambil.`
+              : `The work on <b>${esc(v.plate)}</b> (${esc(v.number)}) is done and the car is ready for pickup.`,
+            ...note(v.note),
+          ],
+          v.business,
+        ),
+      };
   }
 }

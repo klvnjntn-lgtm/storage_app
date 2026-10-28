@@ -9,6 +9,7 @@ import { formatDMY } from '@/lib/dates';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, btnDanger, inputCls } from '@/app/components/shared/PageFrame';
+import { isAdminRole } from '@/lib/roles';
 
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type Request = {
@@ -37,7 +38,7 @@ const STATUS_STYLE: Record<Status, string> = {
 export default function ApprovalsPage() {
   const { user } = useCurrentUser();
   const { t } = useLanguage();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
 
   const [status, setStatus] = useState<Status | ''>('PENDING');
   const [rows, setRows] = useState<Request[] | null>(null);

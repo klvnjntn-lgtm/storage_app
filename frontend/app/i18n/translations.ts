@@ -28,6 +28,8 @@ const base = {
     common: {
       hubMenu: 'Menu',
       hubSearch: 'Search',
+      branchFilterLabel: 'Branch',
+      allBranches: 'All branches',
       increaseQty: 'Increase quantity',
       decreaseQty: 'Decrease quantity',
       errorTitle: 'Something went wrong',
@@ -125,6 +127,7 @@ const base = {
         deliveryOrder: 'Delivery Order',
         salesQuotation: 'Sales Quotation',
         salesMargin: 'Sales Margin',
+        staffPerformance: 'Staff Performance',
         customers: 'Customers',
         purchasing: 'Purchasing',
         purchasingHome: 'Purchasing Home',
@@ -332,6 +335,8 @@ const base = {
     common: {
       hubMenu: 'Menu',
       hubSearch: 'Cari',
+      branchFilterLabel: 'Cabang',
+      allBranches: 'Semua cabang',
       increaseQty: 'Tambah jumlah',
       decreaseQty: 'Kurangi jumlah',
       errorTitle: 'Terjadi kesalahan',
@@ -429,6 +434,7 @@ const base = {
         deliveryOrder: 'Surat Jalan',
         salesQuotation: 'Penawaran Penjualan',
         salesMargin: 'Margin Penjualan',
+        staffPerformance: 'Kinerja Karyawan',
         customers: 'Pelanggan',
         purchasing: 'Pembelian',
         purchasingHome: 'Beranda Pembelian',

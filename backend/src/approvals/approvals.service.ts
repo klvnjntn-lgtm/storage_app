@@ -7,6 +7,7 @@ import {
 import { ApprovalDocumentType, ApprovalStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { isAdminRole, ADMIN_ROLES } from '../auth/roles';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -132,7 +133,7 @@ export class ApprovalsService {
     role: string | undefined,
     db: Db = this.prisma,
   ) {
-    if (role === 'ADMIN') return;
+    if (isAdminRole(role)) return;
     const req = await this.requirement(
       organizationId,
       documentType,
@@ -175,7 +176,12 @@ export class ApprovalsService {
     documentType: ApprovalDocumentType,
     documentId: string,
     note?: string,
+    branchId?: string | null,
   ) {
+    const invoiceBranchId = await this.invoiceBranchOf(organizationId, documentType, documentId);
+    if (branchId && invoiceBranchId !== undefined && invoiceBranchId !== branchId) {
+      throw new NotFoundException('Invoice not found');
+    }
     const req = await this.requirement(
       organizationId,
       documentType,
@@ -213,8 +219,17 @@ export class ApprovalsService {
         requestedById: userId,
       },
     });
+    // An invoice goes to the masters and its own branch's admins.
     const admins = await this.prisma.user.findMany({
-      where: { organizationId, role: 'ADMIN', active: true, removedAt: null },
+      where: {
+        organizationId,
+        active: true,
+        removedAt: null,
+        OR:
+          invoiceBranchId !== undefined
+            ? [{ role: 'MASTER' }, { role: 'ADMIN', branchId: invoiceBranchId }]
+            : [{ role: { in: [...ADMIN_ROLES] } }],
+      },
       select: { id: true },
     });
     await this.notifications.createMany(
@@ -233,11 +248,19 @@ export class ApprovalsService {
     id: string,
     approve: boolean,
     note?: string,
+    branchId?: string | null,
   ) {
     const request = await this.prisma.approvalRequest.findFirst({
       where: { id, organizationId },
     });
     if (!request) throw new NotFoundException('Approval request not found');
+    // A branch ADMIN decides on their own branch's invoices only.
+    if (branchId) {
+      const invoiceBranchId = await this.invoiceBranchOf(organizationId, request.documentType, request.documentId);
+      if (invoiceBranchId !== undefined && invoiceBranchId !== branchId) {
+        throw new NotFoundException('Approval request not found');
+      }
+    }
     if (request.status !== ApprovalStatus.PENDING)
       throw new BadRequestException('This request has already been decided');
     // updateMany on PENDING so two admins deciding at once can't both win.
@@ -284,10 +307,24 @@ export class ApprovalsService {
     return { ok: true };
   }
 
+  // The branch of an invoice under approval; undefined for other documents.
+  private async invoiceBranchOf(
+    organizationId: string,
+    documentType: ApprovalDocumentType,
+    documentId: string,
+  ): Promise<string | null | undefined> {
+    if (documentType !== ApprovalDocumentType.INVOICE) return undefined;
+    const inv = await this.prisma.invoice.findFirst({
+      where: { id: documentId, organizationId },
+      select: { branchId: true },
+    });
+    return inv ? inv.branchId : undefined;
+  }
+
   // Requests with enough of their document to decide without opening it.
   async list(
     organizationId: string,
-    opts: { status?: ApprovalStatus; requestedById?: string } = {},
+    opts: { status?: ApprovalStatus; requestedById?: string; branchId?: string } = {},
   ) {
     const rows = await this.prisma.approvalRequest.findMany({
       where: {
@@ -322,7 +359,7 @@ export class ApprovalsService {
         },
       }),
       this.prisma.invoice.findMany({
-        where: { id: { in: invIds }, organizationId },
+        where: { id: { in: invIds }, organizationId, branchId: opts.branchId },
         select: {
           id: true,
           invoiceNumber: true,
@@ -338,7 +375,11 @@ export class ApprovalsService {
     const poBy = new Map(pos.map((p) => [p.id, p]));
     const invBy = new Map(invoices.map((i) => [i.id, i]));
     const userBy = new Map(users.map((u) => [u.id, u.displayName || u.email]));
-    return rows.map((r) => {
+    // Another branch's invoices weren't fetched, so their requests drop out.
+    const visible = opts.branchId
+      ? rows.filter((r) => r.documentType !== ApprovalDocumentType.INVOICE || invBy.has(r.documentId))
+      : rows;
+    return visible.map((r) => {
       const po = poBy.get(r.documentId);
       const inv = invBy.get(r.documentId);
       return {

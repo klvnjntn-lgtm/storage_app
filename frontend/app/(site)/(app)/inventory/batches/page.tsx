@@ -9,6 +9,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, type PickedProduct } from '@/app/components/shared/ProductPicker';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { isAdminRole } from '@/lib/roles';
 
 type Batch = {
   id: string;
@@ -30,7 +31,7 @@ function expiryStyle(days: number | null) {
 export default function BatchesPage() {
   const { t } = useLanguage();
   const { user } = useCurrentUser();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
   const [filter, setFilter] = useState<'expiring' | 'all'>('expiring');
   const [rows, setRows] = useState<Batch[] | null>(null);
   const [error, setError] = useState<string | null>(null);

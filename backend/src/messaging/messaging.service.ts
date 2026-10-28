@@ -14,8 +14,7 @@ import {
   MessageChannel,
   MessageKind,
   MessageStatus,
-  ModuleKey,
-} from '@prisma/client';
+  ModuleKey, WorkOrderStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from '../auth/mailer/mailer.service';
@@ -51,6 +50,7 @@ import {
   shortDate,
 } from './message-templates';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
+import { ADMIN_ROLES } from '../auth/roles';
 
 const DAY = 86_400_000;
 // WhatsApp document links stay valid this long; the PDF is deleted after.
@@ -261,6 +261,53 @@ export class MessagingService implements OnModuleInit {
       },
       org,
     );
+  }
+
+  // "Your car is ready" for a finished job. Only once the job is done; sending again is allowed
+  // (a customer who didn't see it), and readyNotifiedAt records the latest.
+  async sendWorkOrderReady(organizationId: string, userId: string, workOrderId: string, opts: SendOptions) {
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, organizationId },
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        vehicle: { select: { plateNumber: true } },
+        customer: { select: { name: true, email: true, phone: true } },
+      },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+    if (wo.status !== WorkOrderStatus.DONE) {
+      throw new BadRequestException('Only a finished job can be announced as ready');
+    }
+    const org = await this.orgContact(organizationId);
+    const recipient = this.recipientFor(opts, wo.customer.email, wo.customer.phone);
+    const vars = {
+      business: org.name,
+      customer: wo.customer.name,
+      plate: wo.vehicle.plateNumber,
+      number: wo.number,
+      note: opts.message?.trim() ?? '',
+    };
+    const text = messageText(this.language(), 'workOrderReady', vars);
+    const logged = await this.deliver(
+      {
+        organizationId,
+        userId,
+        channel: opts.channel,
+        kind: MessageKind.WORK_ORDER_READY,
+        documentId: wo.id,
+        recipient,
+        email: text,
+        whatsapp: {
+          template: process.env.WA_TEMPLATE_WORK_ORDER_READY || 'waresys_work_order_ready',
+          params: [vars.customer || '-', vars.business, vars.plate, vars.number],
+        },
+      },
+      org,
+    );
+    await this.prisma.workOrder.update({ where: { id: wo.id }, data: { readyNotifiedAt: new Date() } });
+    return logged;
   }
 
   async sendPurchaseOrder(
@@ -724,7 +771,7 @@ export class MessagingService implements OnModuleInit {
     });
     if (claimed.count === 0) return;
     const admins = await this.prisma.user.findMany({
-      where: { organizationId, role: 'ADMIN', active: true, removedAt: null },
+      where: { organizationId, role: { in: [...ADMIN_ROLES] }, active: true, removedAt: null },
       select: { id: true },
     });
     await this.notifications.createMany(
@@ -795,7 +842,7 @@ export class MessagingService implements OnModuleInit {
           take: 1,
         },
         users: {
-          where: { role: 'ADMIN', active: true, removedAt: null },
+          where: { role: { in: [...ADMIN_ROLES] }, active: true, removedAt: null },
           select: { email: true },
           orderBy: { createdAt: 'asc' },
           take: 1,

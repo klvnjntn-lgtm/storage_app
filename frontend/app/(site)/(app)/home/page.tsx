@@ -8,6 +8,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { HubAccent, HubCard, HubGrid, HubPage, HubSection, hubMono as mono } from '@/app/components/shared/Hub';
 import { OnboardingChecklist } from '@/app/components/onboarding/OnboardingChecklist';
 import { DashboardKpis } from '@/app/components/dashboard/DashboardKpis';
+import { isAdminRole } from '@/lib/roles';
 
 type LicenseStatus = {
   edition: 'desktop' | 'cloud';
@@ -163,7 +164,7 @@ export default function Home() {
     })();
   }, [hasWarehouse]);
 
-  const MODULE_ITEMS = useModuleItems(t, enabledModules, profile?.role === 'ADMIN');
+  const MODULE_ITEMS = useModuleItems(t, enabledModules, isAdminRole(profile?.role));
   const activeModules = MODULE_ITEMS.filter((m) => m.enabled).length;
   const notEnabledLabel = t('home.notEnabled');
 
@@ -183,7 +184,7 @@ export default function Home() {
       subtitle={t('home.subtitle')}
     >
       {/* GETTING STARTED — new self-serve orgs only; renders nothing otherwise */}
-      {profile?.role === 'ADMIN' && (
+      {isAdminRole(profile?.role) && (
         <div className="mb-6">
           <OnboardingChecklist />
         </div>

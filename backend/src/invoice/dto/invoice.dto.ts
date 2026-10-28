@@ -271,6 +271,11 @@ export class RevenueReportQueryDto {
   @IsOptional()
   @IsString()
   locationId?: string;
+
+  // MASTER's branch filter; a branch member always gets their own.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 export class TopReportQueryDto {
@@ -288,6 +293,10 @@ export class TopReportQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 export class ListInvoicesQueryDto {
@@ -319,9 +328,19 @@ export class ListInvoicesQueryDto {
   @IsString()
   locationId?: string;
 
+  // MASTER's branch filter; a branch member always gets their own.
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  // The salesperson (Employee) on the invoice.
+  @IsOptional()
+  @IsString()
+  employeeId?: string;
     @IsOptional()
   @Type(() => Number)
   @IsInt()

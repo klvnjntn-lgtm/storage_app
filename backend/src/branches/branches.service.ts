@@ -50,6 +50,11 @@ export class BranchesService {
     if (branch.archivedAt) return branch;
     const active = await this.prisma.branch.count({ where: { organizationId, archivedAt: null } });
     if (active <= 1) throw new BadRequestException('The only branch can’t be archived');
+    // Its staff would silently land in the first branch; move them first.
+    const staff = await this.prisma.user.count({
+      where: { organizationId, branchId: id, removedAt: null, role: { in: ['ADMIN', 'USER'] } },
+    });
+    if (staff > 0) throw new BadRequestException('Move this branch’s members to another branch first');
     return this.prisma.branch.update({ where: { id }, data: { archivedAt: new Date() } });
   }
 

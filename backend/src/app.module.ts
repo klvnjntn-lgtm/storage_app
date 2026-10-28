@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { BranchRecordGuard } from './auth/guards/branch-record.guard';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
@@ -41,6 +42,7 @@ import { PriceLevelModule } from './price-level/price-level.module';
 import { PaymentsModule } from './payments/payment.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
+import { PerformanceModule } from './performance/performance.module';
 import { TaxExportModule } from './tax-export/tax-export.module';
 import { PartCatalogModule } from './part-catalog/part-catalog.module';
 import { VehicleRemindersModule } from './vehicles/vehicle-reminders.module';
@@ -124,6 +126,7 @@ import { SerialsModule } from './serials/serials.module';
     InvoiceModule,
     VehiclesModule,
     WorkOrdersModule,
+    PerformanceModule,
     TaxExportModule,
     PartCatalogModule,
     CustomersModule,
@@ -186,6 +189,10 @@ import { SerialsModule } from './serials/serials.module';
     {
       provide: APP_GUARD,
       useClass: ModuleGuard, // 2d. enforces @RequireModule wherever it appears
+    },
+    {
+      provide: APP_GUARD,
+      useClass: BranchRecordGuard, // 2e. hides other branches' records from branch members
     },
     {
       provide: APP_GUARD,

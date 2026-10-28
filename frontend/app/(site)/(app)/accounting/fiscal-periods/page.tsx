@@ -10,6 +10,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { isAdminRole } from '@/lib/roles';
 
 
 const MONTH_NAMES_EN = [
@@ -75,7 +76,7 @@ export default function FiscalPeriodsPage() {
       if (!authError) router.replace('/login');
       return;
     }
-    if (profile.role !== 'ADMIN') {
+    if (!isAdminRole(profile.role)) {
       router.replace('/accounting');
     }
   }, [authLoading, profile, authError, router]);
@@ -99,7 +100,7 @@ export default function FiscalPeriodsPage() {
   }
 
   useEffect(() => {
-    if (authLoading || profile?.role !== 'ADMIN') return;
+    if (authLoading || !isAdminRole(profile?.role)) return;
     loadPeriods();
   }, [authLoading, profile]);
 
@@ -154,7 +155,7 @@ export default function FiscalPeriodsPage() {
   const manualKey = `${manualYear}-${manualMonth}`;
   const manualExists = periods?.some((p) => p.year === manualYear && p.month === manualMonth);
 
-  if (authLoading || profile?.role !== 'ADMIN') {
+  if (authLoading || !isAdminRole(profile?.role)) {
     return null;
   }
 

@@ -120,44 +120,46 @@ describe('member and device guards (database)', () => {
   let adminId: string;
   let otherAdminId: string;
   let driverId: string;
+  const master = (sub: string) => ({ sub, role: 'MASTER' });
 
   beforeAll(async () => {
     const org = await prisma.organization.create({ data: { name: `Hardening ${randomUUID()}`, seatLimit: 10 } });
     orgId = org.id;
-    const mk = (role: 'ADMIN' | 'USER' | 'DRIVER') =>
+    const mk = (role: 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER') =>
       prisma.user.create({
         data: { email: `${role.toLowerCase()}-${randomUUID()}@example.com`, password: 'x', role, organizationId: orgId },
       });
-    adminId = (await mk('ADMIN')).id;
-    otherAdminId = (await mk('ADMIN')).id;
+    adminId = (await mk('MASTER')).id;
+    otherAdminId = (await mk('MASTER')).id;
     driverId = (await mk('DRIVER')).id;
   });
 
   afterAll(async () => {
     await prisma.device.deleteMany({ where: { user: { organizationId: orgId } } });
     await prisma.user.deleteMany({ where: { organizationId: orgId } });
+    await prisma.branch.deleteMany({ where: { organizationId: orgId } });
     await prisma.organization.delete({ where: { id: orgId } });
     await prisma.$disconnect();
   });
 
   it("won't let an admin lock their own account", async () => {
-    await expect(users.setActive(orgId, adminId, adminId, false)).rejects.toThrow(/own account/);
+    await expect(users.setActive(orgId, master(adminId), adminId, false)).rejects.toThrow(/own account/);
   });
 
-  it("won't lock or demote the last active admin", async () => {
-    await users.setActive(orgId, adminId, otherAdminId, false);
-    await expect(users.setRole(orgId, otherAdminId, adminId, 'USER')).rejects.toThrow(/last active admin/);
-    // otherAdmin is locked, so adminId is the last active admin.
-    await users.setActive(orgId, adminId, otherAdminId, true);
+  it("won't lock or demote the last active master", async () => {
+    await users.setActive(orgId, master(adminId), otherAdminId, false);
+    await expect(users.setRole(orgId, master(otherAdminId), adminId, 'USER')).rejects.toThrow(/last active master/);
+    // otherAdmin is locked, so adminId is the last active master.
+    await users.setActive(orgId, master(adminId), otherAdminId, true);
   });
 
   it('changes a role and ends that member’s session', async () => {
     await prisma.user.update({ where: { id: otherAdminId }, data: { currentSessionId: 's1' } });
-    const updated = await users.setRole(orgId, adminId, otherAdminId, 'USER');
+    const updated = await users.setRole(orgId, master(adminId), otherAdminId, 'USER');
     expect(updated.role).toBe('USER');
     const row = await prisma.user.findUniqueOrThrow({ where: { id: otherAdminId } });
     expect(row.currentSessionId).toBeNull();
-    await expect(users.setRole(orgId, adminId, adminId, 'USER')).rejects.toThrow(/own role/);
+    await expect(users.setRole(orgId, master(adminId), adminId, 'USER')).rejects.toThrow(/own role/);
   });
 
   it('tells the office when a blocked phone tries again, and lets it be approved again', async () => {

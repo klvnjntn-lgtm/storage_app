@@ -1,8 +1,11 @@
 // app/(app)/workshop/parts/page.tsx — EPC-style catalogue: pick a car, browse categories, one card per part
 'use client';
 
+import { formatIDR } from '@/lib/format';
+import { YearSelect, type CatalogGeneration } from '@/app/components/workshop/YearSelect';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Wrench, Search, Car, Copy, Check, ShieldCheck, Users, CircleHelp, ListFilter } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
@@ -11,15 +14,41 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { FitmentBadge, PartSearchLinks } from './PartMedia';
 
 
-type Facets = { brands: { brand: string; models: string[] }[] };
+type Facets = {
+  brands: { brand: string; models: string[] }[];
+  // Production years per generation (yearTo = this year while still built).
+  generations?: CatalogGeneration[];
+};
 type Confidence = 'verified' | 'confirmed' | 'unverified';
+// GET /part-catalog/vehicle-by-plate: the org's vehicle and the catalogue car to open
+// (saved on the vehicle, or read from its free-text model).
+type PlateVehicle = {
+  id: string;
+  plateNumber: string;
+  vehicleModel: string;
+  customer: { id: string; name: string };
+  car: { brand: string; model: string; year: number | null; guessed: boolean } | null;
+};
+
+// Indonesian plates: area letters, number, suffix letters — "B 1234 XY", "BP1234XX", "D 12 A".
+function looksLikePlate(text: string) {
+  return /^[A-Z]{1,2}\d{1,4}[A-Z]{0,3}$/.test(text.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+}
 type Counted = { value: string; sellers: number };
 type StockMatch = { productId: string; name: string; quantity: number; oem: string; equivalentVia: string | null };
 type ItemSummary = {
   itemType: string;
   item: string;
   specs: Counted[];
-  oems: { number: string; normalized: string; sellers: number; genuine: boolean; fitment: string }[];
+  oems: {
+    number: string;
+    normalized: string;
+    sellers: number;
+    genuine: boolean;
+    fitment: string;
+    // Tokopedia asking price for the number; null = no priced listing yet.
+    price: { low: number; median: number; high: number; listings: number } | null;
+  }[];
   brands: Counted[];
   confidence: Confidence;
   sellers: number;
@@ -32,7 +61,17 @@ type ItemSummary = {
   inStock: StockMatch[];
 };
 type VehicleSummary = {
-  vehicle: { brand: string; model: string; year: number | null; generations: { name: string; yearFrom: number | null; yearTo: number | null }[] };
+  vehicle: {
+    brand: string;
+    model: string;
+    year: number | null;
+    generations: {
+      name: string;
+      yearFrom: number | null;
+      yearTo: number | null;
+      codes?: { chassis: string[]; engine: string[] }; // kode rangka / kode mesin
+    }[];
+  };
   categories: { itemType: string; items: ItemSummary[] }[];
 };
 
@@ -54,7 +93,10 @@ export default function PartsCatalogPage() {
 
 function PartsCatalogInner() {
   const { t, language } = useLanguage();
+  const router = useRouter();
   const locale = language === 'id' ? 'id-ID' : 'en-US';
+  // Free text ("AVANZA 2006 WHEEL HUB", a nomor rangka / mesin) goes to the search, which reads it.
+  const [quick, setQuick] = useState('');
 
   const [facets, setFacets] = useState<Facets | null>(null);
   const [brand, setBrand] = useState<string>(() => getInitialParam('brand', ''));
@@ -63,12 +105,95 @@ function PartsCatalogInner() {
   const [category, setCategory] = useState<string>(() => getInitialParam('cat', ''));
   const [find, setFind] = useState('');
 
+  // The vehicle a plate opened, and whether its car was read from free text (to confirm and save).
+  const [plateVehicle, setPlateVehicle] = useState<PlateVehicle | null>(null);
+  const [carSaved, setCarSaved] = useState<'idle' | 'saved' | 'failed'>('idle');
+  // Opened from a job card ("Find parts"): each part can go straight onto it.
+  const [workOrderId] = useState<string>(() => getInitialParam('workOrderId', ''));
+  const [workOrder, setWorkOrder] = useState<{ id: string; number: string; mechanic: { name: string } | null } | null>(null);
+  const [added, setAdded] = useState<Record<string, 'busy' | 'done' | 'failed'>>({});
+
   const [data, setData] = useState<VehicleSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
 
-  useSyncQueryParams({ brand: brand || null, model: model || null, year: year || null, cat: category || null });
+  useSyncQueryParams({
+    brand: brand || null,
+    model: model || null,
+    year: year || null,
+    cat: category || null,
+    workOrderId: workOrderId || null,
+  });
+
+  useEffect(() => {
+    if (!workOrderId) return;
+    apiFetch(`/work-orders/${workOrderId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((wo) => wo && setWorkOrder({ id: wo.id, number: wo.number, mechanic: wo.mechanic ?? null }))
+      .catch(() => {});
+  }, [workOrderId]);
+
+  // Opened with ?plate= (a job card whose car isn't saved yet): look the plate up once.
+  const [initialPlate] = useState(() => getInitialParam('plate', ''));
+  useEffect(() => {
+    if (initialPlate) submitQuick(initialPlate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A plate opens its car; anything else goes to the full search, which reads free text.
+  async function submitQuick(typed?: string) {
+    const text = (typed ?? quick).trim();
+    if (!text) return;
+    if (looksLikePlate(text)) {
+      const res = await apiFetch(`/part-catalog/vehicle-by-plate?${new URLSearchParams({ plate: text })}`).catch(() => null);
+      const found: PlateVehicle[] = res?.ok ? await res.json() : [];
+      const v = found[0];
+      if (v?.car) {
+        setPlateVehicle(v);
+        setCarSaved('idle');
+        setBrand(v.car.brand);
+        setModel(v.car.model);
+        setYear(v.car.year ? String(v.car.year) : '');
+        setCategory('');
+        setQuick('');
+        return;
+      }
+    }
+    // The plate a job card passed in isn't on file: stay here and let the counter pick the car.
+    if (typed !== undefined) return;
+    router.push(`/workshop/parts/search?${new URLSearchParams({ q: text }).toString()}`);
+  }
+
+  // Remembers the confirmed car on the vehicle, so its plate opens straight to it next time.
+  async function saveCarToVehicle() {
+    if (!plateVehicle) return;
+    const res = await apiFetch(`/vehicles/${plateVehicle.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ carBrand: brand, carModel: model, carYear: /^\d{4}$/.test(year) ? Number(year) : null }),
+    }).catch(() => null);
+    setCarSaved(res?.ok ? 'saved' : 'failed');
+  }
+
+  // In stock: the product goes on the job. Not stocked: a line naming the part and number, priced at
+  // what shops ask on Tokopedia, for the counter to adjust.
+  async function addToJob(i: ItemSummary, productId: string | null) {
+    if (!workOrderId) return;
+    const key = `${i.itemType}|${i.item}`;
+    const oem = i.oems[0];
+    setAdded((a) => ({ ...a, [key]: 'busy' }));
+    const line = productId
+      ? { productId, quantity: 1 }
+      : {
+          description: [i.item, oem?.number ?? i.specs[0]?.value].filter(Boolean).join(' '),
+          quantity: 1,
+          unitPrice: oem?.price?.median ?? 0,
+        };
+    const res = await apiFetch(`/work-orders/${workOrderId}/items`, { method: 'POST', body: JSON.stringify(line) }).catch(
+      () => null,
+    );
+    setAdded((a) => ({ ...a, [key]: res?.ok ? 'done' : 'failed' }));
+  }
 
   useEffect(() => {
     apiFetch('/part-catalog/facets')
@@ -178,13 +303,67 @@ function PartsCatalogInner() {
             </Link>
           </div>
 
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitQuick();
+            }}
+            className="flex items-center gap-2 rounded-xl border border-blue-500/20 bg-white pl-4 pr-1.5 py-1.5 mb-3 shadow-sm focus-within:border-blue-500/50"
+          >
+            <Search size={16} className="text-blue-600/70 shrink-0" />
+            <input
+              value={quick}
+              onChange={(e) => setQuick(e.target.value)}
+              placeholder={t('workshop.partsEpc.quickSearch')}
+              className="flex-1 min-w-0 py-1.5 text-sm outline-none bg-transparent placeholder:text-gray-400"
+            />
+            <button
+              type="submit"
+              disabled={!quick.trim()}
+              className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {t('workshop.partsEpc.quickSearchGo')}
+            </button>
+          </form>
+
+          {workOrder && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 mb-3 text-sm text-blue-900">
+              <span className="font-medium">
+                {workOrder.mechanic
+                  ? t('workshop.partsEpc.addingToMechanic', { number: workOrder.number, mechanic: workOrder.mechanic.name })
+                  : t('workshop.partsEpc.addingTo', { number: workOrder.number })}
+              </span>
+              <Link href={`/workshop/work-orders/${workOrder.id}`} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">
+                {t('workshop.partsEpc.backToJob')}
+              </Link>
+            </div>
+          )}
+          {plateVehicle && (
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 mb-3 text-sm">
+              <span className="font-semibold">
+                {t('workshop.partsEpc.plateOpened', { plate: plateVehicle.plateNumber, customer: plateVehicle.customer.name })}
+              </span>
+              {plateVehicle.car?.guessed && carSaved !== 'saved' && (
+                <span className="block text-xs text-amber-700 mt-0.5">
+                  {t('workshop.partsEpc.plateGuessed', { text: plateVehicle.vehicleModel })}{' '}
+                  <button type="button" onClick={saveCarToVehicle} className="font-semibold underline">
+                    {t('workshop.partsEpc.saveCar')}
+                  </button>
+                </span>
+              )}
+              {carSaved === 'saved' && <span className="block text-xs text-emerald-700 mt-0.5">{t('workshop.partsEpc.carSaved')}</span>}
+              {carSaved === 'failed' && <span className="block text-xs text-red-600 mt-0.5">{t('workshop.partsEpc.saveCarFailed')}</span>}
+            </div>
+          )}
+
           {/* Step 1 — the car. Everything below is filtered to it. */}
-          <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_120px] gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_200px] gap-2">
             <select
               value={brand}
               onChange={(e) => {
                 setBrand(e.target.value);
                 setModel('');
+                setYear('');
                 setCategory('');
               }}
               className={selectClass}
@@ -198,6 +377,7 @@ function PartsCatalogInner() {
               value={model}
               onChange={(e) => {
                 setModel(e.target.value);
+                setYear('');
                 setCategory('');
               }}
               disabled={!brand}
@@ -208,11 +388,12 @@ function PartsCatalogInner() {
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
-            <input
+            <YearSelect
+              generations={facets?.generations}
+              brand={brand}
+              model={model}
               value={year}
-              onChange={(e) => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              inputMode="numeric"
-              placeholder={t('workshop.partsEpc.year')}
+              onChange={setYear}
               className={`${selectClass} col-span-2 sm:col-span-1`}
             />
           </div>
@@ -244,6 +425,18 @@ function PartsCatalogInner() {
                 <span key={g.name} className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600">
                   {g.name}
                   {g.yearFrom ? ` · ${g.yearFrom}–${g.yearTo ?? t('workshop.partsEpc.present')}` : ''}
+                  {!!g.codes?.chassis.length && (
+                    <span className="font-mono text-gray-500">
+                      {' · '}
+                      {t('workshop.partsEpc.chassisCode')} {g.codes.chassis.join(', ')}
+                    </span>
+                  )}
+                  {!!g.codes?.engine.length && (
+                    <span className="font-mono text-gray-500">
+                      {' · '}
+                      {t('workshop.partsEpc.engineCode')} {g.codes.engine.join(', ')}
+                    </span>
+                  )}
                 </span>
               ))}
             </div>
@@ -343,6 +536,18 @@ function PartsCatalogInner() {
                               </span>
                             )}
                             <FitmentBadge fitment={mainOem.fitment} />
+                            {mainOem.price && (
+                              <span
+                                title={t('workshop.partsEpc.priceRange', {
+                                  low: formatIDR(mainOem.price.low),
+                                  high: formatIDR(mainOem.price.high),
+                                  count: mainOem.price.listings,
+                                })}
+                                className="rounded bg-amber-50 border border-amber-200 px-1.5 text-[11px] font-medium text-amber-800"
+                              >
+                                {t('workshop.partsEpc.price', { median: formatIDR(mainOem.price.median) })}
+                              </span>
+                            )}
                             {i.oems.slice(1, 3).map((o) => (
                               <Link
                                 key={o.normalized}
@@ -416,6 +621,30 @@ function PartsCatalogInner() {
                       >
                         {t('workshop.partsEpc.allListings', { count: i.sellers })}
                       </Link>
+                      {workOrderId && (() => {
+                        const state = added[`${i.itemType}|${i.item}`];
+                        const productId = stock.find((p) => p.quantity > 0)?.productId ?? stock[0]?.productId ?? null;
+                        return (
+                          <button
+                            type="button"
+                            disabled={state === 'busy' || state === 'done'}
+                            onClick={() => addToJob(i, productId)}
+                            className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold ${
+                              state === 'done'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : state === 'failed'
+                                  ? 'bg-red-50 text-red-700 border border-red-200'
+                                  : 'bg-blue-600 text-white hover:bg-blue-700'
+                            } disabled:opacity-70`}
+                          >
+                            {state === 'done'
+                              ? t('workshop.partsEpc.addedToJob')
+                              : state === 'failed'
+                                ? t('workshop.partsEpc.addToJobFailed')
+                                : t('workshop.partsEpc.addToJob')}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 );

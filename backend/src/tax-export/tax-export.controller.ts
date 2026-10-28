@@ -25,7 +25,8 @@ class CoretaxExportDto {
 
 // Tax filings are an admin job, same as the rest of accounting.
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
-@Roles('ADMIN')
+// Exports every branch's invoices, so MASTER only.
+@Roles('MASTER')
 @RequireModule(ModuleKey.INVOICE_POS)
 @Controller('tax-export')
 export class TaxExportController {

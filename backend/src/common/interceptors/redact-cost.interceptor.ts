@@ -1,5 +1,6 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Observable, map } from 'rxjs';
+import { isAdminRole } from '../../auth/roles';
 
 // Cost data (what the org pays for stock) is admin-only. ProductService
 // already leaves costPrice out of the product list for non-admins, but a
@@ -43,7 +44,7 @@ export class RedactCostInterceptor implements NestInterceptor {
     if (context.getType() !== 'http') return next.handle();
     const req = context.switchToHttp().getRequest<{ user?: { role?: string }; path?: string }>();
     const role = req.user?.role;
-    if (!role || role === 'ADMIN') return next.handle();
+    if (!role || isAdminRole(role)) return next.handle();
     const path = req.path ?? '';
     return next.handle().pipe(map((body) => redactCostFields(body, path)));
   }

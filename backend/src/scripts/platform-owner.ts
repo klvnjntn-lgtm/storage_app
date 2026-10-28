@@ -12,6 +12,7 @@
 
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { isAdminRole } from '../auth/roles';
 
 async function main() {
   const [command, rawEmail] = process.argv.slice(2);
@@ -46,7 +47,7 @@ async function main() {
     }
 
     const grant = command === 'grant';
-    if (grant && user.role !== 'ADMIN') {
+    if (grant && !isAdminRole(user.role)) {
       console.error(
         `${user.email} is ${user.role}; only an ADMIN can be a platform owner.`,
       );

@@ -3,11 +3,14 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/apifetch';
 import { getSessionMarker } from '@/lib/session';
+import type { Role } from '@/lib/roles';
 
 export type CurrentUser = {
   id: string;
   email: string;
-  role: 'ADMIN' | 'USER' | 'DRIVER';
+  role: Role;
+  // The branch an ADMIN/USER is held to; null = every branch (MASTER).
+  branch?: { id: string; name: string } | null;
 };
 
 // Every component that asks shares one request: pages, guards and widgets

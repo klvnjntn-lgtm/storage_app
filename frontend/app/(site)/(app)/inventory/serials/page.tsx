@@ -11,6 +11,7 @@ import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, useLocations, type PickedProduct } from '@/app/components/shared/ProductPicker';
+import { isAdminRole } from '@/lib/roles';
 
 type Status = 'IN_STOCK' | 'IN_TRANSIT' | 'SOLD' | 'RETURNED_TO_SUPPLIER' | 'WRITTEN_OFF';
 const STATUSES: Status[] = ['IN_STOCK', 'IN_TRANSIT', 'SOLD', 'RETURNED_TO_SUPPLIER', 'WRITTEN_OFF'];
@@ -47,7 +48,7 @@ const STATUS_STYLE: Record<Status, string> = {
 export default function SerialsPage() {
   const { t } = useLanguage();
   const { user } = useCurrentUser();
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = isAdminRole(user?.role);
   const locations = useLocations();
   // Only warehouse orgs see or choose locations; the rest use CENTRE.
   const warehouseOps = useWarehouseOps();

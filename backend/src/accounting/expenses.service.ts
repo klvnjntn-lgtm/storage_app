@@ -29,7 +29,7 @@ export class ExpensesService {
 
   async list(
     organizationId: string,
-    filters: { status?: ExpenseStatus; categoryId?: string; from?: Date; to?: Date; page?: number; pageSize?: number },
+    filters: { status?: ExpenseStatus; categoryId?: string; from?: Date; to?: Date; page?: number; pageSize?: number; branchId?: string },
   ) {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
@@ -38,6 +38,7 @@ export class ExpensesService {
       organizationId,
       status: filters.status,
       categoryId: filters.categoryId,
+      branchId: filters.branchId,
       ...((filters.from || filters.to) && {
         expenseDate: { ...(filters.from && { gte: filters.from }), ...(filters.to && { lte: filters.to }) },
       }),
@@ -223,8 +224,17 @@ async update(
       if (!dto.bankAccountId) {
         throw new BadRequestException(`bankAccountId is required for payment method ${method}`);
       }
+      // Only a shared account or the document's own branch's.
+      const branchId = (
+        await this.prisma.expense.findFirst({ where: { id: expenseId, organizationId }, select: { branchId: true } })
+      )?.branchId;
       const bankAccount = await this.prisma.organizationBankAccount.findFirst({
-        where: { id: dto.bankAccountId, organizationId, archivedAt: null },
+        where: {
+          id: dto.bankAccountId,
+          organizationId,
+          archivedAt: null,
+          ...(branchId && { OR: [{ branchId: null }, { branchId }] }),
+        },
       });
       if (!bankAccount) {
         throw new BadRequestException('bankAccountId does not refer to an active bank account for this organization');

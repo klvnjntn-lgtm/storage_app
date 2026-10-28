@@ -1,6 +1,7 @@
 // app/accounting/expenses/page.tsx
 'use client';
 
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -74,12 +75,14 @@ export default function ExpensesPage() {
   // button) restores the same filters/page.
   const [statusFilter, setStatusFilter] = useState<string>(() => getInitialParam('status', ''));
   const [categoryFilter, setCategoryFilter] = useState<string>(() => getInitialParam('categoryId', ''));
+  const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
 
   useSyncQueryParams({
     status: statusFilter || null,
     categoryId: categoryFilter || null,
+    branchId: branchFilter || null,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
   });
@@ -139,6 +142,7 @@ export default function ExpensesPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (statusFilter) params.set('status', statusFilter);
       if (categoryFilter) params.set('categoryId', categoryFilter);
+      if (branchFilter) params.set('branchId', branchFilter);
 
       const res = await apiFetch(`/expenses?${params}`);
       if (!res.ok) {
@@ -162,7 +166,7 @@ export default function ExpensesPage() {
   // FIX — see ledger/page.tsx's identical fix: merges what were two
   // separate effects into one, so a filter change fires exactly one
   // request instead of two.
-  const filtersKey = `${statusFilter}|${categoryFilter}`;
+  const filtersKey = `${statusFilter}|${categoryFilter}|${branchFilter}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -577,6 +581,11 @@ export default function ExpensesPage() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          <BranchFilter
+            value={branchFilter}
+            onChange={setBranchFilter}
+            selectClassName="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+          />
 
           <button
             onClick={() => setShowAddExpense((s) => !s)}

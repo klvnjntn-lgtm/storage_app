@@ -16,6 +16,7 @@ import {
 import { allocateOnHand } from './batch-allocation';
 import { CreateBatchDto } from './dto/batches.dto';
 import { CRON_TIMEZONE } from '../common/cron-timezone';
+import { ADMIN_ROLES } from '../auth/roles';
 
 type Tx = Prisma.TransactionClient;
 
@@ -221,7 +222,7 @@ export class BatchesService {
         const admins = await this.prisma.user.findMany({
           where: {
             organizationId,
-            role: 'ADMIN',
+            role: { in: [...ADMIN_ROLES] },
             active: true,
             removedAt: null,
           },

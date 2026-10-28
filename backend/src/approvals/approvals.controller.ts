@@ -20,6 +20,8 @@ import {
   RequestApprovalDto,
 } from './dto/approvals.dto';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { isAdminRole } from '../auth/roles';
+import { filterBranchId } from '../auth/branch-scope';
 
 @Roles('ADMIN', 'USER')
 @RequireModule(ModuleKey.INVOICE_POS)
@@ -37,7 +39,8 @@ export class ApprovalsController {
   ) {
     return this.approvals.list(organizationId, {
       status,
-      requestedById: user.role === 'ADMIN' ? undefined : user.sub,
+      requestedById: isAdminRole(user.role) ? undefined : user.sub,
+      branchId: filterBranchId(user),
     });
   }
 
@@ -67,6 +70,7 @@ export class ApprovalsController {
       dto.documentType,
       dto.documentId,
       dto.note,
+      filterBranchId(user),
     );
   }
 
@@ -84,6 +88,7 @@ export class ApprovalsController {
       id,
       dto.approve,
       dto.note,
+      filterBranchId(user),
     );
   }
 

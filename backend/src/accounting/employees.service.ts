@@ -19,6 +19,15 @@ export class EmployeesService {
     });
   }
 
+  // A branch's staff plus those with no branch, for pickers.
+  async listForBranch(organizationId: string, branchId: string) {
+    return this.prisma.employee.findMany({
+      where: { organizationId, archivedAt: null, OR: [{ branchId }, { branchId: null }] },
+      select: { id: true, name: true, position: true, isActive: true, branchId: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async get(organizationId: string, id: string) {
     const employee = await this.prisma.employee.findFirst({
       where: { id, organizationId },
@@ -43,6 +52,7 @@ export class EmployeesService {
         bankName: dto.bankName?.trim(),
         bankAccountNumber: dto.bankAccountNumber?.trim(),
         baseSalary: dto.baseSalary,
+        branchId: await this.validBranchId(organizationId, dto.branchId),
       },
     });
   }
@@ -65,8 +75,19 @@ export class EmployeesService {
         }),
         ...(dto.baseSalary !== undefined && { baseSalary: dto.baseSalary }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.branchId !== undefined && { branchId: await this.validBranchId(organizationId, dto.branchId) }),
       },
     });
+  }
+
+  private async validBranchId(organizationId: string, branchId?: string | null): Promise<string | null> {
+    if (!branchId) return null;
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, organizationId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!branch) throw new BadRequestException('Branch not found');
+    return branch.id;
   }
 
   async archive(organizationId: string, id: string) {

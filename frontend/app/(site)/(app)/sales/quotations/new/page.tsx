@@ -1,5 +1,6 @@
 'use client';
 
+import { BranchPicker } from '@/app/components/shared/BranchFilter';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -80,6 +81,8 @@ function QuotationFormPageInner() {
   const { t } = useLanguage();
   const urlDraftId = searchParams.get('draftId');
 
+  // MASTER picks the branch; '' = the location's, else the first (see BranchPicker).
+  const [branchId, setBranchId] = useState('');
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean>(false);
@@ -631,6 +634,7 @@ function QuotationFormPageInner() {
       }));
     return {
       locationId: cartLines[0]?.locationId,
+      ...(branchId && { branchId }),
       format: 'A4' as const,
       customerId: customer?.id,
       customerName: customer?.name,
@@ -841,6 +845,7 @@ function QuotationFormPageInner() {
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
+          <BranchPicker value={branchId} onChange={setBranchId} />
           <QuotationCartPanel
             cartLines={cartLines}
             customer={customer}

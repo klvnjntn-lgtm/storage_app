@@ -13,6 +13,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import { NewProductForm } from '@/app/components/inventory/NewProductForm';
 import { toCalendarDateString } from '@/lib/dates';
+import { isAdminRole } from '@/lib/roles';
 
 
 type ProductSummary = {
@@ -291,7 +292,7 @@ export default function StockPage() {
   }, []);
 
   const showCostPrice =
-    enabledModules.includes('INVOICE_POS') && currentUser?.role === 'ADMIN';
+    enabledModules.includes('INVOICE_POS') && isAdminRole(currentUser?.role);
 
   // Per-location breakdown only means anything for orgs actually running
   // the warehouse module — single-location (CENTRE-only) orgs would just
@@ -300,7 +301,7 @@ export default function StockPage() {
 
   // Only admins get the ability to create products from this page at all —
   // everyone else is here to look up stock, not manage the catalog.
-  const canCreateProduct = currentUser?.role === 'ADMIN';
+  const canCreateProduct = isAdminRole(currentUser?.role);
 
   // Reset to page 1 whenever a filter or the sort changes — but not on
   // the very first run, or a `page` restored from the URL (e.g. via the

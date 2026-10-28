@@ -122,7 +122,7 @@ export class AuthController {
   @AllowSuspendedOrg()
   @Get('me')
   async me(@CurrentUser() user: any) {
-    return this.authService.me(user.sub);
+    return this.authService.me(user.sub, user.branchId);
   }
 
   @UseGuards(AuthGuard('jwt'))
@@ -138,13 +138,15 @@ export class AuthController {
   @Post('invite')
   invite(
     @Body() dto: InviteDto,
-    @CurrentUser() user: { organizationId: string },
+    @CurrentUser() user: { organizationId: string; role: string; branchId?: string | null },
   ) {
     return this.authService.invite(
       user.organizationId,
       dto.email,
       dto.password,
       dto.role,
+      user,
+      dto.branchId,
     );
   }
 

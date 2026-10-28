@@ -210,6 +210,10 @@ export function CartPanel({
   // Where stock comes from is shown to warehouse orgs only.
   const warehouseOps = useWarehouseOps();
   const { branches, multiBranch } = useBranches();
+  // A branch's documents can only use shared accounts and its own.
+  const usableBankAccounts = branchId
+    ? bankAccounts.filter((a) => !a.branchId || a.branchId === branchId)
+    : bankAccounts;
   const hasEmptyServicePrice = svc.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = svc.some((s) => !s.description.trim());
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
@@ -377,7 +381,7 @@ export function CartPanel({
       {/* Bank account picker. Only shown on A5/A4, matching the formats
           whose print templates actually render a "Payment to" bank block
           (see hasBankDetails in A4Template/A5Template). */}
-      {showInvoiceInfoFields && bankAccounts.length > 0 && (
+      {showInvoiceInfoFields && usableBankAccounts.length > 0 && (
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
             <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
@@ -390,7 +394,7 @@ export function CartPanel({
           >
             <option value="">{t('sales.invoiceCart.defaultBankAccount')}</option>
             <option value={noBankAccountValue}>{t('sales.invoiceCart.noBankDetails')}</option>
-            {bankAccounts.map((a) => (
+            {usableBankAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.bankName} — {a.accountNumber}
                 {a.isDefault ? ` ${t('sales.invoiceCart.defaultSuffix')}` : ''}

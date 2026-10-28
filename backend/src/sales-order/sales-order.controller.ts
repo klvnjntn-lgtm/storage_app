@@ -10,18 +10,22 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SalesOrderService } from './sales-order.service';
 import { CreateSalesOrderDto, UpdateSalesOrderDto } from './dto/sales-order.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+@BranchRecord('salesOrder')
 @Controller('sales-orders')
 export class SalesOrderController {
   constructor(private orderService: SalesOrderService) {}
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreateSalesOrderDto) {
-    return this.orderService.create(organizationId, req.user.sub, dto);
+    return this.orderService.create(organizationId, req.user.sub, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) });
   }
 
+  @BranchRecord('salesQuotation', 'quotationId')
   @Post('from-quotation/:quotationId')
   createFromQuotation(@CurrentOrg() organizationId: string, @Req() req, @Param('quotationId') quotationId: string) {
     return this.orderService.createFromQuotation(organizationId, req.user.sub, quotationId);
@@ -30,12 +34,17 @@ export class SalesOrderController {
   @Get()
   list(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('status') status?: SalesOrderStatus,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('search') search?: string,
+    @Query('branchId') branchId?: string,
   ) {
     return this.orderService.list(organizationId, {
       status,
+      branchId: filterBranchId(req.user, branchId),
+      search,
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });

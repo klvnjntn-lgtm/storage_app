@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDMY } from '@/lib/dates';
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClipboardList, Search, X } from 'lucide-react';
@@ -39,6 +40,18 @@ function NewWorkOrderPage() {
   const [form, setForm] = useState<WorkOrderFormValue>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The car came back for the same problem: the earlier job this one redoes (?comebackOf=… from
+  // that job's "Came back" button), counted against its mechanic in the performance report.
+  const [comebackOfId, setComebackOfId] = useState<string>(() => searchParams.get('comebackOf') ?? '');
+  const [comebackReason, setComebackReason] = useState('');
+  const [pastJobs, setPastJobs] = useState<{ id: string; number: string; completedAt: string | null; mechanic: { name: string } | null }[]>([]);
+  useEffect(() => {
+    if (!vehicle) return;
+    apiFetch(`/work-orders?${new URLSearchParams({ vehicleId: vehicle.id, status: 'DONE' })}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list) => setPastJobs(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, [vehicle]);
 
   function loadVehicle(id: string) {
     apiFetch(`/vehicles/${id}`)
@@ -103,6 +116,7 @@ function NewWorkOrderPage() {
           items: toPayloadLines(form.lines),
           asEstimate,
           ...(reminderNote && reminderId && { fromReminderId: reminderId }),
+          ...(comebackOfId && { comebackOfId, comebackReason: comebackReason.trim() || undefined }),
         }),
       });
       const body = await res.json().catch(() => null);
@@ -169,6 +183,32 @@ function NewWorkOrderPage() {
           </div>
         )}
       </Card>
+
+      {vehicle && pastJobs.length > 0 && (
+        <Card title={t('workshop.workOrders.comebackTitle')}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <select value={comebackOfId} onChange={(e) => setComebackOfId(e.target.value)} className={inputCls}>
+              <option value="">{t('workshop.workOrders.notComeback')}</option>
+              {pastJobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.number}
+                  {j.completedAt ? ` · ${formatDMY(new Date(j.completedAt))}` : ''}
+                  {j.mechanic ? ` · ${j.mechanic.name}` : ''}
+                </option>
+              ))}
+            </select>
+            {comebackOfId && (
+              <input
+                value={comebackReason}
+                onChange={(e) => setComebackReason(e.target.value)}
+                maxLength={300}
+                placeholder={t('workshop.workOrders.comebackReason')}
+                className={inputCls}
+              />
+            )}
+          </div>
+        </Card>
+      )}
 
       {vehicle && <WorkOrderForm value={form} onChange={setForm} vehicleOdometer={vehicle.odometer} />}
 

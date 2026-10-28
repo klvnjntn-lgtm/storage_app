@@ -23,6 +23,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { isAdminRole } from '@/lib/roles';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
@@ -222,7 +223,7 @@ export default function InvoiceDetailPage() {
   const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
   const [applyingCredit, setApplyingCredit] = useState(false);
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -241,6 +242,8 @@ export default function InvoiceDetailPage() {
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderNote, setReminderNote] = useState('');
   const [reminderDueDate, setReminderDueDate] = useState('');
+  // Optional km target ("next oil at 45.000 km"), due at whichever comes first.
+  const [reminderKm, setReminderKm] = useState('');
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderSaved, setReminderSaved] = useState(false);
   const [reminderError, setReminderError] = useState('');
@@ -300,6 +303,7 @@ export default function InvoiceDetailPage() {
         body: JSON.stringify({
           note: reminderNote.trim(),
           dueDate: reminderDueDate,
+          ...(reminderKm && { dueOdometer: Number(reminderKm) }),
         }),
       });
       if (!res.ok) {
@@ -309,6 +313,7 @@ export default function InvoiceDetailPage() {
       setReminderSaved(true);
       setReminderNote('');
       setReminderDueDate('');
+      setReminderKm('');
     } catch (e) {
       setReminderError(errorMessage(e) || t('sales.invoiceDetail.reminderSaveFailed'));
     } finally {
@@ -680,6 +685,19 @@ export default function InvoiceDetailPage() {
                       value={reminderDueDate}
                       onChange={(v) => setReminderDueDate(v)}
                       className="w-full mb-2"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={reminderKm}
+                      onChange={(e) => setReminderKm(e.target.value.replace(/\D/g, ''))}
+                      placeholder={
+                        invoice.vehicleOdometer != null
+                          ? t('sales.invoiceDetail.reminderKmFrom', { km: (invoice.vehicleOdometer + 5000).toLocaleString('id-ID') })
+                          : t('sales.invoiceDetail.reminderKm')
+                      }
+                      className="w-full border border-gray-300 rounded-md p-2 text-xs mb-2"
                     />
 
                     {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}

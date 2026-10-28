@@ -28,6 +28,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ImportProductDto } from './dto/import-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { isAdminRole } from '../auth/roles';
 // Writes (create, import, edit, archive, restore) are admin-only, via
 // RolesGuard per method; reads stay open to every signed-in user.
 // Class-level guards deliberately stop at JwtAuthGuard/OrgGuard — most
@@ -61,7 +62,7 @@ export class ProductController {
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
   ) {
-    const includeCost = req.user?.role === 'ADMIN';
+    const includeCost = isAdminRole(req.user?.role);
     if (page === undefined) return this.productService.findAll(organizationId, includeCost);
     return this.productService.findPage(organizationId, {
       page: Number(page) || 1,

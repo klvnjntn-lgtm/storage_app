@@ -27,23 +27,37 @@ export class BankAccountResolverService {
   // - explicitId is a string: must be an active account owned by this
   //   org, or this throws — a stale/foreign/archived id should never
   //   silently degrade to "no bank details" on a printed document.
+  //
+  // branchId: the document's branch. Only shared accounts and that
+  // branch's own are allowed; with no explicit pick, the org default
+  // when allowed, else the branch's first account.
   async resolve(
     organizationId: string,
     explicitId: string | null | undefined,
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
+    branchId?: string | null,
   ): Promise<BankAccountSnapshot> {
     if (explicitId === null) {
       return EMPTY_SNAPSHOT;
     }
 
+    const allowed: Prisma.OrganizationBankAccountWhereInput = branchId
+      ? { OR: [{ branchId: null }, { branchId }] }
+      : {};
     const account =
       explicitId !== undefined
         ? await tx.organizationBankAccount.findFirst({
-            where: { id: explicitId, organizationId, archivedAt: null },
+            where: { id: explicitId, organizationId, archivedAt: null, ...allowed },
           })
-        : await tx.organizationBankAccount.findFirst({
-            where: { organizationId, isDefault: true, archivedAt: null },
-          });
+        : ((await tx.organizationBankAccount.findFirst({
+            where: { organizationId, isDefault: true, archivedAt: null, ...allowed },
+          })) ??
+          (branchId
+            ? await tx.organizationBankAccount.findFirst({
+                where: { organizationId, branchId, archivedAt: null },
+                orderBy: { createdAt: 'asc' },
+              })
+            : null));
 
     if (explicitId !== undefined && !account) {
       throw new BadRequestException('Selected bank account not found or no longer active');

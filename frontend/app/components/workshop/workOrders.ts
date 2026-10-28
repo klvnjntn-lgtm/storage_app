@@ -13,6 +13,8 @@ export type Recommendation = {
   id: string;
   note: string;
   dueDate: string;
+  // Also due at this odometer reading (km), whichever comes first.
+  dueOdometer?: number | null;
   status: 'PENDING' | 'COMPLETED' | 'DELETED';
   followUpWorkOrderId: string | null;
 };
@@ -56,7 +58,16 @@ export type WorkOrder = {
     npwp: string | null;
     address: string | null;
   };
-  vehicle: { id: string; plateNumber: string; vehicleModel: string; odometer: number | null };
+  vehicle: {
+    id: string;
+    plateNumber: string;
+    vehicleModel: string;
+    odometer: number | null;
+    // The car as the parts catalogue knows it; null until saved.
+    carBrand?: string | null;
+    carModel?: string | null;
+    carYear?: number | null;
+  };
   mechanic: { id: string; name: string } | null;
   items: WorkOrderItem[];
   invoices: { id: string; invoiceNumber: string | null; status: string; total: string; createdAt: string }[];
@@ -64,6 +75,12 @@ export type WorkOrder = {
   recommendations: Recommendation[];
   // The reminder this job was started from, if any.
   followedUp: { id: string; note: string; sourceWorkOrder: { id: string; number: string } | null }[];
+  // The earlier job this one redoes (a comeback), and jobs that came back to redo this one.
+  comebackOf?: { id: string; number: string; completedAt: string | null; mechanic: { id: string; name: string } | null } | null;
+  comebackReason?: string | null;
+  comebacks?: { id: string; number: string; comebackReason: string | null; createdAt: string }[];
+  // When the customer was last told the car is ready.
+  readyNotifiedAt?: string | null;
 };
 
 export type Mechanic = { id: string; name: string; position: string | null };

@@ -1,6 +1,7 @@
 // app/(app)/workshop/parts/search/page.tsx — "Advanced search": the flat, filterable table of every row
 'use client';
 
+import { YearSelect, type CatalogGeneration } from '@/app/components/workshop/YearSelect';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -16,6 +17,7 @@ import { FitmentBadge, PartSearchLinks } from '../PartMedia';
 type Facets = {
   brands: { brand: string; models: string[] }[];
   itemTypes: { itemType: string; items: string[] }[];
+  generations?: CatalogGeneration[];
   totalEntries: number;
   lastUpdated: string | null;
 };
@@ -41,10 +43,27 @@ type PartRow = {
   // equivalentVia: set when the product is stocked under an interchangeable OEM number, e.g.
   // "Sakura C-1109 (Oil Filter)" — fits the same way, but isn't necessarily the identical part.
   inStock: { productId: string; name: string; quantity: number; oem: string; equivalentVia: string | null }[];
+  // Kode rangka / kode mesin of the row's generation (older backends don't send it).
+  codes?: { chassis: string[]; engine: string[] };
+};
+
+// How the backend read the search box (null when it matched it as plain text).
+type Interpretation = {
+  vehicles: { carBrand: string; model?: string; generations?: string[] }[];
+  year?: number;
+  items: { itemType: string; item: string }[];
+  oems: string[];
+  partBrands: string[];
+  codes: { kind: 'chassis' | 'engine'; typed: string; code: string }[];
+  corrections: { typed: string; as: string }[];
+  ignored: string[];
 };
 
 type PartPage = {
   items: PartRow[];
+  interpretation?: Interpretation | null;
+  // When nothing matched: rows the year / shop-count filter hid.
+  relax?: { otherYears: number | null; fewerSellers: number | null };
   specSummary: { spec: string; sellers: number }[];
   page: number;
   limit: number;
@@ -217,6 +236,29 @@ function PartsCatalogPageInner() {
     return t('workshop.partsCatalog.originUnknown');
   }
 
+  // "Show other years": clear the year box, or the year typed in the search ("avanza 2006 …").
+  function dropYear() {
+    if (/^\d{4}$/.test(year)) setYear('');
+    else if (data?.interpretation?.year)
+      setQuery((q) => q.replace(new RegExp(`\\b${data.interpretation!.year}\\b`), '').replace(/\s+/g, ' ').trim());
+  }
+
+  const read = data?.interpretation;
+  const readChips: string[] = read
+    ? [
+        ...read.vehicles.map((v) =>
+          [v.carBrand, v.model, v.generations?.length ? `(${v.generations.join(', ')})` : ''].filter(Boolean).join(' '),
+        ),
+        ...(read.year ? [String(read.year)] : []),
+        ...read.codes.map(
+          (c) => `${t(c.kind === 'chassis' ? 'workshop.partsCatalog.chassisCode' : 'workshop.partsCatalog.engineCode')} ${c.code}`,
+        ),
+        ...read.items.map((i) => i.item),
+        ...read.oems,
+        ...read.partBrands,
+      ]
+    : [];
+
   const selectClass =
     'min-w-0 rounded-lg border border-blue-500/20 bg-white px-3 py-2 text-sm outline-none transition-colors hover:border-blue-500/35 focus:border-blue-500/50 disabled:bg-gray-50 disabled:text-gray-400';
 
@@ -261,12 +303,35 @@ function PartsCatalogPageInner() {
             />
           </div>
 
+          {/* How the search was read — so "WHELL HUB" visibly became Hub Bearing, and a nomor mesin its car. */}
+          {read && query.trim() && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-gray-500">{t('workshop.partsCatalog.readAs')}</span>
+              {readChips.map((c) => (
+                <span key={c} className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-medium text-blue-800">
+                  {c}
+                </span>
+              ))}
+              {read.corrections.map((c) => (
+                <span key={c.typed} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                  <span className="line-through opacity-60">{c.typed}</span> → {c.as}
+                </span>
+              ))}
+              {read.ignored.length > 0 && (
+                <span className="text-gray-400">
+                  {t('workshop.partsCatalog.readIgnored')} {read.ignored.join(' ')}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <select
               value={brand}
               onChange={(e) => {
                 setBrand(e.target.value);
                 setModel('');
+                setYear('');
               }}
               className={selectClass}
             >
@@ -275,17 +340,26 @@ function PartsCatalogPageInner() {
                 <option key={b.brand} value={b.brand}>{b.brand}</option>
               ))}
             </select>
-            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!brand} className={selectClass}>
+            <select
+              value={model}
+              onChange={(e) => {
+                setModel(e.target.value);
+                setYear('');
+              }}
+              disabled={!brand}
+              className={selectClass}
+            >
               <option value="">{t('workshop.partsCatalog.allModels')}</option>
               {models.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
-            <input
+            <YearSelect
+              generations={facets?.generations}
+              brand={brand}
+              model={model}
               value={year}
-              onChange={(e) => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              inputMode="numeric"
-              placeholder={t('workshop.partsCatalog.year')}
+              onChange={setYear}
               className={selectClass}
             />
             <select
@@ -426,6 +500,18 @@ function PartsCatalogPageInner() {
                             {generation}
                           </div>
                         )}
+                        {!!r.codes?.chassis.length && (
+                          <div className="text-[11px] text-gray-500 font-mono whitespace-nowrap" title={r.codes.chassis.join(', ')}>
+                            {t('workshop.partsCatalog.chassisCode')} {r.codes.chassis.slice(0, 3).join(', ')}
+                            {r.codes.chassis.length > 3 ? ` +${r.codes.chassis.length - 3}` : ''}
+                          </div>
+                        )}
+                        {!!r.codes?.engine.length && (
+                          <div className="text-[11px] text-gray-500 font-mono whitespace-nowrap" title={r.codes.engine.join(', ')}>
+                            {t('workshop.partsCatalog.engineCode')} {r.codes.engine.slice(0, 3).join(', ')}
+                            {r.codes.engine.length > 3 ? ` +${r.codes.engine.length - 3}` : ''}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 align-top text-gray-600 whitespace-nowrap">{yearsLabel(r)}</td>
                       <td className="px-4 py-3 align-top">
@@ -522,6 +608,30 @@ function PartsCatalogPageInner() {
           {!loading && data && data.items.length === 0 && (
             <div className="p-8 text-center text-sm text-gray-500">
               {facets && facets.totalEntries === 0 ? t('workshop.partsCatalog.emptyCatalog') : t('workshop.partsCatalog.empty')}
+              {/* Not a dead end: offer the filter that hid everything. */}
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {!!data.relax?.otherYears && (
+                  <button
+                    type="button"
+                    onClick={dropYear}
+                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                  >
+                    {t('workshop.partsCatalog.relaxYears', {
+                      year: /^\d{4}$/.test(year) ? year : (data.interpretation?.year ?? ''),
+                      count: data.relax.otherYears,
+                    })}
+                  </button>
+                )}
+                {!!data.relax?.fewerSellers && (
+                  <button
+                    type="button"
+                    onClick={() => setMinSellers('1')}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    {t('workshop.partsCatalog.relaxSellers', { count: data.relax.fewerSellers })}
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {loading && !data && <div className="p-8 text-center text-sm text-gray-500">{t('workshop.partsCatalog.loading')}</div>}

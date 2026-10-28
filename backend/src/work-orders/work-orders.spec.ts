@@ -441,6 +441,25 @@ describe('Workshop work orders', () => {
     await expect(workOrders.create(orgId, userId, { vehicleId, fromReminderId: reminderId })).rejects.toThrow('not pending');
   });
 
+  it('adds a part from the catalogue, at the location holding it, keeping the other lines', async () => {
+    const wo = await newJob(62_000);
+    const updated = await workOrders.addLine(orgId, userId, wo.id, { productId, quantity: 1 });
+    expect(updated.items).toHaveLength(3);
+    expect(updated.items[2]).toMatchObject({ productId, locationId: rackId });
+    const labour = await workOrders.addLine(orgId, userId, wo.id, {
+      description: 'Tie rod end 45046-09511 (not stocked)',
+      quantity: 2,
+      unitPrice: 85_000,
+    });
+    expect(labour.items.map((i) => i.description ?? i.productId)).toEqual([
+      productId,
+      'Labour: oil change',
+      productId,
+      'Tie rod end 45046-09511 (not stocked)',
+    ]);
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { odometer: 52_000 } });
+  });
+
   it('is unavailable while the org has work orders turned off', async () => {
     await prisma.organization.update({ where: { id: orgId }, data: { workOrdersEnabled: false } });
     try {

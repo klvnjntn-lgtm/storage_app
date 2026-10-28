@@ -11,6 +11,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { useBranches } from '@/lib/hooks/useBranches';
 
 
 function formatIDR(amount: number): string {
@@ -29,6 +30,8 @@ type Employee = {
   position: string | null;
   baseSalary: string | number;
   isActive: boolean;
+  // Where their salary is booked in the P&L by branch; null = unassigned.
+  branchId?: string | null;
   salaryComponents?: { componentId: string; amount: string | number | null; percentage: string | number | null; component: SalaryComponent }[];
 };
 
@@ -730,6 +733,7 @@ function RunsTab() {
 // ----------------------------------------------------------- Employees ----
 
 function EmployeesTab() {
+  const { branches, multiBranch } = useBranches();
   const dialog = useDialog();
   const { t } = useLanguage();
   const [employees, setEmployees] = useState<Employee[] | null>(null);
@@ -749,7 +753,7 @@ function EmployeesTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', position: '', baseSalary: '' });
+  const [form, setForm] = useState({ name: '', position: '', baseSalary: '', branchId: '' });
 
   const [managingId, setManagingId] = useState<string | null>(null);
   // FIX — see openManage() below: a ref, not state, so the in-flight
@@ -761,7 +765,7 @@ function EmployeesTab() {
   const [compError, setCompError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', position: '', baseSalary: '' });
+  const [editForm, setEditForm] = useState({ name: '', position: '', baseSalary: '', branchId: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
@@ -811,14 +815,19 @@ function EmployeesTab() {
       const res = await apiFetch('/payroll/employees', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name.trim(), position: form.position.trim() || undefined, baseSalary }),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          position: form.position.trim() || undefined,
+          baseSalary,
+          ...(form.branchId && { branchId: form.branchId }),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setFormError(body?.message ?? t('accounting.payroll.requestFailed', { status: res.status }));
         return;
       }
-      setForm({ name: '', position: '', baseSalary: '' });
+      setForm({ name: '', position: '', baseSalary: '', branchId: '' });
       setShowAdd(false);
       await loadEmployees();
     } catch {
@@ -832,7 +841,7 @@ function EmployeesTab() {
     setManagingId(null); // components panel and edit form are mutually exclusive per row
     setEditingId(emp.id);
     setEditError(null);
-    setEditForm({ name: emp.name, position: emp.position ?? '', baseSalary: String(emp.baseSalary) });
+    setEditForm({ name: emp.name, position: emp.position ?? '', baseSalary: String(emp.baseSalary), branchId: emp.branchId ?? '' });
   }
 
   async function handleSaveEdit(empId: string) {
@@ -855,6 +864,7 @@ function EmployeesTab() {
           name: editForm.name.trim(),
           position: editForm.position.trim() || undefined,
           baseSalary,
+          ...(multiBranch && { branchId: editForm.branchId || null }),
         }),
       });
       if (!res.ok) {
@@ -1002,6 +1012,23 @@ function EmployeesTab() {
               className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
             />
           </div>
+          {multiBranch && (
+            <div className="flex flex-col gap-1 w-full sm:w-1/2">
+              <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.branchLabel')}</label>
+              <select
+                value={form.branchId}
+                onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+                className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+              >
+                <option value="">{t('accounting.payroll.noBranch')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <button
             type="submit"
             disabled={saving}
@@ -1024,7 +1051,10 @@ function EmployeesTab() {
             <div className="p-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className={`text-sm font-semibold ${!emp.isActive ? 'text-gray-400 line-through' : ''}`}>{emp.name}</p>
-                <p className="text-xs text-gray-400">{emp.position ?? t('accounting.payroll.noPositionSet')}</p>
+                <p className="text-xs text-gray-400">
+                  {emp.position ?? t('accounting.payroll.noPositionSet')}
+                  {multiBranch && emp.branchId && ` · ${branches.find((b) => b.id === emp.branchId)?.name ?? ''}`}
+                </p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-sm font-bold">{formatIDR(Number(emp.baseSalary))}</p>
@@ -1088,6 +1118,23 @@ function EmployeesTab() {
                     className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
                   />
                 </div>
+          {multiBranch && (
+            <div className="flex flex-col gap-1 w-full sm:w-1/2">
+              <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.branchLabel')}</label>
+              <select
+                value={editForm.branchId}
+                onChange={(e) => setEditForm((f) => ({ ...f, branchId: e.target.value }))}
+                className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"
+              >
+                <option value="">{t('accounting.payroll.noBranch')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleSaveEdit(emp.id)}

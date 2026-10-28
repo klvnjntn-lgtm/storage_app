@@ -25,7 +25,7 @@ function errorText(body: { message?: string | string[] } | null, fallback: strin
 // branch each stock location belongs to.
 export default function BranchesPage() {
   const { t } = useLanguage();
-  const { authorized } = useRequireAdmin();
+  const { authorized } = useRequireAdmin(['MASTER']);
   const warehouseOps = useWarehouseOps();
 
   const [branches, setBranches] = useState<Branch[]>([]);

@@ -10,6 +10,8 @@ import { Decimal } from '@prisma/client/runtime/library';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesOrderDto, UpdateSalesOrderDto } from './dto/sales-order.dto';
+import { containsInsensitive, lineMatches, memberMatches, plateMatches } from '../common/text/document-search';
+import { resolveBranchId } from '../branches/resolve-branch';
 
 // eventType is a plain String column on SalesOrderActivityEvent (not a
 // Prisma enum, unlike InvoiceActivityEventType / SalesQuotationActivityEventType)
@@ -164,6 +166,7 @@ export class SalesOrderService {
           data: {
             organizationId,
             userId,
+            branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId, locationId: dto.locationId }),
             locationId: dto.locationId,
             customerId: dto.customerId,
             customerName: dto.customerName,
@@ -297,6 +300,9 @@ await this.logActivity(tx, {
           data: {
             organizationId,
             userId,
+            // The quotation's branch carries to the order.
+            branchId:
+              quotation.branchId ?? (await resolveBranchId(tx, organizationId, { locationId: quotation.locationId })),
             locationId: quotation.locationId,
             customerId: quotation.customerId,
             customerPoNumber: quotation.customerPoNumber ?? null, // NEW
@@ -678,10 +684,30 @@ async confirm(organizationId: string, id: string, userId: string) {
     });
   }
 
-  async list(organizationId: string, filters: { status?: SalesOrderStatus; page?: number; pageSize?: number }) {
+  async list(
+    organizationId: string,
+    filters: { status?: SalesOrderStatus; page?: number; pageSize?: number; search?: string; branchId?: string },
+  ) {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
-    const where = { organizationId, status: filters.status };
+    // Number, customer, the car's plate, a product ordered, or who took it.
+    const term = filters.search?.trim();
+    const plate = term ? plateMatches(term) : null;
+    const where: Prisma.SalesOrderWhereInput = {
+      organizationId,
+      status: filters.status,
+      branchId: filters.branchId,
+      ...(term && {
+        OR: [
+          { orderNumber: containsInsensitive(term) },
+          { customerName: containsInsensitive(term) },
+          { customer: { name: containsInsensitive(term) } },
+          { items: lineMatches(term) },
+          { user: memberMatches(term) },
+          ...(plate ? [{ vehicle: plate }] : []),
+        ],
+      }),
+    };
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.salesOrder.findMany({

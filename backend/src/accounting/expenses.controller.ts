@@ -16,11 +16,14 @@ import {
   RecordExpensePaymentDto,
   UpdateExpenseCategoryDto,
 } from './dto/expense.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
+import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
 // Money going out — admin-only, reads included.
 @Roles('ADMIN')
+@BranchRecord('expense')
 @Controller('expenses')
 export class ExpensesController {
   constructor(
@@ -58,16 +61,19 @@ export class ExpensesController {
   @Get()
   list(
     @CurrentOrg() organizationId: string,
+    @Req() req,
     @Query('status') status?: ExpenseStatus,
     @Query('categoryId') categoryId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('branchId') branchId?: string,
   ) {
     return this.expensesService.list(organizationId, {
       status,
       categoryId,
+      branchId: filterBranchId(req.user, branchId),
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       page: page ? Number(page) : undefined,
@@ -81,8 +87,8 @@ export class ExpensesController {
   }
 
   @Post()
-  create(@CurrentOrg() organizationId: string, @Body() dto: CreateExpenseDto) {
-    return this.expensesService.create(organizationId, dto);
+  create(@CurrentOrg() organizationId: string, @Body() dto: CreateExpenseDto, @Req() req) {
+    return this.expensesService.create(organizationId, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) });
   }
 
   @Patch(':id')
@@ -90,8 +96,10 @@ export class ExpensesController {
     @CurrentOrg() organizationId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: { description?: string; dueDate?: string; locationId?: string; branchId?: string },
+    @Req() req,
   ) {
-    return this.expensesService.update(organizationId, id, dto);
+    const branchId = dto.branchId !== undefined ? bookingBranchId(req.user, dto.branchId) : undefined;
+    return this.expensesService.update(organizationId, id, { ...dto, branchId });
   }
 
   @Post(':id/mark-paid')

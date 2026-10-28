@@ -109,7 +109,9 @@ export class CustomersService {
     return customer;
   }
 
-  async getWithInvoices(organizationId: string, id: string) {
+  // branchId: a branch member sees only their branch's invoices; the
+  // customer itself is shared.
+  async getWithInvoices(organizationId: string, id: string, branchId?: string) {
     const customer = await this.prisma.customer.findFirst({
       where: { id, organizationId },
       include: {
@@ -117,7 +119,7 @@ export class CustomersService {
         // Long-standing customers can have thousands of invoices; the page
         // shows the latest ones and links to the invoice list for the rest.
         invoices: {
-          where: { organizationId },
+          where: { organizationId, branchId },
           orderBy: { createdAt: 'desc' },
           take: CUSTOMER_RECENT_INVOICES,
           select: {

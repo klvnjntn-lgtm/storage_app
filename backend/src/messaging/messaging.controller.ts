@@ -26,6 +26,7 @@ import {
   SendStatementDto,
   TopupDto,
 } from './dto/messaging.dto';
+import { BranchRecord } from '../auth/guards/branch-record.guard';
 
 @RequireModule(ModuleKey.INVOICE_POS, ModuleKey.WORKSHOP_RMS)
 @Controller('messaging')
@@ -42,6 +43,7 @@ export class MessagingController {
   }
 
   @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @BranchRecord('invoice')
   @Post('invoices/:id/send')
   sendInvoice(
     @CurrentOrg() organizationId: string,
@@ -50,6 +52,18 @@ export class MessagingController {
     @Body() dto: SendDocumentDto,
   ) {
     return this.messaging.sendInvoice(organizationId, user.sub, id, dto);
+  }
+
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @BranchRecord('workOrder')
+  @Post('work-orders/:id/ready')
+  sendWorkOrderReady(
+    @CurrentOrg() organizationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: SendDocumentDto,
+  ) {
+    return this.messaging.sendWorkOrderReady(organizationId, user.sub, id, dto);
   }
 
   @Throttle({ default: { limit: 30, ttl: 60000 } })

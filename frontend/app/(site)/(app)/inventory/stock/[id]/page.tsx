@@ -14,6 +14,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import { CostHistoryPanel } from '@/app/components/inventory/CostHistoryPanel';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { isAdminRole } from '@/lib/roles';
 
 
 type StockRow = {
@@ -63,7 +64,7 @@ export default function ProductPage() {
   const router = useRouter();
   const { t, language } = useLanguage();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'ADMIN';
+  const isAdmin = isAdminRole(profile?.role);
 
 const eventColor = (type: string) => {
   switch (type) {

@@ -1,5 +1,6 @@
 'use client';
 
+import { BranchPicker } from '@/app/components/shared/BranchFilter';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -72,6 +73,8 @@ function SalesOrderFormPageInner() {
   const searchParams = useSearchParams();
   const urlDraftId = searchParams.get('draftId');
 
+  // MASTER picks the branch; '' = the location's, else the first (see BranchPicker).
+  const [branchId, setBranchId] = useState('');
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
@@ -605,6 +608,7 @@ function SalesOrderFormPageInner() {
       }));
     return {
       locationId: cartLines[0]?.locationId,
+      ...(branchId && { branchId }),
       format: 'A4' as const,
       customerId: customer?.id,
       customerName: customer?.name,
@@ -817,6 +821,7 @@ function SalesOrderFormPageInner() {
         />
 
         <div ref={cartPanelRef} className="scroll-mt-24">
+          <BranchPicker value={branchId} onChange={setBranchId} />
           <SalesOrderCartPanel
             cartLines={cartLines}
             customer={customer}

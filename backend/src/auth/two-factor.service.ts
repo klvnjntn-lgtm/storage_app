@@ -11,6 +11,7 @@ import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { generateTotpSecret, otpauthUrl, verifyTotp } from './totp';
 import { open, seal } from './secret-box';
+import { isAdminRole } from './roles';
 
 const RECOVERY_CODE_COUNT = 10;
 const CHALLENGE_TTL = '5m';
@@ -50,7 +51,7 @@ export class TwoFactorService {
       enabledAt: user.totpEnabledAt,
       recoveryCodesLeft: user.totpRecoveryCodes.length,
       requiredByOrg:
-        user.organization.require2faForAdmins && user.role === 'ADMIN',
+        user.organization.require2faForAdmins && isAdminRole(user.role),
     };
   }
 
@@ -116,7 +117,7 @@ export class TwoFactorService {
     });
     if (!(await bcrypt.compare(password, user.password)))
       throw new UnauthorizedException('Wrong password');
-    if (user.role === 'ADMIN' && user.organization.require2faForAdmins) {
+    if (isAdminRole(user.role) && user.organization.require2faForAdmins) {
       throw new ForbiddenException(
         'Your organization requires two-factor sign-in for admins',
       );

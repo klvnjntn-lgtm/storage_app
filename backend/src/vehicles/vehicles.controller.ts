@@ -11,6 +11,9 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/decorators/current-user.decorator';
+import { filterBranchId } from '../auth/branch-scope';
 
 // Gated on WORKSHOP_RMS only, same pattern as CustomersController's
 // INVOICE_POS gate — an org can have INVOICE_POS without WORKSHOP_RMS
@@ -58,6 +61,7 @@ export class VehiclesController {
   history(
     @CurrentOrg() orgId: string,
     @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -66,6 +70,7 @@ export class VehiclesController {
       id,
       page ? Number(page) : undefined,
       limit ? Number(limit) : undefined,
+      filterBranchId(user),
     );
   }
 
@@ -79,8 +84,8 @@ export class VehiclesController {
   }
 
   @Get('vehicles/:id')
-  findOne(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    return this.vehiclesService.getWithInvoices(orgId, id);
+  findOne(@CurrentOrg() orgId: string, @Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.vehiclesService.getWithInvoices(orgId, id, filterBranchId(user));
   }
 
   @Patch('vehicles/:id')

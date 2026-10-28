@@ -48,6 +48,13 @@ export class PartCatalogController {
     );
   }
 
+  // A plate typed at the counter: the vehicle(s) and the catalogue car to open.
+  @Get('vehicle-by-plate')
+  vehicleByPlate(@CurrentOrg() orgId: string, @Query('plate') plate?: string) {
+    if (!plate) throw new BadRequestException('plate is required');
+    return this.partCatalogService.vehicleByPlate(orgId, plate.slice(0, 20));
+  }
+
   // One part number: which cars it fits, equivalents and stock.
   @Get('oem/:oem')
   partNumber(@CurrentOrg() orgId: string, @Param('oem') oem: string) {

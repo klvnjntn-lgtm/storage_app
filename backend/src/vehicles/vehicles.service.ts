@@ -90,13 +90,15 @@ export class VehiclesService {
     }
   }
 
-  async getWithInvoices(organizationId: string, vehicleId: string) {
+  // branchId: a branch member sees only their branch's visits; the
+  // vehicle itself is shared.
+  async getWithInvoices(organizationId: string, vehicleId: string, branchId?: string) {
     const vehicle = await this.prisma.vehicle.findFirst({
       where: { id: vehicleId, organizationId },
       include: {
         customer: { select: { id: true, name: true, companyName: true, phone: true } },
         invoices: {
-          where: { organizationId },
+          where: { organizationId, branchId },
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
@@ -292,7 +294,7 @@ export class VehiclesService {
   // Paginated history, newest first, capped page size — keeps the lookup
   // fast for vehicles with hundreds/thousands of invoices by never
   // selecting the full invoices relation the way getWithInvoices does.
-  async getHistory(organizationId: string, vehicleId: string, page = 1, limit = HISTORY_DEFAULT_LIMIT) {
+  async getHistory(organizationId: string, vehicleId: string, page = 1, limit = HISTORY_DEFAULT_LIMIT, branchId?: string) {
     await this.getVehicleOrThrow(organizationId, vehicleId);
 
     // `|| default` so a NaN from a malformed query value falls back too.
@@ -300,9 +302,9 @@ export class VehiclesService {
     const safePage = Math.max(1, page || 1);
 
     const [total, invoices] = await this.prisma.$transaction([
-      this.prisma.invoice.count({ where: { vehicleId, organizationId } }),
+      this.prisma.invoice.count({ where: { vehicleId, organizationId, branchId } }),
       this.prisma.invoice.findMany({
-        where: { vehicleId, organizationId },
+        where: { vehicleId, organizationId, branchId },
         orderBy: [{ issuedAt: 'desc' }, { createdAt: 'desc' }],
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,

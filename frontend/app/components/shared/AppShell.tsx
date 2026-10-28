@@ -59,6 +59,7 @@ import {
   Home,
   Navigation,
   Menu,
+  Award,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { CSRF_HEADERS, clearSession } from '@/lib/session';
@@ -74,6 +75,16 @@ import TourHelpMenu from '@/app/components/tour/TourHelpMenu';
 import { useAuth } from '@/app/context/AuthContext';
 import { WORK_ORDERS_CHANGED } from '@/app/components/workshop/workOrders';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { isAdminRole, isMasterRole } from '@/lib/roles';
+
+// Accounting pages a branch ADMIN can use: their branch's expenses, fixed
+// assets and P&L, plus Sales Insights.
+const BRANCH_ADMIN_ACCOUNTING = new Set([
+  '/accounting/expenses',
+  '/accounting/fixed-assets',
+  '/accounting/profit-loss',
+  '/accounting/sales-insights',
+]);
 
 type LicenseStatus = {
   valid: boolean;
@@ -168,7 +179,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [hasWarehouseOps, setHasWarehouseOps] = useState(false);
   const [hasDelivery, setHasDelivery] = useState(false);
   // Drivers' phones waiting for approval — sidebar badge and bell reminders.
-  const pendingDevices = usePendingDevices(hasDelivery && (profile?.role === 'ADMIN' || profile?.role === 'USER'));
+  const pendingDevices = usePendingDevices(hasDelivery && (isAdminRole(profile?.role) || profile?.role === 'USER'));
   const [showAvatarLibrary, setShowAvatarLibrary] = useState(false);
   const [avatarUpdating, setAvatarUpdating] = useState(false);
   const [avatarError, setAvatarError] = useState('');
@@ -438,7 +449,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/purchasing/suppliers', label: t('nav.items.suppliers'), icon: Building2 },
     { href: '/purchasing/reorder', label: t('nav.items.reorder'), icon: PackageSearch },
     { href: '/purchasing/returns', label: t('nav.items.purchaseReturns'), icon: Undo2 },
-    ...(profile?.role === 'ADMIN'
+    ...(isAdminRole(profile?.role)
       ? [{ href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 }]
       : []),
     { href: '/approvals', label: t('nav.items.approvals'), icon: ShieldCheck },
@@ -452,6 +463,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     tourId: 'nav-purchasing',
   };
 
+  // A branch ADMIN keeps what's split by branch (expenses, assets, the P&L);
+  // the books and business-wide reports are MASTER's.
+  const isMaster = isMasterRole(profile?.role);
   const accountingChildren: NavItem[] = [
     { href: '/accounting', label: t('nav.items.accountingHome'), icon: Home },
     { href: '/accounting/journal', label: t('nav.items.journal'), icon: BookText },
@@ -470,7 +484,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/tax-export', label: t('nav.items.taxExport'), icon: FileSpreadsheet },
     { href: '/accounting/ledger', label: t('nav.items.accountLedger'), icon: BookOpen },
     { href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 },
-  ];
+  ].filter((item) => isMaster || BRANCH_ADMIN_ACCOUNTING.has(item.href));
 
   const accountingItem: NavItem = {
     href: '/accounting',
@@ -517,6 +531,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     children: [
       ...salesChildren,
       { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
+      ...(isAdminRole(profile?.role)
+        ? [{ href: '/sales/reports/performance', label: t('nav.items.staffPerformance'), icon: Award }]
+        : []),
       { href: '/customers', label: t('nav.items.customers'), icon: Users },
     ],
   };
@@ -544,6 +561,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
       { href: '/workshop/parts', label: t('nav.items.partsCatalog'), icon: Wrench },
       { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
+      ...(isAdminRole(profile?.role)
+        ? [{ href: '/sales/reports/performance', label: t('nav.items.staffPerformance'), icon: Award }]
+        : []),
     ],
   };
 
@@ -558,7 +578,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
       // Staff handle drivers' phones too; locking and access hours on that
       // page stay admin-only.
-      ...(profile?.role === 'ADMIN' || profile?.role === 'USER'
+      ...(isAdminRole(profile?.role) || profile?.role === 'USER'
         ? [{ href: '/delivery/drivers', label: t('nav.items.deliveryDrivers'), icon: Users }]
         : []),
     ],
@@ -570,9 +590,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     icon: Settings,
     children: [
       { href: '/settings', label: t('nav.items.settingsGeneral'), icon: Settings },
-      { href: '/settings/branches', label: t('nav.items.branches'), icon: Store },
+      ...(isMaster ? [{ href: '/settings/branches', label: t('nav.items.branches'), icon: Store }] : []),
       { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
-      { href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard },
+      ...(isMaster ? [{ href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard }] : []),
       { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },
       { href: '/settings/security', label: t('nav.items.security'), icon: ShieldAlert },
       { href: '/settings/integrations', label: t('nav.items.integrations'), icon: KeyRound },
@@ -593,7 +613,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         // Sales Insights, which reads invoice reports, not the ledger.
         ...(!hasInvoicePos
           ? []
-          : profile?.role === 'ADMIN'
+          : isAdminRole(profile?.role)
             ? [accountingItem]
             : [{ href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 }]),
         ...(hasWorkshopRms ? [workshopItem] : []),
@@ -612,7 +632,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     {
       label: t('nav.groups.system'),
       items:
-        profile?.role === 'ADMIN'
+        isAdminRole(profile?.role)
           ? [
               settingsItem,
               ...(profile?.platformOwner
@@ -1057,7 +1077,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 ))}
               </div>
 
-              {profile.role === 'ADMIN' && (
+              {isAdminRole(profile.role) && (
                 <button
                   onClick={() => {
                     closeProfile();
@@ -1248,9 +1268,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 min-w-0 pb-[var(--app-bottom-nav-h)] md:pb-[env(safe-area-inset-bottom)]">
-          {profile && <PlanBanner isAdmin={profile.role === 'ADMIN'} />}
+          {profile && <PlanBanner isAdmin={isAdminRole(profile.role)} />}
           {desktopBlocked ? null : children}
-          {profile && <PlanLimitToast isAdmin={profile.role === 'ADMIN'} />}
+          {profile && <PlanLimitToast isAdmin={isAdminRole(profile.role)} />}
         </main>
       </div>
       </TourProvider>

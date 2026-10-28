@@ -99,10 +99,12 @@ export class DeliveryOrderService {
   // placeholder; ship() overwrites it with the weighted-average cost at the
   // moment the goods leave, and recordReturn() reverses at that stamped
   // cost — so it travels with the delivery order the way productName does.
+  // branchId: a branch member may only deliver their own branch's orders.
   async create(
     organizationId: string,
     userId: string,
     dto: CreateDeliveryOrderDto,
+    branchId?: string,
   ) {
     await this.tenantOwnership.validate(organizationId, {
       locationId: dto.locationId,
@@ -124,7 +126,9 @@ export class DeliveryOrderService {
         where: { id: dto.salesOrderId, organizationId },
         include: { items: true, customer: true },
       });
-      if (!salesOrder) throw new NotFoundException('Sales order not found');
+      if (!salesOrder || (branchId && salesOrder.branchId !== branchId)) {
+        throw new NotFoundException('Sales order not found');
+      }
 
       const allowedStatuses: SalesOrderStatus[] = [
         SalesOrderStatus.CONFIRMED,
@@ -237,6 +241,7 @@ export class DeliveryOrderService {
       const deliveryOrder = await tx.deliveryOrder.create({
         data: {
           organizationId,
+          branchId: salesOrder.branchId,
           salesOrderId: salesOrder.id,
           sessionId: dto.sessionId,
           locationId: dto.locationId,
@@ -1258,6 +1263,7 @@ export class DeliveryOrderService {
       status?: DeliveryOrderStatus;
       page?: number;
       pageSize?: number;
+      branchId?: string;
     },
   ) {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
@@ -1270,6 +1276,7 @@ export class DeliveryOrderService {
       organizationId,
       ...(filters.salesOrderId ? { salesOrderId: filters.salesOrderId } : {}),
       ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.branchId ? { branchId: filters.branchId } : {}),
     };
 
     const [data, total] = await this.prisma.$transaction([
@@ -1575,6 +1582,7 @@ export class DeliveryOrderService {
         const deliveryOrder = await tx.deliveryOrder.create({
           data: {
             organizationId,
+            branchId: invoice.branchId,
             invoiceId: invoice.id,
             salesOrderId: null,
             locationId: invoice.locationId,

@@ -6,6 +6,7 @@ import {
 import { Role } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { effectiveBranchId } from '../auth/branch-scope';
 
 export const API_KEY_PREFIX = 'wsk_';
 const LAST_USED_RESOLUTION_MS = 5 * 60 * 1000;
@@ -17,6 +18,7 @@ const ROLE_RANK: Record<Role, number> = {
   [Role.DRIVER]: 0,
   [Role.USER]: 1,
   [Role.ADMIN]: 2,
+  [Role.MASTER]: 3,
 };
 
 export type ApiKeyPrincipal = {
@@ -24,6 +26,7 @@ export type ApiKeyPrincipal = {
   email: string;
   role: Role;
   organizationId: string;
+  branchId: string | null;
   apiKeyId: string;
   readOnly: boolean;
 };
@@ -69,7 +72,14 @@ export class ApiKeysService {
     },
   ) {
     if (dto.role === Role.DRIVER)
-      throw new BadRequestException('Keys can be USER or ADMIN');
+      throw new BadRequestException('Keys can be USER, ADMIN or MASTER');
+    // Not above the creator's own role — authenticate() would refuse it anyway.
+    const creator = await this.prisma.user.findFirst({
+      where: { id: userId, organizationId },
+      select: { role: true },
+    });
+    if (!creator || ROLE_RANK[creator.role] < ROLE_RANK[dto.role ?? Role.USER])
+      throw new BadRequestException('A key can’t have a higher role than yours');
     const key = `${API_KEY_PREFIX}${randomBytes(24).toString('base64url')}`;
     const row = await this.prisma.apiKey.create({
       data: {
@@ -124,6 +134,8 @@ export class ApiKeysService {
         removedAt: true,
         organizationId: true,
         role: true,
+        branchId: true,
+        branch: { select: { archivedAt: true } },
       },
     });
     if (
@@ -148,6 +160,8 @@ export class ApiKeysService {
       email: user.email,
       role: key.role,
       organizationId: key.organizationId,
+      // A key works at its creator's branch, at the key's role.
+      branchId: await effectiveBranchId(this.prisma, { ...user, role: key.role }),
       apiKeyId: key.id,
       readOnly: key.readOnly,
     };

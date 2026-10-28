@@ -1,6 +1,8 @@
 // app/accounting/fixed-assets/page.tsx
 'use client';
 
+import { BranchFilter } from '@/app/components/shared/BranchFilter';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -69,11 +71,13 @@ export default function FixedAssetsPage() {
   // Seeded from the URL so returning here (e.g. via the browser's Back
   // button) restores the same filter/page.
   const [statusFilter, setStatusFilter] = useState<string>(() => getInitialParam('status', 'ACTIVE'));
+  const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
 
   useSyncQueryParams({
     status: statusFilter !== 'ACTIVE' ? statusFilter : null,
+    branchId: branchFilter || null,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
   });
@@ -99,6 +103,9 @@ export default function FixedAssetsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [runningDep, setRunningDep] = useState(false);
+  // Depreciation runs across every branch's assets: MASTER only.
+  const { user } = useCurrentUser();
+  const canRunDepreciation = user?.role === 'MASTER';
   const [depMessage, setDepMessage] = useState<string | null>(null);
 
   async function loadBankAccounts() {
@@ -116,6 +123,7 @@ export default function FixedAssetsPage() {
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (statusFilter) params.set('status', statusFilter);
+      if (branchFilter) params.set('branchId', branchFilter);
 
       const res = await apiFetch(`/fixed-assets?${params}`);
       if (!res.ok) {
@@ -137,10 +145,11 @@ export default function FixedAssetsPage() {
   // FIX — see ledger/page.tsx's identical fix: merges what were two
   // separate effects into one, so a filter change fires exactly one
   // request instead of two.
-  const prevStatusFilterRef = useRef(statusFilter);
+  const filtersKey = `${statusFilter}|${branchFilter}`;
+  const prevStatusFilterRef = useRef(filtersKey);
   useEffect(() => {
-    if (prevStatusFilterRef.current !== statusFilter) {
-      prevStatusFilterRef.current = statusFilter;
+    if (prevStatusFilterRef.current !== filtersKey) {
+      prevStatusFilterRef.current = filtersKey;
       if (page !== 1) {
         setPage(1);
         return;
@@ -148,7 +157,7 @@ export default function FixedAssetsPage() {
     }
     loadAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, page, pageSize]);
+  }, [filtersKey, page, pageSize]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -371,6 +380,7 @@ export default function FixedAssetsPage() {
                 <p className="text-xs text-gray-500 truncate">{t('accounting.fixedAssets.subtitle')}</p>
               </div>
             </div>
+            {canRunDepreciation && (
             <button
               onClick={handleRunDepreciation}
               disabled={runningDep}
@@ -379,6 +389,7 @@ export default function FixedAssetsPage() {
               {runningDep ? <Loader2 size={12} strokeWidth={2} className="animate-spin" /> : <TrendingDown size={12} strokeWidth={2} />}
               {t('accounting.fixedAssets.runDepreciation')}
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -391,6 +402,7 @@ export default function FixedAssetsPage() {
           <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">{depMessage}</p>
         )}
 
+        {canRunDepreciation && (
         <button
           onClick={handleRunDepreciation}
           disabled={runningDep}
@@ -399,6 +411,7 @@ export default function FixedAssetsPage() {
           {runningDep ? <Loader2 size={12} strokeWidth={2} className="animate-spin" /> : <TrendingDown size={12} strokeWidth={2} />}
           {t('accounting.fixedAssets.runDepreciationThroughToday')}
         </button>
+        )}
 
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-2 mb-4">
@@ -411,6 +424,11 @@ export default function FixedAssetsPage() {
             <option value="ACTIVE">{t('accounting.fixedAssets.statusActive')}</option>
             <option value="DISPOSED">{t('accounting.fixedAssets.statusDisposed')}</option>
           </select>
+          <BranchFilter
+            value={branchFilter}
+            onChange={setBranchFilter}
+            selectClassName="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+          />
 
           <button
             onClick={() => setShowAdd((s) => !s)}
