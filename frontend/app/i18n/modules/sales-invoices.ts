@@ -106,6 +106,10 @@ export const salesInvoices = {
         reviewCta: 'Review',
       },
       invoiceDetail: {
+        relatedDocuments: 'Related documents',
+        fromQuotation: 'From Quotation',
+        fromSalesOrder: 'From Sales Order',
+        fromWorkOrder: 'From Work Order',
         activityCreated: 'Invoice created',
         activityIssued: 'Invoice issued',
         activityEdited: 'Invoice edited',
@@ -487,6 +491,10 @@ export const salesInvoices = {
         reviewCta: 'Tinjau',
       },
       invoiceDetail: {
+        relatedDocuments: 'Dokumen terkait',
+        fromQuotation: 'Dari Penawaran',
+        fromSalesOrder: 'Dari Pesanan Penjualan',
+        fromWorkOrder: 'Dari Perintah Kerja',
         activityCreated: 'Faktur dibuat',
         activityIssued: 'Faktur diterbitkan',
         activityEdited: 'Faktur diubah',

@@ -73,6 +73,10 @@ export type InvoicePrintView = {
   // The selling branch, for multi-branch businesses (else null); its
   // address/phone are used above when it has them.
   branchName: string | null;
+  // Where it came from (each null when it wasn't converted from one).
+  quotation: { id: string; quotationNumber: string | null; status: string } | null;
+  salesOrder: { id: string; orderNumber: string | null; status: string } | null;
+  workOrder: { id: string; number: string; status: string } | null;
   customerPoNumber: string | null;
 
   employeeId: string | null;      // NEW
@@ -166,6 +170,10 @@ const invoiceDetailInclude = {
   },
   location: { select: { name: true, address: true, phone: true } },
   branch: { select: { id: true, name: true, address: true, phone: true } },
+  // The documents this invoice was made from, shown as "Related documents".
+  quotation: { select: { id: true, quotationNumber: true, status: true } },
+  salesOrder: { select: { id: true, orderNumber: true, status: true } },
+  workOrder: { select: { id: true, number: true, status: true } },
   customer: true,
   vehicle: true,
   employee: { select: { id: true, name: true, position: true } }, // NEW
@@ -1226,6 +1234,9 @@ async issue(
       businessAddress: (multiBranch ? invoice.branch?.address : null) || invoice.organization.address,
       businessPhone: (multiBranch ? invoice.branch?.phone : null) || invoice.organization.phone,
       branchName: multiBranch ? (invoice.branch?.name ?? null) : null,
+      quotation: invoice.quotation ?? null,
+      salesOrder: invoice.salesOrder ?? null,
+      workOrder: invoice.workOrder ?? null,
       paymentTerms: invoice.paymentTerms,
       notes: invoice.notes,
       customerPoNumber: invoice.customerPoNumber,
@@ -1432,6 +1443,8 @@ async issue(
         taxes: true,
         location: true,
         employee: { select: { id: true, name: true, position: true } }, // NEW — so the new-invoice edit page can preselect the picker
+        // Shown on the editor as "from work order WO-…".
+        workOrder: { select: { id: true, number: true } },
       },
     });
     if (!invoice) throw new NotFoundException('Draft invoice not found');

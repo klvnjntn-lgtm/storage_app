@@ -17,6 +17,10 @@ export type InvoicePrintView = {
   businessAddress: string | null;
   businessPhone: string | null;
   branchName?: string | null;
+  // The documents it was made from (shown as "Related documents").
+  quotation?: { id: string; quotationNumber: string | null; status: string } | null;
+  salesOrder?: { id: string; orderNumber: string | null; status: string } | null;
+  workOrder?: { id: string; number: string; status: string } | null;
   bankName: string | null;
   bankAccountNumber: string | null;
   bankAccountName: string | null;

@@ -8,6 +8,7 @@ import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner'
 import {
   LayoutDashboard,
   Settings,
+  Search,
   Store,
   CreditCard,
   MessageCircle,
@@ -559,6 +560,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ? [{ href: '/workshop/work-orders', label: t('nav.items.workOrders'), icon: ClipboardList }]
         : []),
       { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
+      { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
       { href: '/workshop/parts', label: t('nav.items.partsCatalog'), icon: Wrench },
       { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
       ...(isAdminRole(profile?.role)

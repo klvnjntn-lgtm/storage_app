@@ -142,6 +142,8 @@ function NewInvoicePage() {
   // Employee (sales/cashier) picker. '' means unset — omitted from the
   // payload, so the invoice carries no employee.
   const [employeeId, setEmployeeId] = useState<string>('');
+  // A draft made from a work order says so (and links back to it).
+  const [sourceWorkOrder, setSourceWorkOrder] = useState<{ id: string; number: string } | null>(null);
   // Multi-branch businesses pick the selling branch; a till keeps its last.
   const [branchId, setBranchIdState] = useState<string>(() => rememberedBranchId());
   const setBranchId = (id: string) => {
@@ -331,6 +333,7 @@ function NewInvoicePage() {
     // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
     setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
     setEmployeeId(draft.employeeId ?? '');
+    setSourceWorkOrder(draft.workOrder ?? null);
     if (draft.branchId) setBranchIdState(draft.branchId);
 
     const restoredCart: Record<string, CartLine> = {};
@@ -934,6 +937,17 @@ function NewInvoicePage() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {sourceWorkOrder && !printData && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4">
+          <p className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
+            <span className="font-semibold text-purple-900">{t('sales.invoiceDetail.fromWorkOrder')}</span>{' '}
+            <button className="underline font-medium" onClick={() => router.push(`/workshop/work-orders/${sourceWorkOrder.id}`)}>
+              {sourceWorkOrder.number}
+            </button>
+          </p>
         </div>
       )}
 

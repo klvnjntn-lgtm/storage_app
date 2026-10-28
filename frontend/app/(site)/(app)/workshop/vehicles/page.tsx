@@ -99,24 +99,6 @@ export default function VehiclesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, page, pageSize]);
 
-  // Enter jumps straight to a car: an exact plate match (spacing doesn't
-  // matter), or the only car the search found. Otherwise the list stays.
-  async function openOnEnter() {
-    const q = query.trim();
-    if (!q) return;
-    try {
-      const res = await apiFetch(`/vehicles/lookup?q=${encodeURIComponent(q)}`);
-      const exact: { id: string } | null = res.ok ? await res.json().catch(() => null) : null;
-      if (exact?.id) {
-        router.push(`/workshop/vehicles/${exact.id}`);
-        return;
-      }
-    } catch {
-      // fall through to the list
-    }
-    if (q === searchQuery && total === 1 && vehicles[0]) router.push(`/workshop/vehicles/${vehicles[0].id}`);
-  }
-
   return (
     <main
       className="min-h-screen text-black"
@@ -148,15 +130,8 @@ export default function VehiclesPage() {
           <div data-tour="veh-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
-              autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void openOnEnter();
-                }
-              }}
               placeholder={t('workshop.vehiclesList.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />

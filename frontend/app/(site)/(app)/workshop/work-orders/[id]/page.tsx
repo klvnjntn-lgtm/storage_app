@@ -152,7 +152,6 @@ export default function WorkOrderDetailPage() {
   }
 
   const locked = !!wo.invoicedId || wo.status === 'CANCELLED';
-  const liveInvoice = wo.invoices.find((i) => i.id === wo.invoicedId);
 
   const isEstimate = wo.status === 'ESTIMATE';
   // Approved later than check-in, i.e. it started as an estimate.
@@ -342,18 +341,23 @@ export default function WorkOrderDetailPage() {
         )}
       </Card>
 
-      {liveInvoice && (
-        <div className="flex items-center justify-between gap-3 bg-violet-50 border border-violet-200 text-violet-800 text-sm rounded-md px-3 py-2">
-          <span className="flex items-center gap-1.5">
-            <Receipt size={14} />
-            {t('workshop.workOrders.invoicedAs', { number: liveInvoice.invoiceNumber ?? t('workshop.workOrders.draft') })}
-          </span>
-          <Link
-            className="font-medium underline"
-            href={liveInvoice.status === 'DRAFT' ? `/sales/invoices/new?draftId=${liveInvoice.id}` : `/sales/invoices/${liveInvoice.id}`}
-          >
-            {t('workshop.workOrders.openInvoice')}
-          </Link>
+      {/* Invoices made from this job (voided ones too) — same box as the
+          quotation and sales order pages. */}
+      {wo.invoices.length > 0 && (
+        <div className="border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
+          <p className="font-semibold text-purple-900 mb-1">{t('workshop.workOrders.relatedDocuments')}</p>
+          {wo.invoices.map((inv) => (
+            <p key={inv.id}>
+              {t('workshop.workOrders.invoiceLabel')}{' '}
+              <Link
+                className="underline font-medium"
+                href={inv.status === 'DRAFT' ? `/sales/invoices/new?draftId=${inv.id}` : `/sales/invoices/${inv.id}`}
+              >
+                {inv.invoiceNumber ?? t('workshop.workOrders.draft')}
+              </Link>{' '}
+              — {inv.status}
+            </p>
+          ))}
         </div>
       )}
 

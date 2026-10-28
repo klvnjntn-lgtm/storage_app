@@ -928,6 +928,40 @@ export default function InvoiceDetailPage() {
             )}
           </>
         )}
+
+        {/* Where it came from — same box as the quotation and sales order pages. */}
+        {invoice && (invoice.quotation || invoice.salesOrder || invoice.workOrder) && (
+          <div className="mt-4 border-2 border-purple-200 bg-purple-50/50 rounded-md p-3 text-sm">
+            <p className="font-semibold text-purple-900 mb-1">{t('sales.invoiceDetail.relatedDocuments')}</p>
+            {invoice.quotation && (
+              <p>
+                {t('sales.invoiceDetail.fromQuotation')}{' '}
+                <button className="underline font-medium" onClick={() => router.push(`/sales/quotations/${invoice.quotation!.id}`)}>
+                  {invoice.quotation.quotationNumber ?? invoice.quotation.id}
+                </button>{' '}
+                — {invoice.quotation.status}
+              </p>
+            )}
+            {invoice.salesOrder && (
+              <p>
+                {t('sales.invoiceDetail.fromSalesOrder')}{' '}
+                <button className="underline font-medium" onClick={() => router.push(`/sales/orders/${invoice.salesOrder!.id}`)}>
+                  {invoice.salesOrder.orderNumber ?? invoice.salesOrder.id}
+                </button>{' '}
+                — {invoice.salesOrder.status}
+              </p>
+            )}
+            {invoice.workOrder && (
+              <p>
+                {t('sales.invoiceDetail.fromWorkOrder')}{' '}
+                <button className="underline font-medium" onClick={() => router.push(`/workshop/work-orders/${invoice.workOrder!.id}`)}>
+                  {invoice.workOrder.number}
+                </button>{' '}
+                — {t(`workshop.workOrders.status.${invoice.workOrder.status}`)}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Paper preview — the item table, totals, business/customer details

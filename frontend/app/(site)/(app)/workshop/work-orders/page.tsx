@@ -27,7 +27,7 @@ export default function WorkOrdersPage() {
   const [rows, setRows] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('OPEN');
+  const [filter, setFilter] = useState<Filter>('ALL');
   const [q, setQ] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   // The mechanic responsible for the job.
@@ -69,7 +69,8 @@ export default function WorkOrdersPage() {
     };
   }, [filter, q, branchFilter, mechanicFilter, t]);
 
-  const filters: Filter[] = ['OPEN', ...WORK_ORDER_STATUSES, 'ALL'];
+  // Same order as the other sales lists: All first, then shortcuts.
+  const filters: Filter[] = ['ALL', 'OPEN', ...WORK_ORDER_STATUSES];
 
   return (
     <PageFrame
@@ -149,7 +150,8 @@ export default function WorkOrdersPage() {
                   {w.invoicedId && (
                     <span className="text-xs px-2 py-0.5 rounded-md border font-medium bg-violet-50 text-violet-700 border-violet-300 inline-flex items-center gap-1">
                       <Receipt size={11} />
-                      {t('workshop.workOrders.invoiced')}
+                      {/* Which invoice it became, like the quotation → order trail. */}
+                      {w.invoices.find((i) => i.id === w.invoicedId)?.invoiceNumber ?? t('workshop.workOrders.invoicedDraft')}
                     </span>
                   )}
                 </div>
