@@ -103,6 +103,23 @@ describe('Staff performance', () => {
     expect(report.salespeople).toEqual([expect.objectContaining({ employeeId: andi, invoices: 1, total: 200_000 })]);
   });
 
+  it('counts an invoice with a mechanic but no work order as that mechanic’s job', async () => {
+    // Billed directly (or imported from Accurate's per-mechanic service items).
+    const draft = await invoices.createDraft(orgId, userId, {
+      format: 'A4',
+      customerName: 'Walk-in',
+      mechanicId: budi,
+      items: [{ description: 'Ongkos service', quantity: 1, unitPrice: 75_000 }],
+    } as never);
+    await invoices.issue(orgId, draft.id, userId, 'MASTER');
+
+    const report = await module.get(PerformanceService).report(orgId, { from: today, to: today });
+    const b = report.mechanics!.find((m) => m.employeeId === budi)!;
+    expect(b).toMatchObject({ jobs: 1, invoicedJobs: 1, services: 75_000, timedJobs: 0 });
+    // Andi's work-order job is still counted on its own.
+    expect(report.mechanics!.find((m) => m.employeeId === andi)).toMatchObject({ jobs: 1 });
+  });
+
   it('makes a reminder due once the car reaches its km, before its date', async () => {
     const reminders = module.get(VehicleRemindersService);
     const far = new Date(Date.now() + 180 * 86_400_000).toISOString();

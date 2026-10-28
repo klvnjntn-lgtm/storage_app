@@ -264,6 +264,37 @@ const ODS_MISMATCH_GDSCODE = 335544379;
 const AUTH_FAILURE_GDSCODE = 335544472;
 
 // ---------------------------------------------------------------------------
+// Mechanics on Accurate service items (see GdbImportService.importMechanics)
+// ---------------------------------------------------------------------------
+
+// Outside workshops the shop sends work to — they have their own "XXX-…"
+// service items but aren't the shop's mechanics.
+const OUTSIDE_WORKSHOP_ITEMS = new Set(['GRAND AUTO', 'BOMBA']);
+
+// "XXX-JOHAN" / "ONGKOS SERVICE" -> "JOHAN"; null for anything that isn't a
+// per-mechanic service item (generic codes, other services, outside shops).
+export function mechanicNameFromItem(itemNo: string, description: string | null): string | null {
+  const match = /^XXX-(.+)$/i.exec(itemNo.trim());
+  if (!match) return null;
+  if ((description ?? '').trim().toUpperCase() !== 'ONGKOS SERVICE') return null;
+  const name = match[1].trim();
+  if (!name || /XXX|SVC/i.test(name)) return null;
+  if (OUTSIDE_WORKSHOP_ITEMS.has(name.toUpperCase())) return null;
+  return name;
+}
+
+// For matching a mechanic to an Accurate salesman of the same person:
+// "XXX-EKI" and "DEO MEKANIK" compare equal to "EKI" and "DEO".
+export function normalizePersonName(name: string): string {
+  return name
+    .trim()
+    .toUpperCase()
+    .replace(/^XXX-/, '')
+    .replace(/\s+MEKANIK$/, '')
+    .replace(/\s+/g, ' ');
+}
+
+// ---------------------------------------------------------------------------
 // Firebird connection attempts
 //
 // This deploy runs a single physical Firebird 2.5 server (see
@@ -522,6 +553,100 @@ export class GdbImportService implements OnModuleInit {
   }
 
   // -------------------------------------------------------------------------
+  // Staff backfill: salesmen and mechanics only, for invoices already
+  // imported. Imports the people (same rules as a full import), then fills
+  // each existing invoice's salesperson and mechanic where WareSys has none
+  // — nothing else is touched (no products, stock, totals or payments).
+  // Run by scripts/gdb-backfill-staff.ts against a GDB the Firebird server
+  // can read.
+  // -------------------------------------------------------------------------
+  async backfillStaff(dbPath: string, organizationId: string, opts: { apply: boolean }) {
+    const { db: fbDb } = await attachAnyVersion(dbPath, this.firebirdHost());
+    try {
+      const headers = await fbQuery<{ ARINVOICEID: number; INVNO: string; SALESMANID: number | null }>(
+        fbDb,
+        `SELECT ARINVOICEID, COALESCE(INVOICENO, CAST(ARINVOICEID AS VARCHAR(20))) AS INVNO, SALESMANID FROM ARINV`,
+      );
+      const lines = await fbQuery<{ ARINVOICEID: number; SKU: string }>(
+        fbDb,
+        `SELECT ARINVOICEID, ITEMNO AS SKU FROM ARINVDET WHERE ITEMNO STARTING WITH 'XXX-' ORDER BY ARINVOICEID, SEQ`,
+      );
+      const items = await fbQuery<{ ITEMNO: string; ITEMDESCRIPTION: string | null }>(
+        fbDb,
+        `SELECT ITEMNO, ITEMDESCRIPTION FROM ITEM WHERE ITEMNO STARTING WITH 'XXX-'`,
+      );
+      const mechanicNames = new Map(
+        items
+          .map((i) => [i.ITEMNO.trim(), mechanicNameFromItem(i.ITEMNO, i.ITEMDESCRIPTION)] as const)
+          .filter((e): e is readonly [string, string] => !!e[1]),
+      );
+
+      if (!opts.apply) {
+        const used = new Map<string, number>();
+        for (const l of lines) {
+          const code = String(l.SKU).trim();
+          if (mechanicNames.has(code)) used.set(code, (used.get(code) ?? 0) + 1);
+        }
+        return {
+          invoices: headers.length,
+          withSalesman: headers.filter((h) => h.SALESMANID != null).length,
+          mechanics: [...mechanicNames].map(([code, name]) => ({ code, name, lines: used.get(code) ?? 0 })),
+        };
+      }
+
+      const salesmen = await this.importSalesmen(fbDb, organizationId);
+      const mechanics = await this.importMechanics(fbDb, organizationId);
+
+      const mechanicByInvoice = new Map<number, string>();
+      for (const l of lines) {
+        const id = mechanics.employeeIdByItemNo.get(String(l.SKU).trim());
+        if (id && !mechanicByInvoice.has(l.ARINVOICEID)) mechanicByInvoice.set(l.ARINVOICEID, id);
+      }
+
+      // Group invoice numbers by the value to set, so each is one updateMany
+      // (fill-only: rows that already have one are left alone).
+      const bySalesperson = new Map<string, string[]>();
+      const byMechanic = new Map<string, string[]>();
+      for (const h of headers) {
+        const no = String(h.INVNO).trim();
+        const salesperson = h.SALESMANID != null ? salesmen.employeeIdBySalesmanId.get(h.SALESMANID) : undefined;
+        if (salesperson) bySalesperson.set(salesperson, [...(bySalesperson.get(salesperson) ?? []), no]);
+        const mechanic = mechanicByInvoice.get(h.ARINVOICEID);
+        if (mechanic) byMechanic.set(mechanic, [...(byMechanic.get(mechanic) ?? []), no]);
+      }
+      let salespersonSet = 0;
+      let mechanicSet = 0;
+      const CHUNK = 5_000;
+      for (const [employeeId, numbers] of bySalesperson) {
+        for (let i = 0; i < numbers.length; i += CHUNK) {
+          const r = await this.prisma.invoice.updateMany({
+            where: { organizationId, invoiceNumber: { in: numbers.slice(i, i + CHUNK) }, employeeId: null },
+            data: { employeeId },
+          });
+          salespersonSet += r.count;
+        }
+      }
+      for (const [mechanicId, numbers] of byMechanic) {
+        for (let i = 0; i < numbers.length; i += CHUNK) {
+          const r = await this.prisma.invoice.updateMany({
+            where: { organizationId, invoiceNumber: { in: numbers.slice(i, i + CHUNK) }, mechanicId: null },
+            data: { mechanicId },
+          });
+          mechanicSet += r.count;
+        }
+      }
+      return {
+        salesmen: { created: salesmen.created, updated: salesmen.updated },
+        mechanics: { created: mechanics.created, matched: mechanics.matched },
+        invoicesGivenSalesperson: salespersonSet,
+        invoicesGivenMechanic: mechanicSet,
+      };
+    } finally {
+      await detach(fbDb);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Preview: attach and return counts so the UI can show "X items, Y invoices
   // found" before committing to anything.
   // -------------------------------------------------------------------------
@@ -739,6 +864,7 @@ async saveWarehouseMapping(
 
       const customerIdMap = await this.importCustomers(fbDb, organizationId);
       const salesmen = await this.importSalesmen(fbDb, organizationId);
+      const mechanics = await this.importMechanics(fbDb, organizationId);
       const terms = await loadTerms(fbDb);
       const invoiceResult = await this.importInvoices(
         fbDb,
@@ -747,6 +873,7 @@ async saveWarehouseMapping(
         invoiceFormat,
         salesmen.employeeIdBySalesmanId,
         terms,
+        mechanics.employeeIdByItemNo,
       );
 
       if (target !== 'full_invoices_and_purchase_orders') {
@@ -754,6 +881,7 @@ async saveWarehouseMapping(
           items: itemResult,
           stock: stockResult,
           salesmen: { created: salesmen.created, updated: salesmen.updated },
+          mechanics: { created: mechanics.created, matched: mechanics.matched },
           invoices: invoiceResult,
         };
       }
@@ -1260,6 +1388,62 @@ private async importStock(
     return { employeeIdBySalesmanId, created, updated: rows.length - created };
   }
 
+  // -------------------------------------------------------------------------
+  // Mechanics, from per-mechanic service items -> Employee
+  //
+  // Workshops on Accurate record who did the work by giving each mechanic
+  // their own service item: code "XXX-<NAME>", description "ONGKOS
+  // SERVICE" (e.g. XXX-JOHAN, XXX-PAK DE). The invoice line on that item
+  // names the mechanic. Generic service items (XXX-SVC-XXX, …_SVC) carry
+  // no name, and outside workshops the shop subcontracts to are excluded.
+  //
+  // A mechanic who is also an Accurate salesman (AAN, "DEO MEKANIK",
+  // "XXX-EKI") is matched to that employee by name; the rest are created,
+  // keyed on Employee.externalId "mechanic:<ITEMNO>" so re-imports reuse them.
+  // -------------------------------------------------------------------------
+  private async importMechanics(fbDb: Firebird.Database, organizationId: string) {
+    const items = await fbQuery<{ ITEMNO: string; ITEMDESCRIPTION: string | null }>(
+      fbDb,
+      `SELECT ITEMNO, ITEMDESCRIPTION FROM ITEM WHERE ITEMNO STARTING WITH 'XXX-'`,
+    );
+    const mechanicItems = items
+      .map((i) => ({ itemNo: i.ITEMNO.trim(), name: mechanicNameFromItem(i.ITEMNO, i.ITEMDESCRIPTION) }))
+      .filter((i): i is { itemNo: string; name: string } => !!i.name);
+
+    const employees = await this.prisma.employee.findMany({
+      where: { organizationId },
+      select: { id: true, name: true, externalId: true },
+    });
+    const byExternalId = new Map(employees.filter((e) => e.externalId).map((e) => [e.externalId!, e.id]));
+
+    const employeeIdByItemNo = new Map<string, string>();
+    let created = 0;
+    let matched = 0;
+    for (const item of mechanicItems) {
+      const externalId = `mechanic:${item.itemNo}`;
+      const known = byExternalId.get(externalId);
+      if (known) {
+        employeeIdByItemNo.set(item.itemNo, known);
+        continue;
+      }
+      const sameName = employees.filter((e) => normalizePersonName(e.name) === normalizePersonName(item.name));
+      if (sameName.length === 1) {
+        employeeIdByItemNo.set(item.itemNo, sameName[0].id);
+        matched++;
+        continue;
+      }
+      const employee = await this.prisma.employee.create({
+        data: { organizationId, externalId, name: item.name, position: 'Mechanic', baseSalary: 0, isActive: true },
+      });
+      employees.push({ id: employee.id, name: employee.name, externalId });
+      employeeIdByItemNo.set(item.itemNo, employee.id);
+      created++;
+    }
+
+    console.log('[GdbImport] importMechanics done', { created, matched, items: mechanicItems.length });
+    return { employeeIdByItemNo, created, matched };
+  }
+
   private async importSuppliers(
     fbDb: Firebird.Database,
     organizationId: string,
@@ -1703,6 +1887,7 @@ private async importStock(
     invoiceFormat: InvoiceFormat,
     employeeIdBySalesmanId: Map<number, string>,
     terms: Map<number, AccurateTerm>,
+    mechanicIdByItemNo: Map<string, string> = new Map(),
   ) {
     const headers = await fbQuery<{
       ARINVOICEID: number;
@@ -1836,6 +2021,7 @@ private async importStock(
         paymentTerms: string | null;
         dueDate: Date | null;
         employeeId: string | null;
+        mechanicId: string | null;
         status: InvoiceStatus;
         amountPaid: Prisma.Decimal;
         paymentStatus: PaymentStatus;
@@ -1874,6 +2060,7 @@ private async importStock(
           paymentTerms: true,
           dueDate: true,
           employeeId: true,
+          mechanicId: true,
           status: true,
           amountPaid: true,
           paymentStatus: true,
@@ -1897,6 +2084,7 @@ private async importStock(
             paymentTerms: invoice.paymentTerms,
             dueDate: invoice.dueDate,
             employeeId: invoice.employeeId,
+            mechanicId: invoice.mechanicId,
             status: invoice.status,
             amountPaid: invoice.amountPaid,
             paymentStatus: invoice.paymentStatus,
@@ -1962,7 +2150,12 @@ private async importStock(
           ? new Date(header.INVOICEDATE.getTime() + term.netDays * 86_400_000)
           : undefined;
       const employeeId = header.SALESMANID != null ? employeeIdBySalesmanId.get(header.SALESMANID) : undefined;
-      return { paymentTerms: term?.name, dueDate, employeeId };
+      // The mechanic: the first of the invoice's lines on a per-mechanic
+      // service item (see importMechanics).
+      const mechanicId = (linesByInvoice.get(header.ARINVOICEID) ?? [])
+        .map((l) => mechanicIdByItemNo.get(String(l.SKU ?? '').trim()))
+        .find((id): id is string => !!id);
+      return { paymentTerms: term?.name, dueDate, employeeId, mechanicId };
     };
 
     const buildInvoiceData = (header: (typeof headers)[number]) => {
@@ -2119,6 +2312,7 @@ private async importStock(
                 paymentTerms?: string;
                 dueDate?: Date;
                 employeeId?: string;
+                mechanicId?: string;
                 amountPaid?: number;
                 paymentStatus?: PaymentStatus;
               } = {};
@@ -2143,6 +2337,7 @@ private async importStock(
               if (!existingInvoice.paymentTerms && ts.paymentTerms) patch.paymentTerms = ts.paymentTerms;
               if (!existingInvoice.dueDate && ts.dueDate) patch.dueDate = ts.dueDate;
               if (!existingInvoice.employeeId && ts.employeeId) patch.employeeId = ts.employeeId;
+              if (!existingInvoice.mechanicId && ts.mechanicId) patch.mechanicId = ts.mechanicId;
               // Earlier imports only read PAIDAMOUNT and left paid-at-sale
               // invoices UNPAID. Sync from Accurate only while WareSys has no
               // payment history of its own for the invoice, and never lower

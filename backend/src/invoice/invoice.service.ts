@@ -80,6 +80,8 @@ export type InvoicePrintView = {
   customerPoNumber: string | null;
 
   employeeId: string | null;      // NEW
+  mechanicId: string | null;
+  mechanicName: string | null;
   employeeName: string | null;    // NEW
 
   businessName: string;
@@ -177,6 +179,7 @@ const invoiceDetailInclude = {
   customer: true,
   vehicle: true,
   employee: { select: { id: true, name: true, position: true } }, // NEW
+  mechanic: { select: { id: true, name: true } },
   items: {
     include: {
       product: { select: { name: true, sku: true } },
@@ -280,6 +283,7 @@ constructor(
             customerId: dto.customerId,
             vehicleId: dto.vehicleId,
             employeeId: dto.employeeId ?? null, // NEW
+            mechanicId: dto.mechanicId ?? null,
             workOrderId: opts.workOrderId ?? null,
             customerPoNumber: dto.customerPoNumber ?? null,
             paymentTerms: dto.paymentTerms ?? null,
@@ -375,6 +379,7 @@ constructor(
               customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
               vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
               employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
+              mechanicId: dto.mechanicId !== undefined ? dto.mechanicId : invoice.mechanicId,
               customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
               paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
               notes: dto.notes !== undefined ? dto.notes : invoice.notes,
@@ -461,6 +466,7 @@ constructor(
             customerId: dto.customerId !== undefined ? dto.customerId : invoice.customerId,
             vehicleId: dto.vehicleId !== undefined ? dto.vehicleId : invoice.vehicleId,
             employeeId: dto.employeeId !== undefined ? dto.employeeId : invoice.employeeId, // NEW
+            mechanicId: dto.mechanicId !== undefined ? dto.mechanicId : invoice.mechanicId,
             customerPoNumber: dto.customerPoNumber !== undefined ? dto.customerPoNumber : invoice.customerPoNumber,
             paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : invoice.paymentTerms,
             notes: dto.notes !== undefined ? dto.notes : invoice.notes,
@@ -1253,6 +1259,8 @@ async issue(
       vehicleOdometer: invoice.odometer ?? null,
 
       employeeId: invoice.employeeId ?? null,             // NEW
+      mechanicId: invoice.mechanicId ?? null,
+      mechanicName: invoice.mechanic?.name ?? null,
       employeeName: invoice.employee?.name ?? null,        // NEW
 
       businessName: invoice.organization.name,
@@ -1443,6 +1451,7 @@ async issue(
         taxes: true,
         location: true,
         employee: { select: { id: true, name: true, position: true } }, // NEW — so the new-invoice edit page can preselect the picker
+        mechanic: { select: { id: true, name: true } },
         // Shown on the editor as "from work order WO-…".
         workOrder: { select: { id: true, number: true } },
       },

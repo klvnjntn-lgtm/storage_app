@@ -63,7 +63,10 @@ export class PerformanceService {
 
     if (!enabled.includes(ModuleKey.WORKSHOP_RMS)) return { from: gte, to: lte, salespeople, mechanics: null, comebacks: [] };
 
-    // Jobs finished in the period, with what their (non-void) invoices billed.
+    // Jobs finished in the period, with what their (non-void) invoices billed:
+    // work orders marked done, plus invoices with a mechanic but no work order
+    // (billed directly, or imported from Accurate's per-mechanic service
+    // items) — those count as a job each, without a duration.
     const mechanicRows = await this.prisma.$queryRaw<
       {
         id: string | null;
@@ -97,20 +100,41 @@ export class PerformanceService {
       timed AS (
         SELECT j.id, EXTRACT(EPOCH FROM (j."completedAt" - j."startedAt")) / 3600.0 AS hours
         FROM jobs j WHERE j."startedAt" IS NOT NULL AND j."completedAt" > j."startedAt"
+      ),
+      direct AS (
+        SELECT i.id, i."mechanicId",
+               COALESCE(SUM(it."netAmount") FILTER (WHERE it."productId" IS NOT NULL), 0) AS parts,
+               COALESCE(SUM(it."netAmount") FILTER (WHERE it."productId" IS NULL), 0) AS services
+        FROM "Invoice" i
+        LEFT JOIN "InvoiceItem" it ON it."invoiceId" = i.id
+        WHERE i."organizationId" = ${organizationId}
+          AND i.status = 'ISSUED'
+          AND i."workOrderId" IS NULL
+          AND i."mechanicId" IS NOT NULL
+          AND i."issuedAt" >= ${gte} AND i."issuedAt" <= ${lte}
+          ${branch('i')}
+        GROUP BY i.id, i."mechanicId"
+      ),
+      all_jobs AS (
+        SELECT j."mechanicId", (b.id IS NOT NULL)::int AS invoiced, b.parts, b.services, t.hours
+        FROM jobs j
+        LEFT JOIN billed b ON b.id = j.id
+        LEFT JOIN timed t ON t.id = j.id
+        UNION ALL
+        SELECT d."mechanicId", 1, d.parts, d.services, NULL::float
+        FROM direct d
       )
-      SELECT j."mechanicId" AS id, e.name,
+      SELECT a."mechanicId" AS id, e.name,
              COUNT(*)::int AS jobs,
-             COUNT(b.id)::int AS invoiced,
-             COALESCE(SUM(b.parts), 0) AS parts,
-             COALESCE(SUM(b.services), 0) AS services,
-             COUNT(t.id)::int AS timed,
-             AVG(t.hours)::float AS "avgHours",
-             (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.hours))::float AS "medianHours"
-      FROM jobs j
-      LEFT JOIN billed b ON b.id = j.id
-      LEFT JOIN timed t ON t.id = j.id
-      LEFT JOIN "Employee" e ON e.id = j."mechanicId"
-      GROUP BY j."mechanicId", e.name
+             SUM(a.invoiced)::int AS invoiced,
+             COALESCE(SUM(a.parts), 0) AS parts,
+             COALESCE(SUM(a.services), 0) AS services,
+             COUNT(a.hours)::int AS timed,
+             AVG(a.hours)::float AS "avgHours",
+             (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a.hours))::float AS "medianHours"
+      FROM all_jobs a
+      LEFT JOIN "Employee" e ON e.id = a."mechanicId"
+      GROUP BY a."mechanicId", e.name
     `;
 
     // Comebacks opened in the period, counted against the mechanic of the job they redo.

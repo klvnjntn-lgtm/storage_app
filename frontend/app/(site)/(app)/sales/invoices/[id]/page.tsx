@@ -622,9 +622,18 @@ export default function InvoiceDetailPage() {
               </div>
             )}
 
-            {invoice.employeeName && (
-              <p className="text-xs text-gray-500 mb-4">
-                {t('sales.invoiceDetail.soldBy')} <span className="font-medium text-gray-800">{invoice.employeeName}</span>
+            {(invoice.employeeName || invoice.mechanicName) && (
+              <p className="text-xs text-gray-500 mb-4 flex flex-wrap gap-x-4">
+                {invoice.employeeName && (
+                  <span>
+                    {t('sales.invoiceDetail.soldBy')} <span className="font-medium text-gray-800">{invoice.employeeName}</span>
+                  </span>
+                )}
+                {invoice.mechanicName && (
+                  <span>
+                    {t('sales.invoiceDetail.mechanicBy')} <span className="font-medium text-gray-800">{invoice.mechanicName}</span>
+                  </span>
+                )}
               </p>
             )}
 

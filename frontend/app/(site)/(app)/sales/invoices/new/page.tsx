@@ -142,6 +142,8 @@ function NewInvoicePage() {
   // Employee (sales/cashier) picker. '' means unset — omitted from the
   // payload, so the invoice carries no employee.
   const [employeeId, setEmployeeId] = useState<string>('');
+  // Workshops: who did the work (separate from the salesperson).
+  const [mechanicId, setMechanicId] = useState<string>('');
   // A draft made from a work order says so (and links back to it).
   const [sourceWorkOrder, setSourceWorkOrder] = useState<{ id: string; number: string } | null>(null);
   // Multi-branch businesses pick the selling branch; a till keeps its last.
@@ -207,7 +209,7 @@ function NewInvoicePage() {
     formatRef.current = format;
     printDataRef.current = printData;
     servicesRef.current = services;
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId, activeBranchId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId, activeBranchId, mechanicId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -333,6 +335,7 @@ function NewInvoicePage() {
     // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
     setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
     setEmployeeId(draft.employeeId ?? '');
+    setMechanicId(draft.mechanicId ?? '');
     setSourceWorkOrder(draft.workOrder ?? null);
     if (draft.branchId) setBranchIdState(draft.branchId);
 
@@ -540,6 +543,7 @@ function NewInvoicePage() {
       bankAccountId,
       employeeId,
       branchId: activeBranchId,
+      ...(hasWorkshopRms && { mechanicId }),
     });
 
   function adoptDraftId(id: string) {
@@ -626,7 +630,7 @@ function NewInvoicePage() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId, activeBranchId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId, activeBranchId, mechanicId]);
 
   useEffect(() => {
     return () => {
@@ -1049,6 +1053,8 @@ function NewInvoicePage() {
             onChangeEmployeeId={setEmployeeId}
             branchId={branchId}
             onChangeBranchId={setBranchId}
+            mechanicId={mechanicId}
+            onChangeMechanicId={hasWorkshopRms ? setMechanicId : undefined}
           />
         </div>
       </div>

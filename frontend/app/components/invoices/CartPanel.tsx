@@ -116,6 +116,8 @@ export function CartPanel({
   onChangeEmployeeId,
   branchId,
   onChangeBranchId,
+  mechanicId,
+  onChangeMechanicId,
 }: {
   format: InvoiceFormat;
   cartLines: CartLineWithTotals[];
@@ -204,6 +206,9 @@ export function CartPanel({
   // The selling branch — only asked of multi-branch businesses.
   branchId?: string;
   onChangeBranchId?: (id: string) => void;
+  // Workshops only: who did the work, from the same employee list.
+  mechanicId?: string;
+  onChangeMechanicId?: (id: string) => void;
 }) {
   const { t } = useLanguage();
   const svc = services ?? [];
@@ -298,6 +303,28 @@ export function CartPanel({
             className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
           >
             <option value="">{t('sales.invoiceCart.noEmployee')}</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.position ? ` — ${e.position}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {employees.length > 0 && onChangeMechanicId && (
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.invoiceCart.mechanicLabel')}
+          </label>
+          <select
+            value={mechanicId ?? ''}
+            onChange={(e) => onChangeMechanicId(e.target.value)}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          >
+            <option value="">{t('sales.invoiceCart.noMechanic')}</option>
             {employees.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}

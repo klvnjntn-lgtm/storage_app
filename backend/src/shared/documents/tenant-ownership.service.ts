@@ -27,6 +27,7 @@ export class TenantOwnershipService {
       vehicleId?: string | null;
       locationId?: string | null;
       employeeId?: string | null;
+      mechanicId?: string | null;
     },
     client: Pick<PrismaService, 'customer' | 'vehicle' | 'location' | 'employee'> = this.prisma,
   ) {
@@ -57,6 +58,13 @@ export class TenantOwnershipService {
         select: { id: true },
       });
       if (!employee) throw new NotFoundException('Employee not found');
+    }
+    if (refs.mechanicId) {
+      const mechanic = await client.employee.findFirst({
+        where: { id: refs.mechanicId, organizationId },
+        select: { id: true },
+      });
+      if (!mechanic) throw new NotFoundException('Mechanic not found');
     }
   }
 

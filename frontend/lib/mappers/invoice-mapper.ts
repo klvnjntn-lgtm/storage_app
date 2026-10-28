@@ -48,6 +48,9 @@ export type InvoicePrintView = {
 
   employeeId: string | null;
   employeeName: string | null;
+  // The mechanic who did the work (workshops), separate from the salesperson.
+  mechanicId?: string | null;
+  mechanicName?: string | null;
 
   subtotal: number;
   discount: number;

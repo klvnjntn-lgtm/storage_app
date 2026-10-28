@@ -1535,7 +1535,12 @@ model Invoice {
   replaces          Invoice?          @relation("InvoiceReplacement", fields: [replacesInvoiceId], references: [id])
   replacedBy        Invoice?          @relation("InvoiceReplacement")
   employeeId        String?
-  employee          Employee?         @relation(fields: [employeeId], references: [id])
+  employee          Employee?         @relation("InvoiceSalesperson", fields: [employeeId], references: [id])
+  // The mechanic who did the work (workshops) — from the job's work order,
+  // picked on the invoice, or from Accurate's per-mechanic service items.
+  // Separate from employeeId, the salesperson.
+  mechanicId        String?
+  mechanic          Employee?         @relation("InvoiceMechanic", fields: [mechanicId], references: [id])
   fulfillmentPath   FulfillmentPath?
 
   locationId       String?
@@ -1619,6 +1624,7 @@ model Invoice {
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, employeeId]) // NEW
+  @@index([organizationId, mechanicId])
   @@index([workOrderId])
 }
 
@@ -2241,7 +2247,8 @@ model Employee {
   isActive          Boolean     @default(true)
   createdAt         DateTime    @default(now())
   archivedAt        DateTime?
-  invoices          Invoice[] // NEW — inverse relation
+  invoices          Invoice[] @relation("InvoiceSalesperson") // NEW — inverse relation
+  mechanicInvoices  Invoice[] @relation("InvoiceMechanic")
   workOrders        WorkOrder[]
   // Where their salary is booked in the P&L by branch; null = unassigned.
   branchId          String?

@@ -341,6 +341,8 @@ export type InvoiceHeaderForm = {
   bankAccountId: string;
   employeeId: string;
   // Multi-branch businesses: the branch making the sale ('' = default).
+  // Workshops: the mechanic who did the work ('' = none).
+  mechanicId?: string;
   branchId?: string;
 };
 
@@ -365,6 +367,7 @@ export function buildInvoiceHeader(f: InvoiceHeaderForm) {
     ...(f.bankAccountId !== '' && { bankAccountId: f.bankAccountId === NO_BANK_ACCOUNT ? null : f.bankAccountId }),
     employeeId: f.employeeId || null,
     ...(f.branchId && { branchId: f.branchId }),
+    ...(f.mechanicId !== undefined && { mechanicId: f.mechanicId || null }),
   };
 }
 

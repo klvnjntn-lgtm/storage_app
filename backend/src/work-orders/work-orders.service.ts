@@ -583,6 +583,7 @@ export class WorkOrdersService {
             ? wo.odometer
             : undefined,
         employeeId: wo.mechanicId ?? undefined,
+        mechanicId: wo.mechanicId ?? undefined,
         locationId: firstPart?.locationId ?? undefined,
         notes: wo.complaint ? `${wo.number}: ${wo.complaint}` : wo.number,
         branchId: wo.branchId ?? undefined,

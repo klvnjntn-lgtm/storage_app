@@ -176,6 +176,11 @@ bankAccountId?: string | null;
 @IsOptional()
 @IsUUID()
 employeeId?: string;
+
+// The mechanic who did the work (workshops), separate from the salesperson.
+@IsOptional()
+@IsUUID()
+mechanicId?: string;
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => InvoiceLineInput)
@@ -240,6 +245,10 @@ bankAccountId?: string | null;
   @IsOptional()
   @IsUUID()
   employeeId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  mechanicId?: string;
 
   @IsOptional()
   @IsDateString()
