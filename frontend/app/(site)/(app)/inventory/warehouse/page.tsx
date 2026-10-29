@@ -266,15 +266,15 @@ export default function Warehouse() {
         backgroundSize: '24px 24px',
       }}
     >
-      {/* TOP BAR — logo only; account/logout lives in AppShell's nav */}
+      {/* Header — the app's standard: page name and what it's for; account/logout lives in AppShell's nav */}
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Boxes size={18} strokeWidth={2} className="text-blue-700" aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('appShell.brand')}</h1>
+              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>{t('nav.items.warehouse')}</h1>
               <p className="text-xs text-gray-500 truncate">{t('inventory.warehousePage.scannerHub')}</p>
             </div>
           </div>

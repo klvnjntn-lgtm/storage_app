@@ -1,3 +1,4 @@
+import { ConvertQuotationDto } from '../sales-quotation/dto/sales-quotation.dto';
 // src/invoice/invoice.controller.ts
 import {
   Body, Controller, Delete, Get, Optional, Param, Patch, Post, Req, Query, BadRequestException, Res, UseGuards,
@@ -26,6 +27,7 @@ import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { WebhooksService } from '../api-access/webhooks.service';
 import { BranchRecord } from '../auth/guards/branch-record.guard';
 import { bookingBranchId, filterBranchId, scopedBranchId } from '../auth/branch-scope';
+import { isAdminRole } from '../auth/roles';
 // Gated to INVOICE_POS only (not listed alongside WORKSHOP_RMS like
 // Customers/Payments) — deliberate: invoices are the INVOICE_POS
 // feature itself, and since WORKSHOP_RMS depends on INVOICE_POS being
@@ -67,6 +69,7 @@ export class InvoiceController {
       search: query.search,
       branchId: filterBranchId(req.user, query.branchId),
       employeeId: query.employeeId,
+      mechanicId: query.mechanicId,
     });
   }
 
@@ -76,12 +79,22 @@ export class InvoiceController {
     return d;
   }
 
+  // Cost and profit are admin-only (what the business pays for stock);
+  // staff get the same report with those fields null.
   @Get('reports')
   async getReports(@CurrentOrg() organizationId: string, @Query() query: RevenueReportQueryDto, @Req() req) {
     const { gte, lte } = await this.invoiceService.businessDayBounds(organizationId, query.from, query.to);
-    return this.invoiceService.getRevenueReport(
+    const report = await this.invoiceService.getRevenueReport(
       organizationId, gte!, lte!, query.locationId, filterBranchId(req.user, query.branchId),
     );
+    if (isAdminRole(req.user?.role)) return report;
+    return {
+      ...report,
+      cost: null,
+      profit: null,
+      profitCoverage: null,
+      invoices: report.invoices.map((row) => ({ ...row, cost: null, profit: null })),
+    };
   }
 
   // Top customers / top products / top vehicles, for the Sales Insights
@@ -245,9 +258,10 @@ export class InvoiceController {
     @CurrentOrg() organizationId: string,
     @Req() req,
     @Param('quotationId') quotationId: string,
+    @Body() dto: ConvertQuotationDto,
   ) {
     return this.invoiceService.createDraftFromQuotation(
-      organizationId, req.user.sub, quotationId, scopedBranchId(req.user) ?? undefined,
+      organizationId, req.user.sub, quotationId, scopedBranchId(req.user) ?? undefined, dto.lines,
     );
   }
 

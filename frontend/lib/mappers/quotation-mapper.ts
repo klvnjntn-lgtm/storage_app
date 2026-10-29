@@ -1,10 +1,14 @@
 import { QuotationView } from '@/app/components/quotations/types';
 
 // Matches SalesQuotationService's actual QuotationPrintView + mapQuotationForPrint()
-// after the quotationDate / termsAndConditions / itemTaxAmount / bank-details fixes.
+// after the quotationDate / termsAndConditions / bank-details fixes.
 export type QuotationPrintView = {
   id: string;
   quotationNumber: string | null;
+  vehiclePlateNumber?: string | null;
+  vehicleModel?: string | null;
+  vehicleOdometer?: number | null;
+  complaint?: string | null;
   status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED' | 'CONVERTED';
   format: string;
   quotationDate: string | null;        // NEW — replaces the nonexistent issuedAt
@@ -38,7 +42,6 @@ export type QuotationPrintView = {
   sentAt: string | null;
   createdAt: string;
 
-  taxes: { name: string; percentage: number; amount: number }[];
   items: {
     id: string;
     productName: string;
@@ -48,7 +51,6 @@ export type QuotationPrintView = {
     lineTotal: number;
     
     itemDiscount: number;   // NEW
-    itemTaxAmount: number;  // NEW
     itemTotal: number;
     unit: string | null;
   }[];
@@ -66,6 +68,11 @@ export function toQuotationView(quotation: QuotationPrintView): QuotationView {
     validUntil: quotation.validUntil ?? null,
     termsAndConditions: quotation.termsAndConditions ?? null, // NEW
 
+    vehiclePlateNumber: quotation.vehiclePlateNumber ?? null,
+    vehicleModel: quotation.vehicleModel ?? null,
+    vehicleOdometer: quotation.vehicleOdometer ?? null,
+    complaint: quotation.complaint ?? null,
+
     customerName: quotation.customerName,
     customerPhone: quotation.customerPhone,
     customerAddress: quotation.customerAddress,
@@ -79,7 +86,6 @@ export function toQuotationView(quotation: QuotationPrintView): QuotationView {
       unit: item.unit ?? null,          
       unitPrice: Number(item.unitPrice),
       itemDiscount: Number(item.itemDiscount ?? 0),   // NEW
-      itemTaxAmount: Number(item.itemTaxAmount ?? 0), // NEW
   itemTotal: Number(item.itemTotal ?? item.lineTotal),
   lineTotal: Number(item.lineTotal),   // keep this — QuotationItemView still requires it
       locationName: quotation.locationName ?? '', // NOTE: per-item location isn't
@@ -90,11 +96,6 @@ export function toQuotationView(quotation: QuotationPrintView): QuotationView {
     subtotal: Number(quotation.subtotal),
     discount: Number(quotation.discount ?? 0),
     taxAmount: Number(quotation.taxAmount ?? 0),
-    taxes: (quotation.taxes ?? []).map((t) => ({
-      name: t.name,
-      percentage: Number(t.percentage),
-      amount: Number(t.amount),
-    })),
     total: Number(quotation.total),
 
     businessName: quotation.businessLegalName ?? quotation.businessName,

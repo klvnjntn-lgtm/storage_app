@@ -3,8 +3,8 @@ import { parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 
 // Shapes returned by the backend's /platform routes (src/platform).
 
-export type ModuleKey = 'INVOICE_POS' | 'WAREHOUSE_OPS' | 'WORKSHOP_RMS' | 'DELIVERY_DMS';
-export const MODULE_KEYS: ModuleKey[] = ['INVOICE_POS', 'WAREHOUSE_OPS', 'WORKSHOP_RMS', 'DELIVERY_DMS'];
+export type ModuleKey = 'INVOICE_POS' | 'WAREHOUSE_OPS' | 'WORKSHOP_RMS' | 'DELIVERY_DMS' | 'ACCOUNTING';
+export const MODULE_KEYS: ModuleKey[] = ['INVOICE_POS', 'ACCOUNTING', 'WAREHOUSE_OPS', 'WORKSHOP_RMS', 'DELIVERY_DMS'];
 
 // Mirrors backend src/billing/plans.ts.
 export const PLAN_KEYS = ['custom', 'trial', 'subscription', 'free'] as const;

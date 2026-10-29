@@ -13,6 +13,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import type { DeliveryOrderListItem, DeliveryOrderStatus } from '@/app/components/delivery-orders/types';
 import { mapDeliveryOrderToListItem } from '@/lib/mappers/delivery-orders-mapper';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { DocFlow, docRef } from '@/app/components/shared/DocFlow';
 import { formatDMY } from '@/lib/dates';
 
 
@@ -301,11 +302,17 @@ export default function DeliveryOrdersPage() {
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {o.salesOrder?.orderNumber ? `SO ${o.salesOrder.orderNumber} · ` : ''}
                     {o.items.length} {t(o.items.length === 1 ? 'sales.deliveryOrders.itemSingular' : 'sales.deliveryOrders.itemPlural')}
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
                     {formatDMY(new Date(o.shippedAt ?? o.createdAt))}
                   </p>
+                  {/* Replaces the plain "SO …" text: the order (or invoice) it ships, as a link. */}
+                  <DocFlow
+                    from={[
+                      ...docRef('salesOrder', o.salesOrder?.id ? o.salesOrder : null, o.salesOrder?.orderNumber),
+                      ...docRef('invoice', o.invoice, o.invoice?.invoiceNumber),
+                    ]}
+                  />
                 </div>
               </div>
             </div>

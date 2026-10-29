@@ -104,6 +104,22 @@ describe('PartQueryParser', () => {
     ]);
   });
 
+  it('reads a code typed only in part, or with a space', () => {
+    const partial = parser.parse('F65 laher roda');
+    expect(partial.codes).toEqual([
+      { kind: 'chassis', typed: 'F65', code: 'F651' },
+    ]);
+    expect(partial.vehicles).toEqual([
+      { carBrand: 'Toyota', model: 'Avanza', generations: ['Gen 2 (F650)'] },
+    ]);
+    expect(partial.items).toEqual([wheel]);
+    expect(parser.parse('3SZ VE').codes).toEqual([
+      { kind: 'engine', typed: '3SZ VE', code: '3SZ-VE' },
+    ]);
+    // "F6" is too short to mean a code.
+    expect(parser.parse('F6').recognized).toBe(false);
+  });
+
   it('reads a whole nomor mesin and nomor rangka from the STNK', () => {
     const engine = parser.parse('1NRF123456 laher roda');
     expect(engine.codes).toEqual([
@@ -164,6 +180,115 @@ describe('PartQueryParser lone words', () => {
     expect(p.parse('avanza shok').items.map((i) => i.item)).toEqual([
       'Shock Absorber',
       'Shock Bearing',
+    ]);
+  });
+});
+
+describe('PartQueryParser partial codes', () => {
+  const altis = (generation: string) => ({
+    carBrand: 'Toyota',
+    model: 'Corolla Altis',
+    generation,
+  });
+  const p = new PartQueryParser([
+    term('model', 'altis', { carBrand: 'Toyota', model: 'Corolla Altis' }),
+    term('item', 'rem cakram', { itemType: 'Brakes', item: 'Brake Disc' }),
+    term('chassis', 'zre142', altis('Gen 10 (E140)')),
+    term('chassis', 'zre172', altis('Gen 11 (E170)')),
+    term('chassis', 'remx10', altis('Gen 9 (E120)')),
+    term('engine', 'L15A', {
+      carBrand: 'Honda',
+      model: 'Jazz',
+      generation: 'Gen 1 (GD)',
+    }),
+    term('engine', 'L15Z2', {
+      carBrand: 'Honda',
+      model: 'Jazz',
+      generation: 'Gen 2 (GE)',
+    }),
+  ]);
+
+  it('matches every code a start fits, naming them', () => {
+    const r = p.parse('L15');
+    expect(r.codes).toEqual([
+      { kind: 'engine', typed: 'L15', code: 'L15A / L15Z2' },
+    ]);
+    expect(r.vehicles).toEqual([
+      {
+        carBrand: 'Honda',
+        model: 'Jazz',
+        generations: ['Gen 1 (GD)', 'Gen 2 (GE)'],
+      },
+    ]);
+  });
+
+  it('reads letters alone as a code only when no word claims them', () => {
+    expect(p.parse('zre').vehicles).toEqual([
+      {
+        carBrand: 'Toyota',
+        model: 'Corolla Altis',
+        generations: ['Gen 10 (E140)', 'Gen 11 (E170)'],
+      },
+    ]);
+    // "rem" is a word here (rem cakram), not the start of REMX10 — on its own too.
+    const r = p.parse('rem cakram');
+    expect(r.codes).toEqual([]);
+    expect(r.items).toEqual([{ itemType: 'Brakes', item: 'Brake Disc' }]);
+    expect(p.parse('rem').codes).toEqual([]);
+    expect(p.parse('zre 142').codes).toEqual([
+      { kind: 'chassis', typed: 'zre 142', code: 'ZRE142' },
+    ]);
+  });
+});
+
+describe('PartQueryParser specs and loose words', () => {
+  const hyundai = { carBrand: 'Hyundai', model: 'H-1' };
+  const p = new PartQueryParser(
+    [
+      term('model', 'avanza', { carBrand: 'Toyota', model: 'Avanza' }),
+      term('model', 'h1', hyundai),
+      term('model', 'colt diesel', {
+        carBrand: 'Mitsubishi',
+        model: 'Colt Diesel',
+      }),
+      term('item', 'bohlam', { itemType: 'Lamp', item: 'Headlamp Bulb' }),
+      term('item', 'wiper', { itemType: 'Body', item: 'Wiper Blade' }),
+      term('item', 'lampu rem atas', {
+        itemType: 'Lamp',
+        item: 'Third Brake Lamp',
+      }),
+      term('item', 'wheel bolt', {
+        itemType: 'Wheels',
+        item: 'Wheel Nut / Bolt',
+      }),
+    ],
+    [],
+    ['H4', 'H1', 'H11 / H4', '10W-40', '215/55 R17', '24" + 14"'],
+  );
+
+  it('reads specs however they are typed', () => {
+    expect(p.parse('avanza bohlam h4').specs).toEqual(['H4']);
+    expect(p.parse('oli 10w40').specs).toEqual(['10W-40']);
+    expect(p.parse('10w 40').specs).toEqual(['10W-40']);
+    expect(p.parse('ban 215/55 r17').specs).toEqual(['215/55 R17']);
+    expect(p.parse('wiper 24inch').specs).toEqual(['24"']);
+    expect(p.parse('wiper 14"').specs).toEqual(['14"']);
+    // A bare size is inches only when that size exists.
+    expect(p.parse('wiper 24').specs).toEqual(['24"']);
+    expect(p.parse('wiper 30').specs).toEqual([]);
+  });
+
+  it("keeps a car's own words for the car", () => {
+    const h1 = p.parse('h1');
+    expect(h1.specs).toEqual([]);
+    expect(h1.vehicles).toEqual([hyundai]);
+    // "colt" is Colt Diesel's word, not a typo of "bolt".
+    expect(p.parse('colt').items).toEqual([]);
+  });
+
+  it('matches the start of an item name', () => {
+    expect(p.parse('lampu rem').items).toEqual([
+      { itemType: 'Lamp', item: 'Third Brake Lamp' },
     ]);
   });
 });

@@ -42,9 +42,8 @@ function useModuleItems(t: (key: string) => string, enabledModules: string[], is
       href: '/sales',
       icon: Receipt,
       gradient: 'from-red-500 to-pink-600',
-      // NOTE: Sales, Purchasing, and Accounting all currently gate on
-      // INVOICE_POS. Split each into its own flag once the backend
-      // exposes separate ones.
+      // Sales and Purchasing both gate on INVOICE_POS; Accounting is its
+      // own module on top of it.
       enabled: has('INVOICE_POS'),
     },
     {
@@ -61,7 +60,7 @@ function useModuleItems(t: (key: string) => string, enabledModules: string[], is
       href: '/accounting',
       icon: Calculator,
       gradient: 'from-indigo-500 to-blue-800',
-      enabled: has('INVOICE_POS') && isAdmin, // the books are admin-only
+      enabled: has('INVOICE_POS') && has('ACCOUNTING') && isAdmin, // the books are admin-only
     },
     {
       title: t('home.workshop'),

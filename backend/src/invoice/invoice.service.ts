@@ -62,6 +62,7 @@ export type InvoicePrintView = {
   invoiceNumber: string | null;
   status: string;
   fulfillmentStatus: string;
+  fulfillmentPath: string | null;
   vehicleId: string | null;
   paymentStatus: string;
   vehiclePlateNumber: string | null;
@@ -686,8 +687,10 @@ async issue(
             });
           }
         }
-        await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
       }
+      // Every path, not only a direct issue: an invoice of services alone has nothing to deliver, so it's
+      // fulfilled as issued — before, one waiting on the delivery path stayed "backordered" for good.
+      await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
 
       const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
       const invoiceDate = invoice.invoiceDate ?? new Date();
@@ -1033,6 +1036,7 @@ async issue(
       search?: string;
       branchId?: string;
       employeeId?: string;
+      mechanicId?: string;
     },
   ): Promise<{ data: any[]; total: number; page: number; pageSize: number }> {
     const dateFilter = filters.from || filters.to
@@ -1089,6 +1093,7 @@ async issue(
       branchId: filters.branchId,
       customerId: filters.customerId,
       employeeId: filters.employeeId,
+      mechanicId: filters.mechanicId,
       ...(!filters.overdue && filters.paymentStatus ? { paymentStatus: filters.paymentStatus } : {}),
       ...overdueFilter,
       AND: [dateCondition, searchCondition].filter(
@@ -1107,6 +1112,13 @@ async issue(
           location: true,
           employee: { select: { name: true } },
           vehicle: { select: { plateNumber: true } },
+          // Where it came from and what followed it, for the list's links.
+          quotation: { select: { id: true, quotationNumber: true } },
+          salesOrder: { select: { id: true, orderNumber: true } },
+          workOrder: { select: { id: true, number: true } },
+          replaces: { select: { id: true, invoiceNumber: true } },
+          replacedBy: { select: { id: true, invoiceNumber: true, status: true } },
+          deliveryOrders: { select: { id: true, doNumber: true, status: true }, orderBy: { createdAt: 'asc' } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
@@ -1232,6 +1244,8 @@ async issue(
       invoiceNumber: invoice.invoiceNumber,
       status: invoice.status,
       fulfillmentStatus: invoice.fulfillmentStatus,
+      // DIRECT_ISSUE = stock left on issue, so "unfulfilled" means short; otherwise it waits for delivery.
+      fulfillmentPath: invoice.fulfillmentPath,
       format: invoice.format,
       salesOrderId: invoice.salesOrderId,
       deliveryOrders: invoice.deliveryOrders.map((d) => ({ id: d.id, doNumber: d.doNumber, status: d.status })),
@@ -2113,8 +2127,8 @@ async editIssuedInvoice(
     });
   }
 
-  // The invoice list's salesperson filter: anyone who has sold, plus
-  // current staff. Names only, so it's safe for every member.
+  // The invoice list's staff filter (the mechanic, for workshops): anyone
+  // on an invoice, plus current staff. Names only, so it's safe for every member.
   async salespeople(organizationId: string, branchId?: string) {
     return this.prisma.employee.findMany({
       where: {
@@ -2429,7 +2443,14 @@ async voidInvoice(
 }
 
 // branchId: a branch member's own branch, which the draft is booked to.
-async createDraftFromQuotation(organizationId: string, userId: string, quotationId: string, branchId?: string) {
+// lines: what to invoice now (a quotation converts in parts); left out, everything still left on it.
+async createDraftFromQuotation(
+  organizationId: string,
+  userId: string,
+  quotationId: string,
+  branchId?: string,
+  lines?: { quotationItemId: string; quantity: number }[],
+) {
     try {
       return await this.prisma.$transaction(async (tx) => {
         // Lock the quotation row for the duration of this transaction so a
@@ -2451,54 +2472,25 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
         });
         if (!quotation) throw new NotFoundException('Quotation not found');
 
-        // CONVERTED is also the status after conversion to a sales order —
-        // that order gets invoiced on its own, so invoicing the quotation
-        // too billed the customer twice. Only SENT/ACCEPTED, and never
-        // while a live sales order exists for it.
         if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
           throw new BadRequestException('Only a sent or accepted quotation can be invoiced');
         }
-        if (quotation.salesOrders.some((so) => so.status !== 'CANCELLED')) {
-          throw new BadRequestException(
-            'This quotation was converted to a sales order — invoice the sales order instead',
-          );
-        }
-        const activeInvoices = quotation.invoices.filter((inv) => inv.status !== 'VOID');
-        if (activeInvoices.length > 0) {
-          throw new BadRequestException('This quotation has already been invoiced');
-        }
+        // Only what's still left — a part already on a sales order is invoiced from that order, and a part
+        // already invoiced isn't billed twice.
+        const picks = await this.quotationService.linesToConvert(organizationId, quotation.id, lines, tx);
+        const { quotationItemIds, inputs: items, forcedUnitPriceByIndex, forcedPriceLevelIdByIndex } =
+          this.quotationService.pickedLineInputs(quotation.items, picks);
 
-        const items = quotation.items.map((i) => ({
-          productId: i.productId ?? undefined,
-          description: i.description ?? undefined,
-          locationId: i.locationId ?? undefined,
-          quantity: Number(i.quantity),
-          unitPrice: Number(i.unitPrice),
-          discountType: i.discountType ?? undefined,
-          discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-          // The source line's tax carries over — it used to be dropped, so a
-          // quotation/order with PPN became an invoice without it.
-          taxRateIds: i.taxes.map((t) => t.taxRateId).filter((id): id is string => !!id),
-        }));
-
-        // Carry each source line's price and level forward unchanged — a
-        // quotation that said Rp100k must not become Rp110k on the order
-        // or invoice because a price level changed in between.
-        const forcedUnitPriceByIndex = new Map<number, number>();
-        const forcedPriceLevelIdByIndex = new Map<number, string | null>();
-        quotation.items.forEach((i, idx) => {
-          if (!i.productId) return;
-          forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
-          forcedPriceLevelIdByIndex.set(idx, i.priceLevelId ?? null);
-        });
-
-        const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
+        const { items: priced, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx, {
             forcedUnitPriceByIndex,
             forcedPriceLevelIdByIndex,
             allowArchivedTaxRates: true,
           });
         await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
+        const odometer = quotation.vehicleId
+          ? await this.carryOdometer(tx, organizationId, quotation.vehicleId, quotation.odometer)
+          : null;
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -2512,6 +2504,9 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             format: 'A4',
             customerName: quotation.customerName,
             customerId: quotation.customerId,
+            // Workshops: the quoted car and its reading.
+            vehicleId: quotation.vehicleId,
+            odometer,
             quotationId: quotation.id,
             bankAccountId: quotation.bankAccountId,
             bankName: quotation.bankName,
@@ -2523,7 +2518,8 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             discount: discountAmount,
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
-            items: { create: lines.map((l) => ({
+            items: { create: priced.map((l, idx) => ({
+              quotationItemId: quotationItemIds[idx],
               productId: l.productId, description: l.description, locationId: l.locationId,
               quantity: l.quantity, unitPrice: l.unitPrice, priceLevelId: l.priceLevelId, unitCost: l.unitCost,
               lineTotal: l.lineTotal,
@@ -2631,6 +2627,16 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
         });
         const bank = await this.bankAccounts.resolve(organizationId, undefined, tx, bookedBranchId);
         await this.planLimits.assertCanAdd(organizationId, 'invoicesPerMonth', 1, tx);
+        // The order has no odometer of its own: the reading is the quotation's, for the same car.
+        const quoted = order.vehicleId && order.quotationId
+          ? await tx.salesQuotation.findUnique({
+              where: { id: order.quotationId },
+              select: { vehicleId: true, odometer: true },
+            })
+          : null;
+        const odometer = order.vehicleId && quoted?.vehicleId === order.vehicleId
+          ? await this.carryOdometer(tx, organizationId, order.vehicleId, quoted.odometer)
+          : null;
         const invoice = await tx.invoice.create({
           data: {
             organizationId,
@@ -2640,6 +2646,8 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
             format: 'A4',
             customerName: order.customerName,
             customerId: order.customerId,
+            vehicleId: order.vehicleId,
+            odometer,
             salesOrderId: order.id,
             bankAccountId: bank.bankAccountId,
             bankName: bank.bankName,
@@ -2684,6 +2692,21 @@ async createDraftFromQuotation(organizationId: string, userId: string, quotation
       }
       throw err;
     }
+  }
+
+  // A reading carried over from a quotation: kept (and recorded on the car) unless the car has
+  // since been read higher — readings only go up, so the older one stays on the quotation.
+  private async carryOdometer(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    vehicleId: string,
+    odometer: number | null,
+  ): Promise<number | null> {
+    if (odometer == null) return null;
+    const vehicle = await tx.vehicle.findFirst({ where: { id: vehicleId, organizationId }, select: { odometer: true } });
+    if (!vehicle || (vehicle.odometer != null && odometer < vehicle.odometer)) return null;
+    await tx.vehicle.update({ where: { id: vehicleId }, data: { odometer } });
+    return odometer;
   }
 
   private async applyOdometerReading(

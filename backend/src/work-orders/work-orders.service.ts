@@ -1,24 +1,19 @@
-import { createHash, randomBytes } from 'crypto';
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  GoneException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { InvoiceFormat, InvoiceStatus, Prisma, ReminderStatus, WorkOrderStatus } from '@prisma/client';
+import { randomBytes } from 'crypto';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { InvoiceFormat, InvoiceStatus, ModuleKey, Prisma, ReminderStatus, WorkOrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { InvoiceService } from '../invoice/invoice.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
+import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { resolveBranchId } from '../branches/resolve-branch';
 import { normalizePlate } from '../lib/plate';
 import { escapeLike } from '../common/text/escape-like';
 import {
   CreateRecommendationDto,
   CreateWorkOrderDto,
+  CreateWorkOrderFromQuotationDto,
   UpdateWorkOrderDto,
   AddWorkOrderLineDto,
   WorkOrderLineInput,
@@ -52,6 +47,11 @@ const DETAIL_INCLUDE = {
   // The earlier job this one redoes, and jobs that came back to redo this one.
   comebackOf: { select: { id: true, number: true, completedAt: true, mechanic: { select: { id: true, name: true } } } },
   comebacks: { select: { id: true, number: true, comebackReason: true, createdAt: true } },
+  // The quotation it was made from, and any additional ones for parts found mid-job.
+  quotations: {
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, quotationNumber: true, status: true, parentQuotationId: true },
+  },
 } satisfies Prisma.WorkOrderInclude;
 
 type WorkOrderDetail = Prisma.WorkOrderGetPayload<{ include: typeof DETAIL_INCLUDE }>;
@@ -61,12 +61,18 @@ function withInvoiced(wo: WorkOrderDetail) {
   return { ...wo, invoicedId: live?.id ?? null };
 }
 
-// How long a customer approval link stays valid.
-const APPROVAL_LINK_DAYS = 30;
+// What the workshop board shows: jobs being worked on first, then waiting for parts, then queued.
+const BOARD_STATUSES: WorkOrderStatus[] = [
+  WorkOrderStatus.IN_PROGRESS,
+  WorkOrderStatus.WAITING_PARTS,
+  WorkOrderStatus.QUEUED,
+];
 
-// Job cards for the workshop: a vehicle checks in, a mechanic works
-// through QUEUED → IN_PROGRESS (→ WAITING_PARTS) → DONE, and the job
-// becomes a draft invoice. Only available while the org has turned
+// Job cards for the workshop: a quotation (or a car checked straight in)
+// becomes a job, a mechanic works through QUEUED → IN_PROGRESS
+// (→ WAITING_PARTS) → DONE, and the job becomes a draft invoice. The
+// customer's go-ahead is given on the quotation (see SalesQuotationService
+// approval link). Only available while the org has turned
 // workOrdersEnabled on — otherwise workshops invoice vehicles directly.
 @Injectable()
 export class WorkOrdersService {
@@ -75,7 +81,8 @@ export class WorkOrdersService {
     private numbering: DocumentNumberingService,
     private pricing: LineItemPricingService,
     private invoices: InvoiceService,
-    private notifications: NotificationsService,
+    private quotations: SalesQuotationService,
+    private modules: OrganizationModulesService,
   ) {}
 
   async isEnabled(organizationId: string): Promise<boolean> {
@@ -101,11 +108,13 @@ export class WorkOrdersService {
   }
 
   // branchId: a branch member's picker — their branch's and unassigned staff.
+  // The job's mechanic picker (front desk): only the mechanics listed on the Mechanic account.
   async mechanics(organizationId: string, branchId?: string) {
     await this.assertEnabled(organizationId);
     return this.prisma.employee.findMany({
       where: {
         organizationId,
+        isMechanic: true,
         archivedAt: null,
         isActive: true,
         ...(branchId && { OR: [{ branchId }, { branchId: null }] }),
@@ -245,12 +254,11 @@ export class WorkOrdersService {
         data: {
           organizationId,
           number,
-          // A job checked straight in is approved at check-in; an estimate
-          // waits for approve(). approvedAt also tells a reopened job which
-          // of the two to go back to (see setStatus).
-          status: dto.asEstimate ? WorkOrderStatus.ESTIMATE : WorkOrderStatus.QUEUED,
-          approvedAt: dto.asEstimate ? null : new Date(),
-          approvedById: dto.asEstimate ? null : userId,
+          // The go-ahead is given before a job exists: on its quotation, or
+          // by checking the car straight in.
+          status: WorkOrderStatus.QUEUED,
+          approvedAt: new Date(),
+          approvedById: userId,
           customerId: vehicle.customerId,
           vehicleId: vehicle.id,
           mechanicId: dto.mechanicId ?? null,
@@ -367,17 +375,12 @@ export class WorkOrdersService {
 
   async setStatus(organizationId: string, id: string, requested: WorkOrderStatus) {
     const wo = await this.getEditable(organizationId, id, { allowCancelled: true });
-    // An estimate only moves on by approve() (or is cancelled = declined),
-    // and nothing moves back into ESTIMATE — except reopening a cancelled
-    // job that was never approved, which returns to being an estimate.
-    if (requested === WorkOrderStatus.ESTIMATE) {
-      throw new BadRequestException('A job can’t be turned back into an estimate');
+    // Estimates are quotations now; a legacy ESTIMATE job only waits for
+    // src/scripts/estimates-to-quotations.ts to turn it into one.
+    if (requested === WorkOrderStatus.ESTIMATE || wo.status === WorkOrderStatus.ESTIMATE) {
+      throw new BadRequestException('Estimates are sales quotations now — quote the job there');
     }
-    if (wo.status === WorkOrderStatus.ESTIMATE && requested !== WorkOrderStatus.CANCELLED) {
-      throw new BadRequestException('Record the customer’s approval first');
-    }
-    const status =
-      wo.status === WorkOrderStatus.CANCELLED && !wo.approvedAt ? WorkOrderStatus.ESTIMATE : requested;
+    const status = requested;
     if (wo.status === status) return this.getOne(organizationId, id);
     const now = new Date();
     await this.prisma.workOrder.update({
@@ -393,147 +396,205 @@ export class WorkOrdersService {
     return this.getOne(organizationId, id);
   }
 
-  // The customer's go-ahead on an estimate: it becomes a normal queued job
-  // (and from then on holds its parts' stock).
-  async approve(organizationId: string, userId: string, id: string, note?: string) {
-    await this.getEditable(organizationId, id);
-    await this.decideEstimate(organizationId, id, true, { userId, note });
-    return this.getOne(organizationId, id);
-  }
+  // ── From a quotation ─────────────────────────────────────────────────
 
-  // Approve (→ QUEUED) or decline (→ CANCELLED) an estimate — by staff, or
-  // by the customer through the link (no userId; `version` must match the
-  // estimate they were shown, see respondToEstimate). Claimed on status so
-  // two answers can't both win.
-  private async decideEstimate(
+  // The quoted job, whether or not the customer has answered the link yet. An additional quotation (parts
+  // found mid-job) adds its lines to its original's work order instead of starting another.
+  async createFromQuotation(
     organizationId: string,
-    id: string,
-    approve: boolean,
-    by: { userId?: string; note?: string },
+    userId: string,
+    quotationId: string,
+    dto: CreateWorkOrderFromQuotationDto = {},
   ) {
-    const claimed = await this.prisma.workOrder.updateMany({
-      where: { id, organizationId, status: WorkOrderStatus.ESTIMATE },
-      data: approve
-        ? {
-            status: WorkOrderStatus.QUEUED,
-            approvedAt: new Date(),
-            approvedById: by.userId ?? null,
-            approvalNote: by.note?.trim() || null,
-          }
-        : { status: WorkOrderStatus.CANCELLED, approvalNote: by.note?.trim() || null },
+    await this.assertEnabled(organizationId);
+    let quotation = await this.prisma.salesQuotation.findFirst({
+      where: { id: quotationId, organizationId },
+      // Lines in the order they were saved, as the quotation prints them.
+      include: { items: true, parentQuotation: { select: { workOrderId: true } } },
     });
-    if (claimed.count === 0) throw new BadRequestException('Only an estimate can be approved or declined');
+    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (quotation.items.length === 0) throw new BadRequestException('Add at least one part or service first');
+    if (!quotation.customerId || !quotation.vehicleId) {
+      throw new BadRequestException('Pick the customer and their vehicle on the quotation first');
+    }
+    const targetId = quotation.parentQuotationId ? quotation.parentQuotation?.workOrderId : null;
+    if (quotation.parentQuotationId && !targetId) {
+      throw new BadRequestException('Convert the original quotation to a work order first');
+    }
+    // A draft is sent first, so the job refers to a numbered quotation.
+    if (quotation.status === 'DRAFT') {
+      await this.quotations.send(organizationId, quotationId, userId);
+      quotation = { ...quotation, ...(await this.prisma.salesQuotation.findUniqueOrThrow({ where: { id: quotationId } })) };
+    }
+    const lines = quotationLines(quotation.items);
+    const previousStatus = await this.quotations.claimForWorkOrder(organizationId, quotationId);
+    try {
+      let workOrderId: string;
+      if (targetId) {
+        const wo = await this.prisma.workOrder.findUniqueOrThrow({
+          where: { id: targetId },
+          include: { items: { orderBy: { sortOrder: 'asc' } } },
+        });
+        await this.update(organizationId, userId, targetId, {
+          items: [...wo.items.map(fromItem), ...lines],
+        } as UpdateWorkOrderDto);
+        workOrderId = targetId;
+      } else {
+        const vehicle = await this.prisma.vehicle.findUniqueOrThrow({
+          where: { id: quotation.vehicleId! },
+          select: { odometer: true },
+        });
+        // Readings only go up: one older than the car's latest stays on the quotation, and the job
+        // says so rather than starting with a blank odometer and no reason.
+        const staleOdometer =
+          quotation.odometer != null && vehicle.odometer != null && quotation.odometer < vehicle.odometer;
+        const created = await this.create(organizationId, userId, {
+          vehicleId: quotation.vehicleId!,
+          mechanicId: dto.mechanicId,
+          branchId: quotation.branchId ?? undefined,
+          odometer: quotation.odometer != null && !staleOdometer ? quotation.odometer : undefined,
+          complaint: quotation.complaint ?? undefined,
+          customerPoNumber: quotation.customerPoNumber ?? undefined,
+          items: lines,
+        } as CreateWorkOrderDto);
+        await this.prisma.workOrder.update({
+          where: { id: created.id },
+          data: {
+            approvalNote: [
+              `From quotation ${quotation.quotationNumber}`,
+              quotation.responseNote,
+              staleOdometer &&
+                `Quoted at ${quotation.odometer!.toLocaleString('id-ID')} km, below the car's current ` +
+                  `${vehicle.odometer!.toLocaleString('id-ID')} km — enter today's reading`,
+            ]
+              .filter(Boolean)
+              .join(' — '),
+          },
+        });
+        workOrderId = created.id;
+      }
+      await this.quotations.recordWorkOrder(organizationId, quotationId, userId, workOrderId);
+      return this.getOne(organizationId, workOrderId);
+    } catch (err) {
+      await this.quotations.releaseWorkOrderClaim(quotationId, previousStatus);
+      throw err;
+    }
   }
 
-  // ── Customer approval link ───────────────────────────────────────────
+  // ── Mechanics ──────────────────────────────────────────────────────────
 
-  // The secret for /estimate/<token>. Reused while valid, so a link already
-  // sent to the customer keeps working when staff copy it again.
-  async approvalLink(organizationId: string, id: string) {
-    const wo = await this.getEditable(organizationId, id);
-    if (wo.status !== WorkOrderStatus.ESTIMATE) throw new BadRequestException('Only an estimate can be sent for approval');
-    if (wo.approvalToken && wo.approvalTokenExpiresAt && wo.approvalTokenExpiresAt > new Date()) {
-      return { token: wo.approvalToken, expiresAt: wo.approvalTokenExpiresAt };
+  // The mechanics listed on the Mechanic account: employees marked isMechanic, created from the names
+  // written there (no "Mekanik" / "Mechanic" position to type). Archived ones too when asked, for the list.
+  async listMechanics(organizationId: string, includeArchived = false) {
+    return this.prisma.employee.findMany({
+      where: { organizationId, isMechanic: true, ...(includeArchived ? {} : { archivedAt: null }) },
+      select: { id: true, name: true, branchId: true, archivedAt: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  // A name on the Mechanic account becomes a Payroll employee (salary set there later).
+  async addMechanic(organizationId: string, name: string, branchId?: string | null) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new BadRequestException('Enter the mechanic’s name');
+    const existing = await this.prisma.employee.findFirst({
+      where: { organizationId, isMechanic: true, name: { equals: trimmed, mode: 'insensitive' } },
+    });
+    // Re-adding someone archived brings them back, history and all.
+    if (existing) {
+      if (!existing.archivedAt) throw new BadRequestException(`${existing.name} is already a mechanic`);
+      return this.prisma.employee.update({
+        where: { id: existing.id },
+        data: { archivedAt: null, isActive: true },
+        select: { id: true, name: true, branchId: true, archivedAt: true },
+      });
     }
-    const token = randomBytes(24).toString('base64url');
-    const expiresAt = new Date(Date.now() + APPROVAL_LINK_DAYS * 24 * 60 * 60 * 1000);
-    await this.prisma.workOrder.update({
+    return this.prisma.employee.create({
+      data: { organizationId, name: trimmed, position: 'Mechanic', baseSalary: 0, isMechanic: true, branchId: branchId ?? null },
+      select: { id: true, name: true, branchId: true, archivedAt: true },
+    });
+  }
+
+  async renameMechanic(organizationId: string, id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new BadRequestException('Enter the mechanic’s name');
+    await this.getMechanicRecord(organizationId, id);
+    return this.prisma.employee.update({
       where: { id },
-      data: { approvalToken: token, approvalTokenExpiresAt: expiresAt },
+      data: { name: trimmed },
+      select: { id: true, name: true, branchId: true, archivedAt: true },
     });
-    return { token, expiresAt };
   }
 
-  private async byApprovalToken(token: string) {
-    const wo = await this.prisma.workOrder.findUnique({
-      where: { approvalToken: token },
-      select: { id: true, organizationId: true, approvalTokenExpiresAt: true },
+  // Off the list and the pickers; their past jobs and pay keep pointing at them.
+  async removeMechanic(organizationId: string, id: string) {
+    await this.getMechanicRecord(organizationId, id);
+    return this.prisma.employee.update({
+      where: { id },
+      data: { archivedAt: new Date(), isActive: false },
+      select: { id: true, name: true, branchId: true, archivedAt: true },
     });
-    if (!wo) throw new NotFoundException('This link is not valid');
-    if (!wo.approvalTokenExpiresAt || wo.approvalTokenExpiresAt < new Date()) {
-      throw new GoneException('This link has expired — ask the workshop for a new one');
-    }
-    if (!(await this.isEnabled(wo.organizationId))) throw new NotFoundException('This link is not valid');
-    return wo;
   }
 
-  // What the customer sees: no internal notes, mechanic or phone numbers.
-  async publicEstimate(token: string) {
-    const { id, organizationId, approvalTokenExpiresAt } = await this.byApprovalToken(token);
-    const { workOrder: wo, pricing, business } = await this.printView(organizationId, id);
+  private async getMechanicRecord(organizationId: string, id: string) {
+    const mechanic = await this.prisma.employee.findFirst({ where: { id, organizationId, isMechanic: true } });
+    if (!mechanic) throw new NotFoundException('Mechanic not found');
+    return mechanic;
+  }
+
+  // ── Workshop board (the Mechanic account's screen) ─────────────────────
+
+  // Read-only: the jobs on the floor, with what to fit — no prices, customers' contacts or staff names other
+  // than the mechanic.
+  async board(organizationId: string) {
+    await this.assertEnabled(organizationId);
+    const org = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { id: true, name: true, logoUrl: true },
+    });
+    const jobs = await this.prisma.workOrder.findMany({
+      where: { organizationId: org.id, status: { in: BOARD_STATUSES } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        complaint: true,
+        notes: true,
+        createdAt: true,
+        startedAt: true,
+        vehicle: { select: { plateNumber: true, vehicleModel: true } },
+        mechanic: { select: { name: true } },
+        branch: { select: { name: true } },
+        items: {
+          orderBy: { sortOrder: 'asc' },
+          select: { productId: true, description: true, quantity: true, product: { select: { name: true } } },
+        },
+      },
+    });
+    jobs.sort((a, b) => BOARD_STATUSES.indexOf(a.status) - BOARD_STATUSES.indexOf(b.status));
     return {
-      business,
-      number: wo.number,
-      createdAt: wo.createdAt,
-      status: wo.status,
-      approvedAt: wo.approvedAt,
-      customerName: wo.customer.name,
-      customerCompany: wo.customer.companyName,
-      customerNpwp: wo.customer.npwp,
-      validUntil: wo.validUntil,
-      customerPoNumber: wo.customerPoNumber,
-      paymentTerms: wo.paymentTerms,
-      vehicle: { plateNumber: wo.vehicle.plateNumber, vehicleModel: wo.vehicle.vehicleModel },
-      complaint: wo.complaint,
-      lines: wo.items.map((i, idx) => ({
-        name: i.product?.name ?? i.description ?? '',
-        isPart: !!i.productId,
-        quantity: Number(i.quantity),
-        unitPrice: pricing?.lines[idx]?.unitPrice ?? null,
-        lineTotal: pricing?.lines[idx]?.lineTotal ?? null,
+      business: { name: org.name, logoUrl: org.logoUrl },
+      generatedAt: new Date(),
+      jobs: jobs.map((j) => ({
+        id: j.id,
+        number: j.number,
+        status: j.status,
+        plateNumber: j.vehicle.plateNumber,
+        vehicleModel: j.vehicle.vehicleModel,
+        complaint: j.complaint,
+        notes: j.notes,
+        mechanic: j.mechanic?.name ?? null,
+        branch: j.branch?.name ?? null,
+        createdAt: j.createdAt,
+        startedAt: j.startedAt,
+        lines: j.items.map((i) => ({
+          name: i.product?.name ?? i.description ?? '',
+          isPart: !!i.productId,
+          quantity: Number(i.quantity),
+        })),
       })),
-      subtotal: pricing?.subtotal ?? null,
-      discountAmount: pricing?.discountAmount ?? 0,
-      taxAmount: pricing?.taxAmount ?? 0,
-      total: pricing?.total ?? Number(wo.estimatedTotal),
-      expiresAt: approvalTokenExpiresAt,
-      // A fingerprint of what the customer is shown, echoed back on
-      // approve/decline: if staff changed the estimate since, it's refused.
-      version: createHash('sha256')
-        .update(
-          JSON.stringify([
-            wo.complaint,
-            wo.items.map((i) => [i.productId, i.description, String(i.quantity), i.unitPrice?.toString() ?? null]),
-            pricing?.total ?? null,
-          ]),
-        )
-        .digest('hex')
-        .slice(0, 16),
     };
-  }
-
-  async respondToEstimate(
-    token: string,
-    approve: boolean,
-    dto: { name: string; reason?: string; version: string },
-  ) {
-    const { id, organizationId } = await this.byApprovalToken(token);
-    const current = await this.publicEstimate(token);
-    if (current.status === WorkOrderStatus.ESTIMATE && current.version !== dto.version) {
-      throw new ConflictException('This estimate was updated — please reload to see the latest version');
-    }
-    if (approve && current.validUntil && endOfDay(current.validUntil) < new Date()) {
-      throw new BadRequestException('This estimate is no longer valid — ask the workshop for an updated one');
-    }
-    const name = dto.name.trim();
-    const note = approve
-      ? `Approved online by ${name}`
-      : `Declined online by ${name}${dto.reason?.trim() ? `: ${dto.reason.trim()}` : ''}`;
-    await this.decideEstimate(organizationId, id, approve, { note });
-
-    const wo = await this.prisma.workOrder.findUniqueOrThrow({
-      where: { id },
-      select: { number: true, vehicle: { select: { plateNumber: true } } },
-    });
-    await this.notifications.notifyOrgStaff(
-      organizationId,
-      approve ? 'WORK_ORDER_APPROVED' : 'WORK_ORDER_DECLINED',
-      approve
-        ? `Estimate ${wo.number} (${wo.vehicle.plateNumber}) was approved`
-        : `Estimate ${wo.number} (${wo.vehicle.plateNumber}) was declined`,
-      { body: note, link: `/workshop/work-orders/${id}` },
-    );
-    return this.publicEstimate(token);
   }
 
   // Work spotted on this job for a later visit, kept as a reminder on the
@@ -623,10 +684,10 @@ export class WorkOrdersService {
 
   private async assertMechanic(organizationId: string, employeeId: string) {
     const found = await this.prisma.employee.findFirst({
-      where: { id: employeeId, organizationId, archivedAt: null },
+      where: { id: employeeId, organizationId, archivedAt: null, isMechanic: true },
       select: { id: true },
     });
-    if (!found) throw new BadRequestException('Mechanic not found');
+    if (!found) throw new BadRequestException('Mechanic not found — add them to the mechanic account first');
   }
 
   // Without POS pricing the invoice ignores a typed part price and uses
@@ -690,7 +751,34 @@ function formalFields(dto: { validUntil?: string | null; customerPoNumber?: stri
   };
 }
 
-// A DATE column holds midnight UTC; the estimate is good through that day.
-function endOfDay(date: Date) {
-  return new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
+// A quotation line as a job line, at the quoted price per unit (any line discount folded in). Part prices
+// only stay on the job while POS pricing is on (see dropIgnoredPartPrices).
+function quotationLines(
+  items: { productId: string | null; locationId: string | null; description: string | null; quantity: Prisma.Decimal; netAmount: Prisma.Decimal }[],
+): WorkOrderLineInput[] {
+  return items.map((i) => {
+    const quantity = Number(i.quantity);
+    const unitPrice = quantity ? Math.round((Number(i.netAmount) / quantity) * 100) / 100 : 0;
+    return (
+      i.productId
+        ? { productId: i.productId, locationId: i.locationId ?? undefined, quantity, unitPrice }
+        : { description: i.description?.trim() || '-', quantity, unitPrice }
+    ) as WorkOrderLineInput;
+  });
+}
+
+// A saved job line, as update() takes it back.
+function fromItem(i: {
+  productId: string | null;
+  locationId: string | null;
+  description: string | null;
+  quantity: Prisma.Decimal;
+  unitPrice: Prisma.Decimal | null;
+}): WorkOrderLineInput {
+  return {
+    ...(i.productId ? { productId: i.productId, locationId: i.locationId ?? undefined } : { description: i.description ?? '' }),
+    ...(i.productId && i.description ? { description: i.description } : {}),
+    quantity: Number(i.quantity),
+    ...(i.unitPrice != null ? { unitPrice: Number(i.unitPrice) } : {}),
+  } as WorkOrderLineInput;
 }

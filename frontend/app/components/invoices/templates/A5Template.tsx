@@ -59,7 +59,6 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           {invoice.dueDate && (
             <p className="text-black">{t('sales.invoiceTemplate.due')} {formatDMY(parseCalendarDate(invoice.dueDate))}</p>
           )}
-          {invoice.employeeName && <p className="text-black">{t('sales.invoiceTemplate.salesLabel', { name: invoice.employeeName })}</p>}
         </div>
       </div>
 
@@ -96,17 +95,23 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
         </div>
       )}
 
-      {/* Items — Discount/Tax columns always render, matching the
+      {/* Items — Discount column always render, matching the
           Sales Order template's table style. */}
-      {/* Items — Discount/Tax columns always render, same shape as A4. */}
-      <table className="w-full border-collapse mt-3">
+      {/* Items — Discount column always render, same shape as A4. */}
+      <table className="w-full table-fixed border-collapse mt-3">
+        <colgroup>
+          <col />
+          <col className="w-[10%]" />
+          <col className="w-[17%]" />
+          <col className="w-[15%]" />
+          <col className="w-[18%]" />
+        </colgroup>
         <thead>
           <tr>
             <th className="text-left border-b border-gray-300 py-1 pr-2 text-black">{t('sales.invoiceTemplate.itemHeader')}</th>
             <th className="text-left border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.qtyHeader')}</th>
             <th className="text-left border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.priceHeader')}</th>
             <th className="text-right border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.discount')}</th>
-            <th className="text-right border-b border-gray-300 py-1 px-2 text-black">{t('sales.invoiceTemplate.tax')}</th>
             <th className="text-right border-b border-gray-300 py-1 pl-2 text-black">{t('common.total')}</th>
           </tr>
         </thead>
@@ -114,33 +119,30 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
         <tbody>
           {invoice.items.map((item) => (
             <tr key={item.id}>
-              <td className="border-b border-gray-100 py-1 pr-2 text-black break-words">
+              <td className="border-b border-gray-100 py-1 pr-2 text-black [overflow-wrap:anywhere]">
                 {item.productName}
                 {item.serialNumbers && item.serialNumbers.length > 0 && (
                   <span className="block text-[9px] font-mono text-gray-600">S/N: {item.serialNumbers.join(', ')}</span>
                 )}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 px-2 text-black [overflow-wrap:anywhere]">
                 {item.quantity}
                 {item.unit && (
                   <span className="text-black text-[10px] ml-1">{item.unit}</span>
                 )}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 px-2 text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.unitPrice)}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-right text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 px-2 text-right text-black [overflow-wrap:anywhere]">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
 
-              <td className="border-b border-gray-100 py-1 px-2 text-right text-black whitespace-nowrap">
-                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-              </td>
 
-              <td className="border-b border-gray-100 py-1 pl-2 text-right font-medium text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-1 pl-2 text-right font-medium text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.itemTotal)}
               </td>
             </tr>
@@ -163,15 +165,13 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
               <span>-{formatIDR(invoice.discount)}</span>
             </div>
           )}
-          {invoice.taxAmount > 0 &&
-            invoice.taxes.map((tax, i) => (
-              <div key={i} className="flex justify-between py-0.5 text-black">
-                <span>
-                  {tax.name} ({tax.percentage}%)
-                </span>
-                <span>{formatIDR(tax.amount)}</span>
-              </div>
-            ))}
+          {/* Only documents issued while tax rates existed carry tax. */}
+          {invoice.taxAmount > 0 && (
+            <div className="flex justify-between py-0.5 text-black">
+              <span>{t('sales.invoiceTemplate.tax')}</span>
+              <span>{formatIDR(invoice.taxAmount)}</span>
+            </div>
+          )}
           <div className="flex justify-between font-bold border-t border-black pt-1 mt-1 text-sm text-black">
             <span>{t('common.total')}</span>
             <span>{formatIDR(invoice.total)}</span>
@@ -218,7 +218,7 @@ export function A5Template({ invoice }: { invoice: InvoiceView }) {
           <p className="text-black">{t('sales.invoiceTemplate.regardsLabel')}</p>
           <div className="h-14" />
           <p className="border-t border-gray-400 pt-1 text-black">
-            {invoice.employeeName ?? invoice.businessName ?? invoice.locationName}
+            {invoice.businessName ?? invoice.locationName}
           </p>
         </div>
       </div>

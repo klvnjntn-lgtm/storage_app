@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { CartLine, ServiceLine } from '@/app/components/invoices/types';
 import {
   applyDiscountToAllLines,
-  applyTaxToAllLines,
   buildInvoiceHeader,
   NO_BANK_ACCOUNT,
   cartKey,
@@ -18,7 +17,6 @@ import {
   setLineSerials,
   setServicePrice,
   setUnitPrice,
-  toggleLineTax,
   type Cart,
 } from './invoice-cart';
 
@@ -30,7 +28,6 @@ function line(stock: number, quantity = 1): CartLine {
     unit: null,
     locationId: 'loc',
     locationName: 'Main',
-    taxRateIds: [],
     discountType: null,
     discountValue: null,
   } as unknown as CartLine;
@@ -75,15 +72,6 @@ describe('line edits', () => {
     expect(c[key].priceCustom).toBe(true);
   });
 
-  it('toggles a tax rate on and off, and applies one to every line', () => {
-    let c = toggleLineTax(cartOf(line(5)), key, 'ppn');
-    expect(c[key].taxRateIds).toEqual(['ppn']);
-    c = toggleLineTax(c, key, 'ppn');
-    expect(c[key].taxRateIds).toEqual([]);
-    c = applyTaxToAllLines(c, 'ppn', true);
-    expect(applyTaxToAllLines(c, 'ppn', true)[key].taxRateIds).toEqual(['ppn']);
-  });
-
   it('sets, clears and bulk-applies discounts', () => {
     let c = setLineDiscount(cartOf(line(5)), key, 'PERCENTAGE', '250');
     expect(c[key].discountValue).toBe(100);
@@ -109,9 +97,8 @@ describe('serial numbers', () => {
 });
 
 describe('service lines', () => {
-  it('starts with the default tax and parses prices leniently', () => {
-    const s: ServiceLine[] = [newServiceLine('s1', 'ppn')];
-    expect(s[0].taxRateIds).toEqual(['ppn']);
+  it('parses prices leniently', () => {
+    const s: ServiceLine[] = [newServiceLine('s1')];
     expect(setServicePrice(s, 's1', '25000')[0].unitPrice).toBe(25_000);
     expect(setServicePrice(setServicePrice(s, 's1', '25000'), 's1', 'x')[0].unitPrice).toBe(25_000);
     expect(setServicePrice(s, 's1', '  ')[0].unitPrice).toBeNull();
@@ -148,16 +135,14 @@ describe('adding to the cart', () => {
 });
 
 describe('totals', () => {
-  it('taxes the net after discount and adds service lines', () => {
-    const ppn = { id: 'ppn', name: 'PPN', percentage: 11 } as never;
-    const l = { ...line(5, 2), key, discountType: 'PERCENTAGE' as const, discountValue: 10, taxRateIds: ['ppn'] };
-    const svc = { ...newServiceLine('s', 'ppn'), unitPrice: 50_000 };
-    const r = computeTotals([l], [svc], [ppn]);
-    expect(r.cartLines[0]).toMatchObject({ lineSubtotal: 20_000, lineDiscountAmount: 2_000, netAmount: 18_000, lineTaxAmount: 1_980 });
+  it('takes the discount off the line and adds service lines', () => {
+    const l = { ...line(5, 2), key, discountType: 'PERCENTAGE' as const, discountValue: 10 };
+    const svc = { ...newServiceLine('s'), unitPrice: 50_000 };
+    const r = computeTotals([l], [svc]);
+    expect(r.cartLines[0]).toMatchObject({ lineSubtotal: 20_000, lineDiscountAmount: 2_000, netAmount: 18_000, lineTotal: 18_000 });
     expect(r.subtotal).toBe(70_000);
     expect(r.discount).toBe(2_000);
-    expect(r.taxAmount).toBe(7_480);
-    expect(r.total).toBe(75_480);
+    expect(r.total).toBe(68_000);
   });
 });
 
@@ -165,7 +150,7 @@ describe('draft autosave', () => {
   it('saves a bare customer pick, but not an empty service row', () => {
     expect(hasSaveableContent({}, [], true, null, '')).toBe(false);
     expect(hasSaveableContent({}, [], false, null, 'Budi')).toBe(true);
-    expect(hasSaveableContent({}, [newServiceLine('s', undefined)], true, null, '')).toBe(false);
+    expect(hasSaveableContent({}, [newServiceLine('s')], true, null, '')).toBe(false);
   });
 });
 
@@ -181,11 +166,10 @@ describe('draft request body', () => {
     odometer: '12000',
     hasWorkshopRms: true,
     bankAccountId: '',
-    employeeId: '',
   };
 
   it('clears customer/vehicle fields explicitly on a receipt', () => {
-    expect(buildInvoiceHeader(base)).toEqual({ customerId: null, customerName: 'Walk-in', vehicleId: null, employeeId: null });
+    expect(buildInvoiceHeader(base)).toEqual({ customerId: null, customerName: 'Walk-in', vehicleId: null });
   });
 
   it('sends the full set on an A4 invoice, and an explicit "no bank account"', () => {

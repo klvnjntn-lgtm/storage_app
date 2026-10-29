@@ -1,6 +1,7 @@
 // Reads a workshop's free-text parts search the way a mechanic types it: "AVANZA 2006 WHEEL HUB",
 // "whell hub avanza" (typo), "grand new avanza laher roda", a kode rangka (F651) / kode mesin (1NR-VE),
-// a whole nomor rangka or nomor mesin from the STNK, or an OEM number. The words it knows come from
+// a whole nomor rangka or nomor mesin from the STNK, or an OEM number. Codes needn't be typed in full:
+// "NCP15", "L15", "ZRE" match every code starting so, and "ZRE 142" / "2KD FTV" read as one code. The words it knows come from
 // PartSearchTerm (written by the scraper's sync).
 
 export type SearchTerm = {
@@ -27,12 +28,17 @@ export type ParsedQuery = {
   oems: string[]; // normalized
   partBrands: string[];
   codes: { kind: 'chassis' | 'engine'; typed: string; code: string }[];
+  specs: string[]; // as the catalogue writes them: H4, NS60, 10W-40, 14"
   corrections: { typed: string; as: string }[]; // typos read as a known word
   ignored: string[];
   recognized: boolean;
 };
 
 const normalize = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// A spec compared the way people type it: "10w40" = 10W-40, "14inch" / 14in = 14", "215/55 r17" = 215/55 R17.
+export const specKey = (v: string) =>
+  normalize(v.toUpperCase().replace(/(\d)\s*(?:"|''|INCH|IN)$/, '$1IN'));
 
 // Engine family a nomor mesin starts with: "1NR-VE" → 1NR, "K3-VE" → K3, "4A91" → 4A91, "L15Z5" → L15Z5.
 const engineFamily = (code: string) => normalize(code.split('-')[0]);
@@ -68,11 +74,31 @@ const allowedTypos = (w: string) =>
   /\d/.test(w) || w.length <= 3 ? 0 : w.length >= 8 ? 2 : 1;
 
 const MAX_WORD_ITEMS = 6;
+// A partial code fitting more generations than this ("K1" across brands) is too vague to filter by.
+const MAX_CODE_GENERATIONS = 24;
+// How many of a partial code's matches to name in the "read as" chip.
+const SHOWN_CODES = 4;
+
+type CodeHit = {
+  kind: 'chassis' | 'engine';
+  code: string;
+  terms: SearchTerm[];
+};
 
 type Phrase = { words: string[]; compact: string; term: SearchTerm };
 
+// Words that say where or which (front, left, original…) — data has no such column, so they narrow nothing.
+export const NOISE_WORDS = new Set(
+  'depan belakang kiri kanan atas bawah dalam luar fr rr lh rh front rear left right upper lower inner outer set pasang satu 1set mobil untuk utk buat for ori original asli genuine oem kw murah harga baru new assy komplit lengkap'.split(
+    ' ',
+  ),
+);
+
 export class PartQueryParser {
   private phrases: Phrase[] = [];
+  private phraseWords = new Set<string>(); // every word of a car, item or brand name
+  private carWords = new Set<string>(); // every word of a car brand, model or generation name
+  private specs = new Map<string, string[]>(); // specKey → the spec values written so
   private chassis = new Map<string, SearchTerm[]>(); // normalized code → generations
   private engines = new Map<string, SearchTerm[]>(); // normalized code and family → generations
   readonly codesByVehicle = new Map<
@@ -83,7 +109,17 @@ export class PartQueryParser {
   constructor(
     terms: SearchTerm[],
     private readonly partBrands: string[] = [],
+    specs: string[] = [],
   ) {
+    // Combined specs ("46B24L / NS60L", wiper pairs "24\" + 14\"") are looked up by each part.
+    for (const spec of specs)
+      for (const part of spec.split(/ \/ | \+ /)) {
+        const key = specKey(part.trim());
+        if (key.length < 2 || !/[A-Z]/.test(key)) continue;
+        const known = this.specs.get(key) ?? [];
+        if (!known.includes(part.trim()))
+          this.specs.set(key, [...known, part.trim()]);
+      }
     const add = (m: Map<string, SearchTerm[]>, k: string, t: SearchTerm) =>
       m.set(k, [...(m.get(k) ?? []), t]);
     for (const t of terms) {
@@ -110,6 +146,10 @@ export class PartQueryParser {
           .filter(Boolean);
         if (words.length)
           this.phrases.push({ words, compact: words.join(''), term: t });
+        for (const w of words) {
+          this.phraseWords.add(w);
+          if (t.kind !== 'item') this.carWords.add(w);
+        }
       }
     }
   }
@@ -124,6 +164,7 @@ export class PartQueryParser {
       oems: [],
       partBrands: [],
       codes: [],
+      specs: [],
       corrections: [],
       ignored: [],
       recognized: false,
@@ -131,36 +172,59 @@ export class PartQueryParser {
     const codeHits: SearchTerm[][] = [];
     const phraseHits: SearchTerm[] = [];
 
-    tokens.forEach((tok, i) => {
-      const n = normalize(tok);
+    const takeCode = (hit: CodeHit, from: number, to = from) => {
+      codeHits.push(hit.terms);
+      out.codes.push({
+        kind: hit.kind,
+        typed: raw.slice(from, to + 1).join(' '),
+        code: hit.code,
+      });
+      for (let k = from; k <= to; k++) used[k] = true;
+    };
+
+    for (let i = 0; i < tokens.length; i++) {
+      const n = normalize(tokens[i]);
+      const next = i + 1 < tokens.length ? tokens[i + 1] : null;
+      const joined = next ? this.exactCode(n + normalize(next)) : null;
+      const joinedSpec = next
+        ? this.specs.get(specKey(`${tokens[i]} ${next}`))
+        : undefined;
+      // A car's own word stays the car's: "H1" is Hyundai's model before it is a bulb.
+      const spec = this.carWords.has(tokens[i])
+        ? undefined
+        : this.specs.get(specKey(tokens[i]));
       if (/^(19[5-9]\d|20[0-4]\d)$/.test(n) && out.year === undefined) {
         out.year = Number(n);
         used[i] = true;
       } else if (n.length >= 5 && /\d/.test(n) && knownOems.has(n)) {
         out.oems.push(n);
         used[i] = true;
-      } else if (this.chassis.has(n) || this.engines.has(n)) {
+      } else if (joined) {
+        // A code typed with a space: "ZRE 142", "2KD FTV"
+        takeCode(joined, i, ++i);
+      } else if (this.exactCode(n)) {
         // A bare code: "F651", "1NR", "K3-VE"
-        const hits = [
-          ...(this.chassis.get(n) ?? []),
-          ...(this.engines.get(n) ?? []),
-        ];
-        codeHits.push(hits);
-        out.codes.push({
-          kind: this.chassis.has(n) ? 'chassis' : 'engine',
-          typed: raw[i],
-          code: hits[0].term.toUpperCase(),
-        });
+        takeCode(this.exactCode(n)!, i);
+      } else if (joinedSpec) {
+        // A spec typed in two: "215/55 R17", "10W 40"
+        out.specs.push(...joinedSpec);
+        used[i] = used[++i] = true;
+      } else if (spec) {
+        // A spec: "H4", "NS60", "10w40", "14inch"
+        out.specs.push(...spec);
         used[i] = true;
-      } else if (n.length >= 7 && /\d/.test(n) && /[A-Z]/.test(n)) {
-        const hit = this.serialNumber(n);
-        if (hit) {
-          codeHits.push(hit.terms);
-          out.codes.push({ kind: hit.kind, typed: raw[i], code: hit.code });
-          used[i] = true;
-        }
+      } else if (
+        n.length >= 7 &&
+        /\d/.test(n) &&
+        /[A-Z]/.test(n) &&
+        this.serialNumber(n)
+      ) {
+        takeCode(this.serialNumber(n)!, i);
+      } else if (/\d/.test(n) && /[A-Z]/.test(n) && this.codePrefix(n)) {
+        // The start of a code: "NCP15", "L15", "G4K"
+        takeCode(this.codePrefix(n)!, i);
       }
-    });
+    }
 
     // Words and phrases, longest first, so "wheel hub" wins over "wheel" and "pajero sport" over "pajero".
     for (let len = Math.min(4, tokens.length); len >= 1; len--) {
@@ -183,10 +247,32 @@ export class PartQueryParser {
       }
     }
 
+    // The start or middle of an item's name: "lampu rem" → Third Brake Lamp ("lampu rem atas").
+    for (let len = Math.min(3, tokens.length); len >= 2; len--) {
+      for (let start = 0; start + len <= tokens.length; start++) {
+        if (used.slice(start, start + len).some(Boolean)) continue;
+        const words = tokens.slice(start, start + len);
+        if (words.some((w) => !/^[a-z]+$/.test(w) || NOISE_WORDS.has(w)))
+          continue;
+        const items = new Map<string, SearchTerm>();
+        for (const p of this.phrases)
+          if (
+            p.term.kind === 'item' &&
+            p.words.length > len &&
+            p.words.some((_, k) => words.every((w, j) => p.words[k + j] === w))
+          )
+            items.set(p.term.item, p.term);
+        if (items.size === 0 || items.size > MAX_WORD_ITEMS) continue;
+        phraseHits.push(...items.values());
+        for (let k = start; k < start + len; k++) used[k] = true;
+      }
+    }
+
     // A lone word that is part of item names: "shock" → Shock Absorber / Shock Bearing / Shock Mounting.
-    // Too common a word ("rem", "bearing" fit dozens of items) stays unmatched.
+    // Too common a word ("rem", "bearing" fit dozens of items) stays unmatched, and so does a car's word
+    // ("colt" of Colt Diesel is no typo of "bolt").
     tokens.forEach((tok, i) => {
-      if (used[i] || !/^[a-z]{4,}$/.test(tok)) return;
+      if (used[i] || !/^[a-z]{4,}$/.test(tok) || this.carWords.has(tok)) return;
       const max = allowedTypos(tok);
       const items = new Map<string, SearchTerm>();
       for (const p of this.phrases)
@@ -206,10 +292,22 @@ export class PartQueryParser {
     tokens.forEach((tok, i) => {
       if (used[i]) return;
       const brand = this.partBrands.find((b) => b.toLowerCase() === tok);
+      // Letters alone ("ZRE", "GUN") are only a code when the word isn't in any car, item or part brand name.
+      const code =
+        brand || !/^[a-z]{3,}$/.test(tok) || this.phraseWords.has(tok)
+          ? null
+          : this.codePrefix(normalize(tok));
+      // A bare size left over ("wiper xpander 24") is inches, when the catalogue has that size.
+      const inches = /^\d{2}$/.test(tok)
+        ? this.specs.get(`${tok}IN`)
+        : undefined;
       if (brand) out.partBrands.push(brand);
+      else if (code) takeCode(code, i);
+      else if (inches) out.specs.push(...inches);
       else out.ignored.push(raw[i]);
     });
 
+    out.specs = [...new Set(out.specs)];
     const uniq = <T>(xs: T[], key: (x: T) => string) => [
       ...new Map(xs.map((x) => [key(x), x])).values(),
     ];
@@ -225,17 +323,67 @@ export class PartQueryParser {
       out.items.length ||
       out.oems.length ||
       out.codes.length ||
+      out.specs.length ||
       out.partBrands.length ||
       out.year
     );
     return out;
   }
 
+  // A code typed in full. An engine family ("1NR" of 1NR-VE) counts only when too short for codePrefix
+  // ("K3"), so a longer one ("L15") gathers every code starting so, not just those it's the family of.
+  private exactCode(n: string): CodeHit | null {
+    const chassis = this.chassis.get(n) ?? [];
+    const engines = (this.engines.get(n) ?? []).filter(
+      (t) => n.length < 3 || t.termNormalized === n,
+    );
+    if (!chassis.length && !engines.length) return null;
+    const terms = [...chassis, ...engines];
+    return {
+      kind: chassis.length ? 'chassis' : 'engine',
+      code: terms[0].term.toUpperCase(),
+      terms,
+    };
+  }
+
+  // Every chassis and engine code starting with `n` (3+ characters), unless that's too many cars to mean one.
+  private codePrefix(n: string): CodeHit | null {
+    if (n.length < 3) return null;
+    const terms: SearchTerm[] = [];
+    const codes = new Set<string>();
+    let chassisKeys = 0;
+    let engineKeys = 0;
+    for (const [kind, map] of [
+      ['chassis', this.chassis],
+      ['engine', this.engines],
+    ] as const)
+      for (const [key, ts] of map) {
+        if (!key.startsWith(n)) continue;
+        if (kind === 'chassis') chassisKeys++;
+        else engineKeys++;
+        for (const t of ts) {
+          terms.push(t);
+          codes.add(t.term.toUpperCase());
+        }
+      }
+    if (!terms.length) return null;
+    const gens = new Set(
+      terms.map((t) => `${t.carBrand}|${t.model}|${t.generation}`),
+    );
+    if (gens.size > MAX_CODE_GENERATIONS) return null;
+    const shown = [...codes].sort();
+    return {
+      kind: chassisKeys >= engineKeys ? 'chassis' : 'engine',
+      code:
+        shown.slice(0, SHOWN_CODES).join(' / ') +
+        (shown.length > SHOWN_CODES ? ` +${shown.length - SHOWN_CODES}` : ''),
+      terms,
+    };
+  }
+
   // A whole nomor mesin ("1NRF123456": starts with the engine family) or nomor rangka (a frame number
   // starting with the chassis code, "ZRE1201234567", or a VIN carrying it, "MHYKZE81S..."). Longest code wins.
-  private serialNumber(
-    n: string,
-  ): { kind: 'chassis' | 'engine'; code: string; terms: SearchTerm[] } | null {
+  private serialNumber(n: string): CodeHit | null {
     let best: {
       kind: 'chassis' | 'engine';
       key: string;

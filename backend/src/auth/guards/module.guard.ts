@@ -25,6 +25,8 @@ import { REQUIRE_MODULE_KEY } from '../decorators/require-module.decorator';
 // that never touched WORKSHOP_RMS at all.
 const MODULE_DEPENDENCIES: Partial<Record<ModuleKey, ModuleKey>> = {
   [ModuleKey.WORKSHOP_RMS]: ModuleKey.INVOICE_POS,
+  // The books are built from invoices, bills and payments.
+  [ModuleKey.ACCOUNTING]: ModuleKey.INVOICE_POS,
 };
 
 // Runs AFTER OrgGuard (class-level guards execute before method-level

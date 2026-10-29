@@ -40,7 +40,7 @@ type JournalEntry = {
   lines: JournalLine[];
 };
 
-const SOURCE_TYPES = ['INVOICE', 'PAYMENT', 'PURCHASE_ORDER', 'GOODS_RECEIPT', 'SUPPLIER_PAYMENT', 'EXPENSE', 'PAYROLL', 'MANUAL'];
+const SOURCE_TYPES = ['INVOICE', 'PAYMENT', 'PURCHASE_ORDER', 'GOODS_RECEIPT', 'SUPPLIER_PAYMENT', 'EXPENSE', 'PAYROLL', 'MANUAL', 'OPENING_BALANCE'];
 const SOURCE_LABEL_KEY: Record<string, string> = {
   INVOICE: 'accounting.journal.source.invoice',
   PAYMENT: 'accounting.journal.source.payment',
@@ -50,6 +50,7 @@ const SOURCE_LABEL_KEY: Record<string, string> = {
   EXPENSE: 'accounting.journal.source.expense',
   PAYROLL: 'accounting.journal.source.payroll',
   MANUAL: 'accounting.journal.source.manual',
+  OPENING_BALANCE: 'accounting.journal.source.openingBalance',
 };
 
 function formatIDR(amount: number): string {

@@ -332,9 +332,10 @@ async function start(cfg, { onStatus, onCrash }) {
     APP_URL: frontendUrl,
     ALLOWED_ORIGINS: frontendUrl,
     UPLOADS_DIR: config.paths.uploads(),
-    // One business per install: it gets the INVOICE_POS module at sign-up
-    // (see auth.service.ts) since there is no platform owner to grant it.
-    AUTO_ENABLE_MODULES: 'INVOICE_POS',
+    // One business per install: it gets INVOICE_POS and ACCOUNTING at
+    // sign-up (see auth.service.ts) since there is no platform owner to
+    // grant them.
+    AUTO_ENABLE_MODULES: 'INVOICE_POS,ACCOUNTING',
     SINGLE_ORGANIZATION: 'true',
     WARESYS_EDITION: 'desktop',
     LICENSE_KEY: cfg.licenseKey || '',

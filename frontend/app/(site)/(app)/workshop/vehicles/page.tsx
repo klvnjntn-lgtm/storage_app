@@ -20,6 +20,9 @@ type VehicleListItem = {
   customer: { id: string; name: string; companyName: string | null };
 };
 
+// "B 1234 XYZ" and "b1234xyz" are the same plate.
+const normalizePlate = (s: string) => s.replace(/\s+/g, '').toUpperCase();
+
 export default function VehiclesPage() {
   const router = useRouter();
   const { t, language } = useLanguage();
@@ -99,6 +102,19 @@ export default function VehiclesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, page, pageSize]);
 
+  // Enter jumps straight to the vehicle when the search pins one down —
+  // an exact plate match or the only result — so "type a plate, see its
+  // history" stays one step. Ignored while the list is still catching up
+  // with the typed text.
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return;
+    const trimmed = query.trim();
+    if (!trimmed || loading || searchQuery !== trimmed) return;
+    const exact = vehicles.find((v) => normalizePlate(v.plateNumber) === normalizePlate(trimmed));
+    const match = exact ?? (total === 1 ? vehicles[0] : undefined);
+    if (match) router.push(`/workshop/vehicles/${match.id}`);
+  }
+
   return (
     <main
       className="min-h-screen text-black"
@@ -126,12 +142,13 @@ export default function VehiclesPage() {
             </div>
           </div>
 
-          {/* Search — command-palette style matching /vehicles/search, /customers, /inventory/stock */}
+          {/* Search — command-palette style matching /customers, /inventory/stock */}
           <div data-tour="veh-search" className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35">
             <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               placeholder={t('workshop.vehiclesList.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />

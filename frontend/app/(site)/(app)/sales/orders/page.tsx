@@ -10,6 +10,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import Pagination from '@/app/components/shared/Pagination';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { DocFlow, docRef } from '@/app/components/shared/DocFlow';
 import { formatDMY } from '@/lib/dates';
 
 
@@ -25,6 +26,9 @@ type SalesOrderListItem = {
   confirmedAt: string | null;
   location: { name: string } | null;
   items: { id: string }[];
+  quotation: { id: string; quotationNumber: string | null } | null;
+  deliveryOrders: { id: string; doNumber: string | null; status: string }[];
+  invoices: { id: string; invoiceNumber: string | null; status: string }[];
 };
 
 function formatIDR(amount: number): string {
@@ -296,6 +300,13 @@ export default function SalesOrdersPage() {
                     {o.customerName ? ` · ${o.customerName}` : ''} ·{' '}
                     {formatDMY(new Date(o.confirmedAt ?? o.createdAt))}
                   </p>
+                  <DocFlow
+                    from={docRef('quotation', o.quotation, o.quotation?.quotationNumber)}
+                    to={[
+                      ...(o.deliveryOrders ?? []).flatMap((d) => docRef('delivery', d, d.doNumber)),
+                      ...(o.invoices ?? []).flatMap((i) => docRef('invoice', i, i.invoiceNumber)),
+                    ]}
+                  />
                 </div>
 
                 <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">

@@ -48,15 +48,12 @@ export type POCustomItem = {
 
 export type LocationOption = { id: string; name: string };
 
-export type TaxRate = { id: string; name: string; percentage: number; isDefault?: boolean };
-
 export type PurchaseOrderDetail = {
   id: string;
   poNumber: string | null;
   status: PurchaseOrderStatus;
   supplierId: string | null;
   locationId: string | null;
-  taxRateId: string | null;
   subtotal: string | number;
   discountAmount: string | number;
   taxAmount: string | number;

@@ -22,6 +22,12 @@ type BankAccountInput = {
 // PostingRulesService's resolution step with a clear "no linked GL
 // account" error rather than silently posting somewhere wrong, but the
 // fix is still to call this, not to catch that error after the fact.
+// "BCA •••1234": the bank and the end of its number, so two accounts at one bank tell apart.
+export function linkedAccountName(bankAccount: Pick<BankAccountInput, 'bankName' | 'accountNumber'>) {
+  const last4 = bankAccount.accountNumber ? bankAccount.accountNumber.slice(-4) : null;
+  return last4 ? `${bankAccount.bankName} •••${last4}` : bankAccount.bankName;
+}
+
 @Injectable()
 export class BankAccountGLLinkService {
   constructor(private prisma: PrismaService) {}
@@ -47,19 +53,31 @@ export class BankAccountGLLinkService {
     });
     const code = parent ? `${parent.code}.${siblingCount + 1}` : `1010.${siblingCount + 1}`;
 
-    const last4 = bankAccount.accountNumber ? bankAccount.accountNumber.slice(-4) : null;
-    const name = last4 ? `${bankAccount.bankName} •••${last4}` : bankAccount.bankName;
-
     return db.chartOfAccount.create({
       data: {
         organizationId,
         code,
-        name,
+        name: linkedAccountName(bankAccount),
         type: AccountType.ASSET,
         normalBalance: NormalBalance.DEBIT,
         parentId: parent?.id,
         bankAccountId: bankAccount.id,
       },
+    });
+  }
+
+  // Keeps the ledger account in step with its bank account: renamed with it, inactive while it's archived.
+  // Accounts from before auto-linking get their ledger account here.
+  async syncLinkedAccount(
+    organizationId: string,
+    bankAccount: BankAccountInput & { archivedAt: Date | null },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db: Db = tx ?? this.prisma;
+    const linked = await this.ensureLinkedAccount(organizationId, bankAccount, tx);
+    return db.chartOfAccount.update({
+      where: { id: linked.id },
+      data: { name: linkedAccountName(bankAccount), isActive: !bankAccount.archivedAt },
     });
   }
 }

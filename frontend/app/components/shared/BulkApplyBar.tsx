@@ -1,16 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { DiscountType, TaxRate } from '@/app/components/invoices/types';
+import { DiscountType } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 export function BulkApplyBar({
-  taxRates,
-  onApplyTaxToAll,
   onApplyDiscountToAll,
 }: {
-  taxRates: TaxRate[];
-  onApplyTaxToAll: (taxRateId: string, checked: boolean) => void;
   onApplyDiscountToAll: (discountType: DiscountType | null, value: number) => void;
 }) {
   const [discType, setDiscType] = useState<DiscountType>('PERCENTAGE');
@@ -19,29 +15,6 @@ export function BulkApplyBar({
 
   return (
     <div className="mb-3 p-2.5 bg-blue-600/5 rounded-lg border border-blue-500/15 space-y-2">
-      {taxRates.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-gray-500 shrink-0">{t('shared.bulkApplyBar.taxAllLines')}</span>
-          {taxRates.map((rate) => (
-            <button
-              key={rate.id}
-              type="button"
-              onClick={() => onApplyTaxToAll(rate.id, true)}
-              className="text-[11px] px-2 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-white transition-colors"
-            >
-              + {rate.name} ({rate.percentage}%)
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => taxRates.forEach((r) => onApplyTaxToAll(r.id, false))}
-            className="text-[11px] px-2 py-1 rounded-md text-gray-400 hover:text-red-600"
-          >
-            {t('common.clear')}
-          </button>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] text-gray-500 shrink-0">{t('shared.bulkApplyBar.discountAllLines')}</span>
         <select

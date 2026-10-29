@@ -28,7 +28,7 @@ import {
 import { display } from '@/lib/fonts';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
-import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { getInitialParam, useMergeQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
@@ -626,7 +626,8 @@ function AttentionPanel({
 
 type Takeaway = { tone: Tone; icon: LucideIcon; text: string };
 
-export default function DeliveryReportsPage() {
+// The Driver tab of Staff Reports: its body (the page's header and tabs are Staff Reports').
+export default function DeliveryReports() {
   const { t, language } = useLanguage();
   const locale = language === 'id' ? 'id-ID' : 'en-US';
   // In the URL, so opening a customer or route and coming back keeps the
@@ -634,7 +635,7 @@ export default function DeliveryReportsPage() {
   const [from, setFrom] = useState(() => validDay(getInitialParam('from', '')) ?? daysAgo(29));
   const [to, setTo] = useState(() => validDay(getInitialParam('to', '')) ?? daysAgo(0));
   const isDefaultRange = from === daysAgo(29) && to === daysAgo(0);
-  useSyncQueryParams({
+  useMergeQueryParams({
     from: isDefaultRange ? null : from,
     to: isDefaultRange ? null : to,
   });
@@ -864,38 +865,21 @@ export default function DeliveryReportsPage() {
   });
 
   return (
-    <main
-      className="console insights min-h-screen text-(--c-text) bg-(--c-bg)"
-      style={{
-        backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
-        backgroundSize: '24px 24px',
-      }}
-    >
-      <div className="sticky top-0 z-10 bg-(--c-header) backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
-              <TrendingUp size={18} strokeWidth={2} className="text-blue-700" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate text-(--c-ink)`}>
-                {t('delivery.reports.title')}
-              </h1>
-              <p className="text-sm text-(--c-muted) truncate">{t('delivery.reports.subtitle')}</p>
-            </div>
-          </div>
-          <DateRangePicker
-            from={from}
-            to={to}
-            onChange={(f, tt) => {
-              setFrom(f ?? daysAgo(29));
-              setTo(tt ?? daysAgo(0));
-            }}
-          />
+    // Its panels use the console tokens (theme.css .console.insights); the page around it is Staff Reports'.
+    <div className="console insights text-(--c-text)">
+      <div className="space-y-4 sm:space-y-5">
+        {/* Filters — the reports' one date range, first in the body like every other report. */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <DateRangePicker
+              from={from}
+              to={to}
+              onChange={(f, tt) => {
+                setFrom(f ?? daysAgo(29));
+                setTo(tt ?? daysAgo(0));
+              }}
+            />
         </div>
-      </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         {error && (
           <div className="flex flex-wrap items-center gap-3 text-sm text-(--c-red) bg-(--c-red)/10 border border-(--c-red)/30 rounded-xl px-4 py-3">
             <CircleAlert size={16} aria-hidden="true" />
@@ -1440,6 +1424,6 @@ export default function DeliveryReportsPage() {
           }}
         />
       )}
-    </main>
+    </div>
   );
 }

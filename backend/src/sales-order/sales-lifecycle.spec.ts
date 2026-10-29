@@ -142,6 +142,48 @@ describe('Quotation and sales order lifecycle', () => {
       await expect(orders.createFromQuotation(orgId, userId, quoteId)).rejects.toThrow(BadRequestException);
     });
 
+    // The SQ-001 example: 100 quoted, 40 invoiced straight away, the other 60 ordered — and no more.
+    it('converts in parts: invoice some, order the rest, never past what was quoted', async () => {
+      const q = await draftQuote(lines(100));
+      await quotations.send(orgId, q.id, userId);
+      const itemId = (await quotations.getOne(orgId, q.id)).items[0].id;
+      const invoices = module.get(InvoiceService);
+
+      const invoice = await invoices.createDraftFromQuotation(orgId, userId, q.id, undefined, [
+        { quotationItemId: itemId, quantity: 40 },
+      ]);
+      expect(Number(invoice.items[0].quantity)).toBe(40);
+      let quote = await quotations.getOne(orgId, q.id);
+      expect(quote.conversion[0]).toMatchObject({ quoted: 100, invoiced: 40, ordered: 0, remaining: 60 });
+      // Still open for the rest.
+      expect(quote.status).toBe(SalesQuotationStatus.SENT);
+
+      // More than is left is refused; the default takes exactly what's left.
+      await expect(
+        orders.createFromQuotation(orgId, userId, q.id, [{ quotationItemId: itemId, quantity: 61 }]),
+      ).rejects.toThrow('Only 60');
+      const order = await orders.createFromQuotation(orgId, userId, q.id);
+      expect(Number(order.items[0].quantity)).toBe(60);
+      quote = await quotations.getOne(orgId, q.id);
+      expect(quote.conversion[0]).toMatchObject({ invoiced: 40, ordered: 60, remaining: 0 });
+      expect(quote.status).toBe(SalesQuotationStatus.CONVERTED);
+      await expect(invoices.createDraftFromQuotation(orgId, userId, q.id)).rejects.toThrow(BadRequestException);
+
+      // Cancelling the order frees its 60 again.
+      await orders.cancel(orgId, order.id, userId, 'Customer changed plans');
+      quote = await quotations.getOne(orgId, q.id);
+      expect(quote.conversion[0].remaining).toBe(60);
+      expect(quote.status).toBe(SalesQuotationStatus.ACCEPTED);
+    });
+
+    it('scales a fixed line discount to the part converted', async () => {
+      const q = await draftQuote(lines(10, { taxRateIds: [], discountType: 'FIXED', discountValue: 100_000 }));
+      await quotations.send(orgId, q.id, userId);
+      const itemId = (await quotations.getOne(orgId, q.id)).items[0].id;
+      const order = await orders.createFromQuotation(orgId, userId, q.id, [{ quotationItemId: itemId, quantity: 4 }]);
+      expect(Number(order.items[0].discountAmount)).toBe(40_000);
+    });
+
     it('numbers on confirm and only confirms once', async () => {
       const order = await orders.createFromQuotation(orgId, userId, await sentQuoteId());
       const confirmed = await orders.confirm(orgId, order.id, userId);

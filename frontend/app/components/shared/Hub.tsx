@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { JetBrains_Mono } from 'next/font/google';
-import { ArrowUpRight, Lock, type LucideIcon } from 'lucide-react';
+import { Lock, type LucideIcon } from 'lucide-react';
 import { display } from '@/lib/fonts';
 import { GridBackdrop } from '@/app/(site)/_landing/primitives';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -11,7 +11,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 // (inventory, sales, purchasing, accounting, workshop, delivery). One
 // definition so they all read as the same family: blueprint grid + glow,
 // a mono "~/path" line with the date and clock, a big display title,
-// numbered section tags, and the gradient module cards.
+// numbered section tags, and the module launcher tiles.
 
 export const hubMono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'] });
 
@@ -130,11 +130,13 @@ export function SectionTag({ index, label }: { index: string; label: string }) {
   );
 }
 
+// A launcher grid of small icon tiles: dense enough that a section with many features stays one glance.
 export function HubGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">{children}</div>;
+  return <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-3">{children}</div>;
 }
 
-// Enabled: gradient tile that navigates. Disabled: dashed, locked tile.
+// Enabled: an icon tile that navigates — the gradient sits on the icon chip, the description is its
+// tooltip (and read out by screen readers). Disabled: greyed icon with a lock, same footprint.
 export function HubCard({
   title,
   description,
@@ -154,45 +156,44 @@ export function HubCard({
   lockedLabel?: string;
   dataTour?: string;
 }) {
+  const tile =
+    'relative flex flex-col items-center gap-2 rounded-xl px-2 pt-3.5 pb-3 text-center border transition-all duration-200';
+  const label = `${hubMono.className} text-[11px] sm:text-xs leading-tight tracking-tight line-clamp-2`;
+
   if (!enabled) {
     return (
-      <div className="relative text-left rounded-xl p-4 sm:p-6 bg-slate-50 border-2 border-dashed border-blue-300/50 text-gray-400 flex items-center gap-4 sm:flex-col sm:items-stretch sm:justify-between sm:min-h-[150px] cursor-not-allowed">
-        <span className="shrink-0 self-center sm:self-start rounded-lg bg-blue-100 p-2.5">
-          <Lock size={20} strokeWidth={2} className="text-blue-400" />
+      <div
+        title={lockedLabel ? `${title} — ${lockedLabel}` : title}
+        aria-disabled="true"
+        className={`${tile} border-dashed border-gray-300 bg-slate-50/70 cursor-not-allowed`}
+      >
+        <span className="relative rounded-xl bg-gray-200 p-2.5 sm:p-3">
+          <Icon size={22} strokeWidth={2} className="text-gray-400" />
+          <span className="absolute -right-1.5 -bottom-1.5 rounded-full bg-white border border-gray-300 p-0.5">
+            <Lock size={10} strokeWidth={2.5} className="text-gray-500" />
+          </span>
         </span>
-        <div className="min-w-0">
-          <p className={`${display.className} text-lg sm:text-xl font-bold leading-tight text-gray-500`}>{title}</p>
-          <p className="text-sm text-gray-400 mt-0.5">{lockedLabel}</p>
-        </div>
+        <span className={`${label} text-gray-400`}>{title}</span>
+        {lockedLabel && <span className="sr-only">{lockedLabel}</span>}
       </div>
     );
   }
 
-  // Phones: a compact row (icon · text · arrow) so more of the menu fits
-  // above the fold. sm+: the tall tile from /home.
   return (
     <button
       type="button"
       data-tour={dataTour}
       onClick={onClick}
-      className={`group relative text-left rounded-xl p-4 sm:p-6 bg-gradient-to-br ${gradient} text-white shadow-md ring-1 ring-white/10 hover:shadow-lg hover:shadow-blue-900/10 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] transition-all duration-200 flex items-center gap-4 sm:flex-col sm:items-stretch sm:justify-between sm:min-h-[150px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600`}
+      title={description}
+      className={`group ${tile} border-blue-500/10 bg-white/80 backdrop-blur-sm shadow-sm hover:border-blue-500/40 hover:shadow-[0_0_0_3px_rgba(37,99,235,0.08),0_8px_20px_-8px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600`}
     >
-      <div className="flex items-start justify-between shrink-0">
-        <span className="shrink-0 rounded-lg bg-white/15 p-2.5 ring-1 ring-white/10">
-          <Icon size={22} strokeWidth={2} />
-        </span>
-        <ArrowUpRight
-          size={18}
-          strokeWidth={2}
-          aria-hidden="true"
-          className="hidden sm:block opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all"
-        />
-      </div>
-      <div className="min-w-0 flex-1 sm:flex-none">
-        <p className={`${display.className} text-lg sm:text-xl font-bold leading-tight`}>{title}</p>
-        <p className="text-sm text-white/85 mt-0.5">{description}</p>
-      </div>
-      <ArrowUpRight size={18} strokeWidth={2} aria-hidden="true" className="sm:hidden shrink-0 opacity-70" />
+      <span
+        className={`rounded-xl bg-gradient-to-br ${gradient} p-2.5 sm:p-3 text-white shadow-md ring-1 ring-white/20 group-hover:scale-105 transition-transform`}
+      >
+        <Icon size={22} strokeWidth={2} />
+      </span>
+      <span className={`${label} text-gray-800 group-hover:text-blue-700`}>{title}</span>
+      <span className="sr-only">{description}</span>
     </button>
   );
 }

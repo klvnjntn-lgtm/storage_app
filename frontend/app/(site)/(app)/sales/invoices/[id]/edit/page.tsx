@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Save, Minus, Plus, Trash2, Pencil, Percent, Wrench, X, AlertCircle, CalendarClock, MessageSquareText, UserRound } from 'lucide-react';
+import { Save, Minus, Plus, Trash2, Pencil, Wrench, X, AlertCircle, CalendarClock, MessageSquareText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useHasModule } from '@/lib/hooks/useHasModule';
@@ -13,12 +13,10 @@ import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl
 import {
   CartLine,
   DiscountType,
-  Employee,
   InvoiceFormat,
   LocationOption,
   ProductSearchResult,
   ServiceLine,
-  TaxRate,
 } from '@/app/components/invoices/types';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
@@ -29,7 +27,6 @@ import QtyInput from '@/app/components/shared/QtyInput';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 
-type RawTaxRate = TaxRate & { archivedAt: string | null };
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -82,15 +79,11 @@ export default function EditIssuedInvoicePage() {
   const [services, setServices] = useState<ServiceLine[]>([]);
   const serviceCounterRef = useRef(0);
 
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [posPricingEnabled, setPosPricingEnabled] = useState(false);
   // Whether lines may go past stock — the org's stock policy (WARN/ALLOW),
   // not the POS pricing toggle. Editing is admin-only, so admin-only
   // overrides don't restrict it here.
   const [allowOversell, setAllowOversell] = useState(false);
-
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [employeeId, setEmployeeId] = useState<string>('');
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ProductSearchResult[]>([]);
@@ -123,29 +116,6 @@ export default function EditIssuedInvoicePage() {
   }, []);
 
   useEffect(() => {
-    async function loadTaxRates() {
-      const res = await apiFetch('/organization/tax-rates');
-      if (!res.ok) return;
-      const rates: RawTaxRate[] = await res.json();
-      setTaxRates(
-        rates
-          .filter((r) => !r.archivedAt)
-          .map((r) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: r.isDefault })),
-      );
-    }
-    loadTaxRates();
-  }, []);
-
-  useEffect(() => {
-    async function loadEmployees() {
-      const res = await apiFetch('/payroll/employees');
-      if (!res.ok) return;
-      setEmployees(await res.json());
-    }
-    loadEmployees();
-  }, []);
-
-  useEffect(() => {
     async function loadInvoice() {
       setLoading(true);
       setLoadError('');
@@ -166,14 +136,10 @@ export default function EditIssuedInvoicePage() {
           invoice.vehicle ? `${invoice.vehicle.plateNumber} · ${invoice.vehicle.vehicleModel}` : null,
         );
         setDueDate(invoice.dueDate ? String(invoice.dueDate).slice(0, 10) : '');
-        setEmployeeId(invoice.employeeId ?? '');
 
         const restoredCart: Record<string, CartLine> = {};
         const restoredServices: ServiceLine[] = [];
         for (const item of invoice.items) {
-          const taxRateIds = (item.taxes ?? [])
-            .map((t: { taxRateId: string | null }) => t.taxRateId)
-            .filter((id: string | null): id is string => !!id);
 
 if (item.productId) {
   const locationId = item.locationId ?? invoice.locationId;
@@ -202,7 +168,6 @@ if (item.productId) {
     discountType: item.discountType ?? null,
     discountValue: item.discountValue != null ? Number(item.discountValue) : null,
     priceLevelId: item.priceLevelId ?? null,
-    taxRateIds,
     // NEW — floor for changeQty()'s decrement below. The backend now
     // refuses to save a line below its fulfilledQuantity (physical stock
     // already left for that amount), so the stepper enforces the same
@@ -223,7 +188,6 @@ if (item.productId) {
     unit: item.unit ?? null,
     discountType: item.discountType ?? null,
     discountValue: item.discountValue != null ? Number(item.discountValue) : null,
-    taxRateIds,
   });
 }
         }
@@ -285,7 +249,6 @@ function addToCart(
     quantity: number;
     unitPrice: number;
     unit: string | null;
-    taxRateIds: string[];
     discountType: DiscountType | null;
     discountValue: number | null;
   },
@@ -320,7 +283,6 @@ function addToCart(
         locationName: resolvedTarget.locationName,
         discountType: details.discountType,
         discountValue: details.discountValue,
-        taxRateIds: details.taxRateIds,
         priceLevelId: existing?.priceLevelId ?? basePriceLevelId,
         // A newly added line has nothing fulfilled yet, whether or not
         // one already existed with a floor from the restored invoice —
@@ -374,20 +336,6 @@ function addToCart(
     });
   }
 
-  function toggleLineTaxRate(key: string, taxRateId: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      const has = line.taxRateIds.includes(taxRateId);
-      return {
-        ...prev,
-        [key]: {
-          ...line,
-          taxRateIds: has ? line.taxRateIds.filter((id) => id !== taxRateId) : [...line.taxRateIds, taxRateId],
-        },
-      };
-    });
-  }
 
   // NEW — this page had no discount UI/handlers at all, even though
   // restored lines could already carry a discount from the original
@@ -422,7 +370,6 @@ function addToCart(
 function addService() {
   serviceCounterRef.current += 1;
   const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
-  const defaultRate = taxRates.find((r) => r.isDefault);
   setServices((prev) => [
     ...prev,
     {
@@ -434,7 +381,6 @@ function addService() {
       // added service. null means "no discount."
       discountType: null,
       discountValue: null,
-      taxRateIds: defaultRate ? [defaultRate.id] : [],
     },
   ]);
 }
@@ -462,35 +408,18 @@ function changeServiceUnit(key: string, value: string) {
     setServices((prev) => prev.filter((s) => s.key !== key));
   }
 
-  function toggleServiceTaxRate(key: string, taxRateId: string) {
-    setServices((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s;
-        const has = s.taxRateIds.includes(taxRateId);
-        return { ...s, taxRateIds: has ? s.taxRateIds.filter((id) => id !== taxRateId) : [...s.taxRateIds, taxRateId] };
-      }),
-    );
-  }
 
-  // FIX — was computing tax on the gross lineSubtotal with no discount
-  // netted out at all, unlike invoices/new/page.tsx which explicitly nets
-  // the discount out before tax ("otherwise a 100% discounted line would
-  // still carry tax"). A discounted line showed/submitted a total ~the
-  // discount amount too high.
   const cartLines = Object.entries(cart).map(([key, line]) => {
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => line.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + netAmount * (r.percentage / 100), 0));
     return {
       key,
       ...line,
       lineSubtotal,
       lineDiscountAmount: discAmt,
       netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
+      lineTotal: netAmount,
     };
   });
 
@@ -498,15 +427,12 @@ function changeServiceUnit(key: string, value: string) {
     const lineSubtotal = s.unitPrice ?? 0;
     const discAmt = lineDiscountAmount(lineSubtotal, s.discountType, s.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => s.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(lineRates.reduce((sum, r) => sum + netAmount * (r.percentage / 100), 0));
     return {
       ...s,
       lineSubtotal,
       lineDiscountAmount: discAmt,
       netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
+      lineTotal: netAmount,
     };
   });
 
@@ -517,11 +443,7 @@ function changeServiceUnit(key: string, value: string) {
     cartLines.reduce((sum, l) => sum + l.lineDiscountAmount, 0) +
       serviceLinesWithTotals.reduce((sum, s) => sum + s.lineDiscountAmount, 0),
   );
-  const taxAmount = round2(
-    cartLines.reduce((sum, l) => sum + l.lineTaxAmount, 0) +
-      serviceLinesWithTotals.reduce((sum, s) => sum + s.lineTaxAmount, 0),
-  );
-  const total = round2(subtotal - discount + taxAmount);
+  const total = round2(subtotal - discount);
 
   const hasEmptyServicePrice = services.some((s) => s.unitPrice === null);
   const hasEmptyServiceDescription = services.some((s) => !s.description.trim());
@@ -554,7 +476,6 @@ function changeServiceUnit(key: string, value: string) {
         unitPrice: line.unitPrice,
         priceLevelId: line.priceLevelId ?? undefined,
         unit: line.unit ?? undefined,
-        taxRateIds: line.taxRateIds,
         discountType: line.discountType ?? undefined,
         discountValue: line.discountValue ?? undefined,
       }));
@@ -566,7 +487,6 @@ function changeServiceUnit(key: string, value: string) {
               quantity: 1,
               unit: s.unit ?? undefined,
               unitPrice: s.unitPrice as number,
-              taxRateIds: s.taxRateIds,
               discountType: s.discountType ?? undefined,
               discountValue: s.discountValue ?? undefined,
             }))
@@ -575,7 +495,6 @@ function changeServiceUnit(key: string, value: string) {
       const payload = {
         items: [...productItems, ...serviceItems],
         dueDate: dueDate || undefined,
-        employeeId: employeeId || null,
         reason: reason.trim(),
       };
       let res = await apiFetch(`/invoices/${params.id}/edit`, {
@@ -641,7 +560,6 @@ function changeServiceUnit(key: string, value: string) {
             onAddToCart={addToCart}
             posModeEnabled={posPricingEnabled}
             allowOversell={allowOversell}
-            taxRates={taxRates}
             basePriceLevelId={basePriceLevelId}
           />
 
@@ -658,28 +576,6 @@ function changeServiceUnit(key: string, value: string) {
                 className="w-full"
               />
             </div>
-
-            {employees.length > 0 && (
-              <div className="mb-3">
-                <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                  <UserRound size={12} strokeWidth={2} />
-                  {t('sales.invoiceEdit.employeeLabel')}
-                </label>
-                <select
-                  value={employeeId}
-                  onChange={(e) => setEmployeeId(e.target.value)}
-                  className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-black"
-                >
-                  <option value="">{t('sales.invoiceEdit.noEmployee')}</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                      {e.position ? ` — ${e.position}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             {/* Reason for edit — required, sent as dto.reason and shown
                 later in the invoice detail page's Edit History list. */}
@@ -797,17 +693,6 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                       discountAmount={line.lineDiscountAmount}
                       onChange={(type, raw) => changeLineDiscount(line.key, type, raw)}
                     />
-                    {taxRates.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <Percent size={10} strokeWidth={2} className="text-gray-400" />
-                        {taxRates.map((rate) => (
-                          <label key={rate.id} className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                            <input type="checkbox" checked={line.taxRateIds.includes(rate.id)} onChange={() => toggleLineTaxRate(line.key, rate.id)} className="w-3.5 h-3.5 accent-black" />
-                            {rate.name} ({rate.percentage}%)
-                          </label>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -866,17 +751,6 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                           discountAmount={s.lineDiscountAmount}
                           onChange={(type, raw) => changeServiceDiscount(s.key, type, raw)}
                         />
-                        {taxRates.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <Percent size={10} strokeWidth={2} className="text-gray-400" />
-                            {taxRates.map((rate) => (
-                              <label key={rate.id} className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                                <input type="checkbox" checked={s.taxRateIds.includes(rate.id)} onChange={() => toggleServiceTaxRate(s.key, rate.id)} className="w-3.5 h-3.5 accent-black" />
-                                {rate.name} ({rate.percentage}%)
-                              </label>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -893,12 +767,6 @@ className={`w-full border-2 rounded-md p-2 text-sm outline-none resize-none focu
                 <div className="flex justify-between text-sm text-gray-600">
                   <span>{t('sales.invoiceEdit.discount')}</span>
                   <span>−{formatIDR(discount)}</span>
-                </div>
-              )}
-              {taxAmount > 0 && (
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>{t('sales.invoiceEdit.tax')}</span>
-                  <span>{formatIDR(taxAmount)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold pt-1">

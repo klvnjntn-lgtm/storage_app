@@ -141,8 +141,6 @@ export const pageTours: Record<string, PageTourConfig> = {
   },
 
   // ── Workshop ───────────────────────────────────────────────────────
-  // Literal before '[id]'; the lookup page has no tour of its own.
-  rmsVehicleLookup: { module: 'rms', title: 'tour.rms.title', path: '/workshop/vehicles/search', steps: [] },
   rmsVehicles: {
     module: 'rms',
     title: 'tour.pages.rmsVehicles.title',

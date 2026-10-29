@@ -9,12 +9,14 @@ import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
-// Global deny-by-default for DRIVER accounts. RolesGuard treats "no
-// @Roles()" as "any authenticated user", which let a driver token reach
-// every un-annotated endpoint (products, stock, invoices…). Here a DRIVER
-// gets through only where @Roles(...) explicitly names 'DRIVER' — the
-// driver page's own endpoints. Other roles are unaffected; RolesGuard
-// still does the normal per-route role check.
+// Global deny-by-default for the single-purpose accounts: DRIVER (the
+// driver page) and MECHANIC (the shop PC's mechanic board). RolesGuard
+// treats "no @Roles()" as "any authenticated user", which let such a token
+// reach every un-annotated endpoint (products, stock, invoices…). Here one
+// gets through only where @Roles(...) explicitly names its role — its own
+// page's endpoints. Other roles are unaffected; RolesGuard still does the
+// normal per-route role check.
+const SCOPED_ROLES = ['DRIVER', 'MECHANIC'];
 @Injectable()
 export class DriverScopeGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -28,14 +30,17 @@ export class DriverScopeGuard implements CanActivate {
     const { user } = context
       .switchToHttp()
       .getRequest<{ user?: { role?: string } }>();
-    if (user?.role !== 'DRIVER') return true;
+    const role = user?.role;
+    if (!role || !SCOPED_ROLES.includes(role)) return true;
 
     const roles = this.reflector.getAllAndOverride<string[]>(
       ROLES_KEY,
       targets,
     );
-    if (roles?.includes('DRIVER')) return true;
+    if (roles?.includes(role)) return true;
 
-    throw new ForbiddenException('Not available to driver accounts');
+    throw new ForbiddenException(
+      role === 'DRIVER' ? 'Not available to driver accounts' : 'Not available to the mechanic account',
+    );
   }
 }

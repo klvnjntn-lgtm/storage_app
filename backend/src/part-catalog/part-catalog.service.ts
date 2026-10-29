@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { normalizePlate } from '../lib/plate';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ParsedQuery, PartQueryParser } from './part-query';
+import { NOISE_WORDS, ParsedQuery, PartQueryParser } from './part-query';
 
 export type PartCatalogQuery = {
   brand?: string;
@@ -25,15 +25,55 @@ export function normalizeOem(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+// Rows with spec `s`, alone or as one part of a combined one ("H11 / H4", wiper pairs "24\" + 14\"").
+function specClause(s: string): Prisma.PartCatalogEntryWhereInput {
+  return {
+    OR: [
+      { spec: s },
+      ...[' / ', ' + '].flatMap((sep) => [
+        { spec: { startsWith: `${s}${sep}` } },
+        { spec: { endsWith: `${sep}${s}` } },
+        { spec: { contains: `${sep}${s}${sep}` } },
+      ]),
+    ],
+  };
+}
+
+// Each word somewhere in the row — item, car, part brand, spec or part number — so "lampu kabut" or
+// "aspira 15601" match without having to appear as one string.
+function wordsClause(words: string[]): Prisma.PartCatalogEntryWhereInput[] {
+  return words.map((w) => {
+    const oem = normalizeOem(w);
+    return {
+      OR: [
+        ...(oem.length >= 3 && /\d/.test(oem)
+          ? [{ oemNormalized: { contains: oem } }]
+          : []),
+        { item: { contains: w, mode: 'insensitive' as const } },
+        { itemType: { contains: w, mode: 'insensitive' as const } },
+        { model: { contains: w, mode: 'insensitive' as const } },
+        { partBrand: { contains: w, mode: 'insensitive' as const } },
+        { spec: { contains: w, mode: 'insensitive' as const } },
+      ],
+    };
+  });
+}
+
 // Best catalogue car for a free-text model: the longest model name found as a whole word, preferring
 // one whose brand is named too; a 4-digit year in the text is taken as the year.
-export function guessCar(text: string, brands: { brand: string; models: string[] }[]) {
+export function guessCar(
+  text: string,
+  brands: { brand: string; models: string[] }[],
+) {
   const upper = ` ${text.toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
   let best: { brand: string; model: string; score: number } | null = null;
   for (const { brand, models } of brands) {
     const brandNamed = upper.includes(` ${brand.toUpperCase()} `);
     for (const model of models) {
-      const key = model.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+      const key = model
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, ' ')
+        .trim();
       if (!key || !upper.includes(` ${key} `)) continue;
       const score = key.length + (brandNamed ? 100 : 0);
       if (!best || score > best.score) best = { brand, model, score };
@@ -41,7 +81,12 @@ export function guessCar(text: string, brands: { brand: string; models: string[]
   }
   if (!best) return null;
   const year = upper.match(/ (19[5-9]\d|20\d\d) /)?.[1];
-  return { brand: best.brand, model: best.model, year: year ? Number(year) : null, guessed: true };
+  return {
+    brand: best.brand,
+    model: best.model,
+    year: year ? Number(year) : null,
+    guessed: true,
+  };
 }
 
 @Injectable()
@@ -93,7 +138,10 @@ export class PartCatalogService {
         generation: g.generation,
         yearFrom: g._min.yearFrom!,
         // A row with no end year means still built.
-        yearTo: g._count.yearTo < g._count._all ? thisYear : (g._max.yearTo ?? thisYear),
+        yearTo:
+          g._count.yearTo < g._count._all
+            ? thisYear
+            : (g._max.yearTo ?? thisYear),
       })),
       itemTypes: [...itemTypes].map(([itemType, items]) => ({
         itemType,
@@ -129,9 +177,15 @@ export class PartCatalogService {
     const { brands } = await this.facets();
     return vehicles.map((v) => ({
       ...v,
-      car: v.carBrand && v.carModel
-        ? { brand: v.carBrand, model: v.carModel, year: v.carYear, guessed: false }
-        : guessCar(v.vehicleModel, brands),
+      car:
+        v.carBrand && v.carModel
+          ? {
+              brand: v.carBrand,
+              model: v.carModel,
+              year: v.carYear,
+              guessed: false,
+            }
+          : guessCar(v.vehicleModel, brands),
     }));
   }
 
@@ -163,21 +217,19 @@ export class PartCatalogService {
     let interpretation: ParsedQuery | null = null;
     if (q) {
       const parsed = await this.parseQuery(q);
+      const unknown = (words: string[]) =>
+        words.filter((w) => !NOISE_WORDS.has(w.toLowerCase()));
       if (parsed.recognized) {
         interpretation = parsed;
         and.push(...this.parsedFilters(parsed));
+        // A car named but not what part ("avanza amplas rem"): the unknown words must still match as
+        // text, rather than every part of the car showing up.
+        if (!parsed.items.length && !parsed.specs.length && !parsed.oems.length)
+          and.push(...wordsClause(unknown(parsed.ignored)));
       } else {
-        // Nothing recognised (a spec like "H4", part of a number…): match it as text.
-        const oem = normalizeOem(q);
-        and.push({
-          OR: [
-            ...(oem.length >= 3 ? [{ oemNormalized: { contains: oem } }] : []),
-            { item: { contains: q, mode: 'insensitive' } },
-            { model: { contains: q, mode: 'insensitive' } },
-            { partBrand: { contains: q, mode: 'insensitive' } },
-            { spec: { contains: q, mode: 'insensitive' } },
-          ],
-        });
+        // Nothing recognised (part of a number, a word the vocabulary lacks…): match it as text.
+        const words = unknown(q.split(/[\s,;]+/).filter(Boolean));
+        and.push(...wordsClause(words.length ? words : [q]));
       }
     }
     // The year box wins over a year typed in the search ("avanza 2006 …").
@@ -202,15 +254,7 @@ export class PartCatalogService {
     };
     if (query.spec) {
       // Specs can be combined ("H4 / H11"), so match the whole value or one ' / '-separated part.
-      const s = query.spec;
-      and.push({
-        OR: [
-          { spec: s },
-          { spec: { startsWith: `${s} / ` } },
-          { spec: { endsWith: ` / ${s}` } },
-          { spec: { contains: ` / ${s} / ` } },
-        ],
-      });
+      and.push(specClause(query.spec));
     }
     const where: Prisma.PartCatalogEntryWhereInput = { AND: and };
 
@@ -289,16 +333,22 @@ export class PartCatalogService {
     });
     const syncedAt = latest._max.syncedAt?.getTime() ?? 0;
     if (this.parserCache?.syncedAt === syncedAt) return this.parserCache.parser;
-    const [terms, brands] = await Promise.all([
+    const where = await this.latestSync();
+    const [terms, brands, specs] = await Promise.all([
       this.prisma.partSearchTerm.findMany(),
       this.prisma.partCatalogEntry.groupBy({
         by: ['partBrand'],
-        where: { AND: [await this.latestSync(), { NOT: { partBrand: '' } }] },
+        where: { AND: [where, { NOT: { partBrand: '' } }] },
+      }),
+      this.prisma.partCatalogEntry.groupBy({
+        by: ['spec'],
+        where: { AND: [where, { NOT: { spec: '' } }] },
       }),
     ]);
     const parser = new PartQueryParser(
       terms,
       brands.map((b) => b.partBrand),
+      specs.map((s) => s.spec),
     );
     this.parserCache = { syncedAt, parser };
     return parser;
@@ -354,6 +404,7 @@ export class PartCatalogService {
     if (p.items.length) and.push({ item: { in: p.items.map((i) => i.item) } });
     if (p.oems.length) and.push({ oemNormalized: { in: p.oems } });
     if (p.partBrands.length) and.push({ partBrand: { in: p.partBrands } });
+    if (p.specs.length) and.push({ OR: p.specs.map(specClause) });
     return and;
   }
 
@@ -456,7 +507,12 @@ export class PartCatalogService {
           genuine: boolean;
           fitment: string;
           fitmentRank: number;
-          price: { low: number; median: number; high: number; listings: number } | null;
+          price: {
+            low: number;
+            median: number;
+            high: number;
+            listings: number;
+          } | null;
         }
       >;
       brands: Map<string, number>;
@@ -504,7 +560,12 @@ export class PartCatalogService {
           price: null,
         };
         if (!o.price && r.priceMedian != null)
-          o.price = { low: r.priceLow ?? r.priceMedian, median: r.priceMedian, high: r.priceHigh ?? r.priceMedian, listings: r.pricedListings };
+          o.price = {
+            low: r.priceLow ?? r.priceMedian,
+            median: r.priceMedian,
+            high: r.priceHigh ?? r.priceMedian,
+            listings: r.pricedListings,
+          };
         o.sellers += r.sellers;
         o.genuine ||= r.origin === 'Official';
         if (r.fitmentRank > o.fitmentRank) {

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SystemAccountKey } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAccountDto, UpdateAccountDto } from './dto/accounting.dto';
 
@@ -25,6 +25,11 @@ export class ChartOfAccountsService {
       // Not a hard accounting rule everywhere, but catches the most common
       // mistake (nesting a liability under an asset, etc.) — a parent/child
       // pair should normally share the same top-level type.
+      // A bank is added as a bank account (with its number, holder and branch), which creates its ledger
+      // account under Bank; one made here could never be paid into.
+      if (parent.systemKey === SystemAccountKey.BANK) {
+        throw new BadRequestException('Add a bank through "Add bank account" — it creates the ledger account under Bank');
+      }
       if (parent.type !== dto.type) {
         throw new BadRequestException(
           `Parent account "${parent.name}" is type ${parent.type} — child account type must match`,
@@ -63,6 +68,13 @@ export class ChartOfAccountsService {
   async update(organizationId: string, id: string, dto: UpdateAccountDto) {
     const account = await this.prisma.chartOfAccount.findFirst({ where: { id, organizationId } });
     if (!account) throw new NotFoundException('Account not found');
+
+    // A bank's ledger account is named after it and archived with it — change it from its bank account.
+    if (account.bankAccountId && (dto.name !== undefined || dto.isActive !== undefined)) {
+      throw new BadRequestException(
+        `"${account.name}" belongs to a bank account — rename or archive it from the bank account instead`,
+      );
+    }
 
     if (dto.isActive === false && account.systemKey) {
       throw new BadRequestException(

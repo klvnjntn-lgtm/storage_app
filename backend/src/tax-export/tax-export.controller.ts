@@ -27,7 +27,7 @@ class CoretaxExportDto {
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
 // Exports every branch's invoices, so MASTER only.
 @Roles('MASTER')
-@RequireModule(ModuleKey.INVOICE_POS)
+@RequireModule(ModuleKey.ACCOUNTING)
 @Controller('tax-export')
 export class TaxExportController {
   constructor(private readonly taxExport: TaxExportService) {}

@@ -3,7 +3,7 @@
 // React so it can be unit-tested (lib/invoice-cart.test.ts) and so the
 // page component is about wiring, not arithmetic.
 
-import type { CartLine, Customer, DiscountType, LocationOption, ProductSearchResult, ServiceLine, TaxRate } from '@/app/components/invoices/types';
+import type { CartLine, Customer, DiscountType, LocationOption, ProductSearchResult, ServiceLine } from '@/app/components/invoices/types';
 
 export type Cart = Record<string, CartLine>;
 
@@ -50,17 +50,6 @@ export function clampDiscount(discountType: DiscountType, rawValue: string | und
   const parsed = Number(rawValue);
   const clamped = discountType === 'PERCENTAGE' ? Math.min(parsed, 100) : parsed;
   return Number.isFinite(clamped) && clamped >= 0 ? clamped : (current ?? 0);
-}
-
-function toggled(ids: string[], id: string) {
-  return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-}
-
-function withTax(ids: string[], id: string, checked: boolean) {
-  const has = ids.includes(id);
-  if (checked && !has) return [...ids, id];
-  if (!checked && has) return ids.filter((x) => x !== id);
-  return ids;
 }
 
 // ---- product lines -------------------------------------------------------
@@ -171,23 +160,11 @@ export function removeLine(cart: Cart, key: string): Cart {
   return next;
 }
 
-export function toggleLineTax(cart: Cart, key: string, taxRateId: string): Cart {
-  const line = cart[key];
-  if (!line) return cart;
-  return { ...cart, [key]: { ...line, taxRateIds: toggled(line.taxRateIds, taxRateId) } };
-}
-
 export function setLineDiscount(cart: Cart, key: string, discountType: DiscountType | null, rawValue?: string): Cart {
   const line = cart[key];
   if (!line) return cart;
   if (discountType === null) return { ...cart, [key]: { ...line, discountType: null, discountValue: null } };
   return { ...cart, [key]: { ...line, discountType, discountValue: clampDiscount(discountType, rawValue, line.discountValue) } };
-}
-
-export function applyTaxToAllLines(cart: Cart, taxRateId: string, checked: boolean): Cart {
-  return Object.fromEntries(
-    Object.entries(cart).map(([k, line]) => [k, { ...line, taxRateIds: withTax(line.taxRateIds, taxRateId, checked) }]),
-  );
 }
 
 export function applyDiscountToAllLines(cart: Cart, discountType: DiscountType | null, value: number): Cart {
@@ -198,53 +175,41 @@ export function applyDiscountToAllLines(cart: Cart, discountType: DiscountType |
 
 // ---- totals -------------------------------------------------------------
 
-type LineMoney = { lineSubtotal: number; lineDiscountAmount: number; netAmount: number; lineTaxAmount: number; lineTotal: number };
+type LineMoney = { lineSubtotal: number; lineDiscountAmount: number; netAmount: number; lineTotal: number };
 
-// One line's money: gross, its discount, net, the tax of every rate on it
-// (taxed on the net), and the total.
-function lineMoney(
-  lineSubtotal: number,
-  discountType: DiscountType | null,
-  discountValue: number | null,
-  taxRateIds: string[],
-  taxRates: TaxRate[],
-): LineMoney {
+// One line's money: gross, its discount, and the net that is its total.
+function lineMoney(lineSubtotal: number, discountType: DiscountType | null, discountValue: number | null): LineMoney {
   const discAmt = lineDiscountAmount(lineSubtotal, discountType, discountValue);
   const netAmount = round2(lineSubtotal - discAmt);
-  const lineTaxAmount = round2(
-    taxRates.filter((r) => taxRateIds.includes(r.id)).reduce((sum, rate) => sum + netAmount * (rate.percentage / 100), 0),
-  );
-  return { lineSubtotal, lineDiscountAmount: discAmt, netAmount, lineTaxAmount, lineTotal: round2(netAmount + lineTaxAmount) };
+  return { lineSubtotal, lineDiscountAmount: discAmt, netAmount, lineTotal: netAmount };
 }
 
 // The cart's lines with their money, and the document totals. Product
 // lines are passed already price-levelled (the page applies the customer's
 // level first); a service line is one unit at its price.
-export function computeTotals(productLines: (CartLine & { key: string })[], services: ServiceLine[], taxRates: TaxRate[]) {
+export function computeTotals(productLines: (CartLine & { key: string })[], services: ServiceLine[]) {
   const cartLines = productLines.map((line) => ({
     ...line,
-    ...lineMoney(line.unitPrice * line.quantity, line.discountType, line.discountValue, line.taxRateIds, taxRates),
+    ...lineMoney(line.unitPrice * line.quantity, line.discountType, line.discountValue),
   }));
   const serviceLines = services.map((s) => ({
     ...s,
-    ...lineMoney(s.unitPrice ?? 0, s.discountType, s.discountValue, s.taxRateIds, taxRates),
+    ...lineMoney(s.unitPrice ?? 0, s.discountType, s.discountValue),
   }));
   const all: LineMoney[] = [...cartLines, ...serviceLines];
   const subtotal = all.reduce((sum, l) => sum + l.lineSubtotal, 0);
   const discount = round2(all.reduce((sum, l) => sum + l.lineDiscountAmount, 0));
-  const taxAmount = round2(all.reduce((sum, l) => sum + l.lineTaxAmount, 0));
-  return { cartLines, serviceLines, subtotal, discount, taxAmount, total: round2(subtotal - discount + taxAmount) };
+  return { cartLines, serviceLines, subtotal, discount, total: round2(subtotal - discount) };
 }
 
 // ---- service lines (workshop labour etc.) --------------------------------
 
-export function newServiceLine(key: string, defaultTaxRateId: string | undefined): ServiceLine {
+export function newServiceLine(key: string): ServiceLine {
   return {
     key,
     description: '',
     unitPrice: null,
     unit: null,
-    taxRateIds: defaultTaxRateId ? [defaultTaxRateId] : [],
     discountType: null,
     discountValue: null,
   };
@@ -271,20 +236,12 @@ export function setServicePrice(services: ServiceLine[], key: string, raw: strin
   });
 }
 
-export function toggleServiceTax(services: ServiceLine[], key: string, taxRateId: string) {
-  return updateService(services, key, (s) => ({ ...s, taxRateIds: toggled(s.taxRateIds, taxRateId) }));
-}
-
 export function setServiceDiscount(services: ServiceLine[], key: string, discountType: DiscountType | null, rawValue?: string) {
   return updateService(services, key, (s) =>
     discountType === null
       ? { ...s, discountType: null, discountValue: null }
       : { ...s, discountType, discountValue: clampDiscount(discountType, rawValue, s.discountValue) },
   );
-}
-
-export function applyTaxToAllServices(services: ServiceLine[], taxRateId: string, checked: boolean) {
-  return services.map((s) => ({ ...s, taxRateIds: withTax(s.taxRateIds, taxRateId, checked) }));
 }
 
 export function applyDiscountToAllServices(services: ServiceLine[], discountType: DiscountType | null, value: number) {
@@ -306,7 +263,6 @@ export function buildInvoiceItems(cartLines: CartLine[], services: ServiceLine[]
     unitPrice: line.unitPrice,
     // A typed (custom) price comes from no level.
     priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
-    taxRateIds: line.taxRateIds,
     discountType: line.discountType ?? undefined,
     discountValue: line.discountValue ?? undefined,
     ...(line.serialNumbers?.length && { serialNumbers: line.serialNumbers }),
@@ -319,7 +275,6 @@ export function buildInvoiceItems(cartLines: CartLine[], services: ServiceLine[]
           quantity: 1,
           unitPrice: s.unitPrice as number,
           unit: s.unit ?? undefined,
-          taxRateIds: s.taxRateIds,
           discountType: s.discountType ?? undefined,
           discountValue: s.discountValue ?? undefined,
         }))
@@ -339,7 +294,6 @@ export type InvoiceHeaderForm = {
   hasWorkshopRms: boolean;
   // '' = untouched, NO_BANK_ACCOUNT = none, otherwise an account id.
   bankAccountId: string;
-  employeeId: string;
   // Multi-branch businesses: the branch making the sale ('' = default).
   // Workshops: the mechanic who did the work ('' = none).
   mechanicId?: string;
@@ -365,7 +319,6 @@ export function buildInvoiceHeader(f: InvoiceHeaderForm) {
     }),
     // Untouched leaves the backend to pick the org's default account.
     ...(f.bankAccountId !== '' && { bankAccountId: f.bankAccountId === NO_BANK_ACCOUNT ? null : f.bankAccountId }),
-    employeeId: f.employeeId || null,
     ...(f.branchId && { branchId: f.branchId }),
     ...(f.mechanicId !== undefined && { mechanicId: f.mechanicId || null }),
   };

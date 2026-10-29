@@ -126,31 +126,43 @@ export function CustomerPicker({
     }
   }
 
+  // Labelled like the document's other fields, so it lines up beside them in a two-column panel.
+  const label = (
+    <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+      <User size={12} strokeWidth={2} className="text-blue-600/70" />
+      {t('sales.customerPicker.label')}
+    </label>
+  );
+
   if (value) {
     return (
-      <div data-tour="sales-customer" className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg bg-blue-600/5 p-2.5 mb-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <User size={14} strokeWidth={2} className="text-blue-600/70 shrink-0" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{value.name}</p>
-            {value.phone && <p className="text-xs text-gray-500 truncate">{value.phone}</p>}
+      <div className="mb-3">
+        {label}
+        <div data-tour="sales-customer" className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg bg-blue-600/5 px-3 py-[9px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <User size={14} strokeWidth={2} className="text-blue-600/70 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{value.name}</p>
+              {value.phone && <p className="text-xs text-gray-500 truncate">{value.phone}</p>}
+            </div>
           </div>
+          <button
+            onClick={() => onChange(null)}
+            className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-blue-700 hover:bg-white shrink-0 transition-colors"
+          >
+            {t('sales.customerPicker.change')}
+          </button>
         </div>
-        <button
-          onClick={() => onChange(null)}
-          className="text-xs px-2 py-1 rounded-md border border-blue-500/20 text-blue-700 hover:bg-white shrink-0 transition-colors"
-        >
-          {t('sales.customerPicker.change')}
-        </button>
       </div>
     );
   }
 
   return (
     <div data-tour="sales-customer" className="relative mb-3" ref={containerRef}>
+      {label}
       <div
         onClick={() => setOpen(true)}
-        className={`flex items-center gap-2 border rounded-lg p-2.5 cursor-text bg-white transition-colors ${
+        className={`flex items-center gap-2 border rounded-lg px-3 py-[9px] cursor-text bg-white transition-colors ${
           hasError ? 'border-amber-400' : 'border-blue-500/20 focus-within:border-blue-500/50'
         }`}
       >

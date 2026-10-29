@@ -4,6 +4,10 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/apifetch';
 import { useCurrentUser } from './useCurrentUser';
 
+// Fired by the Branches page after a change, so every useBranches (the
+// sidebar included) refetches without a reload.
+export const BRANCHES_CHANGED = 'waresys:branches-changed';
+
 export type Branch = { id: string; name: string; address: string | null; phone: string | null; archivedAt: string | null };
 
 // The business's active branches. Branch choices (on invoices, expenses,
@@ -15,14 +19,18 @@ export function useBranches() {
   const [branches, setBranches] = useState<Branch[]>([]);
   useEffect(() => {
     let cancelled = false;
-    apiFetch('/branches')
-      .then((res) => (res.ok ? res.json() : []))
-      .then((list: Branch[]) => {
-        if (!cancelled) setBranches(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {});
+    const load = () =>
+      apiFetch('/branches')
+        .then((res) => (res.ok ? res.json() : []))
+        .then((list: Branch[]) => {
+          if (!cancelled) setBranches(Array.isArray(list) ? list : []);
+        })
+        .catch(() => {});
+    load();
+    window.addEventListener(BRANCHES_CHANGED, load);
     return () => {
       cancelled = true;
+      window.removeEventListener(BRANCHES_CHANGED, load);
     };
   }, []);
   return { branches, multiBranch: branches.length > 1 && user?.role === 'MASTER' };

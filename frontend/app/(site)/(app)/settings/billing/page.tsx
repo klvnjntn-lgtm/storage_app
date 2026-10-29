@@ -14,7 +14,7 @@ import { Card, ComingSoon, ErrorNote, PageFrame, UsageBar, btnPrimary, thCls, td
 type Limits = { seats: number | null; locations: number | null; products: number | null; invoicesPerMonth: number | null };
 type Resource = keyof Limits;
 type Period = 'MONTH' | 'YEAR';
-type ModuleKey = 'INVOICE_POS' | 'WAREHOUSE_OPS' | 'WORKSHOP_RMS' | 'DELIVERY_DMS';
+type ModuleKey = 'INVOICE_POS' | 'WAREHOUSE_OPS' | 'WORKSHOP_RMS' | 'DELIVERY_DMS' | 'ACCOUNTING';
 
 type ModuleRow = {
   module: ModuleKey;

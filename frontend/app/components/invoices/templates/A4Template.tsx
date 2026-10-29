@@ -29,7 +29,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
     : formatDMY(new Date(invoice.issuedAt));
 
   return (
-    <div className="w-[210mm] p-[15mm] text-sm text-black bg-white">
+    <div className="box-border w-[210mm] p-[15mm] text-sm text-black bg-white">
       {/* Business identity + invoice meta */}
       <div className="flex justify-between items-start gap-4">
         <div className="flex items-start gap-3">
@@ -85,11 +85,6 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           {invoice.paymentTerms && (
             <p className="text-black text-xs">
               {invoice.paymentTerms}
-            </p>
-          )}
-          {invoice.employeeName && (
-            <p className="text-black text-xs">
-              {t('sales.invoiceTemplate.salesLabel', { name: invoice.employeeName })}
             </p>
           )}
         </div>
@@ -166,51 +161,52 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
         </div>
       )}
 
-      {/* Items */}
-      {/* Items — Discount/Tax columns always render, matching the
-          Quotation/Sales Order templates. */}
-      <table className="w-full border-collapse mt-6">
+      {/* Items — fixed layout so long product names wrap inside the
+          Item column instead of pushing the table past the A4 width. */}
+      <table className="w-full table-fixed border-collapse mt-6 text-xs">
+        <colgroup>
+          <col />
+          <col className="w-[16mm]" />
+          <col className="w-[28mm]" />
+          <col className="w-[26mm]" />
+          <col className="w-[30mm]" />
+        </colgroup>
         <thead>
           <tr>
-            <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">{t('sales.invoiceTemplate.itemHeader')}</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.qtyHeader')}</th>
-            <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.priceHeader')}</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.discount')}</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.invoiceTemplate.tax')}</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">{t('common.total')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 pr-2 text-black">{t('sales.invoiceTemplate.itemHeader')}</th>
+            <th className="text-left border-b-2 border-gray-300 py-2 px-2 text-black">{t('sales.invoiceTemplate.qtyHeader')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-2 text-black">{t('sales.invoiceTemplate.priceHeader')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 px-2 text-black">{t('sales.invoiceTemplate.discount')}</th>
+            <th className="text-right border-b-2 border-gray-300 py-2 pl-2 text-black">{t('common.total')}</th>
           </tr>
         </thead>
 
         <tbody>
           {invoice.items.map((item) => (
             <tr key={item.id}>
-              <td className="border-b border-gray-100 py-2 pr-3 text-black break-words">
+              <td className="border-b border-gray-100 py-2 pr-2 text-black [overflow-wrap:anywhere]">
                 {item.productName}
                 {item.serialNumbers && item.serialNumbers.length > 0 && (
                   <span className="block text-[10px] font-mono text-gray-600">S/N: {item.serialNumbers.join(', ')}</span>
                 )}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-2 text-black [overflow-wrap:anywhere]">
                 {item.quantity}
                 {item.unit && (
-                  <span className="text-black text-xs ml-1">{item.unit}</span>
+                  <span className="text-black text-[10px] ml-1">{item.unit}</span>
                 )}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-2 text-right text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.unitPrice)}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-2 text-right text-black [overflow-wrap:anywhere]">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
 
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-black whitespace-nowrap">
-                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-              </td>
-
-              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 pl-2 text-right font-medium text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.itemTotal)}
               </td>
             </tr>
@@ -232,19 +228,13 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           </div>
         )}
 
-        {invoice.taxAmount > 0 &&
-          invoice.taxes.map((tax, index) => (
-            <div
-              key={`${tax.name}-${tax.percentage}-${index}`}
-              className="flex justify-between py-1 text-black"
-            >
-              <span>
-                {tax.name} ({tax.percentage}%)
-              </span>
-
-              <span>{formatIDR(tax.amount)}</span>
-            </div>
-          ))}
+        {/* Only documents issued while tax rates existed carry tax. */}
+        {invoice.taxAmount > 0 && (
+          <div className="flex justify-between py-1 text-black">
+            <span>{t('sales.invoiceTemplate.tax')}</span>
+            <span>{formatIDR(invoice.taxAmount)}</span>
+          </div>
+        )}
 
         <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2 mt-2 text-black">
           <span>{t('common.total')}</span>
@@ -326,7 +316,7 @@ export function A4Template({ invoice }: { invoice: InvoiceView }) {
           <div className="h-20" />
 
           <p className="border-t border-gray-400 pt-1 text-black">
-            {invoice.employeeName ?? invoice.businessName ?? invoice.locationName}
+            {invoice.businessName ?? invoice.locationName}
           </p>
         </div>
       </div>

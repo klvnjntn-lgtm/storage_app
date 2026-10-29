@@ -1,9 +1,9 @@
 'use client';
 
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, CalendarClock, FileSignature, Landmark } from 'lucide-react';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, CalendarClock, FileSignature, Landmark } from 'lucide-react';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
-import { BankAccount, CartLine, Customer, DiscountType, ServiceLine, TaxRate } from './types';
+import { BankAccount, CartLine, Customer, DiscountType, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
@@ -17,7 +17,6 @@ type CartLineWithTotals = CartLine & {
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -25,7 +24,6 @@ type ServiceLineWithTotals = ServiceLine & {
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -49,23 +47,19 @@ export function QuotationCartPanel({
   termsAndConditions,
   onChangeTermsAndConditions,
   onSubmit,
+  submitBlocked = false,
   printing,
   error,
-  taxRates,
   posPricingEnabled,
-  onToggleLineTaxRate,
-  onApplyTaxToAll,
   onChangeLineDiscount,
   onChangeServiceDiscount,
   onApplyDiscountToAll,
-  taxAmount,
   total,
   services,
   onAddService,
   onChangeServiceDescription,
   onChangeServicePrice,
   onRemoveService,
-  onToggleServiceTaxRate,
   bankAccounts,
   bankAccountId,
   onChangeBankAccountId,
@@ -90,24 +84,21 @@ export function QuotationCartPanel({
   termsAndConditions: string;
   onChangeTermsAndConditions: (v: string) => void;
   onSubmit: () => void;
+  // Something outside the panel (e.g. a too-low odometer reading) is holding the submit.
+  submitBlocked?: boolean;
   printing: boolean;
   onChangeServiceUnit: (key: string, value: string) => void;
   error: string;
-  taxRates: TaxRate[];
   posPricingEnabled: boolean;
-  onToggleLineTaxRate: (key: string, taxRateId: string) => void;
-  onApplyTaxToAll: (taxRateId: string, checked: boolean) => void;
   onChangeLineDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onChangeServiceDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onApplyDiscountToAll: (discountType: DiscountType | null, value: number) => void;
-  taxAmount: number;
   total: number;
   services: ServiceLineWithTotals[];
   onAddService: () => void;
   onChangeServiceDescription: (key: string, value: string) => void;
   onChangeServicePrice: (key: string, raw: string) => void;
   onRemoveService: (key: string) => void;
-  onToggleServiceTaxRate: (key: string, taxRateId: string) => void;
   // Bank-account picker, same shape/semantics as CartPanel.
   bankAccounts: BankAccount[];
   bankAccountId: string;
@@ -125,7 +116,7 @@ export function QuotationCartPanel({
   const warehouseOps = useWarehouseOps();
 
   return (
-    <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
+    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
@@ -147,59 +138,62 @@ export function QuotationCartPanel({
         <p className="text-xs text-gray-400 mb-3">{t('sales.quotationCart.addItemsPrompt')}</p>
       )}
 
-      <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
+      {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
+      <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
+        <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
 
-      <div className="mb-3">
-        <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-          <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-          {t('sales.quotationCart.validUntilLabel')}
-        </label>
-        <DatePicker
-          clearable
-          value={validUntil}
-          onChange={(v) => onChangeValidUntil(v)}
-          className="w-full"
-        />
-      </div>
-
-      <div className="mb-3">
-        <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-          <FileSignature size={12} strokeWidth={2} className="text-blue-600/70" />
-          {t('sales.quotationCart.termsLabel')}
-        </label>
-        <textarea
-          value={termsAndConditions}
-          onChange={(e) => onChangeTermsAndConditions(e.target.value)}
-          placeholder={t('sales.quotationCart.termsPlaceholder')}
-          rows={3}
-          className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
-        />
-      </div>
-
-      {/* Bank account picker. Quotations are always A4, so no format gate
-          is needed here (unlike CartPanel). */}
-      {bankAccounts.length > 0 && (
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.quotationCart.bankAccountLabel')}
+            <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.quotationCart.validUntilLabel')}
           </label>
-          <select
-            value={bankAccountId}
-            onChange={(e) => onChangeBankAccountId(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">{t('sales.quotationCart.defaultBankAccount')}</option>
-            <option value={noBankAccountValue}>{t('sales.quotationCart.noBankDetails')}</option>
-            {bankAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.bankName} — {a.accountNumber}
-                {a.isDefault ? ` ${t('sales.quotationCart.defaultSuffix')}` : ''}
-              </option>
-            ))}
-          </select>
+          <DatePicker
+            clearable
+            value={validUntil}
+            onChange={(v) => onChangeValidUntil(v)}
+            className="w-full"
+          />
         </div>
-      )}
+
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <FileSignature size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.quotationCart.termsLabel')}
+          </label>
+          <textarea
+            value={termsAndConditions}
+            onChange={(e) => onChangeTermsAndConditions(e.target.value)}
+            placeholder={t('sales.quotationCart.termsPlaceholder')}
+            rows={3}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
+          />
+        </div>
+
+        {/* Bank account picker. Quotations are always A4, so no format gate
+            is needed here (unlike CartPanel). */}
+        {bankAccounts.length > 0 && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.quotationCart.bankAccountLabel')}
+            </label>
+            <select
+              value={bankAccountId}
+              onChange={(e) => onChangeBankAccountId(e.target.value)}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            >
+              <option value="">{t('sales.quotationCart.defaultBankAccount')}</option>
+              <option value={noBankAccountValue}>{t('sales.quotationCart.noBankDetails')}</option>
+              {bankAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.bankName} — {a.accountNumber}
+                  {a.isDefault ? ` ${t('sales.quotationCart.defaultSuffix')}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {cartLines.length === 0 && services.length === 0 && (
         <p className="text-sm text-gray-400">{t('sales.quotationCart.noItemsSelected')}</p>
@@ -207,8 +201,6 @@ export function QuotationCartPanel({
 
       {(cartLines.length > 0 || services.length > 0) && (
         <BulkApplyBar
-          taxRates={taxRates}
-          onApplyTaxToAll={onApplyTaxToAll}
           onApplyDiscountToAll={onApplyDiscountToAll}
         />
       )}
@@ -321,34 +313,6 @@ export function QuotationCartPanel({
                 onChange={(discountType, rawValue) => onChangeLineDiscount(line.key, discountType, rawValue)}
               />
 
-              {taxRates.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                  <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                    <Percent size={10} strokeWidth={2} />
-                    {t('sales.quotationCart.tax')}
-                  </span>
-                  {taxRates.map((rate) => {
-                    const checked = line.taxRateIds.includes(rate.id);
-                    return (
-                      <label
-                        key={rate.id}
-                        className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => onToggleLineTaxRate(line.key, rate.id)}
-                          className="w-3.5 h-3.5 accent-blue-600"
-                        />
-                        {rate.name} ({rate.percentage}%)
-                      </label>
-                    );
-                  })}
-                  {line.lineTaxAmount > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">+{formatIDR(line.lineTaxAmount)}</span>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
@@ -428,34 +392,6 @@ export function QuotationCartPanel({
                   onChange={(discountType, rawValue) => onChangeServiceDiscount(line.key, discountType, rawValue)}
                 />
 
-                {taxRates.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                    <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                      <Percent size={10} strokeWidth={2} />
-                      {t('sales.quotationCart.tax')}
-                    </span>
-                    {taxRates.map((rate) => {
-                      const checked = line.taxRateIds.includes(rate.id);
-                      return (
-                        <label
-                          key={rate.id}
-                          className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => onToggleServiceTaxRate(line.key, rate.id)}
-                            className="w-3.5 h-3.5 accent-blue-600"
-                          />
-                          {rate.name} ({rate.percentage}%)
-                        </label>
-                      );
-                    })}
-                    {line.lineTaxAmount > 0 && (
-                      <span className="text-xs text-gray-400 ml-auto">+{formatIDR(line.lineTaxAmount)}</span>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -473,12 +409,6 @@ export function QuotationCartPanel({
             <span>−{formatIDR(discount)}</span>
           </div>
         )}
-        {taxAmount > 0 && (
-          <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>{t('sales.quotationCart.tax')}</span>
-            <span>{formatIDR(taxAmount)}</span>
-          </div>
-        )}
         <div className="flex justify-between items-center font-bold pt-1">
           <span>{t('common.total')}</span>
           <span>{formatIDR(total)}</span>
@@ -489,6 +419,7 @@ export function QuotationCartPanel({
         onClick={onSubmit}
         disabled={
           nothingToQuote ||
+          submitBlocked ||
           printing ||
           !customer ||
           hasEmptyServicePrice ||

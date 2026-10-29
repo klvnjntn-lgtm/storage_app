@@ -122,7 +122,7 @@ export function SupplierPicker({
 
   if (supplier) {
     return (
-      <div className="flex items-center justify-between gap-2 border-2 border-gray-300 rounded-md p-2.5 mb-3">
+      <div className="flex items-center justify-between gap-2 border border-blue-500/20 rounded-lg p-2.5">
         <div className="flex items-center gap-2 min-w-0">
           <Truck size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
           <div className="min-w-0">
@@ -132,7 +132,7 @@ export function SupplierPicker({
         </div>
         <button
           onClick={() => onChange(null)}
-          className="text-xs px-2 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 shrink-0"
+          className="text-xs px-2 py-1 rounded-lg border border-blue-500/20 text-gray-600 hover:bg-blue-50/60 shrink-0"
         >
           {t('purchasing.supplierPicker.change')}
         </button>
@@ -141,11 +141,11 @@ export function SupplierPicker({
   }
 
   return (
-    <div className="relative mb-3" ref={containerRef}>
+    <div className="relative" ref={containerRef}>
       <div
         onClick={() => setOpen(true)}
-        className={`flex items-center gap-2 border-2 rounded-md p-2.5 cursor-text ${
-          hasError ? 'border-amber-400' : 'border-gray-300'
+        className={`flex items-center gap-2 border rounded-lg p-2.5 cursor-text focus-within:border-blue-500/50 ${
+          hasError ? 'border-amber-400' : 'border-blue-500/20'
         }`}
       >
         <Search size={14} strokeWidth={2} className="text-gray-400 shrink-0" />
@@ -162,12 +162,12 @@ export function SupplierPicker({
       </div>
 
       {open && (
-        <div className="absolute left-0 right-0 z-10 mt-1.5 bg-white border-2 border-gray-200 rounded-md shadow-lg overflow-hidden">
+        <div className="absolute left-0 right-0 z-10 mt-1.5 bg-white border border-blue-500/15 rounded-lg shadow-lg overflow-hidden">
           {quickAddOpen ? (
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('purchasing.supplierPicker.newSupplierLabel')}</p>
-                <button aria-label={t('common.close')} onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-black">
+                <button aria-label={t('common.close')} onClick={() => setQuickAddOpen(false)} className="text-gray-400 hover:text-blue-700">
                   <X size={14} strokeWidth={2} />
                 </button>
               </div>
@@ -176,37 +176,37 @@ export function SupplierPicker({
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder={t('purchasing.supplierPicker.namePlaceholder')}
                 autoFocus
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50"
               />
               <input
                 value={newContactName}
                 onChange={(e) => setNewContactName(e.target.value)}
                 placeholder={t('purchasing.supplierPicker.contactPlaceholder')}
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50"
               />
               <input
                 value={newPhone}
                 onChange={(e) => setNewPhone(e.target.value)}
                 placeholder={t('purchasing.supplierPicker.phonePlaceholder')}
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50"
               />
               <input
                 value={newAddress}
                 onChange={(e) => setNewAddress(e.target.value)}
                 placeholder={t('purchasing.supplierPicker.addressPlaceholder')}
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50"
               />
               <input
                 value={newNpwp}
                 onChange={(e) => setNewNpwp(e.target.value)}
                 placeholder={t('purchasing.supplierPicker.npwpPlaceholder')}
-                className="w-full border-2 border-gray-300 rounded-md p-2 text-sm mb-2 outline-none focus:border-black"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50"
               />
               {saveError && <p className="text-xs text-red-600 mb-2">{saveError}</p>}
               <button
                 onClick={submitQuickAdd}
                 disabled={saving}
-                className="w-full flex items-center justify-center gap-1.5 bg-black text-white rounded-md p-2 text-sm font-semibold disabled:bg-gray-300"
+                className="w-full flex items-center justify-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-sm font-semibold disabled:bg-gray-300"
               >
                 <Check size={14} strokeWidth={2} />
                 {saving ? t('purchasing.supplierPicker.saving') : t('purchasing.supplierPicker.addAndSelect')}

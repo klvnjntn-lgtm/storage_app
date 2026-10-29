@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { formatDMY } from '@/lib/dates';
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -15,6 +16,7 @@ import WorkOrderForm, {
 } from '@/app/components/workshop/WorkOrderForm';
 import { toPayloadLines } from '@/app/components/workshop/workOrders';
 import { lineProblem } from '@/app/components/workshop/lineProblem';
+import { isOdometerBelowLast } from '@/lib/odometer';
 
 type PickedVehicle = { id: string; plateNumber: string; vehicleModel: string; odometer?: number | null; customer: { name: string } };
 // /vehicles/search returns a flat customerName and no odometer.
@@ -98,7 +100,7 @@ function NewWorkOrderPage() {
     };
   }, [query]);
 
-  async function save(asEstimate: boolean) {
+  async function save() {
     if (!vehicle) return;
     const problem = lineProblem(form.lines, t);
     if (problem) {
@@ -114,7 +116,6 @@ function NewWorkOrderPage() {
           vehicleId: vehicle.id,
           ...formToPayload(form),
           items: toPayloadLines(form.lines),
-          asEstimate,
           ...(reminderNote && reminderId && { fromReminderId: reminderId }),
           ...(comebackOfId && { comebackOfId, comebackReason: comebackReason.trim() || undefined }),
         }),
@@ -217,11 +218,11 @@ function NewWorkOrderPage() {
         <button type="button" className={btnSecondary} onClick={() => router.back()}>
           {t('workshop.workOrders.cancel')}
         </button>
-        {/* Estimate: priced and printed for the customer's go-ahead first. */}
-        <button type="button" className={btnSecondary} disabled={!vehicle || saving} onClick={() => save(true)}>
-          {t('workshop.workOrders.saveEstimate')}
-        </button>
-        <button type="button" className={btnPrimary} disabled={!vehicle || saving} onClick={() => save(false)}>
+        {/* Needs the customer's go-ahead first: quote it — the quotation becomes this job later. */}
+        <Link href="/sales/quotations/new" className={btnSecondary}>
+          {t('workshop.workOrders.quoteFirst')}
+        </Link>
+        <button type="button" className={btnPrimary} disabled={!vehicle || saving || isOdometerBelowLast(form.odometer, vehicle.odometer)} onClick={save}>
           {saving ? t('workshop.workOrders.saving') : t('workshop.workOrders.create')}
         </button>
       </div>

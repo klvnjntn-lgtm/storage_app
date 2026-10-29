@@ -20,7 +20,7 @@ import { BranchRecord } from '../auth/guards/branch-record.guard';
 import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
-@RequireModule(ModuleKey.INVOICE_POS)
+@RequireModule(ModuleKey.ACCOUNTING)
 // Money going out — admin-only, reads included.
 @Roles('ADMIN')
 @BranchRecord('expense')

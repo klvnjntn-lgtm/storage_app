@@ -182,6 +182,7 @@ model Vehicle {
   organization   Organization      @relation(fields: [organizationId], references: [id])
   reminders      VehicleReminder[]
   workOrders     WorkOrder[]
+  quotations     SalesQuotation[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, customerId, plateNumber])
@@ -942,6 +943,29 @@ model SalesQuotation {
   customerName     String?
   customerPoNumber String?
 
+  // Workshops (WORKSHOP_RMS): the car being quoted for and why it came in — carried to the work order the
+  // quotation becomes.
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  odometer  Int?
+  complaint String?
+
+  // Secret for the customer's approval page (/estimate/<token>), copied by staff into WhatsApp. Reused
+  // while valid so a link already sent keeps working; expires 30 days after it was made.
+  approvalToken          String?   @unique
+  approvalTokenExpiresAt DateTime?
+  // How the customer answered online ("Approved online by Budi", "Declined online by Budi: too expensive").
+  responseNote           String?
+
+  // Extra parts found mid-job: a further quotation for the same job, pointing at the original. Converting
+  // it adds its lines to the original's work order.
+  parentQuotationId String?
+  parentQuotation   SalesQuotation?  @relation("QuotationAdditions", fields: [parentQuotationId], references: [id])
+  additions         SalesQuotation[] @relation("QuotationAdditions")
+  // The work order this quotation (or, for an addition, its original) became.
+  workOrderId       String?
+  workOrder         WorkOrder?       @relation(fields: [workOrderId], references: [id])
+
   subtotal  Decimal @default(0) @db.Decimal(12, 2)
   discount  Decimal @default(0) @db.Decimal(12, 2)
   taxAmount Decimal @default(0) @db.Decimal(12, 2)
@@ -969,6 +993,7 @@ model SalesQuotation {
   salesOrders  SalesOrder[]
 
   @@unique([organizationId, quotationNumber])
+  @@index([workOrderId])
 }
 
 model SalesQuotationItem {
@@ -996,6 +1021,9 @@ model SalesQuotationItem {
   product        Product?                @relation(fields: [productId], references: [id])
   location       Location?               @relation(fields: [locationId], references: [id])
   taxes          SalesQuotationItemTax[]
+  // What this line has become so far (partial conversions).
+  orderedLines   SalesOrderItem[]        @relation("QuotationItemOrdered")
+  invoicedLines  InvoiceItem[]           @relation("QuotationItemInvoiced")
 
   // Where unitPrice came from. unitPrice itself is the historical price
   // charged and never follows later price-level edits. Null = custom price
@@ -1082,12 +1110,16 @@ model SalesOrder {
 }
 
 model SalesOrderItem {
-  id           String  @id @default(uuid())
-  salesOrderId String
-  productId    String?
-  description  String?
-  locationId   String?
-  unit         String?
+  id              String              @id @default(uuid())
+  salesOrderId    String
+  // The quotation line this was ordered from: a quotation converts in parts, and each line's quantity
+  // can't be ordered/invoiced past what was quoted (see SalesQuotationService.conversionLines).
+  quotationItemId String?
+  quotationItem   SalesQuotationItem? @relation("QuotationItemOrdered", fields: [quotationItemId], references: [id], onDelete: SetNull)
+  productId       String?
+  description     String?
+  locationId      String?
+  unit            String?
 
   quantity  Decimal  @db.Decimal(12, 2)
   unitPrice Decimal  @db.Decimal(12, 2)
@@ -1115,6 +1147,8 @@ model SalesOrderItem {
   // Where unitPrice came from (see SalesQuotationItem.priceLevelId).
   priceLevelId String?
   priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
+
+  @@index([quotationItemId])
 }
 
 model SalesOrderTax {
@@ -1795,19 +1829,22 @@ model InvoiceActivityEvent {
 }
 
 model InvoiceItem {
-  id                Int      @id @default(autoincrement())
+  id                Int                 @id @default(autoincrement())
   invoiceId         String
+  // The quotation line this was invoiced straight from (not through a sales order) — see SalesOrderItem.
+  quotationItemId   String?
+  quotationItem     SalesQuotationItem? @relation("QuotationItemInvoiced", fields: [quotationItemId], references: [id], onDelete: SetNull)
   productId         String?
-  quantity          Decimal  @db.Decimal(12, 2)
+  quantity          Decimal             @db.Decimal(12, 2)
   unit              String?
-  unitPrice         Decimal  @db.Decimal(12, 2)
-  unitCost          Decimal? @db.Decimal(12, 2)
-  lineTotal         Decimal  @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
-  fulfilledQuantity Decimal  @default(0) @db.Decimal(12, 2)
+  unitPrice         Decimal             @db.Decimal(12, 2)
+  unitCost          Decimal?            @db.Decimal(12, 2)
+  lineTotal         Decimal             @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
+  fulfilledQuantity Decimal             @default(0) @db.Decimal(12, 2)
   // Serial-tracked products: the units sold on this line (ProductSerial).
-  serialNumbers     String[] @default([])
-  reservedQuantity  Decimal  @default(0) @db.Decimal(12, 2)
-  costProvisional   Boolean  @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
+  serialNumbers     String[]            @default([])
+  reservedQuantity  Decimal             @default(0) @db.Decimal(12, 2)
+  costProvisional   Boolean             @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
 
   // NEW — per-item discount. Mirrors Invoice.discountType/discountValue
   // (now deprecated at the document level, see below) but scoped per line.
@@ -1842,6 +1879,8 @@ model InvoiceItem {
   // Where unitPrice came from (see SalesQuotationItem.priceLevelId).
   priceLevelId String?
   priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
+
+  @@index([quotationItemId])
 }
 
 enum SalesQuotationActivityEventType {
@@ -2050,6 +2089,9 @@ enum NotificationType {
   WA_BALANCE_LOW
   WORK_ORDER_APPROVED
   WORK_ORDER_DECLINED
+  // The customer answered a quotation through its link.
+  QUOTATION_APPROVED
+  QUOTATION_DECLINED
 }
 
 // A browser/device a DRIVER has logged in from. `deviceId` is a
@@ -2135,6 +2177,9 @@ enum Role {
   ADMIN
   USER
   DRIVER
+  // The workshop's shared shop-PC login (one per business): sees the mechanic board, changes nothing.
+  // The mechanics themselves are Employees with isMechanic, listed on that account.
+  MECHANIC
 }
 
 enum EventType {
@@ -2179,6 +2224,10 @@ enum ModuleKey {
   WAREHOUSE_OPS
   WORKSHOP_RMS
   DELIVERY_DMS
+  // The books and finance pages (/accounting). Requires INVOICE_POS.
+  // Journal entries are posted whether or not it's active, so turning it
+  // on later shows the full history.
+  ACCOUNTING
 }
 
 enum RouteStatus {
@@ -2240,6 +2289,9 @@ model Employee {
   organizationId    String
   name              String
   position          String?
+  // A mechanic: listed on the Mechanic account and picked on work orders / invoices (only these are
+  // offered there). Set by adding the name to the Mechanic account, not typed as a position.
+  isMechanic        Boolean     @default(false)
   nik               String? // employee ID number
   bankName          String?
   bankAccountNumber String?
@@ -2247,8 +2299,8 @@ model Employee {
   isActive          Boolean     @default(true)
   createdAt         DateTime    @default(now())
   archivedAt        DateTime?
-  invoices          Invoice[] @relation("InvoiceSalesperson") // NEW — inverse relation
-  mechanicInvoices  Invoice[] @relation("InvoiceMechanic")
+  invoices          Invoice[]   @relation("InvoiceSalesperson") // NEW — inverse relation
+  mechanicInvoices  Invoice[]   @relation("InvoiceMechanic")
   workOrders        WorkOrder[]
   // Where their salary is booked in the P&L by branch; null = unassigned.
   branchId          String?
@@ -2621,6 +2673,9 @@ enum JournalSourceType {
   FIXED_ASSET_DEPRECIATION
   FIXED_ASSET_DISPOSAL
   PURCHASE_RETURN
+  // AR/AP for documents that never posted (the Accurate import); see
+  // OpeningBalanceService. One posted entry per side, replaced on re-sync.
+  OPENING_BALANCE
 }
 
 enum JournalEntryStatus {
@@ -3266,8 +3321,8 @@ model PartSearchTerm {
 }
 
 enum WorkOrderStatus {
-  // Priced and waiting for the customer's go-ahead: holds no stock and
-  // can't be invoiced until approved (→ QUEUED).
+  // Legacy: estimates are sales quotations now (src/scripts/estimates-to-quotations.ts converts the old
+  // ones). Nothing creates this any more; drop it once every install has run that script.
   ESTIMATE
   QUEUED
   IN_PROGRESS
@@ -3331,6 +3386,8 @@ model WorkOrder {
   comebacks       WorkOrder[]       @relation("WorkOrderComeback")
   items           WorkOrderItem[]
   invoices        Invoice[]
+  // The quotation(s) it was made from: the original and any additions.
+  quotations      SalesQuotation[]
   // Work this job recommended for later, and reminders this job followed up.
   recommendations VehicleReminder[] @relation("ReminderSourceWorkOrder")
   followedUp      VehicleReminder[] @relation("ReminderFollowUpWorkOrder")

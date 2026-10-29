@@ -11,6 +11,7 @@ import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { OpeningBalancesNotice, SyncOpeningBalancesButton, type OpeningBalancesResult } from '@/app/components/accounting/OpeningBalances';
 
 
 type APLine = {
@@ -75,6 +76,7 @@ export default function APAgingPage() {
   const [page, setPage] = useState(() => getInitialNumberParam('page', 1));
   const [pageSize, setPageSize] = useState(() => getInitialNumberParam('pageSize', 20));
   const [report, setReport] = useState<APAgingReport | null>(null);
+  const [openingResult, setOpeningResult] = useState<OpeningBalancesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,6 +178,23 @@ export default function APAgingPage() {
                   : t('accounting.apAging.notReconciledMessage', { ledger: formatIDR(report.reconciliation.apLedgerBalance), sum: formatIDR(report.reconciliation.sumOfOutstandingPOs) })}
               </span>
             </div>
+
+            {/* Imported (unposted) documents are the usual reason; offer the fix. */}
+            {!report.reconciliation.matches && (
+              <div className="mb-3">
+                <SyncOpeningBalancesButton
+                  onDone={(r) => {
+                    setOpeningResult(r);
+                    loadReport();
+                  }}
+                />
+              </div>
+            )}
+            {openingResult && (
+              <div className="mb-3">
+                <OpeningBalancesNotice result={openingResult} />
+              </div>
+            )}
 
             <div className="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3 mb-5">
               <Info size={13} strokeWidth={2} className="shrink-0 mt-0.5" />

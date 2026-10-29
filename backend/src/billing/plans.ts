@@ -23,6 +23,12 @@ export const MODULE_PRICES: ModulePrice[] = [
     requires: ModuleKey.INVOICE_POS,
   },
   { module: ModuleKey.DELIVERY_DMS, monthly: 700_000, yearly: 7_000_000 },
+  {
+    module: ModuleKey.ACCOUNTING,
+    monthly: 250_000,
+    yearly: 2_500_000,
+    requires: ModuleKey.INVOICE_POS,
+  },
 ];
 
 export function modulePrice(module: ModuleKey, period: BillingPeriod): number {
@@ -79,6 +85,7 @@ export const TRIAL_MODULES: ModuleKey[] = [
   ModuleKey.WAREHOUSE_OPS,
   ModuleKey.WORKSHOP_RMS,
   ModuleKey.DELIVERY_DMS,
+  ModuleKey.ACCOUNTING,
 ];
 
 // A module keeps working this long after its paid-until date, so a renewal

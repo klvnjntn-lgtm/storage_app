@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2 } from 'lucide-react';
+import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2, Link2, Wrench, FilePlus2, Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { QuotationA4Template } from '@/app/components/quotations/templates/QuotationA4Template';
@@ -12,12 +12,14 @@ import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
+import { useHasModule } from '@/lib/hooks/useHasModule';
+import { ConvertQuotationDialog, type ConversionLine } from '@/app/components/quotations/ConvertQuotationDialog';
 
 
 type QuotationDetail = {
   id: string;
   quotationNumber: string | null;
-  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'CONVERTED';
+  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED' | 'CONVERTED';
   customerName: string | null;
   customer: { name: string; phone: string | null } | null;
   location: { name: string } | null;
@@ -27,6 +29,16 @@ type QuotationDetail = {
   items: { id: string }[];
   salesOrders: { id: string; orderNumber: string | null; status: string }[];
   invoices: { id: string; invoiceNumber: string | null; status: string }[];
+  // Workshops: the car, why it came in, the customer's online answer, and the job/quotation chain.
+  vehicle: { id: string; plateNumber: string; vehicleModel: string } | null;
+  odometer: number | null;
+  complaint: string | null;
+  responseNote: string | null;
+  workOrder: { id: string; number: string; status: string } | null;
+  parentQuotation: { id: string; quotationNumber: string | null; status: string } | null;
+  additions: { id: string; quotationNumber: string | null; status: string }[];
+  // Per line: quoted, ordered, invoiced, left — it converts in parts.
+  conversion: ConversionLine[];
 };
 
 export default function QuotationDetailPage() {
@@ -36,6 +48,17 @@ export default function QuotationDetailPage() {
   const id = params.id;
   const { t } = useLanguage();
   const warehouseOps = useWarehouseOps();
+  const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  // Work orders are an org setting on top of the module.
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  useEffect(() => {
+    if (!hasWorkshopRms) return;
+    apiFetch('/work-orders/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => setWorkOrdersEnabled(!!body?.enabled))
+      .catch(() => {});
+  }, [hasWorkshopRms]);
 
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   // Flat print-shaped data for the paper preview — separate fetch from
@@ -80,11 +103,11 @@ export default function QuotationDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function runAction(action: string, path: string, method = 'POST') {
+  async function runAction(action: string, path: string, method = 'POST', payload?: object) {
     setActionLoading(action);
     setError(null);
     try {
-      const res = await apiFetch(path, { method });
+      const res = await apiFetch(path, { method, ...(payload && { body: JSON.stringify(payload) }) });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         setError(body?.message ?? t('sales.quotationDetail.requestFailed', { status: res.status }));
@@ -113,8 +136,11 @@ export default function QuotationDetailPage() {
     if (res.ok) router.push('/sales/quotations');
   }
 
-  async function handleConvertToOrder() {
-    const order = await runAction('convert-order', `/sales-orders/from-quotation/${id}`);
+  // Which conversion's quantity picker is open.
+  const [converting, setConverting] = useState<'order' | 'invoice' | null>(null);
+
+  async function handleConvertToOrder(lines?: { quotationItemId: string; quantity: number }[]) {
+    const order = await runAction('convert-order', `/sales-orders/from-quotation/${id}`, 'POST', { lines });
     if (order?.id) {
       load();
       router.push(`/sales/orders/${order.id}`);
@@ -125,12 +151,37 @@ export default function QuotationDetailPage() {
   // disappears with the rest of the SENT/ACCEPTED action group — invoicing
   // from that point on happens from the sales order's own detail page via
   // /invoices/from-order/:orderId, not from here.
-  async function handleConvertToInvoice() {
-    const invoice = await runAction('convert-invoice', `/invoices/from-quotation/${id}`);
+  async function handleConvertToInvoice(lines?: { quotationItemId: string; quantity: number }[]) {
+    const invoice = await runAction('convert-invoice', `/invoices/from-quotation/${id}`, 'POST', { lines });
     if (invoice?.id) {
       load();
       router.push(`/sales/invoices/${invoice.id}`);
     }
+  }
+
+  // The customer's approval link, onto the clipboard (a draft is sent first, so reload).
+  async function handleCopyLink() {
+    const body = await runAction('copy-link', `/sales-quotations/${id}/approval-link`);
+    if (!body?.token) return;
+    const url = `${window.location.origin}/estimate/${body.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      await dialog.alert(url);
+    }
+    load();
+  }
+
+  async function handleConvertToWorkOrder() {
+    const wo = await runAction('convert-wo', `/work-orders/from-quotation/${id}`);
+    if (wo?.id) router.push(`/workshop/work-orders/${wo.id}`);
+  }
+
+  async function handleAddition() {
+    const addition = await runAction('addition', `/sales-quotations/${id}/additions`);
+    if (addition?.id) router.push(`/sales/quotations/new?draftId=${addition.id}`);
   }
 
   function handlePrint() {
@@ -177,6 +228,8 @@ export default function QuotationDetailPage() {
   }
 
   if (!quotation) return null;
+  const anyLeft = quotation.conversion.some((l) => l.remaining > 0);
+  const partlyConverted = quotation.conversion.some((l) => l.ordered > 0 || l.invoiced > 0);
 
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
@@ -255,10 +308,10 @@ export default function QuotationDetailPage() {
                 </>
               )}
 
-{(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') && (
+{(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') && !quotation.workOrder && anyLeft && (
   <button data-tour="qd-to-order"
     disabled={actionLoading === 'convert-order'}
-    onClick={handleConvertToOrder}
+    onClick={() => setConverting('order')}
     className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
   >
     <ArrowRightCircle size={14} strokeWidth={2} />
@@ -269,18 +322,53 @@ export default function QuotationDetailPage() {
 {/* Not once CONVERTED: that status also means "converted to a sales
     order", which is invoiced from the order — invoicing here too billed
     the customer twice. */}
-{(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') &&
-  !quotation.salesOrders.some((so) => so.status !== 'CANCELLED') &&
-  !quotation.invoices.some((inv) => inv.status !== 'VOID') && (
+{(quotation.status === 'SENT' || quotation.status === 'ACCEPTED') && !quotation.workOrder && anyLeft && (
     <button data-tour="qd-to-invoice"
       disabled={actionLoading === 'convert-invoice'}
-      onClick={handleConvertToInvoice}
+      onClick={() => setConverting('invoice')}
       className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
     >
       <FileText size={14} strokeWidth={2} />
       {t('sales.quotationDetail.convertToInvoice')}
     </button>
   )}
+              {hasWorkshopRms && !quotation.workOrder && ['DRAFT', 'SENT', 'ACCEPTED'].includes(quotation.status) && (
+                <button
+                  disabled={actionLoading === 'copy-link'}
+                  onClick={handleCopyLink}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                >
+                  <Link2 size={14} strokeWidth={2} />
+                  {linkCopied ? t('sales.quotationWorkshop.linkCopied') : t('sales.quotationWorkshop.copyLink')}
+                </button>
+              )}
+              {hasWorkshopRms &&
+                workOrdersEnabled &&
+                quotation.vehicle &&
+                !quotation.workOrder &&
+                !partlyConverted &&
+                ['DRAFT', 'SENT', 'ACCEPTED'].includes(quotation.status) && (
+                  <button
+                    disabled={actionLoading === 'convert-wo'}
+                    onClick={handleConvertToWorkOrder}
+                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Wrench size={14} strokeWidth={2} />
+                    {quotation.parentQuotation
+                      ? t('sales.quotationWorkshop.addToWorkOrder')
+                      : t('sales.quotationWorkshop.convertToWorkOrder')}
+                  </button>
+                )}
+              {hasWorkshopRms && quotation.workOrder && (
+                <button
+                  disabled={actionLoading === 'addition'}
+                  onClick={handleAddition}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                >
+                  <FilePlus2 size={14} strokeWidth={2} />
+                  {t('sales.quotationWorkshop.additionalQuotation')}
+                </button>
+              )}
               {quotation.status !== 'DRAFT' && (
                 <>
                   <button
@@ -308,6 +396,94 @@ export default function QuotationDetailPage() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 space-y-3 print:hidden">
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
+        )}
+
+        {(quotation.vehicle || quotation.workOrder || quotation.parentQuotation || quotation.additions.length > 0 || quotation.responseNote) && (
+          <div className="border-2 border-blue-200 bg-blue-50/40 rounded-md p-3 text-sm space-y-1">
+            {quotation.vehicle && (
+              <p className="flex items-center gap-1.5">
+                <Car size={14} strokeWidth={2} className="text-blue-700" />
+                <span className="font-semibold">{quotation.vehicle.plateNumber}</span> · {quotation.vehicle.vehicleModel}
+                {quotation.odometer != null && (
+                  <span className="text-gray-600"> · {quotation.odometer.toLocaleString('id-ID')} km</span>
+                )}
+                {quotation.complaint && <span className="text-gray-600"> — {quotation.complaint}</span>}
+              </p>
+            )}
+            {quotation.responseNote && <p className="text-gray-700">{quotation.responseNote}</p>}
+            {quotation.workOrder && (
+              <p>
+                {t('sales.quotationWorkshop.workOrderLabel')}{' '}
+                <button className="underline font-medium" onClick={() => router.push(`/workshop/work-orders/${quotation.workOrder!.id}`)}>
+                  {quotation.workOrder.number}
+                </button>
+              </p>
+            )}
+            {quotation.parentQuotation && (
+              <p>
+                {t('sales.quotationWorkshop.additionTo')}{' '}
+                <button className="underline font-medium" onClick={() => router.push(`/sales/quotations/${quotation.parentQuotation!.id}`)}>
+                  {quotation.parentQuotation.quotationNumber ?? t('sales.quotationDetail.unissuedDraft')}
+                </button>
+              </p>
+            )}
+            {quotation.additions.length > 0 && (
+              <p>
+                {t('sales.quotationWorkshop.additions')}{' '}
+                {quotation.additions.map((a, i) => (
+                  <span key={a.id}>
+                    {i > 0 && ', '}
+                    <button className="underline font-medium" onClick={() => router.push(`/sales/quotations/${a.id}`)}>
+                      {a.quotationNumber ?? t('sales.quotationDetail.unissuedDraft')}
+                    </button>{' '}
+                    ({a.status})
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
+        )}
+
+        {partlyConverted && (
+          <div className="border-2 border-gray-200 bg-white rounded-md p-3 text-sm overflow-x-auto">
+            <p className="font-semibold mb-2">{t('sales.quotationConvert.progressTitle')}</p>
+            <table className="w-full min-w-[420px]">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500">
+                  <th className="py-1 pr-2">{t('sales.quotationConvert.item')}</th>
+                  <th className="py-1 px-2 text-right">{t('sales.quotationConvert.quoted')}</th>
+                  <th className="py-1 px-2 text-right">{t('sales.quotationConvert.ordered')}</th>
+                  <th className="py-1 px-2 text-right">{t('sales.quotationConvert.invoiced')}</th>
+                  <th className="py-1 pl-2 text-right">{t('sales.quotationConvert.left')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quotation.conversion.map((l) => (
+                  <tr key={l.id} className="border-t border-gray-100">
+                    <td className="py-1 pr-2">{l.name}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{l.quoted}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{l.ordered}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{l.invoiced}</td>
+                    <td className={`py-1 pl-2 text-right tabular-nums font-semibold ${l.remaining ? '' : 'text-gray-400'}`}>{l.remaining}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {converting && (
+          <ConvertQuotationDialog
+            target={converting}
+            lines={quotation.conversion}
+            busy={actionLoading === 'convert-order' || actionLoading === 'convert-invoice'}
+            onClose={() => setConverting(null)}
+            onConfirm={(lines) => {
+              setConverting(null);
+              if (converting === 'order') handleConvertToOrder(lines);
+              else handleConvertToInvoice(lines);
+            }}
+          />
         )}
 
         {(quotation.salesOrders.length > 0 || quotation.invoices.length > 0) && (

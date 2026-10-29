@@ -105,6 +105,7 @@ export const platform = {
         WAREHOUSE_OPS: 'Warehouse operations',
         WORKSHOP_RMS: 'Workshop',
         DELIVERY_DMS: 'Delivery',
+        ACCOUNTING: 'Accounting',
       },
       audit: {
         organization_update: 'Billing changed',
@@ -229,6 +230,7 @@ export const platform = {
         WAREHOUSE_OPS: 'Operasional gudang',
         WORKSHOP_RMS: 'Bengkel',
         DELIVERY_DMS: 'Pengiriman',
+        ACCOUNTING: 'Akuntansi',
       },
       audit: {
         organization_update: 'Tagihan diubah',

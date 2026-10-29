@@ -8,7 +8,6 @@ export type {
   LocationOption,
   ProductSearchResult,
   ServiceLine,
-  TaxRate,
 } from '@/app/components/invoices/types';
 
 export type QuotationItemView = {
@@ -16,17 +15,10 @@ export type QuotationItemView = {
   quantity: number;
   unitPrice: number;
   itemDiscount: number;
-  itemTaxAmount: number;
   lineTotal: number;
   itemTotal: number;
   unit: string | null;
   locationName: string;
-};
-
-export type QuotationTaxView = {
-  name: string;
-  percentage: number;
-  amount: number;
 };
 
 export type QuotationView = {
@@ -34,6 +26,12 @@ export type QuotationView = {
   quotationDate: string;
   validUntil: string | null;
   termsAndConditions: string | null;
+
+  // Workshops: the car quoted for, its odometer and the complaint.
+  vehiclePlateNumber?: string | null;
+  vehicleModel?: string | null;
+  vehicleOdometer?: number | null;
+  complaint?: string | null;
 
   customerName: string | null;
   customerPhone: string | null;
@@ -44,8 +42,8 @@ export type QuotationView = {
   items: QuotationItemView[];
   subtotal: number;
   discount: number;
+  // Only documents issued while tax rates existed carry any.
   taxAmount: number;
-  taxes: QuotationTaxView[];
   total: number;
 
   businessName: string | null;

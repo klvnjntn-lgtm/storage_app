@@ -139,11 +139,6 @@ export class CreateWorkOrderDto {
   @Type(() => WorkOrderLineInput)
   items?: WorkOrderLineInput[];
 
-  // Save as an estimate awaiting the customer's approval instead of
-  // checking the car straight in.
-  @IsOptional()
-  @IsBoolean()
-  asEstimate?: boolean;
 
   // Started from this vehicle's pending reminder (recommended work):
   // the reminder is completed and linked to the new job.
@@ -207,14 +202,6 @@ export class SetWorkOrderStatusDto {
   status: WorkOrderStatus;
 }
 
-export class ApproveWorkOrderDto {
-  // How the go-ahead was given, e.g. "Signed SPK", "By phone — Budi".
-  @IsOptional()
-  @IsString()
-  @MaxLength(300)
-  note?: string;
-}
-
 export class CreateRecommendationDto {
   @IsString()
   @IsNotEmpty()
@@ -232,23 +219,11 @@ export class CreateRecommendationDto {
   dueOdometer?: number;
 }
 
-// The customer's answer on the approval page.
-export class RespondToEstimateDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  name: string;
-
+// Converting a quotation: optionally who'll do the job.
+export class CreateWorkOrderFromQuotationDto {
   @IsOptional()
   @IsString()
-  @MaxLength(500)
-  reason?: string;
-
-  // The estimate's version as shown to them (see publicEstimate).
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(64)
-  version: string;
+  mechanicId?: string;
 }
 
 export class CreateWorkOrderInvoiceDto {

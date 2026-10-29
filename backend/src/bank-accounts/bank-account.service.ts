@@ -60,48 +60,55 @@ export class BankAccountService {
       throw new BadRequestException('Only a master account can set the default bank account');
     }
 
-    if (dto.isDefault) {
-      // Only one default at a time — unset any other default first,
-      // same pattern as TaxRateService.update.
-      return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault) {
+        // Only one default at a time — unset any other default first.
         await tx.organizationBankAccount.updateMany({
           where: { organizationId, isDefault: true, id: { not: id } },
           data: { isDefault: false },
         });
-        return tx.organizationBankAccount.update({
-          where: { id },
-          data: {
-            ...(dto.bankName !== undefined && { bankName: dto.bankName.trim() }),
-            ...(dto.accountNumber !== undefined && { accountNumber: dto.accountNumber.trim() }),
-            ...(dto.accountName !== undefined && { accountName: dto.accountName.trim() }),
-            ...branchPatch,
-            isDefault: true,
-          },
-        });
+      }
+      const updated = await tx.organizationBankAccount.update({
+        where: { id },
+        data: {
+          ...(dto.bankName !== undefined && { bankName: dto.bankName.trim() }),
+          ...(dto.accountNumber !== undefined && { accountNumber: dto.accountNumber.trim() }),
+          ...(dto.accountName !== undefined && { accountName: dto.accountName.trim() }),
+          ...branchPatch,
+          ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
+        },
       });
-    }
-
-    return this.prisma.organizationBankAccount.update({
-      where: { id },
-      data: {
-        ...(dto.bankName !== undefined && { bankName: dto.bankName.trim() }),
-        ...(dto.accountNumber !== undefined && { accountNumber: dto.accountNumber.trim() }),
-        ...(dto.accountName !== undefined && { accountName: dto.accountName.trim() }),
-        ...branchPatch,
-        ...(dto.isDefault === false && { isDefault: false }),
-      },
+      await this.bankAccountGLLink.syncLinkedAccount(organizationId, updated, tx);
+      return updated;
     });
   }
 
   // Archive rather than delete — nothing references a bank account by FK
   // yet, but this keeps the door open (e.g. if a document ever snapshots
   // which account was quoted) without risking a dangling reference later.
-  // Also clears isDefault, same fix TaxRateService.archive applies.
+  // Also clears isDefault.
+  // Its ledger account goes inactive with it (history stays in the books) and comes back on restore.
   async archive(organizationId: string, id: string, user?: BranchScopedUser) {
     await this.assertOwned(organizationId, id, user);
-    return this.prisma.organizationBankAccount.update({
-      where: { id },
-      data: { archivedAt: new Date(), isDefault: false },
+    return this.prisma.$transaction(async (tx) => {
+      const archived = await tx.organizationBankAccount.update({
+        where: { id },
+        data: { archivedAt: new Date(), isDefault: false },
+      });
+      await this.bankAccountGLLink.syncLinkedAccount(organizationId, archived, tx);
+      return archived;
+    });
+  }
+
+  async restore(organizationId: string, id: string, user?: BranchScopedUser) {
+    await this.assertOwned(organizationId, id, user);
+    return this.prisma.$transaction(async (tx) => {
+      const restored = await tx.organizationBankAccount.update({
+        where: { id },
+        data: { archivedAt: null },
+      });
+      await this.bankAccountGLLink.syncLinkedAccount(organizationId, restored, tx);
+      return restored;
     });
   }
 

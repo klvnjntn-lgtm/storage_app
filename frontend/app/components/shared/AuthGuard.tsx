@@ -5,18 +5,21 @@ import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/apifetch';
 import { getSessionMarker } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { homeFor } from '@/lib/roles';
 
 const PUBLIC_PATHS = ['/', '/login', '/register', '/register/import', '/forgot-password', '/reset-password'];
 
 const checkIsPublic = (pathname: string) =>
   PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/print/');
 
-// A DRIVER account only ever sees its own route page — no landing page,
-// home, or other modules (the backend refuses them anyway, see
-// DriverScopeGuard). Password reset stays reachable.
-const DRIVER_PATHS = ['/driver', '/forgot-password', '/reset-password', '/suspended'];
-const driverMayView = (pathname: string) =>
-  DRIVER_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+// A DRIVER or MECHANIC account only ever sees its own page (/driver, /mechanic) — no landing page, home,
+// or other modules (the backend refuses them anyway, see DriverScopeGuard). Password reset stays
+// reachable.
+const SCOPED_ROLES = ['DRIVER', 'MECHANIC'];
+const scopedMayView = (role: string, pathname: string) =>
+  [homeFor(role), '/forgot-password', '/reset-password', '/suspended'].some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
 
 // Where a freshly verified session lands from an auth page or a page its
 // role may not view; null = stay. A suspended organization (platform
@@ -32,8 +35,8 @@ function redirectFor(
     const stays = pathname === '/suspended' || (checkIsPublic(pathname) && !isAuthPage);
     return stays ? null : '/suspended';
   }
-  if (pathname === '/suspended') return role === 'DRIVER' ? '/driver' : '/home';
-  if (role === 'DRIVER') return driverMayView(pathname) ? null : '/driver';
+  if (pathname === '/suspended') return homeFor(role);
+  if (role && SCOPED_ROLES.includes(role)) return scopedMayView(role, pathname) ? null : homeFor(role);
   return isAuthPage ? '/home' : null;
 }
 
@@ -136,8 +139,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [pathname, router, role, suspended]);
 
   const isPublic = checkIsPublic(pathname);
-  // Don't flash a page (landing, AppShell) a driver is being sent away from.
-  const leavingAsDriver = role === 'DRIVER' && !driverMayView(pathname);
+  // Don't flash a page (landing, AppShell) a driver or the mechanic account is being sent away from.
+  const leavingAsDriver = !!role && SCOPED_ROLES.includes(role) && !scopedMayView(role, pathname);
   // Nor a page of a suspended org's app (it would only fill with errors).
   const leavingAsSuspended = suspended && pathname !== '/suspended' && !isPublic;
 

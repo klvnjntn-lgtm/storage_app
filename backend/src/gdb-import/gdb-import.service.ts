@@ -12,10 +12,10 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
-  PurchaseOrderStatus,
-} from '@prisma/client';
+  PurchaseOrderStatus, FulfillmentStatus } from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
 import { PlanLimitsService } from '../billing/plan-limits.service';
+import { OpeningBalanceService } from '../accounting/opening-balance.service';
 import { ensureDefaultPriceLevel } from '../price-level/default-price-level';
 import { detectInvoiceNumberFormat } from '../shared/documents/invoice-number-format.util';
 // ---------------------------------------------------------------------------
@@ -489,6 +489,7 @@ export class GdbImportService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService,     
     private readonly locationService: LocationService,
     private readonly planLimits: PlanLimitsService,
+    private readonly openingBalances: OpeningBalanceService,
 ) {}
 
   private readonly tempFiles = new Map<string, TempFileEntry>();
@@ -876,6 +877,8 @@ async saveWarehouseMapping(
         mechanics.employeeIdByItemNo,
       );
 
+      // The imported history never posts to the ledger, so the books get
+      // opening AR/AP for it instead (recomputed on every import).
       if (target !== 'full_invoices_and_purchase_orders') {
         return {
           items: itemResult,
@@ -883,6 +886,7 @@ async saveWarehouseMapping(
           salesmen: { created: salesmen.created, updated: salesmen.updated },
           mechanics: { created: mechanics.created, matched: mechanics.matched },
           invoices: invoiceResult,
+          openingBalances: await this.openingBalances.sync(organizationId),
         };
       }
 
@@ -908,6 +912,7 @@ async saveWarehouseMapping(
         invoices: invoiceResult,
         purchaseOrders: purchaseOrderResult,
         purchaseInvoices: purchaseInvoiceResult,
+        openingBalances: await this.openingBalances.sync(organizationId),
       };
     } finally {
       await detach(fbDb);
@@ -2213,6 +2218,9 @@ private async importStock(
         invoiceNumber,
         format: invoiceFormat,
         status: InvoiceStatus.ISSUED,
+        // Accurate history: the goods were handed over there already (and WareSys's stock came in as a
+        // count), so it's fulfilled — not "backordered".
+        fulfillmentStatus: FulfillmentStatus.FULFILLED,
         customerId,
         vehicleId,
         customerName: customer?.name ?? header.CUSTOMER_NAME ?? null,

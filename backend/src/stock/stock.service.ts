@@ -5,7 +5,7 @@ import { ProductService } from '../product/product.service'; // adjust path if d
 import { PostingRulesService } from '../accounting/posting-rules.service'; // NEW
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { StockConfirmationRequiredException } from './exceptions/stock-confirmation-required.exception';
-import { heldWorkOrderItemsWhere } from './work-order-holds';
+import { heldStock, holdKey } from './stock-holds';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { ensureDefaultBranch } from '../branches/resolve-branch';
 import { findOrCreateCentre, isWarehouseOpsActive } from '../organization-module/warehouse-ops-active';
@@ -137,22 +137,17 @@ export class StockService {
     return rows[0] ? Number(rows[0].quantity) : 0;
   }
 
-  // Units at this location held for open work orders (see
-  // work-order-holds.ts), less the ones excludeInvoiceId's own job holds.
-  async heldForWorkOrders(
+  // Units at this location promised elsewhere — open work orders, accepted quotations, confirmed
+  // sales orders (see stock-holds.ts) — less what excludeInvoiceId's own job / quotation / order holds.
+  async heldElsewhere(
     client: Prisma.TransactionClient,
     orgId: string,
     productId: string,
     locationId: string,
     excludeInvoiceId?: string,
   ): Promise<number> {
-    const org = await client.organization.findUnique({ where: { id: orgId }, select: { workOrdersEnabled: true } });
-    if (!org?.workOrdersEnabled) return 0;
-    const held = await client.workOrderItem.aggregate({
-      _sum: { quantity: true },
-      where: { ...heldWorkOrderItemsWhere(orgId, excludeInvoiceId), productId, locationId },
-    });
-    return Number(held._sum.quantity ?? 0);
+    const held = await heldStock(client, orgId, [productId], { locationId, excludeInvoiceId });
+    return held.get(holdKey(productId, locationId)) ?? 0;
   }
 
   // -----------------------------
@@ -294,8 +289,8 @@ export class StockService {
       await this.assertLocationOwnership(orgId, locationId, client);
 
       const onHand = await this.lockStockRow(client, orgId, productId, locationId);
-      // What this sale may take: on hand less what open jobs are holding.
-      const held = await this.heldForWorkOrders(client, orgId, productId, locationId, context.invoiceId);
+      // What this sale may take: on hand less what's promised to other customers.
+      const held = await this.heldElsewhere(client, orgId, productId, locationId, context.invoiceId);
       const available = Math.max(0, onHand - held);
       const shortfall = Math.max(0, requestedQty - available);
 

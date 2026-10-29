@@ -9,6 +9,8 @@ export type InvoicePrintView = {
   format: InvoiceFormat;
   paymentStatus: 'UNPAID' | 'PARTIAL' | 'PAID';
   fulfillmentStatus: 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED';
+  // DIRECT_ISSUE, DELIVERY_ORDER, SESSION, or null (not yet fulfilled any way).
+  fulfillmentPath?: string | null;
 
   businessName: string;
   businessLegalName: string | null;
@@ -46,9 +48,7 @@ export type InvoicePrintView = {
   vehicleVin: string | null;
   vehicleOdometer: number | null;
 
-  employeeId: string | null;
-  employeeName: string | null;
-  // The mechanic who did the work (workshops), separate from the salesperson.
+  // The mechanic who did the work (workshops).
   mechanicId?: string | null;
   mechanicName?: string | null;
 
@@ -65,7 +65,6 @@ export type InvoicePrintView = {
   paymentTerms: string | null; // NEW — backend always returned this; type just never declared it
   notes: string | null;        // NEW — same
 
-  taxes: { name: string; percentage: number; amount: number }[];
   items: {
     id: string;
     productName: string;
@@ -75,7 +74,6 @@ export type InvoicePrintView = {
     unit: string | null;
     unitPrice: number;
     itemDiscount: number;
-    itemTaxAmount: number;
     itemTotal: number;
     lineTotal: number;
     locationName: string;
@@ -120,9 +118,6 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
     vehicleVin: invoice.vehicleVin,
     vehicleOdometer: invoice.vehicleOdometer,
 
-    employeeId: invoice.employeeId ?? null,
-    employeeName: invoice.employeeName ?? null,
-
     items: invoice.items.map((item) => ({
       id: item.id,
       productName: item.productName ?? '',
@@ -131,7 +126,6 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
       unit: item.unit ?? null,
       unitPrice: Number(item.unitPrice),
       itemDiscount: Number(item.itemDiscount ?? 0),
-      itemTaxAmount: Number(item.itemTaxAmount ?? 0),
       itemTotal: Number(item.itemTotal ?? item.lineTotal),
       lineTotal: Number(item.lineTotal),
       locationName: item.locationName ?? '',
@@ -139,11 +133,6 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
     subtotal: Number(invoice.subtotal),
     discount: Number(invoice.discount),
     taxAmount: Number(invoice.taxAmount ?? 0),
-    taxes: (invoice.taxes ?? []).map((t) => ({
-      name: t.name,
-      percentage: Number(t.percentage),
-      amount: Number(t.amount),
-    })),
     total: Number(invoice.total),
 
     businessName: invoice.businessLegalName ?? invoice.businessName,

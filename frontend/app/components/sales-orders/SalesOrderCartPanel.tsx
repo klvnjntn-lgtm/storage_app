@@ -1,9 +1,9 @@
 'use client';
 
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
-import { Minus, Plus, Trash2, Send, AlertCircle, MapPin, Pencil, Percent, Wrench, X } from 'lucide-react';
+import { Minus, Plus, Trash2, Send, AlertCircle, MapPin, Pencil, Wrench, X } from 'lucide-react';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
-import { CartLine, Customer, DiscountType, ServiceLine, TaxRate } from './types';
+import { CartLine, Customer, DiscountType, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
@@ -17,7 +17,6 @@ type CartLineWithTotals = CartLine & {
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -25,7 +24,6 @@ type ServiceLineWithTotals = ServiceLine & {
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -50,13 +48,9 @@ export function SalesOrderCartPanel({
   onSubmit,
   saving,
   error,
-  taxRates,
-  onToggleLineTaxRate,
-  onApplyTaxToAll,
   onChangeLineDiscount,
   onChangeServiceDiscount,
   onApplyDiscountToAll,
-  taxAmount,
   total,
   services,
   onAddService,
@@ -64,7 +58,6 @@ export function SalesOrderCartPanel({
   onChangeServicePrice,
   onChangeServiceUnit,
   onRemoveService,
-  onToggleServiceTaxRate,
 }: {
   cartLines: CartLineWithTotals[];
   customer: Customer | null;
@@ -87,13 +80,9 @@ export function SalesOrderCartPanel({
   onSubmit: () => void;
   saving: boolean;
   error: string;
-  taxRates: TaxRate[];
-  onToggleLineTaxRate: (key: string, taxRateId: string) => void;
-  onApplyTaxToAll: (taxRateId: string, checked: boolean) => void;
   onChangeLineDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onChangeServiceDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onApplyDiscountToAll: (discountType: DiscountType | null, value: number) => void;
-  taxAmount: number;
   total: number;
   services: ServiceLineWithTotals[];
   onAddService: () => void;
@@ -101,7 +90,6 @@ export function SalesOrderCartPanel({
   onChangeServicePrice: (key: string, raw: string) => void;
   onChangeServiceUnit: (key: string, value: string) => void;
   onRemoveService: (key: string) => void;
-  onToggleServiceTaxRate: (key: string, taxRateId: string) => void;
 }) {
   const { t } = useLanguage();
   const hasEmptyServicePrice = services.some((s) => s.unitPrice === null);
@@ -112,7 +100,7 @@ export function SalesOrderCartPanel({
   const warehouseOps = useWarehouseOps();
 
   return (
-    <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
+    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
@@ -134,27 +122,30 @@ export function SalesOrderCartPanel({
         <p className="text-xs text-gray-400 mb-3">{t('sales.orderCart.emptyHint')}</p>
       )}
 
-      <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
+      {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
+      <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
+        <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
 
-      <div className="grid grid-cols-2 gap-2 mt-3">
-        <div>
-          <label className="text-[11px] text-gray-500">{t('sales.orderCart.poNumber')}</label>
-          <input
-            type="text"
-            value={customerPoNumber}
-            onChange={(e) => setCustomerPoNumber(e.target.value)}
-            placeholder={t('common.optional')}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
-          <DatePicker
-            clearable
-            value={orderDate}
-            onChange={(v) => setOrderDate(v)}
-            className="w-full"
-          />
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <div>
+            <label className="text-[11px] text-gray-500">{t('sales.orderCart.poNumber')}</label>
+            <input
+              type="text"
+              value={customerPoNumber}
+              onChange={(e) => setCustomerPoNumber(e.target.value)}
+              placeholder={t('common.optional')}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
+            <DatePicker
+              clearable
+              value={orderDate}
+              onChange={(v) => setOrderDate(v)}
+              className="w-full"
+            />
+          </div>
         </div>
       </div>
 
@@ -165,8 +156,6 @@ export function SalesOrderCartPanel({
       {(cartLines.length > 0 || services.length > 0) && (
         <div className="mt-3">
           <BulkApplyBar
-            taxRates={taxRates}
-            onApplyTaxToAll={onApplyTaxToAll}
             onApplyDiscountToAll={onApplyDiscountToAll}
           />
         </div>
@@ -269,34 +258,6 @@ export function SalesOrderCartPanel({
                 onChange={(discountType, rawValue) => onChangeLineDiscount(line.key, discountType, rawValue)}
               />
 
-              {taxRates.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                  <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                    <Percent size={10} strokeWidth={2} />
-                    {t('sales.orderCart.tax')}
-                  </span>
-                  {taxRates.map((rate) => {
-                    const checked = line.taxRateIds.includes(rate.id);
-                    return (
-                      <label
-                        key={rate.id}
-                        className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => onToggleLineTaxRate(line.key, rate.id)}
-                          className="w-3.5 h-3.5 accent-blue-600"
-                        />
-                        {rate.name} ({rate.percentage}%)
-                      </label>
-                    );
-                  })}
-                  {line.lineTaxAmount > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">+{formatIDR(line.lineTaxAmount)}</span>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
@@ -380,34 +341,6 @@ export function SalesOrderCartPanel({
                   onChange={(discountType, rawValue) => onChangeServiceDiscount(line.key, discountType, rawValue)}
                 />
 
-                {taxRates.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                    <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                      <Percent size={10} strokeWidth={2} />
-                      {t('sales.orderCart.tax')}
-                    </span>
-                    {taxRates.map((rate) => {
-                      const checked = line.taxRateIds.includes(rate.id);
-                      return (
-                        <label
-                          key={rate.id}
-                          className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => onToggleServiceTaxRate(line.key, rate.id)}
-                            className="w-3.5 h-3.5 accent-blue-600"
-                          />
-                          {rate.name} ({rate.percentage}%)
-                        </label>
-                      );
-                    })}
-                    {line.lineTaxAmount > 0 && (
-                      <span className="text-xs text-gray-400 ml-auto">+{formatIDR(line.lineTaxAmount)}</span>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -423,12 +356,6 @@ export function SalesOrderCartPanel({
           <div className="flex justify-between items-center text-sm text-gray-600">
             <span>{t('sales.orderCart.discount')}</span>
             <span>−{formatIDR(discount)}</span>
-          </div>
-        )}
-        {taxAmount > 0 && (
-          <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>{t('sales.orderCart.tax')}</span>
-            <span>{formatIDR(taxAmount)}</span>
           </div>
         )}
         <div className="flex justify-between items-center font-bold pt-1">

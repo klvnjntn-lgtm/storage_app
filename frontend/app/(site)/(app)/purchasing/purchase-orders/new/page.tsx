@@ -11,11 +11,10 @@ import { POProductSearch } from '@/app/components/purchase-orders/POProductSearc
 import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker';
 import { Supplier } from '@/app/components/suppliers/types';
 import { defaultLocation } from '@/lib/locations';
-import { LocationOption, POCartLine, PONewProductLine, POProduct, TaxRate } from '@/app/components/purchase-orders/types';
+import { LocationOption, POCartLine, PONewProductLine, POProduct } from '@/app/components/purchase-orders/types';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { errorMessage } from '@/lib/api-error';
-import type { TaxRateRow } from '@/lib/api-types';
 
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -58,11 +57,9 @@ function PurchaseOrderFormPageInner() {
 
   const hasWarehouseOps = useHasModule('WAREHOUSE_OPS');
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [locationId, setLocationId] = useState('');
-  const [taxRateId, setTaxRateId] = useState<string | null>(null);
   const [discountAmount, setDiscountAmount] = useState('0');
 
   const [cart, setCart] = useState<Record<string, POCartLine>>({});
@@ -89,23 +86,14 @@ function PurchaseOrderFormPageInner() {
     cartRef.current = cart;
     newProductLinesRef.current = newProductLines;
     supplierRef.current = supplier;
-  }, [cart, newProductLines, supplier, locationId, taxRateId, discountAmount]);
+  }, [cart, newProductLines, supplier, locationId, discountAmount]);
 
   useEffect(() => {
     (async () => {
-      const [locRes, taxRes] = await Promise.all([
+      const [locRes] = await Promise.all([
         apiFetch('/locations'),
-        apiFetch('/organization/tax-rates'),
       ]);
       if (locRes.ok) setLocations(await locRes.json());
-      if (taxRes.ok) {
-        const rates = await taxRes.json();
-        setTaxRates(
-          rates
-            .filter((r: TaxRateRow) => !r.archivedAt)
-            .map((r: TaxRateRow) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: !!r.isDefault })),
-        );
-      }
     })();
   }, []);
 
@@ -129,7 +117,6 @@ function PurchaseOrderFormPageInner() {
         }
 
         setLocationId(po.locationId ?? '');
-        setTaxRateId(po.taxRateId ?? null);
         setDiscountAmount(String(Number(po.discountAmount ?? 0)));
 
         if (po.supplierId) {
@@ -227,9 +214,7 @@ function PurchaseOrderFormPageInner() {
   );
   const parsedDiscount = Number(discountAmount) || 0;
   const clampedDiscount = Math.min(Math.max(parsedDiscount, 0), subtotal);
-  const selectedTaxRate = taxRates.find((r) => r.id === taxRateId) ?? null;
-  const taxAmount = selectedTaxRate ? round2((subtotal - clampedDiscount) * (selectedTaxRate.percentage / 100)) : 0;
-  const total = round2(subtotal - clampedDiscount + taxAmount);
+  const total = round2(subtotal - clampedDiscount);
   const itemCount = cartLines.length + newProductLineTotals.length;
 
   function buildPayload() {
@@ -243,7 +228,8 @@ function PurchaseOrderFormPageInner() {
       locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
       discountAmount: clampedDiscount,
-      taxRateId: taxRateId || undefined,
+      // Explicit null so saving a draft from before tax rates were removed drops its tax.
+      taxRateId: null,
       items: [
         ...cartLines.map((l) => ({ productId: l.product.id, quantity: l.quantity, unitCost: l.unitCost })),
         ...newProductLines.map((l) => ({
@@ -274,7 +260,8 @@ function PurchaseOrderFormPageInner() {
       locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
       discountAmount: clampedDiscount,
-      taxRateId: taxRateId || undefined,
+      // Explicit null so saving a draft from before tax rates were removed drops its tax.
+      taxRateId: null,
       items: [
         ...cartLines.map((l) => ({ productId: l.product.id, quantity: l.quantity, unitCost: l.unitCost })),
         ...validNewProductLines.map((l) => ({
@@ -351,7 +338,7 @@ function PurchaseOrderFormPageInner() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, newProductLines, supplier, locationId, taxRateId, discountAmount]);
+  }, [cart, newProductLines, supplier, locationId, discountAmount]);
 
   // Safety net for leaving via client-side navigation (component unmount) —
   // the debounce above may not have fired yet.
@@ -415,63 +402,82 @@ function PurchaseOrderFormPageInner() {
     }
   }
 
+  const pageStyle = {
+    backgroundColor: 'var(--page-bg)',
+    backgroundImage: 'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
+    backgroundSize: '24px 24px',
+  };
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-gray-500">{t('purchasing.purchaseOrderNew.loading')}</p>
+      <main className="min-h-screen text-black" style={pageStyle}>
+        <div className="max-w-5xl mx-auto p-4 sm:p-6">
+          <p className="text-sm text-gray-500">{t('purchasing.purchaseOrderNew.loading')}</p>
+        </div>
       </main>
     );
   }
 
   if (notEditable) {
     return (
-      <main className="min-h-screen bg-white text-black p-6">
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
-          {t('purchasing.purchaseOrderNew.notEditable')}
-        </p>
-        <button
-          onClick={() => router.push(`/purchasing/purchase-orders/${editId}`)}
-          className="text-sm underline"
-        >
-          {t('purchasing.purchaseOrderNew.viewInstead')}
-        </button>
+      <main className="min-h-screen text-black" style={pageStyle}>
+        <div className="max-w-5xl mx-auto p-4 sm:p-6">
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+            {t('purchasing.purchaseOrderNew.notEditable')}
+          </p>
+          <button
+            onClick={() => router.push(`/purchasing/purchase-orders/${editId}`)}
+            className="text-sm underline"
+          >
+            {t('purchasing.purchaseOrderNew.viewInstead')}
+          </button>
+        </div>
       </main>
     );
   }
 
+  const inputClass =
+    'border border-blue-500/20 rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]';
+
   return (
-    <main
-      className="min-h-screen text-black"
-      style={{
-        backgroundColor: 'var(--page-bg)',
-        backgroundImage:
-          'radial-gradient(circle at 1px 1px, var(--page-dots) 1px, transparent 0)',
-        backgroundSize: '24px 24px',
-      }}
-    >
+    <main className="min-h-screen text-black" style={pageStyle}>
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
-              <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
-            </span>
-            <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight`}>
-              {currentId ? t('purchasing.purchaseOrderNew.titleEdit') : t('purchasing.purchaseOrderNew.titleNew')}
-            </h1>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
+                <ClipboardList size={18} strokeWidth={2} className="text-blue-700" />
+              </span>
+              <div className="min-w-0">
+                <h1 className={`${display.className} text-xl sm:text-2xl font-bold tracking-tight truncate`}>
+                  {currentId ? t('purchasing.purchaseOrderNew.titleEdit') : t('purchasing.purchaseOrderNew.titleNew')}
+                </h1>
+                <p className="text-xs text-gray-500 truncate">{t('purchasing.purchaseOrderNew.subtitle')}</p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => router.push('/purchasing/purchase-orders')}
+              className="text-sm px-2 sm:px-3 py-2 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-blue-50/60 shrink-0 transition-colors"
+            >
+              {t('purchasing.purchaseOrderNew.history')}
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
-        <div className="space-y-4">
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
+        <div className="space-y-4 min-w-0">
           <POProductSearch onAddProduct={addProduct} />
 
           {cartLines.length === 0 && newProductLineTotals.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">{t('purchasing.purchaseOrderNew.noItemsYet')}</p>
+            <p className="text-sm text-gray-400 text-center py-8 border border-dashed border-blue-500/20 rounded-xl bg-white/60">
+              {t('purchasing.purchaseOrderNew.noItemsYet')}
+            </p>
           ) : (
-            <div className="border-2 border-gray-200 rounded-md overflow-x-auto bg-white">
+            <div className="border border-blue-500/15 rounded-xl overflow-x-auto bg-white shadow-sm">
               <table className="w-full text-sm">
-                <thead className="bg-blue-50/60 border-b-2 border-gray-200">
+                <thead className="bg-blue-50/60 border-b border-blue-500/15">
                   <tr>
                     <th className="text-left font-semibold px-3 py-2">{t('purchasing.purchaseOrderNew.colItem')}</th>
                     <th className="text-right font-semibold px-3 py-2 w-20">{t('purchasing.purchaseOrderNew.colQty')}</th>
@@ -482,7 +488,7 @@ function PurchaseOrderFormPageInner() {
                 </thead>
                 <tbody>
                   {cartLines.map((l) => (
-                    <tr key={l.product.id} className="border-b border-gray-100 last:border-0">
+                    <tr key={l.product.id} className="border-b border-blue-500/10 last:border-0">
                       <td className="px-3 py-2">
                         <p className="font-medium">{l.product.name}</p>
                         {l.product.sku && <p className="text-xs text-gray-500">{t('purchasing.purchaseOrderNew.skuLabel', { sku: l.product.sku })}</p>}
@@ -493,7 +499,7 @@ function PurchaseOrderFormPageInner() {
                           min={1}
                           value={l.quantity}
                           onChange={(e) => changeQty(l.product.id, e.target.value)}
-                          className="w-16 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
+                          className={`w-16 text-right ${inputClass}`}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -502,7 +508,7 @@ function PurchaseOrderFormPageInner() {
                           min={0}
                           value={l.unitCost}
                           onChange={(e) => changeUnitCost(l.product.id, e.target.value)}
-                          className="w-28 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
+                          className={`w-28 text-right ${inputClass}`}
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
@@ -514,7 +520,7 @@ function PurchaseOrderFormPageInner() {
                     </tr>
                   ))}
                   {newProductLineTotals.map((l) => (
-                    <tr key={l.key} className="border-b border-gray-100 last:border-0 align-top">
+                    <tr key={l.key} className="border-b border-blue-500/10 last:border-0 align-top">
                       <td className="px-3 py-2">
                         <div className="space-y-1">
                           <input
@@ -522,8 +528,8 @@ function PurchaseOrderFormPageInner() {
                             placeholder={t('purchasing.purchaseOrderNew.productNamePlaceholder')}
                             value={l.name}
                             onChange={(e) => updateNewProductLine(l.key, { name: e.target.value })}
-                            className={`w-full border-2 rounded-md px-2 py-1 text-sm outline-none ${
-                              l.name.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
+                            className={`w-full border rounded-lg px-2 py-1 text-sm outline-none ${
+                              l.name.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
                             }`}
                           />
                           <div className="flex gap-1">
@@ -532,8 +538,8 @@ function PurchaseOrderFormPageInner() {
                               placeholder={t('purchasing.purchaseOrderNew.skuPlaceholder')}
                               value={l.sku}
                               onChange={(e) => updateNewProductLine(l.key, { sku: e.target.value })}
-                              className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
-                                l.sku.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
+                              className={`w-1/2 border rounded-lg px-2 py-1 text-xs outline-none ${
+                                l.sku.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
                               }`}
                             />
                             <input
@@ -541,8 +547,8 @@ function PurchaseOrderFormPageInner() {
                               placeholder={t('purchasing.purchaseOrderNew.categoryPlaceholder')}
                               value={l.category}
                               onChange={(e) => updateNewProductLine(l.key, { category: e.target.value })}
-                              className={`w-1/2 border-2 rounded-md px-2 py-1 text-xs outline-none ${
-                                l.category.trim() ? 'border-gray-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'
+                              className={`w-1/2 border rounded-lg px-2 py-1 text-xs outline-none ${
+                                l.category.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
                               }`}
                             />
                           </div>
@@ -560,7 +566,7 @@ function PurchaseOrderFormPageInner() {
                               quantity: Number.isFinite(parsed) && parsed > 0 ? parsed : l.quantity,
                             });
                           }}
-                          className="w-16 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
+                          className={`w-16 text-right ${inputClass}`}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -574,7 +580,7 @@ function PurchaseOrderFormPageInner() {
                               unitCost: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
                             });
                           }}
-                          className="w-28 text-right border-2 border-gray-300 focus:border-blue-500 rounded-md px-2 py-1 text-sm outline-none"
+                          className={`w-28 text-right ${inputClass}`}
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
@@ -592,30 +598,30 @@ function PurchaseOrderFormPageInner() {
 
           <button
             onClick={addNewProductLine}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-dashed border-gray-300 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 hover:bg-blue-50/40 transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2.5 rounded-xl border border-dashed border-blue-500/30 bg-white/60 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 hover:bg-blue-50/40 transition-colors"
           >
             <Plus size={14} strokeWidth={2} />
             {t('purchasing.purchaseOrderNew.addNewProduct')}
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="border border-blue-500/15 rounded-xl bg-white p-4 shadow-sm space-y-4">
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">{error}</p>
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>
           )}
 
           <div>
-            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.supplier')}</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.supplier')}</label>
             <SupplierPicker supplier={supplier} onChange={setSupplier} />
           </div>
 
           {hasWarehouseOps && (
             <div>
-              <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.receivingLocation')}</label>
+              <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.receivingLocation')}</label>
               <select
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
+                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               >
                 <option value="">{t('purchasing.purchaseOrderNew.selectLocationPlaceholder')}</option>
                 {locations.map((loc) => (
@@ -628,33 +634,17 @@ function PurchaseOrderFormPageInner() {
           )}
 
           <div>
-            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.tax')}</label>
-            <select
-              value={taxRateId ?? ''}
-              onChange={(e) => setTaxRateId(e.target.value || null)}
-              className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
-            >
-              <option value="">{t('purchasing.purchaseOrderNew.none')}</option>
-              {taxRates.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} ({r.percentage}%)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
             <input
               type="number"
               min={0}
               value={discountAmount}
               onChange={(e) => setDiscountAmount(e.target.value)}
-              className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-md px-3 py-2 text-sm outline-none"
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
             />
           </div>
 
-          <div className="border-t-2 border-gray-200 pt-3 space-y-1 text-sm">
+          <div className="border-t border-blue-500/15 pt-3 space-y-1 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">{t('purchasing.purchaseOrderNew.subtotal')}</span>
               <span>{formatIDR(subtotal)}</span>
@@ -662,10 +652,6 @@ function PurchaseOrderFormPageInner() {
             <div className="flex justify-between">
               <span className="text-gray-500">{t('purchasing.purchaseOrderNew.discountRow')}</span>
               <span>-{formatIDR(clampedDiscount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.taxRow')}</span>
-              <span>{formatIDR(taxAmount)}</span>
             </div>
             <div className="flex justify-between font-bold text-base pt-1">
               <span>{t('purchasing.purchaseOrderNew.total')}</span>
@@ -676,7 +662,7 @@ function PurchaseOrderFormPageInner() {
           <button
             onClick={handleSave}
             disabled={saving || itemCount === 0}
-            className="w-full bg-blue-600 text-white font-semibold px-4 py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? t('purchasing.purchaseOrderNew.saving') : currentId ? t('purchasing.purchaseOrderNew.saveChanges') : t('purchasing.purchaseOrderNew.saveDraft')}
           </button>

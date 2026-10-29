@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { isAdminRole } from '@/lib/roles';
+import BankAccountsSection from '@/app/components/accounting/BankAccountsSection';
 
 
 type Account = {
@@ -18,6 +19,8 @@ type Account = {
   type: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   normalBalance: 'DEBIT' | 'CREDIT';
   systemKey: string | null;
+  // Set on a bank's ledger account (under 1010 Bank): named, archived and restored from its bank account.
+  bankAccountId: string | null;
   isActive: boolean;
 };
 
@@ -46,8 +49,9 @@ export default function AccountingSetupPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState({ code: '', name: '', type: 'EXPENSE' as Account['type'], normalBalance: 'DEBIT' as 'DEBIT' | 'CREDIT' });
 
-  async function loadAccounts() {
-    setLoading(true);
+  // silent: refresh in place (after a bank change) without the loading state, which would unmount the list.
+  async function loadAccounts(silent = false) {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await apiFetch('/accounting/accounts');
@@ -318,6 +322,11 @@ export default function AccountingSetupPage() {
               </form>
             )}
 
+            {/* Banks are set up here, each with its ledger account under Bank. */}
+            <div className="mb-5">
+              <BankAccountsSection onLoadError={setError} onChanged={() => loadAccounts(true)} />
+            </div>
+
             <div className="flex flex-col gap-4">
               {TYPE_ORDER.map((type) => {
                 const list = grouped.get(type) ?? [];
@@ -344,11 +353,20 @@ export default function AccountingSetupPage() {
                               {acc.systemKey.replace(/_/g, ' ')}
                             </span>
                           )}
+                          {acc.bankAccountId && (
+                            <a
+                              href="#bank-accounts"
+                              title={t('accounting.setup.bankManagedHint')}
+                              className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 hover:bg-emerald-100"
+                            >
+                              {t('accounting.setup.bankBadge')}
+                            </a>
+                          )}
                           {/* System accounts can't be archived — the backend
                               rejects it outright, since it'd break every
                               document type that posts to it. Only custom
                               accounts get the toggle. */}
-                          {isAdmin && !acc.systemKey && (
+                          {isAdmin && !acc.systemKey && !acc.bankAccountId && (
                             <button
                               onClick={() => handleToggleActive(acc)}
                               disabled={togglingId === acc.id}

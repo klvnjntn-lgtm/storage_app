@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, ClipboardList } from 'lucide-react';
+import { Settings as SettingsIcon, CheckCircle2, Tag, Image as ImageIcon, ClipboardList, Store, Landmark } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -13,9 +14,9 @@ import { WORK_ORDERS_CHANGED } from '@/app/components/workshop/workOrders';
 import PriceLevelsSettings from '@/app/components/settings/PriceLevelsSettings';
 import InvoiceNumberingSettings from '@/app/components/settings/InvoiceNumberingSettings';
 import ExportBusinessSettings from '@/app/components/settings/ExportBusinessSettings';
-import TaxRatesSection from '@/app/components/settings/TaxRatesSection';
-import BankAccountsSection from '@/app/components/settings/BankAccountsSection';
-import { isAdminRole } from '@/lib/roles';
+import { isAdminRole, isMasterRole } from '@/lib/roles';
+import { useBranches } from '@/lib/hooks/useBranches';
+import BankAccountsSection from '@/app/components/accounting/BankAccountsSection';
 
 
 type FulfillmentMode = 'PICK_PACK_SHIP' | 'PICK_SHIP';
@@ -37,10 +38,14 @@ type BusinessDetails = {
 
 
 
+// The business-identity fields saveBusinessDetails sends.
+const BUSINESS_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone'] as const;
+
 export default function SettingsPage() {
   const router = useRouter();
   const { profile, loading: authLoading, error: authError } = useAuth();
   const { t } = useLanguage();
+  const { multiBranch } = useBranches();
 
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode | null>(null);
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean | null>(null);
@@ -342,6 +347,10 @@ export default function SettingsPage() {
   const hasWarehouseOps = modules?.find((m) => m.module === 'WAREHOUSE_OPS')?.purchased ?? false;
   const hasInvoicePos = modules?.find((m) => m.module === 'INVOICE_POS')?.purchased ?? false;
   const hasWorkshopRms = modules?.find((m) => m.module === 'WORKSHOP_RMS')?.purchased ?? false;
+  const hasAccounting = modules?.find((m) => m.module === 'ACCOUNTING')?.purchased ?? false;
+
+  // Like the timezone's Save: greyed out until something differs from what's saved (empty = unset).
+  const businessChanged = BUSINESS_FIELDS.some((k) => (businessForm[k] ?? '') !== (business?.[k] ?? ''));
 
   const loaded = fulfillmentMode !== null && posPricingEnabled !== null && stockPolicy !== null && modules !== null;
 
@@ -457,7 +466,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={saveBusinessDetails}
-              disabled={savingBusiness}
+              disabled={savingBusiness || !businessChanged}
               className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow-sm disabled:bg-gray-300 transition-colors"
             >
               {savingBusiness ? t('common.saving') : t('settings.businessIdentity.saveButton')}
@@ -511,9 +520,35 @@ export default function SettingsPage() {
           </section>
         )}
 
-        {hasInvoicePos && <BankAccountsSection onLoadError={setError} />}
+        {/* With Accounting, bank accounts live in the Chart of Accounts (each is a ledger account
+            there); without it, MASTER manages them right here. Either way they're MASTER only. */}
+        {hasInvoicePos && !hasAccounting && isMasterRole(profile?.role) && (
+          <BankAccountsSection onLoadError={setError} inChart={false} />
+        )}
+        {hasInvoicePos && (hasAccounting || !isMasterRole(profile?.role)) && (
+          <section id="bank-accounts" className="scroll-mt-24 border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <Landmark size={16} strokeWidth={2} className="text-blue-700" />
+                <h2 className="font-bold">{t('settings.bankAccounts.heading')}</h2>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                {isMasterRole(profile?.role)
+                  ? t('settings.bankAccounts.movedNotice')
+                  : t(hasAccounting ? 'settings.bankAccounts.movedNoticeAdmin' : 'settings.bankAccounts.movedNoticeAdminNoChart')}
+              </p>
+            </div>
+            {isMasterRole(profile?.role) && (
+              <Link
+                href="/accounting/setup#bank-accounts"
+                className="shrink-0 text-center text-sm font-medium rounded-md border border-blue-500/30 text-blue-700 px-3 py-2 sm:py-1.5 hover:bg-blue-50"
+              >
+                {t('settings.bankAccounts.openChart')}
+              </Link>
+            )}
+          </section>
+        )}
 
-        {hasInvoicePos && <TaxRatesSection onLoadError={setError} />}
 
         {hasInvoicePos && <InvoiceNumberingSettings />}
 
@@ -713,6 +748,26 @@ export default function SettingsPage() {
             <p className="text-xs text-gray-400 pt-1">
               {t('settings.fulfillment.note')}
             </p>
+          </section>
+        )}
+
+        {/* Branches — the sidebar only lists them once there are two, so
+            a single-branch MASTER adds the second from here. */}
+        {isMasterRole(profile?.role) && !multiBranch && (
+          <section className="border border-blue-500/15 rounded-xl p-4 sm:p-5 bg-white shadow-sm flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <Store size={16} strokeWidth={2} className="text-blue-700" />
+                <h2 className="font-bold">{t('settings.branchesLink.heading')}</h2>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">{t('settings.branchesLink.description')}</p>
+            </div>
+            <Link
+              href="/settings/branches"
+              className="shrink-0 text-center text-sm font-medium rounded-md border border-blue-500/30 text-blue-700 px-3 py-2 sm:py-1.5 hover:bg-blue-50"
+            >
+              {t('settings.branchesLink.cta')}
+            </Link>
           </section>
         )}
 

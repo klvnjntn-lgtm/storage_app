@@ -1,5 +1,7 @@
 'use client';
 
+import { MechanicNamesEditor } from '@/app/components/workshop/MechanicNamesEditor';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useEffect, useMemo, useState } from 'react';
 import { display } from '@/lib/fonts';
 import { Users, UserPlus, Lock, Unlock, Trash2, Search, AlertTriangle, X } from 'lucide-react';
@@ -28,9 +30,10 @@ type Member = {
 // seatLimit null = the plan has no seat cap.
 type MembersResponse = { seatLimit: number | null; seatsUsed: number; members: Member[] };
 
-// MASTER can hand out any role; a branch ADMIN can't make a MASTER.
-const ALL_ROLES: Role[] = ['MASTER', 'ADMIN', 'USER', 'DRIVER'];
-const BRANCH_ROLES: Role[] = ['ADMIN', 'USER', 'DRIVER'];
+// MASTER can hand out any role; a branch ADMIN can't make a MASTER. MECHANIC (the workshop's shop-PC
+// login) only with the Workshop module, and only one per business.
+const ALL_ROLES: Role[] = ['MASTER', 'ADMIN', 'USER', 'DRIVER', 'MECHANIC'];
+const BRANCH_ROLES: Role[] = ['ADMIN', 'USER', 'DRIVER', 'MECHANIC'];
 // Roles that work at one branch.
 const branchRole = (r: Role) => r === 'ADMIN' || r === 'USER';
 
@@ -39,6 +42,7 @@ const ROLE_STYLE: Record<Role, string> = {
   ADMIN: 'bg-purple-100 text-purple-800 border-purple-300',
   USER: 'bg-blue-100 text-blue-800 border-blue-300',
   DRIVER: 'bg-amber-100 text-amber-800 border-amber-300',
+  MECHANIC: 'bg-teal-100 text-teal-800 border-teal-300',
 };
 
 export default function MembersPage() {
@@ -47,7 +51,8 @@ export default function MembersPage() {
   const { user: me } = useCurrentUser();
   const { t } = useLanguage();
   const isMaster = me?.role === 'MASTER';
-  const ROLES = isMaster ? ALL_ROLES : BRANCH_ROLES;
+  const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const ROLES = (isMaster ? ALL_ROLES : BRANCH_ROLES).filter((r) => r !== 'MECHANIC' || hasWorkshopRms);
   const { branches, multiBranch } = useBranches();
 
   const [data, setData] = useState<MembersResponse | null>(null);
@@ -89,6 +94,8 @@ export default function MembersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authorized]);
 
+  // The one Mechanic account (shop PC), if there is one: its names are edited under its row.
+  const mechanicAccount = data?.members.find((x) => x.role === 'MECHANIC') ?? null;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (data?.members ?? []).filter(
@@ -289,7 +296,7 @@ export default function MembersPage() {
                 onChange={(e) => setInviteRole(e.target.value as Role)}
                 className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               >
-                {ROLES.map((r) => (
+                {ROLES.filter((r) => r !== 'MECHANIC' || !mechanicAccount).map((r) => (
                   <option key={r} value={r}>
                     {t(`admin.members.role.${r}`)}
                   </option>
@@ -365,7 +372,7 @@ export default function MembersPage() {
           {filtered.map((m) => {
             const isMe = m.id === me?.id;
             return (
-              <div key={m.id} className="p-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+              <div key={m.id} className="p-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
                   <UserAvatar user={m} size={32} />
                   <div className="min-w-0">
@@ -405,7 +412,7 @@ export default function MembersPage() {
                       onChange={(e) => changeRole(m, e.target.value as Role)}
                       className="col-span-2 sm:col-span-1 text-sm sm:text-xs font-medium rounded-md border border-gray-300 text-gray-700 bg-white px-2 min-h-10 sm:min-h-0 sm:py-1 disabled:opacity-50"
                     >
-                      {ROLES.map((r) => (
+                      {ROLES.filter((r) => r !== 'MECHANIC' || !mechanicAccount || mechanicAccount.id === m.id).map((r) => (
                         <option key={r} value={r}>
                           {t(`admin.members.role.${r}`)}
                         </option>
@@ -450,6 +457,7 @@ export default function MembersPage() {
                     </button>
                   </div>
                 )}
+                {m.role === 'MECHANIC' && hasWorkshopRms && <MechanicNamesEditor />}
               </div>
             );
           })}

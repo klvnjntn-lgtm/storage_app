@@ -11,6 +11,7 @@ import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { OpeningBalancesNotice, SyncOpeningBalancesButton, type OpeningBalancesResult } from '@/app/components/accounting/OpeningBalances';
 
 
 type ARLine = {
@@ -82,6 +83,7 @@ export default function ARAgingPage() {
     const { t } = useLanguage();
     const [asOf, setAsOf] = useState(todayISO());
   const [report, setReport] = useState<ARAgingReport | null>(null);
+  const [openingResult, setOpeningResult] = useState<OpeningBalancesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
@@ -209,6 +211,23 @@ export default function ARAgingPage() {
                 )}
               </span>
             </div>
+
+            {/* Imported (unposted) documents are the usual reason; offer the fix. */}
+            {!report.reconciliation.matches && (
+              <div className="-mt-3 mb-5">
+                <SyncOpeningBalancesButton
+                  onDone={(r) => {
+                    setOpeningResult(r);
+                    loadReport();
+                  }}
+                />
+              </div>
+            )}
+            {openingResult && (
+              <div className="mb-5">
+                <OpeningBalancesNotice result={openingResult} />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5">
               {BUCKETS.map((b) => (

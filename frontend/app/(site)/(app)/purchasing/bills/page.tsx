@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { MATCH_STYLE } from '@/app/components/purchase-orders/ThreeWayMatchPanel';
@@ -28,6 +29,8 @@ type Row = {
 export default function SupplierBillsPage() {
   const { authorized } = useRequireAdmin();
   const { t } = useLanguage();
+  // The cash & bank statement is an Accounting page.
+  const hasAccounting = useHasModule('ACCOUNTING');
   const [status, setStatus] = useState<MatchStatus | ''>('');
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export default function SupplierBillsPage() {
       title={t('purchasing.bills.pageTitle')}
       subtitle={t('purchasing.bills.pageSubtitle')}
       actions={
+        hasAccounting && (
         <Link
           href="/accounting/cash-statement/new"
           className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
@@ -57,6 +61,7 @@ export default function SupplierBillsPage() {
           <Landmark size={16} strokeWidth={2} />
           <span className="hidden sm:inline">{t('accounting.cashStatement.generateButton')}</span>
         </Link>
+        )
       }
     >
       <ErrorNote message={error} />

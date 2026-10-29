@@ -46,7 +46,6 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
           </p>
 )}
 
-        {invoice.employeeName && <p>{t('sales.invoiceTemplate.cashier', { name: invoice.employeeName })}</p>}
       </div>
 
       <div className="border-t border-dashed border-black my-1" />
@@ -63,7 +62,7 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
       )}
 
       {/* Items — same compact breakdown as the 80mm receipt, just tighter.
-          Discount/Tax lines are omitted when zero to save vertical space
+          The discount line is omitted when zero to save vertical space
           on narrow paper. */}
       {invoice.items.map((item) => (
         <div key={item.id} className="mb-1.5">
@@ -85,12 +84,6 @@ export function Thermal58Template({ invoice }: { invoice: InvoiceView }) {
             </div>
           )}
 
-          {item.itemTaxAmount > 0 && (
-            <div className="flex justify-between text-gray-600">
-              <span>{t('sales.invoiceTemplate.tax')}</span>
-              <span>{formatIDR(item.itemTaxAmount)}</span>
-            </div>
-          )}
 
           <div className="flex justify-between font-semibold">
             <span>{t('common.total')}</span>

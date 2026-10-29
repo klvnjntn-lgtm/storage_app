@@ -158,6 +158,26 @@ describe('session cookie (e2e)', () => {
     await prisma.organizationModule.deleteMany({ where: { organizationId: orgId! } });
   });
 
+  it('gates the books on ACCOUNTING, but not Sales reports, bank accounts or period status', async () => {
+    await prisma.organizationModule.deleteMany({ where: { organizationId: orgId! } });
+    await prisma.organizationModule.create({ data: { organizationId: orgId!, module: 'INVOICE_POS', enabled: true } });
+    const login = await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(201);
+    const cookie = sessionCookie(login)!.split(';')[0];
+    const as = (req: request.Test) => req.set('Cookie', cookie).set('X-Requested-With', 'waresys');
+
+    // MASTER, INVOICE_POS only.
+    const refused = await as(request(app.getHttpServer()).get('/expenses')).expect(403);
+    expect(refused.body.error).toBe('ModuleNotEnabled');
+    await as(request(app.getHttpServer()).get('/payroll/employees')).expect(403);
+    await as(request(app.getHttpServer()).get('/invoices/reports?from=2026-01-01&to=2026-01-31')).expect(200);
+    await as(request(app.getHttpServer()).get('/organization/bank-accounts')).expect(200);
+    await as(request(app.getHttpServer()).get('/accounting/fiscal-periods')).expect(200);
+
+    await prisma.organizationModule.create({ data: { organizationId: orgId!, module: 'ACCOUNTING', enabled: true } });
+    await as(request(app.getHttpServer()).get('/expenses')).expect(200);
+    await prisma.organizationModule.deleteMany({ where: { organizationId: orgId! } });
+  });
+
   it('locks an account after repeated wrong passwords', async () => {
     for (let i = 0; i < 5; i++) {
       await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'wrong-password' }).expect(401);

@@ -23,6 +23,8 @@ import { CreateBankAccountDto, UpdateBankAccountDto } from './dto/bank-accounts.
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
 @RequireModule(ModuleKey.INVOICE_POS)
+// Every bank account is a ledger account in the business-wide books (Chart of Accounts → 1010 Bank), so
+// only MASTER sets them up; anyone may list them, to pick one on a document.
 @Controller('organization/bank-accounts')
 export class BankAccountController {
   constructor(private readonly bankAccounts: BankAccountService) {}
@@ -38,14 +40,14 @@ export class BankAccountController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Post()
   create(@CurrentOrg() orgId: string, @Body() dto: CreateBankAccountDto, @Req() req) {
     return this.bankAccounts.create(orgId, dto, req.user);
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Patch(':id')
   update(
     @CurrentOrg() orgId: string,
@@ -57,9 +59,16 @@ export class BankAccountController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('MASTER')
   @Delete(':id')
   archive(@CurrentOrg() orgId: string, @Param('id') id: string, @Req() req) {
     return this.bankAccounts.archive(orgId, id, req.user);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('MASTER')
+  @Post(':id/restore')
+  restore(@CurrentOrg() orgId: string, @Param('id') id: string, @Req() req) {
+    return this.bankAccounts.restore(orgId, id, req.user);
   }
 }

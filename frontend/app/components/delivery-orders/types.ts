@@ -36,7 +36,8 @@ export type DeliveryOrderListItem = {
   customerName: string | null;
   createdAt: string;
   shippedAt: string | null;
-  salesOrder: { orderNumber: string | null; customerName: string | null } | null;
+  salesOrder: { id: string; orderNumber: string | null; customerName: string | null } | null;
+  invoice: { id: string; invoiceNumber: string | null; status: string | null } | null;
   items: { id: string }[];
 };
 

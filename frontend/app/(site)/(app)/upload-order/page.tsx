@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import { isAdminRole, isMasterRole } from '@/lib/roles';
+import { OpeningBalancesNotice, type OpeningBalancesResult } from '@/app/components/accounting/OpeningBalances';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -64,6 +65,8 @@ type GdbImportTarget = 'products_only' | 'full_invoices' | 'full_invoices_and_pu
 
 type GdbImportResult = {
   items: { created: number; updated: number; priceLevelPrices?: number };
+  // Opening AR/AP the import posted for the history it brought in.
+  openingBalances?: OpeningBalancesResult;
   salesmen?: { created: number; updated: number };
   purchaseInvoices?: {
     created: number;
@@ -706,6 +709,8 @@ export default function ImportOrdersPage() {
                 .
               </span>
             </div>
+
+            {gdbResult.openingBalances && <OpeningBalancesNotice result={gdbResult.openingBalances} />}
 
             {gdbResult.invoices && gdbResult.invoices.fractionalQuantityWarnings.length > 0 && (
               <div className="border border-yellow-200 rounded-xl overflow-hidden">

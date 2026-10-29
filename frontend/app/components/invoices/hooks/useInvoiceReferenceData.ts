@@ -2,36 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/apifetch';
-import type { BankAccount, Employee, LocationOption, TaxRate } from '@/app/components/invoices/types';
+import type { BankAccount, Employee, LocationOption } from '@/app/components/invoices/types';
 
-type RawTaxRate = TaxRate & { archivedAt: string | null };
 type RawBankAccount = BankAccount & { archivedAt: string | null };
 
-// The lists the invoice form picks from — locations, active tax rates,
-// active bank accounts, employees — loaded once when the page opens.
+// The lists the invoice form picks from — locations, active bank accounts, the mechanics (workshops' mechanic picker: only the names on the Mechanic
+// account) — loaded once when the page opens.
 export function useInvoiceReferenceData() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   useEffect(() => {
     (async () => {
-      const [loc, tax, bank, emp] = await Promise.all([
+      const [loc, bank, emp] = await Promise.all([
         apiFetch('/locations').catch(() => null),
-        apiFetch('/organization/tax-rates').catch(() => null),
         apiFetch('/organization/bank-accounts').catch(() => null),
-        apiFetch('/payroll/employees').catch(() => null),
+        apiFetch('/mechanics').catch(() => null),
       ]);
       if (loc?.ok) setLocations(await loc.json());
-      if (tax?.ok) {
-        const rates: RawTaxRate[] = await tax.json();
-        setTaxRates(
-          rates
-            .filter((r) => !r.archivedAt)
-            .map((r) => ({ id: r.id, name: r.name, percentage: r.percentage, isDefault: r.isDefault })),
-        );
-      }
       if (bank?.ok) {
         const accounts: RawBankAccount[] = await bank.json();
         setBankAccounts(
@@ -50,5 +39,5 @@ export function useInvoiceReferenceData() {
     })();
   }, []);
 
-  return { locations, taxRates, bankAccounts, employees };
+  return { locations, bankAccounts, employees };
 }

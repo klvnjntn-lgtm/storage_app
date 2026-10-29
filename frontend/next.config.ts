@@ -80,6 +80,16 @@ const nextConfig: NextConfig = {
     // upload/route.ts — so this must not be raised for it again.
     proxyClientMaxBodySize: "15mb",
   },
+  // Mechanic and driver reports are now tabs of Staff Reports, and Sales Margin / Sales Insights
+  // tabs of Sales Reports; old links and bookmarks still land there.
+  async redirects() {
+    return [
+      { source: "/sales/reports", destination: "/reports/sales?tab=invoices", permanent: false },
+      { source: "/accounting/sales-insights", destination: "/reports/sales?tab=rankings", permanent: false },
+      { source: "/sales/reports/performance", destination: "/reports/staff?tab=mechanics", permanent: false },
+      { source: "/delivery/reports", destination: "/reports/staff?tab=delivery", permanent: false },
+    ];
+  },
   async rewrites() {
     return [
       {

@@ -1,19 +1,18 @@
 // app/admin/products/page.tsx
 'use client';
 
-import ProductLevelPricesDialog from '@/app/components/admin/ProductLevelPricesDialog';
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import ProductEditorDrawer from '@/app/components/admin/ProductEditorDrawer';
+import { useEffect, useState } from 'react';
 import { display } from '@/lib/fonts';
-import { Package, AlertTriangle, CheckCircle2, Archive, Pencil, Check, X, Plus, ChevronDown, ChevronUp, Tag, Hash, Wallet, Boxes } from 'lucide-react';
+import { Package, AlertTriangle, CheckCircle2, Archive, ArchiveRestore, Pencil, Plus, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { formatIDR } from '@/lib/format';
+import { usePriceLevels } from '@/lib/price-levels';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import Pagination from '@/app/components/shared/Pagination';
 import SortableTh from '@/app/components/shared/SortableTh';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
-import { defaultLocation } from '@/lib/locations';
 import { useLanguage } from '@/app/context/LanguageContext';
-import ComboBox from '@/app/components/shared/ComboBox';
 import { errorMessage } from '@/lib/api-error';
 
 
@@ -27,7 +26,7 @@ type Product = {
   active: boolean;
   sellingPrice: number | null;
   costPrice: number | null;
-  // Non-default price level prices (see ProductLevelPricesDialog).
+  // Non-default price level prices (see ProductEditorDrawer).
   prices?: { priceLevelId: string; price: number }[];
 };
 
@@ -41,15 +40,14 @@ type StockSummary = {
 type Option = { id: string; name: string };
 type Location = { id: string; name: string };
 
-// Columns the table can be sorted by, same as Stock's SortKey. Status is
-// excluded (categorical badge, not a ranked value); OEM is excluded since
-// it's an identifier people match against a document, not something
-// they'd want ordered.
+// Columns the table can be sorted by, same as Stock's SortKey. OEM and
+// brand ride along under the name rather than getting their own column.
 type SortKey = 'sku' | 'name' | 'category' | 'brand' | 'sellingPrice' | 'costPrice' | 'stock';
 
 const PAGE_SIZE_DEFAULT = 20;
 const LOW_STOCK_THRESHOLD = 5;
-const DEFAULT_ADJUST_REASON = 'ADMIN ADJUSTMENT';
+// Level prices listed under the default price before collapsing to "+N".
+const LEVEL_PRICES_SHOWN = 3;
 
 // The session cookie and CSRF header are added by apiFetch; only the
 // content type varies here.
@@ -57,89 +55,31 @@ function authHeaders(json = true): Record<string, string> {
   return json ? { 'Content-Type': 'application/json' } : {};
 }
 
-function formatIDR(amount: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-type FieldErrors = {
-  name?: string;
-  sku?: string;
-  category?: string;
-  sellingPrice?: string;
-  costPrice?: string;
-};
-
-const inputBase =
-  'w-full border-2 rounded-md px-3 py-2 text-sm outline-none transition-colors placeholder:text-gray-400 bg-white';
-const inputOk = 'border-gray-300 focus:border-blue-500';
-const inputBad = 'border-red-400 focus:border-red-500 bg-red-50/40';
-
-function fieldClass(err?: string) {
-  return `${inputBase} ${err ? inputBad : inputOk}`;
-}
-
-// Compact variant of fieldClass for the smaller inline table inputs.
-// Always w-full: the table columns are fixed-width (see <colgroup> below),
-// so inputs simply fill whatever space the column already has instead of
-// carrying their own width and shifting the column when editing starts.
-const rowInputBase =
-  'w-full min-w-0 border-2 rounded-md px-2 py-1 text-sm outline-none transition-colors bg-white';
-function rowFieldClass(err?: string) {
-  return `${rowInputBase} ${err ? inputBad : inputOk}`;
-}
-
-// Truncates long display text with an ellipsis instead of letting it force
-// the (fixed-width) column wider and triggering horizontal scroll. Full
-// text is still available on hover via the native title tooltip.
-function CellText({ value, className = '' }: { value: string; className?: string }) {
-  return (
-    <span className={`block truncate ${className}`} title={value}>
-      {value}
-    </span>
-  );
-}
-
 function StockBadge({ stock }: { stock: number | undefined }) {
   const { t } = useLanguage();
   if (stock == null) return <span className="text-gray-400">-</span>;
   if (stock <= 0) {
     return (
-      <span className="inline-block text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-300">
+      <span className="inline-block text-xs px-2 py-0.5 rounded-md border font-medium bg-red-100 text-red-800 border-red-300 whitespace-nowrap">
         {t('admin.products.outOfStock')}
       </span>
     );
   }
   if (stock <= LOW_STOCK_THRESHOLD) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-amber-100 text-amber-800 border-amber-300">
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium bg-amber-100 text-amber-800 border-amber-300 whitespace-nowrap">
         <AlertTriangle size={11} strokeWidth={2.5} />
         {t('admin.products.stockLeft', { count: stock })}
       </span>
     );
   }
-  return <span>{stock}</span>;
-}
-
-function useSkuTaken(sku: string, excludeId: string | undefined, onResult: (taken: boolean) => void) {
-  useEffect(() => {
-    const trimmed = sku.trim();
-    const timer = setTimeout(async () => {
-      if (!trimmed) return onResult(false);
-      const params = new URLSearchParams({ sku: trimmed, ...(excludeId && { excludeId }) });
-      const res = await apiFetch(`/products/sku-taken?${params}`).catch(() => null);
-      if (res?.ok) onResult((await res.json()).taken);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [sku, excludeId, onResult]);
+  return <span className="font-medium tabular-nums">{stock}</span>;
 }
 
 export default function ProductsPage() {
-    const { authorized, loading: authLoading } = useRequireAdmin();
+  const { authorized, loading: authLoading } = useRequireAdmin();
   const { t } = useLanguage();
+  const { levels, defaultLevelId, activeLevelIds } = usePriceLevels();
 
   // One page of the catalog, searched and sorted on the server
   // (GET /products?page=…) — the full list no longer comes down.
@@ -153,54 +93,19 @@ export default function ProductsPage() {
   const [brands, setBrands] = useState<Option[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
 
-  const [name, setName] = useState('');
-  const [sku, setSku] = useState('');
-  const [oem, setOem] = useState('');
-  const [categoryInput, setCategoryInput] = useState('');
-  const [brandInput, setBrandInput] = useState('');
-  const [sellingPriceInput, setSellingPriceInput] = useState('');
-  const [costPriceInput, setCostPriceInput] = useState('');
-
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [successMsg, setSuccessMsg] = useState('');
   const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
-
-  // --- Create form open/collapsed state ---
-  const [formOpen, setFormOpen] = useState(true);
 
   // --- Pagination ---
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
 
-  // --- Inline row editing state ---
-  // Every catalog field (name, sku, oem, category, brand, prices) is
-  // editable inline. Stock is still per-location, so editing it here
-  // applies a delta through the same /stock/adjust endpoint the Stock
-  // page uses — it does not overwrite a scalar total.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editSku, setEditSku] = useState('');
-  const [editOem, setEditOem] = useState('');
-  const [editCategory, setEditCategory] = useState('');
-  const [editBrand, setEditBrand] = useState('');
-  const [editSellingPrice, setEditSellingPrice] = useState('');
-  const [editCostPrice, setEditCostPrice] = useState('');
-  const [editFieldErrors, setEditFieldErrors] = useState<FieldErrors>({});
-
-  // Stock adjustment fields, part of the same row-edit form.
-  const [pickedStockLocationId, setEditStockLocationId] = useState('');
-  // Only warehouse orgs choose where a stock adjustment lands; the rest
-  // adjust their CENTRE stock without being asked.
+  // Create and edit both happen in the side drawer: { product: null } is
+  // a new product, null is closed. Stock is per-location, so the drawer
+  // applies a delta through /stock/adjust rather than overwriting a total.
+  const [editor, setEditor] = useState<{ product: Product | null } | null>(null);
   const warehouseOps = useWarehouseOps();
-  const editStockLocationId = warehouseOps ? pickedStockLocationId : (defaultLocation(locations)?.id ?? '');
-  const [editStockDelta, setEditStockDelta] = useState('');
-  const [editStockReason, setEditStockReason] = useState(DEFAULT_ADJUST_REASON);
-
-  const [savingEdit, setSavingEdit] = useState(false);
-
-  const [levelPricesFor, setLevelPricesFor] = useState<Product | null>(null);
 
   async function loadProducts() {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
@@ -253,9 +158,6 @@ export default function ProductsPage() {
     setBrands(Array.isArray(data) ? data : []);
   }
 
-  // NOTE: assumes a /locations endpoint exists (mirroring /categories and
-  // /brands) that returns the same locations shown on the Stock page. If
-  // your backend exposes this under a different path, update the URL below.
   async function loadLocations() {
     try {
       const res = await apiFetch('/locations', { headers: authHeaders(false) });
@@ -295,138 +197,28 @@ export default function ProductsPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const paginatedProducts = products;
-
   function cellHighlight(key: SortKey) {
     return sort?.key === key ? 'bg-blue-50/70' : '';
   }
 
-  // Parses a price input. Empty string -> undefined (omit field / leave
-  // unset), invalid non-numeric -> null (caller should treat as error).
-  function parsePriceInput(raw: string): number | undefined | null {
-    const trimmed = raw.trim();
-    if (!trimmed) return undefined;
-    const n = Number(trimmed);
-    if (Number.isNaN(n) || n < 0) return null;
-    return n;
-  }
-
-  // Live duplicate-SKU hint before submit (the server stays the source of
-  // truth on create/save). Asked of the server, since only one page of
-  // the catalog is loaded.
-  const [duplicateSku, setDuplicateSku] = useState(false);
-  const [editDuplicateSku, setEditDuplicateSku] = useState(false);
-  useSkuTaken(sku, undefined, setDuplicateSku);
-  useSkuTaken(editingId ? editSku : '', editingId ?? undefined, setEditDuplicateSku);
-
-  // Live margin preview while creating a product.
-  const marginPreview = useMemo(() => {
-    const sell = parsePriceInput(sellingPriceInput);
-    const cost = parsePriceInput(costPriceInput);
-    if (typeof sell !== 'number' || typeof cost !== 'number' || sell <= 0) return null;
-    const profit = sell - cost;
-    const pct = (profit / sell) * 100;
-    return { profit, pct };
-  }, [sellingPriceInput, costPriceInput]);
-
-  // Live margin preview for the inline row editor.
-  const editMarginPreview = useMemo(() => {
-    const sell = parsePriceInput(editSellingPrice);
-    const cost = parsePriceInput(editCostPrice);
-    if (typeof sell !== 'number' || typeof cost !== 'number' || sell <= 0) return null;
-    const profit = sell - cost;
-    const pct = (profit / sell) * 100;
-    return { profit, pct };
-  }, [editSellingPrice, editCostPrice]);
-
-  function resetCreateForm() {
-    setName('');
-    setSku('');
-    setOem('');
-    setCategoryInput('');
-    setBrandInput('');
-    setSellingPriceInput('');
-    setCostPriceInput('');
-    setFieldErrors({});
-  }
-
-  function validateCreateForm(): FieldErrors | null {
-    const errs: FieldErrors = {};
-
-    if (!name.trim()) errs.name = t('common.required');
-    if (!sku.trim()) errs.sku = t('common.required');
-    if (!categoryInput.trim()) errs.category = t('common.required');
-
-    const sellingPrice = parsePriceInput(sellingPriceInput);
-    if (sellingPrice === null) errs.sellingPrice = t('admin.products.mustBeNonNegativeNumber');
-
-    const costPrice = parsePriceInput(costPriceInput);
-    if (costPrice === null) errs.costPrice = t('admin.products.mustBeNonNegativeNumber');
-
-    return Object.keys(errs).length > 0 ? errs : null;
-  }
-
-  async function createProduct() {
+  function openEditor(product: Product | null) {
     setError('');
     setSuccessMsg('');
-
-    const errs = validateCreateForm();
-    setFieldErrors(errs ?? {});
-    if (errs) return;
-
-    const sellingPrice = parsePriceInput(sellingPriceInput) as number | undefined;
-    const costPrice = parsePriceInput(costPriceInput) as number | undefined;
-
-    setLoading(true);
-
-    try {
-      const res = await apiFetch('/products', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          name: name.trim(),
-          sku: sku.trim(),
-          oem: oem.trim() || undefined,
-          category: categoryInput.trim(),
-          brand: brandInput.trim() || undefined,
-          sellingPrice,
-          costPrice,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.message || t('admin.products.createFailed'));
-      }
-
-      setSuccessMsg(t('admin.products.createdSuccess', { name: name.trim() }));
-      resetCreateForm();
-      setPage(1);
-
-      await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
-    } catch (err) {
-      console.error(err);
-      setError(errorMessage(err) || t('admin.products.createFailed'));
-    } finally {
-      setLoading(false);
-    }
+    setEditor({ product });
   }
 
-  function handleCreateFormKeyDown(e: React.KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      createProduct();
-    }
+  async function onEditorSaved(message: string) {
+    const wasNew = editor?.product == null;
+    setEditor(null);
+    setSuccessMsg(message);
+    if (wasNew) setPage(1);
+    await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
   }
 
   function requestArchive(id: string) {
     setError('');
     setSuccessMsg('');
     setPendingArchiveId(id);
-  }
-
-  function cancelArchive() {
-    setPendingArchiveId(null);
   }
 
   async function confirmArchive() {
@@ -475,132 +267,19 @@ export default function ProductsPage() {
     }
   }
 
-  // --- Inline row editing (all catalog fields + optional stock delta) ---
-  function startEditProduct(product: Product) {
-    setError('');
-    setSuccessMsg('');
-    setEditingId(product.id);
-    setEditName(product.name ?? '');
-    setEditSku(product.sku ?? '');
-    setEditOem(product.oem ?? '');
-    setEditCategory(product.category ?? '');
-    setEditBrand(product.brand ?? '');
-    setEditSellingPrice(product.sellingPrice != null ? String(product.sellingPrice) : '');
-    setEditCostPrice(product.costPrice != null ? String(product.costPrice) : '');
-    setEditFieldErrors({});
-    setEditStockLocationId('');
-    setEditStockDelta('');
-    setEditStockReason(DEFAULT_ADJUST_REASON);
-  }
-
-  function cancelEditProduct() {
-    setEditingId(null);
-    setEditFieldErrors({});
-    setEditStockLocationId('');
-    setEditStockDelta('');
-    setEditStockReason(DEFAULT_ADJUST_REASON);
-  }
-
-  function validateEditForm(): FieldErrors | null {
-    const errs: FieldErrors = {};
-
-    if (!editName.trim()) errs.name = t('common.required');
-    if (!editSku.trim()) errs.sku = t('common.required');
-    if (!editCategory.trim()) errs.category = t('common.required');
-
-    const sellingPrice = parsePriceInput(editSellingPrice);
-    if (sellingPrice === null) errs.sellingPrice = t('admin.products.mustBeNonNegativeNumber');
-
-    const costPrice = parsePriceInput(editCostPrice);
-    if (costPrice === null) errs.costPrice = t('admin.products.mustBeNonNegativeNumber');
-
-    return Object.keys(errs).length > 0 ? errs : null;
-  }
-
-  async function saveEditProduct(id: string) {
-    setError('');
-    setSuccessMsg('');
-
-    const errs = validateEditForm();
-    setEditFieldErrors(errs ?? {});
-    if (errs) return;
-
-    const sellingPrice = parsePriceInput(editSellingPrice) as number | undefined;
-    const costPrice = parsePriceInput(editCostPrice) as number | undefined;
-
-    // Stock is only touched if the admin actually typed a non-zero delta.
-    const trimmedDelta = editStockDelta.trim();
-    const stockDeltaNum = trimmedDelta ? Number(trimmedDelta) : 0;
-    const wantsStockAdjust = trimmedDelta !== '' && stockDeltaNum !== 0;
-
-    if (trimmedDelta && Number.isNaN(stockDeltaNum)) {
-      setError(t('admin.products.stockAdjustMustBeNumber'));
-      return;
-    }
-    if (wantsStockAdjust && !editStockLocationId) {
-      setError(t('admin.products.pickLocationForAdjust'));
-      return;
-    }
-    if (wantsStockAdjust && !editStockReason.trim()) {
-      setError(t('admin.products.reasonRequiredForAdjust'));
-      return;
-    }
-
-    const product = products.find((p) => p.id === id);
-    setSavingEdit(true);
-
-    try {
-      const res = await apiFetch(`/products/${id}`, {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          name: editName.trim(),
-          sku: editSku.trim(),
-          oem: editOem.trim() || undefined,
-          category: editCategory.trim(),
-          brand: editBrand.trim() || undefined,
-          sellingPrice,
-          costPrice,
-        }),
+  // A product's prices at the active non-default levels, in level order.
+  function levelPricesOf(product: Product) {
+    return levels
+      .filter((l) => l.id !== defaultLevelId && activeLevelIds.has(l.id))
+      .flatMap((l) => {
+        const own = product.prices?.find((p) => p.priceLevelId === l.id);
+        return own ? [{ id: l.id, name: l.name, price: own.price }] : [];
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.message || t('admin.products.updateFailed'));
-      }
-
-      // Applied through the same endpoint the Stock page uses, so it shows
-      // up on this product's Event History with whatever reason is given —
-      // defaults to "ADMIN ADJUSTMENT" to make edits made from this page
-      // easy to spot there.
-      if (wantsStockAdjust) {
-        const stockRes = await apiFetch('/stock/adjust', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            productId: id,
-            locationId: editStockLocationId,
-            qtyDelta: stockDeltaNum,
-            reason: editStockReason.trim(),
-          }),
-        });
-        if (!stockRes.ok) {
-          const data = await stockRes.json().catch(() => null);
-          throw new Error(data?.message || t('admin.products.stockAdjustFailed'));
-        }
-      }
-
-      setSuccessMsg(t('admin.products.updatedSuccess', { name: editName.trim() || product?.name || '' }));
-      setEditingId(null);
-      await Promise.all([loadProducts(), loadStockSummary(), loadCategories(), loadBrands()]);
-    } catch (err) {
-      console.error(err);
-      setError(errorMessage(err) || t('admin.products.updateFailed'));
-    } finally {
-      setSavingEdit(false);
-    }
   }
 
+  const defaultLevelName = levels.find((l) => l.id === defaultLevelId)?.name;
   const pendingProduct = products.find((p) => p.id === pendingArchiveId);
+
   if (authLoading || !authorized) {
     return (
       <main
@@ -630,7 +309,7 @@ export default function ProductsPage() {
 
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Package size={18} strokeWidth={2} className="text-blue-700" />
@@ -642,28 +321,41 @@ export default function ProductsPage() {
               <p className="text-xs text-gray-500 truncate">{t('admin.products.subtitle')}</p>
             </div>
           </div>
+          <button
+            onClick={() => openEditor(null)}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 shadow-sm transition-colors"
+          >
+            <Plus size={16} strokeWidth={2.5} />
+            <span className="hidden sm:inline">{t('admin.products.newProduct')}</span>
+          </button>
         </div>
       </div>
 
       {/* Content */}
-      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4 sm:space-y-6">
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
 
         {error && (
           <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
             <AlertTriangle size={18} strokeWidth={2} className="shrink-0 mt-0.5" />
-            {error}
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError('')} aria-label={t('common.close')} className="text-red-700/60 hover:text-red-800">
+              <X size={16} />
+            </button>
           </div>
         )}
 
         {successMsg && (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 text-sm">
             <CheckCircle2 size={18} strokeWidth={2} className="shrink-0" />
-            {successMsg}
+            <span className="flex-1">{successMsg}</span>
+            <button onClick={() => setSuccessMsg('')} aria-label={t('common.close')} className="text-green-700/60 hover:text-green-800">
+              <X size={16} />
+            </button>
           </div>
         )}
 
         {pendingArchiveId && (
-          <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-sm">
             <div className="flex items-center gap-2">
               <Archive size={18} strokeWidth={2} className="shrink-0" />
               <span>
@@ -672,7 +364,7 @@ export default function ProductsPage() {
             </div>
             <div className="flex gap-2 shrink-0">
               <button
-                onClick={cancelArchive}
+                onClick={() => setPendingArchiveId(null)}
                 className="px-3 py-1.5 rounded-md border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition-colors"
               >
                 {t('common.cancel')}
@@ -687,249 +379,45 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Create Product */}
-        <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
-          <button
-            onClick={() => setFormOpen((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50/60 hover:bg-blue-50 transition-colors"
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold">
-              <Plus size={16} strokeWidth={2.5} className="text-blue-700" />
-              {t('admin.products.newProduct')}
-            </span>
-            {formOpen ? (
-              <ChevronUp size={16} strokeWidth={2} className="text-blue-700" />
-            ) : (
-              <ChevronDown size={16} strokeWidth={2} className="text-blue-700" />
-            )}
-          </button>
-
-          {formOpen && (
-            <div className="p-4 space-y-5" onKeyDown={handleCreateFormKeyDown}>
-              {/* Section: Identity */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
-                  <Tag size={12} strokeWidth={2.5} />
-                  {t('admin.products.identity')}
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div>
-                    <input
-                      value={name}
-                      onChange={(e) => {
-                        setName(e.target.value);
-                        if (fieldErrors.name) setFieldErrors((f) => ({ ...f, name: undefined }));
-                      }}
-                      placeholder={t('admin.products.namePlaceholder')}
-                      autoFocus
-                      className={fieldClass(fieldErrors.name)}
-                    />
-                    {fieldErrors.name && <p className="text-xs text-red-600 mt-1">{fieldErrors.name}</p>}
-                  </div>
-                  <div>
-                    <input
-                      value={oem}
-                      onChange={(e) => setOem(e.target.value)}
-                      placeholder={t('admin.products.oemPlaceholder')}
-                      className={fieldClass()}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section: Catalog identifiers */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
-                  <Hash size={12} strokeWidth={2.5} />
-                  {t('admin.products.catalog')}
-                </div>
-                <div className="grid md:grid-cols-3 gap-3">
-                  <div>
-                    <input
-                      value={sku}
-                      onChange={(e) => {
-                        setSku(e.target.value);
-                        if (fieldErrors.sku) setFieldErrors((f) => ({ ...f, sku: undefined }));
-                      }}
-                      placeholder={t('admin.products.skuPlaceholder')}
-                      className={fieldClass(fieldErrors.sku)}
-                    />
-                    {fieldErrors.sku && <p className="text-xs text-red-600 mt-1">{fieldErrors.sku}</p>}
-                    {!fieldErrors.sku && duplicateSku && (
-                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                        <AlertTriangle size={11} strokeWidth={2.5} />
-                        {t('admin.products.skuExists')}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <ComboBox
-                noMatchesLabel={t('admin.products.noMatches')}
-                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
-
-                      value={categoryInput}
-                      onChange={(v) => {
-                        setCategoryInput(v);
-                        if (fieldErrors.category) setFieldErrors((f) => ({ ...f, category: undefined }));
-                      }}
-                      options={categories}
-                      placeholder={t('admin.products.categoryPlaceholder')}
-                      className={fieldClass(fieldErrors.category)}
-                    />
-                    {fieldErrors.category ? (
-                      <p className="text-xs text-red-600 mt-1">{fieldErrors.category}</p>
-                    ) : (
-                      <p className="text-xs text-gray-400 mt-1">{t('admin.products.categoryHint')}</p>
-                    )}
-                  </div>
-                  <div>
-                    <ComboBox
-                noMatchesLabel={t('admin.products.noMatches')}
-                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
-
-                      value={brandInput}
-                      onChange={setBrandInput}
-                      options={brands}
-                      placeholder={t('admin.products.brandPlaceholder')}
-                      className={fieldClass()}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">{t('admin.products.brandHint')}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section: Pricing */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700/80 uppercase tracking-wide">
-                  <Wallet size={12} strokeWidth={2.5} />
-                  {t('admin.products.pricing')}
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">{t('admin.products.sellingPriceLabel')}</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
-                        Rp
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={sellingPriceInput}
-                        onChange={(e) => {
-                          setSellingPriceInput(e.target.value);
-                          if (fieldErrors.sellingPrice) setFieldErrors((f) => ({ ...f, sellingPrice: undefined }));
-                        }}
-                        placeholder="150000"
-                        className={`${fieldClass(fieldErrors.sellingPrice)} pl-8`}
-                      />
-                    </div>
-                    {fieldErrors.sellingPrice && (
-                      <p className="text-xs text-red-600 mt-1">{fieldErrors.sellingPrice}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">{t('admin.products.costPriceLabel')}</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
-                        Rp
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={costPriceInput}
-                        onChange={(e) => {
-                          setCostPriceInput(e.target.value);
-                          if (fieldErrors.costPrice) setFieldErrors((f) => ({ ...f, costPrice: undefined }));
-                        }}
-                        placeholder="100000"
-                        className={`${fieldClass(fieldErrors.costPrice)} pl-8`}
-                      />
-                    </div>
-                    {fieldErrors.costPrice && <p className="text-xs text-red-600 mt-1">{fieldErrors.costPrice}</p>}
-                  </div>
-                </div>
-
-                {marginPreview && (
-                  <div
-                    className={`text-xs rounded-md px-3 py-2 border inline-flex items-center gap-1.5 ${
-                      marginPreview.profit >= 0
-                        ? 'bg-green-50 border-green-200 text-green-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
-                    }`}
-                  >
-                    {t('admin.products.marginLabel', { amount: formatIDR(marginPreview.profit), pct: marginPreview.pct.toFixed(1) })}
-                  </div>
-                )}
-
-                <p className="text-xs text-gray-400">
-                  {t('admin.products.stockNote')}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  onClick={createProduct}
-                  disabled={loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {loading ? t('common.creating') : t('admin.products.createProduct')}
-                </button>
-                <button
-                  onClick={resetCreateForm}
-                  disabled={loading}
-                  className="px-4 py-2 text-gray-500 text-sm hover:text-blue-700 disabled:opacity-40 transition-colors"
-                >
-                  {t('common.clear')}
-                </button>
-                <span className="text-xs text-gray-400 ml-auto hidden md:inline">{t('admin.products.shortcutHint')}</span>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Product Table */}
         <div className="border border-blue-500/15 rounded-xl overflow-hidden bg-white shadow-sm">
-          <div className="px-4 py-3 border-b border-blue-500/15 bg-blue-50/60 flex flex-wrap items-center justify-between gap-2">
+          <div className="px-4 py-3 border-b border-blue-500/15 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">
-              {t('admin.products.productCatalog')} <span className="font-normal text-gray-500">({totalProducts})</span>
+              {t('admin.products.productCatalog')}{' '}
+              <span className="ml-1 text-xs font-medium px-1.5 py-0.5 rounded-md bg-blue-600/10 text-blue-700 tabular-nums">
+                {totalProducts}
+              </span>
             </h2>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('admin.products.searchPlaceholder')}
-              className="w-full sm:w-72 border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white outline-none focus:border-blue-500"
-            />
+            <div className="relative w-full sm:w-80">
+              <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('admin.products.searchPlaceholder')}
+                className="w-full border border-gray-300 rounded-md pl-8 pr-3 py-1.5 text-sm bg-white outline-none focus:border-blue-500"
+              />
+            </div>
           </div>
 
           {products.length === 0 ? (
-            <div className="p-6 text-center text-sm text-gray-500">{t('admin.products.noProductsFound')}</div>
+            <div className="px-6 py-12 text-center">
+              <Package size={28} strokeWidth={1.5} className="mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-500">{t('admin.products.noProductsFound')}</p>
+              {!debouncedQuery && (
+                <button
+                  onClick={() => openEditor(null)}
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800"
+                >
+                  <Plus size={15} strokeWidth={2.5} />
+                  {t('admin.products.newProduct')}
+                </button>
+              )}
+            </div>
           ) : (
             <div className="overflow-x-auto">
-              {/*
-                table-fixed + an explicit <colgroup> pins every column to a
-                set percentage width up front. Because the width no longer
-                comes from the content, switching a cell between plain text
-                and an input (which is always w-full) doesn't reflow the
-                columns — only the cell's own content changes. Long text is
-                truncated with an ellipsis (see CellText) instead of forcing
-                the table wider and requiring a horizontal scroll.
-              */}
-              <table className="w-full text-sm table-fixed">
-                <colgroup>
-                  <col style={{ width: '9%' }} />
-                  <col style={{ width: '16%' }} />
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '12%' }} />
-                  <col style={{ width: '12%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '11%' }} />
-                </colgroup>
-                <thead className="bg-blue-50/60 border-b border-blue-500/15">
+              <table className="w-full min-w-[880px] text-sm">
+                <thead className="bg-blue-50/60 border-b border-blue-500/15 text-xs">
                   <tr>
                     <SortableTh<SortKey>
                       label="SKU"
@@ -939,7 +427,7 @@ export default function ProductsPage() {
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label={t('common.name')}
+                      label={t('admin.products.productColumn')}
                       columnKey="name"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
@@ -953,19 +441,12 @@ export default function ProductsPage() {
                       onSort={toggleSort}
                     />
                     <SortableTh<SortKey>
-                      label={t('admin.products.brandColumn')}
-                      columnKey="brand"
-                      activeKey={sort?.key ?? null}
-                      direction={sort?.direction ?? null}
-                      onSort={toggleSort}
-                    />
-                    <SortableTh<SortKey>
-                      label={t('admin.products.sellingPriceColumn')}
+                      label={t('admin.products.priceColumn')}
                       columnKey="sellingPrice"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
-                      className="whitespace-nowrap"
+                      align="right"
                     />
                     <SortableTh<SortKey>
                       label={t('admin.products.costPriceColumn')}
@@ -973,326 +454,142 @@ export default function ProductsPage() {
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
-                      className="whitespace-nowrap"
+                      align="right"
                     />
-                    {/* SortableTh's label prop is typed as a string, so the
-                        Boxes icon that used to sit next to "Total Stock"
-                        can't ride along here without changing that type —
-                        dropped rather than forcing a cast. */}
                     <SortableTh<SortKey>
                       label={t('admin.products.totalStockColumn')}
                       columnKey="stock"
                       activeKey={sort?.key ?? null}
                       direction={sort?.direction ?? null}
                       onSort={toggleSort}
-                      className="whitespace-nowrap"
+                      align="right"
                     />
-                    <th className="text-left px-4 py-3 font-semibold">{t('common.status')}</th>
-                    <th className="text-right px-4 py-3 font-semibold">{t('common.actions')}</th>
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedProducts.map((product, idx) => {
-                    const isEditing = editingId === product.id;
+                  {products.map((product) => {
                     const stock = stockByProduct[product.id]?.totalStock;
+                    const levelPrices = levelPricesOf(product);
+                    const margin =
+                      product.sellingPrice != null && product.costPrice != null && product.sellingPrice > 0
+                        ? ((product.sellingPrice - product.costPrice) / product.sellingPrice) * 100
+                        : null;
+                    const subline = [product.brand, product.oem && `OEM ${product.oem}`].filter(Boolean).join(' · ');
                     return (
-                      <Fragment key={product.id}>
-                        <tr
-                          className={`border-t border-blue-500/10 ${
-                            isEditing ? 'bg-blue-50/60' : idx % 2 === 1 ? 'bg-blue-50/10' : 'bg-white'
-                          }`}
-                        >
-                          <td className={`px-4 py-3 text-gray-500 align-top ${cellHighlight('sku')}`}>
-                            {isEditing ? (
-                              <div>
-                                <input
-                                  value={editSku}
-                                  onChange={(e) => {
-                                    setEditSku(e.target.value);
-                                    if (editFieldErrors.sku)
-                                      setEditFieldErrors((f) => ({ ...f, sku: undefined }));
-                                  }}
-                                  className={rowFieldClass(editFieldErrors.sku)}
-                                />
-                                {editFieldErrors.sku && (
-                                  <p className="text-xs text-red-600 mt-1">{editFieldErrors.sku}</p>
-                                )}
-                                {!editFieldErrors.sku && editDuplicateSku && (
-                                  <p className="text-xs text-amber-600 mt-1">{t('admin.products.duplicateSku')}</p>
-                                )}
-                              </div>
-                            ) : (
-                              <CellText value={product.sku ?? '-'} />
-                            )}
-                          </td>
+                      <tr
+                        key={product.id}
+                        onClick={() => openEditor(product)}
+                        className={`group border-t border-blue-500/10 cursor-pointer hover:bg-blue-50/40 transition-colors ${
+                          product.active ? '' : 'text-gray-400'
+                        }`}
+                      >
+                        <td className={`px-4 py-3 align-top font-mono text-xs text-gray-500 whitespace-nowrap ${cellHighlight('sku')}`}>
+                          {product.sku ?? '-'}
+                        </td>
 
-                          <td className={`px-4 py-3 align-top ${cellHighlight('name')}`}>
-                            {isEditing ? (
-                              <div>
-                                <input
-                                  value={editName}
-                                  onChange={(e) => {
-                                    setEditName(e.target.value);
-                                    if (editFieldErrors.name)
-                                      setEditFieldErrors((f) => ({ ...f, name: undefined }));
-                                  }}
-                                  className={rowFieldClass(editFieldErrors.name)}
-                                />
-                                {editFieldErrors.name && (
-                                  <p className="text-xs text-red-600 mt-1">{editFieldErrors.name}</p>
-                                )}
-                              </div>
-                            ) : (
-                              <CellText value={product.name} />
-                            )}
-                          </td>
-
-                          <td className={`px-4 py-3 align-top ${cellHighlight('category')}`}>
-                            {isEditing ? (
-                              <div>
-                                <ComboBox
-                noMatchesLabel={t('admin.products.noMatches')}
-                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
-
-                                  value={editCategory}
-                                  onChange={(v) => {
-                                    setEditCategory(v);
-                                    if (editFieldErrors.category)
-                                      setEditFieldErrors((f) => ({ ...f, category: undefined }));
-                                  }}
-                                  options={categories}
-                                  placeholder={t('admin.products.categoryColumn')}
-                                  className={rowFieldClass(editFieldErrors.category)}
-                                />
-                                {editFieldErrors.category && (
-                                  <p className="text-xs text-red-600 mt-1">{editFieldErrors.category}</p>
-                                )}
-                              </div>
-                            ) : (
-                              <CellText value={product.category ?? '-'} />
-                            )}
-                          </td>
-
-                          <td className={`px-4 py-3 align-top ${cellHighlight('brand')}`}>
-                            {isEditing ? (
-                              <div>
-                                <ComboBox
-                noMatchesLabel={t('admin.products.noMatches')}
-                createOptionLabel={(v) => t('admin.products.createOption', { value: v })}
-
-                                  value={editBrand}
-                                  onChange={setEditBrand}
-                                  options={brands}
-                                  placeholder={t('admin.products.brandColumn')}
-                                  className={rowFieldClass()}
-                                />
-                              </div>
-                            ) : (
-                              <CellText value={product.brand ?? '-'} />
-                            )}
-                          </td>
-
-                          <td className={`px-4 py-3 align-top ${cellHighlight('sellingPrice')}`}>
-                            {isEditing ? (
-                              <div>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  inputMode="decimal"
-                                  value={editSellingPrice}
-                                  onChange={(e) => {
-                                    setEditSellingPrice(e.target.value);
-                                    if (editFieldErrors.sellingPrice)
-                                      setEditFieldErrors((f) => ({ ...f, sellingPrice: undefined }));
-                                  }}
-                                  className={rowFieldClass(editFieldErrors.sellingPrice)}
-                                />
-                                {editFieldErrors.sellingPrice && (
-                                  <p className="text-xs text-red-600 mt-1">{editFieldErrors.sellingPrice}</p>
-                                )}
-                              </div>
-                            ) : (
-                              <>
-                                {product.sellingPrice != null ? (
-                                  <CellText value={formatIDR(product.sellingPrice)} />
-                                ) : (
-                                  <span className="text-gray-400">{t('admin.products.noPrice')}</span>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setLevelPricesFor(product)}
-                                  className="mt-1 block text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                                >
-                                  {t('admin.products.levelPrices.open', { count: product.prices?.length ?? 0 })}
-                                </button>
-                              </>
-                            )}
-                          </td>
-
-                          <td className={`px-4 py-3 align-top ${cellHighlight('costPrice')}`}>
-                            {isEditing ? (
-                              <div>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  inputMode="decimal"
-                                  value={editCostPrice}
-                                  onChange={(e) => {
-                                    setEditCostPrice(e.target.value);
-                                    if (editFieldErrors.costPrice)
-                                      setEditFieldErrors((f) => ({ ...f, costPrice: undefined }));
-                                  }}
-                                  className={rowFieldClass(editFieldErrors.costPrice)}
-                                />
-                                {editFieldErrors.costPrice && (
-                                  <p className="text-xs text-red-600 mt-1">{editFieldErrors.costPrice}</p>
-                                )}
-                              </div>
-                            ) : product.costPrice != null ? (
-                              <CellText value={formatIDR(product.costPrice)} />
-                            ) : (
-                              <span className="text-gray-400">{t('admin.products.noPrice')}</span>
-                            )}
-                          </td>
-
-                          {/* Stock is per-location — shown read-only here; use
-                              the panel below while editing to apply a delta. */}
-                          <td
-                            className={`px-4 py-3 align-top ${cellHighlight('stock')}`}
-                            title={isEditing ? undefined : t('admin.products.editToAdjustStock')}
-                          >
-                            <StockBadge stock={stock} />
-                          </td>
-
-                          <td className="px-4 py-3 align-top">
-                            <span
-                              className={`inline-block max-w-full truncate text-xs px-2 py-0.5 rounded-md border font-medium ${
-                                product.active
-                                  ? 'bg-green-100 text-green-800 border-green-300'
-                                  : 'bg-gray-100 text-gray-600 border-gray-300'
-                              }`}
-                            >
-                              {product.active ? t('admin.products.active') : t('admin.products.archived')}
+                        <td className={`px-4 py-3 align-top max-w-[280px] ${cellHighlight('name')}`}>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`font-medium truncate ${product.active ? 'text-gray-900' : ''}`} title={product.name}>
+                              {product.name}
                             </span>
-                          </td>
-
-                          <td className="px-4 py-3 text-right align-top">
-                            {isEditing ? (
-                              <div className="flex flex-wrap justify-end gap-2">
-                                <button
-                                  onClick={() => saveEditProduct(product.id)}
-                                  disabled={savingEdit}
-                                  title={t('common.save')}
-                                  className="p-1.5 rounded-md border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-40 transition-colors"
-                                >
-                                  <Check size={14} strokeWidth={2.5} />
-                                </button>
-                                <button
-                                  onClick={cancelEditProduct}
-                                  disabled={savingEdit}
-                                  title={t('common.cancel')}
-                                  className="p-1.5 rounded-md border border-blue-500/20 text-gray-600 hover:bg-blue-50 disabled:opacity-40 transition-colors"
-                                >
-                                  <X size={14} strokeWidth={2.5} />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex flex-wrap justify-end gap-2">
-                                <button
-                                  onClick={() => startEditProduct(product)}
-                                  title={t('admin.products.editProductTitle')}
-                                  className="p-1.5 rounded-md border border-blue-500/20 text-gray-600 hover:bg-blue-50 transition-colors"
-                                >
-                                  <Pencil size={14} strokeWidth={2} />
-                                </button>
-                                {product.active ? (
-                                  <button
-                                    onClick={() => requestArchive(product.id)}
-                                    className="px-3 py-1.5 rounded-md border border-red-300 text-red-700 text-xs font-semibold hover:bg-red-50 transition-colors"
-                                  >
-                                    {t('admin.products.archive')}
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => restoreProduct(product.id)}
-                                    className="px-3 py-1.5 rounded-md border border-green-300 text-green-700 text-xs font-semibold hover:bg-green-50 transition-colors"
-                                  >
-                                    {t('admin.products.restore')}
-                                  </button>
-                                )}
-                              </div>
+                            {!product.active && (
+                              <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">
+                                {t('admin.products.archived')}
+                              </span>
                             )}
-                          </td>
-                        </tr>
+                          </div>
+                          {subline && (
+                            <div className="text-xs text-gray-500 truncate" title={subline}>
+                              {subline}
+                            </div>
+                          )}
+                        </td>
 
-                        {/* Expanded edit panel: OEM + stock adjustment.
-                            Kept out of the narrow columns above so the
-                            location/qty/reason controls have room. */}
-                        {isEditing && (
-                          <tr className="border-t border-blue-500/10 bg-blue-50/40">
-                            <td colSpan={9} className="px-4 py-3">
-                              <div className="flex flex-wrap items-end gap-3">
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-xs font-semibold text-gray-500">{t('admin.products.oemNumberLabel')}</label>
-                                  <input
-                                    value={editOem}
-                                    onChange={(e) => setEditOem(e.target.value)}
-                                    placeholder={t('common.optional')}
-                                    className={`${rowFieldClass()} w-40`}
-                                  />
-                                </div>
+                        <td className={`px-4 py-3 align-top ${cellHighlight('category')}`}>
+                          {product.category ? (
+                            <span className="inline-block max-w-[160px] truncate text-xs px-2 py-0.5 rounded-md bg-gray-100 text-gray-700" title={product.category}>
+                              {product.category}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
 
-                                <div className="w-px self-stretch bg-blue-500/15 hidden md:block" />
+                        <td className={`px-4 py-3 align-top text-right ${cellHighlight('sellingPrice')}`}>
+                          {product.sellingPrice != null ? (
+                            <div className="font-semibold tabular-nums whitespace-nowrap" title={defaultLevelName ?? undefined}>
+                              {formatIDR(product.sellingPrice)}
+                            </div>
+                          ) : (
+                            <div className="text-gray-400 text-xs">{t('admin.products.noPrice')}</div>
+                          )}
+                          {levelPrices.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {levelPrices.slice(0, LEVEL_PRICES_SHOWN).map((lp) => (
+                                <div key={lp.id} className="flex justify-end gap-1.5 text-[11px] whitespace-nowrap">
+                                  <span className="text-gray-400 truncate max-w-[90px]">{lp.name}</span>
+                                  <span className="text-gray-600 tabular-nums">{formatIDR(lp.price)}</span>
+                                </div>
+                              ))}
+                              {levelPrices.length > LEVEL_PRICES_SHOWN && (
+                                <div className="text-[11px] text-blue-600">
+                                  {t('admin.products.moreLevels', { count: levelPrices.length - LEVEL_PRICES_SHOWN })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
 
-                                {warehouseOps && (
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-xs font-semibold text-gray-500">
-                                    {t('admin.products.adjustStockLocationLabel')}
-                                  </label>
-                                  <select
-                                    value={pickedStockLocationId}
-                                    onChange={(e) => setEditStockLocationId(e.target.value)}
-                                    className={`${rowFieldClass()} w-40`}
-                                  >
-                                    <option value="">{t('admin.products.selectLocation')}</option>
-                                    {locations.map((l) => (
-                                      <option key={l.id} value={l.id}>
-                                        {l.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                )}
-                                <div className="flex flex-col gap-1">
-                                  <label className="text-xs font-semibold text-gray-500">
-                                    {t('admin.products.qtyLabel')}
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={editStockDelta}
-                                    onChange={(e) => setEditStockDelta(e.target.value)}
-                                    placeholder="0"
-                                    className={`${rowFieldClass()} w-24`}
-                                  />
-                                </div>
-                                <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
-                                  <label className="text-xs font-semibold text-gray-500">
-                                    {t('admin.products.reasonLabel')}
-                                  </label>
-                                  <input
-                                    value={editStockReason}
-                                    onChange={(e) => setEditStockReason(e.target.value)}
-                                    className={`${rowFieldClass()} w-full`}
-                                  />
-                                </div>
-                              </div>
-                              <p className="text-xs text-gray-400 mt-2">
-                                {t('admin.products.stockAdjustNote', { reason: DEFAULT_ADJUST_REASON })}
-                              </p>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                        <td className={`px-4 py-3 align-top text-right ${cellHighlight('costPrice')}`}>
+                          {product.costPrice != null ? (
+                            <div className="tabular-nums whitespace-nowrap text-gray-700">{formatIDR(product.costPrice)}</div>
+                          ) : (
+                            <div className="text-gray-400 text-xs">{t('admin.products.noPrice')}</div>
+                          )}
+                          {margin != null && (
+                            <div className={`text-[11px] tabular-nums ${margin < 0 ? 'text-red-600' : 'text-green-700'}`}>
+                              {t('admin.products.marginPct', { pct: margin.toFixed(1) })}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className={`px-4 py-3 align-top text-right ${cellHighlight('stock')}`}>
+                          <StockBadge stock={stock} />
+                        </td>
+
+                        <td className="px-4 py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => openEditor(product)}
+                              title={t('admin.products.editProductTitle')}
+                              aria-label={t('admin.products.editProductTitle')}
+                              className="p-1.5 rounded-md text-gray-500 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+                            >
+                              <Pencil size={15} strokeWidth={2} />
+                            </button>
+                            {product.active ? (
+                              <button
+                                onClick={() => requestArchive(product.id)}
+                                title={t('admin.products.archive')}
+                                aria-label={t('admin.products.archive')}
+                                className="p-1.5 rounded-md text-gray-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                              >
+                                <Archive size={15} strokeWidth={2} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => restoreProduct(product.id)}
+                                title={t('admin.products.restore')}
+                                aria-label={t('admin.products.restore')}
+                                className="p-1.5 rounded-md text-gray-500 hover:text-green-700 hover:bg-green-50 transition-colors"
+                              >
+                                <ArchiveRestore size={15} strokeWidth={2} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -1300,9 +597,6 @@ export default function ProductsPage() {
             </div>
           )}
 
-          {/* Pagination — shared component (same as Stock, Customers,
-              Vehicles, Reference Data) instead of a hand-rolled Prev/Next
-              row, now inside the card so it visually belongs to the table. */}
           {totalProducts > 0 && (
             <div className="px-4 py-3 border-t border-blue-500/15">
               <Pagination
@@ -1320,11 +614,16 @@ export default function ProductsPage() {
         </div>
 
       </div>
-      {levelPricesFor && (
-        <ProductLevelPricesDialog
-          product={levelPricesFor}
-          onClose={() => setLevelPricesFor(null)}
-          onSaved={loadProducts}
+      {editor && (
+        <ProductEditorDrawer
+          product={editor.product}
+          stock={editor.product ? stockByProduct[editor.product.id] : undefined}
+          categories={categories}
+          brands={brands}
+          locations={locations}
+          warehouseOps={warehouseOps}
+          onClose={() => setEditor(null)}
+          onSaved={onEditorSaved}
         />
       )}
     </main>

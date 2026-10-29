@@ -37,7 +37,7 @@ import { scopedBranchId } from '../auth/branch-scope';
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard, RolesGuard)
 // Every branch's staff and salaries: MASTER only, not a branch's ADMIN.
 @Roles('MASTER')
-@RequireModule(ModuleKey.INVOICE_POS)
+@RequireModule(ModuleKey.ACCOUNTING)
 @Controller('payroll')
 export class PayrollController {
   constructor(

@@ -2,26 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Award, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
-import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
-import DatePicker from '@/app/components/shared/DatePicker';
+import { getInitialParam, useMergeQueryParams } from '@/lib/useQuerySync';
+import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import { BranchFilter } from '@/app/components/shared/BranchFilter';
-import { PageFrame, Card, ErrorNote, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { Card, ErrorNote, thCls, tdCls } from '@/app/components/shared/PageFrame';
 
-type Salesperson = {
-  employeeId: string | null;
-  name: string | null;
-  invoices: number;
-  parts: number;
-  services: number;
-  total: number;
-  average: number;
-};
 type Mechanic = {
   employeeId: string | null;
   name: string | null;
@@ -44,7 +35,7 @@ type Comeback = {
   plate: string;
   original: { id: string; number: string; completedAt: string | null; mechanic: string | null } | null;
 };
-type Report = { salespeople: Salesperson[]; mechanics: Mechanic[] | null; comebacks: Comeback[] };
+type Report = { mechanics: Mechanic[] | null; comebacks: Comeback[] };
 
 function monthStart() {
   const d = new Date();
@@ -61,8 +52,9 @@ function duration(hours: number | null, t: (k: string, v?: Record<string, string
   return t('sales.performance.hoursMinutes', { h, m });
 }
 
-// Who sold and who fixed what in a period — the numbers a boss pays commission on (through payroll).
-export default function PerformancePage() {
+// Who fixed what in a period — the numbers a boss pays commission on (through payroll). The Mechanic tab
+// of Staff Reports: its body (the page's header and tabs are Staff Reports').
+export default function MechanicReports() {
   const { t } = useLanguage();
   const { authorized } = useRequireAdmin();
   const [from, setFrom] = useState<string>(() => getInitialParam('from', monthStart()));
@@ -72,7 +64,7 @@ export default function PerformancePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useSyncQueryParams({ from, to, branchId: branchId || null });
+  useMergeQueryParams({ from, to, branchId: branchId || null });
 
   useEffect(() => {
     if (!authorized || !from || !to) return;
@@ -106,16 +98,17 @@ export default function PerformancePage() {
   const unassigned = t('sales.performance.unassigned');
 
   return (
-    <PageFrame icon={Award} title={t('sales.performance.title')} subtitle={t('sales.performance.subtitle')}>
-      <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-        <div className="sm:w-44">
-          <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">{t('sales.performance.from')}</p>
-          <DatePicker value={from} onChange={setFrom} max={to} />
-        </div>
-        <div className="sm:w-44">
-          <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">{t('sales.performance.to')}</p>
-          <DatePicker value={to} onChange={setTo} min={from} />
-        </div>
+    <div className="space-y-4">
+      {/* Filters — the reports' one date range first, then the branch. */}
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <DateRangePicker
+          from={from}
+          to={to}
+          onChange={(f, tt) => {
+            setFrom(f ?? monthStart());
+            setTo(tt ?? toCalendarDateString(new Date()));
+          }}
+        />
         <BranchFilter value={branchId} onChange={setBranchId} />
       </div>
       <ErrorNote message={error} />
@@ -123,52 +116,6 @@ export default function PerformancePage() {
 
       {report && (
         <>
-          <Card title={t('sales.performance.salespeople')}>
-            <p className="text-xs text-gray-500 mb-2">{t('sales.performance.salespeopleHint')}</p>
-            <div className="overflow-x-auto -mx-4 px-4">
-              <table className="w-full min-w-[560px]">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className={thCls}>{t('sales.performance.name')}</th>
-                    <th className={`${thCls} text-right`}>{t('sales.performance.invoices')}</th>
-                    <th className={`${thCls} text-right`}>{t('sales.performance.parts')}</th>
-                    <th className={`${thCls} text-right`}>{t('sales.performance.services')}</th>
-                    <th className={`${thCls} text-right`}>{t('sales.performance.total')}</th>
-                    <th className={`${thCls} text-right`}>{t('sales.performance.average')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.salespeople.map((s) => (
-                    <tr key={s.employeeId ?? 'none'} className="border-b border-gray-100">
-                      <td className={`${tdCls} font-medium ${s.employeeId ? '' : 'text-gray-400 italic'}`}>
-                        {s.employeeId ? (
-                          <Link
-                            href={`/sales/invoices?${new URLSearchParams({ employeeId: s.employeeId, from, to, status: 'ISSUED' })}`}
-                            className="hover:underline"
-                          >
-                            {s.name}
-                          </Link>
-                        ) : (
-                          unassigned
-                        )}
-                      </td>
-                      <td className={`${tdCls} text-right tabular-nums`}>{s.invoices}</td>
-                      <td className={`${tdCls} text-right tabular-nums`}>{formatIDR(s.parts)}</td>
-                      <td className={`${tdCls} text-right tabular-nums`}>{formatIDR(s.services)}</td>
-                      <td className={`${tdCls} text-right tabular-nums font-semibold`}>{formatIDR(s.total)}</td>
-                      <td className={`${tdCls} text-right tabular-nums text-gray-500`}>{formatIDR(s.average)}</td>
-                    </tr>
-                  ))}
-                  {report.salespeople.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className={`${tdCls} text-center text-gray-400`}>{t('sales.performance.empty')}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
           {report.mechanics && (
             <Card title={t('sales.performance.mechanics')}>
               <p className="text-xs text-gray-500 mb-2">{t('sales.performance.mechanicsHint')}</p>
@@ -251,6 +198,6 @@ export default function PerformancePage() {
           )}
         </>
       )}
-    </PageFrame>
+    </div>
   );
 }

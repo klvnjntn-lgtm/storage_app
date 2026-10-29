@@ -26,12 +26,24 @@ export const locales: { code: Locale; label: string }[] = [
 const base = {
   en: {
     common: {
+      documentLayout: { label: 'Layout', office: 'Office', retail: 'Cashier' },
       hubMenu: 'Menu',
       hubSearch: 'Search',
       branchFilterLabel: 'Branch',
       allBranches: 'All branches',
       increaseQty: 'Increase quantity',
       decreaseQty: 'Decrease quantity',
+      odometerTooLow: "Can't be lower than the last reading ({km} km)",
+      docFlow: {
+        from: 'From',
+        to: 'To',
+        draft: 'draft',
+        quotation: 'Quotation',
+        salesOrder: 'Sales order',
+        delivery: 'Delivery order',
+        invoice: 'Invoice',
+        workOrder: 'Work order',
+      },
       errorTitle: 'Something went wrong',
       errorBody: 'This page hit an unexpected error. Your saved data is safe — try again, or go back to the home page.',
       tryAgain: 'Try again',
@@ -99,6 +111,18 @@ const base = {
       areYouSure: 'Are you sure?',
       actionCannotBeUndone: 'This action cannot be undone.',
     },
+    staffReports: {
+      tabs: { mechanics: 'Mechanics', delivery: 'Drivers' },
+    },
+    salesReports: {
+      tabs: { overview: 'Overview', invoices: 'Invoices', rankings: 'Rankings' },
+      subtitles: {
+        overview: 'From issued invoices — not the accounting P&L',
+        invoices: 'Each issued invoice, newest first',
+        rankings: 'Top customers, best-selling items, and top vehicles',
+      },
+      seeAllRankings: 'See all',
+    },
     nav: {
       groups: {
         overview: 'Overview',
@@ -126,8 +150,9 @@ const base = {
         invoice: 'Invoice',
         deliveryOrder: 'Delivery Order',
         salesQuotation: 'Sales Quotation',
-        salesMargin: 'Sales Margin',
+        salesReports: 'Sales Reports',
         staffPerformance: 'Staff Performance',
+        staffReports: 'Staff Reports',
         customers: 'Customers',
         purchasing: 'Purchasing',
         purchasingHome: 'Purchasing Home',
@@ -154,7 +179,6 @@ const base = {
         workshopHome: 'Workshop Home',
         workOrders: 'Work Orders',
         vehicles: 'Vehicles',
-        vehicleLookup: 'Vehicle Lookup',
         partsCatalog: 'Parts Catalogue',
         reminders: 'Reminders',
         deliveryHome: 'Delivery Home',
@@ -333,12 +357,24 @@ const base = {
   },
   id: {
     common: {
+      documentLayout: { label: 'Tata letak', office: 'Kantor', retail: 'Kasir' },
       hubMenu: 'Menu',
       hubSearch: 'Cari',
       branchFilterLabel: 'Cabang',
       allBranches: 'Semua cabang',
       increaseQty: 'Tambah jumlah',
       decreaseQty: 'Kurangi jumlah',
+      odometerTooLow: 'Tidak boleh lebih rendah dari pembacaan terakhir ({km} km)',
+      docFlow: {
+        from: 'Dari',
+        to: 'Ke',
+        draft: 'draf',
+        quotation: 'Penawaran',
+        salesOrder: 'Pesanan penjualan',
+        delivery: 'Surat jalan',
+        invoice: 'Invois',
+        workOrder: 'Perintah kerja',
+      },
       errorTitle: 'Terjadi kesalahan',
       errorBody: 'Halaman ini mengalami kesalahan tak terduga. Data yang sudah tersimpan aman — coba lagi, atau kembali ke beranda.',
       tryAgain: 'Coba lagi',
@@ -406,6 +442,18 @@ const base = {
       areYouSure: 'Anda yakin?',
       actionCannotBeUndone: 'Tindakan ini tidak dapat dibatalkan.',
     },
+    staffReports: {
+      tabs: { mechanics: 'Mekanik', delivery: 'Driver' },
+    },
+    salesReports: {
+      tabs: { overview: 'Ringkasan', invoices: 'Faktur', rankings: 'Peringkat' },
+      subtitles: {
+        overview: 'Dari faktur terbit — bukan laba rugi akuntansi',
+        invoices: 'Tiap faktur terbit, terbaru dulu',
+        rankings: 'Pelanggan teratas, barang terlaris, dan kendaraan teratas',
+      },
+      seeAllRankings: 'Lihat semua',
+    },
     nav: {
       groups: {
         overview: 'Ringkasan',
@@ -433,8 +481,9 @@ const base = {
         invoice: 'Faktur',
         deliveryOrder: 'Surat Jalan',
         salesQuotation: 'Penawaran Penjualan',
-        salesMargin: 'Margin Penjualan',
+        salesReports: 'Laporan Penjualan',
         staffPerformance: 'Kinerja Karyawan',
+        staffReports: 'Laporan Staf',
         customers: 'Pelanggan',
         purchasing: 'Pembelian',
         purchasingHome: 'Beranda Pembelian',
@@ -461,7 +510,6 @@ const base = {
         workshopHome: 'Beranda Bengkel',
         workOrders: 'Perintah Kerja',
         vehicles: 'Kendaraan',
-        vehicleLookup: 'Cari Kendaraan',
         partsCatalog: 'Katalog Suku Cadang',
         reminders: 'Pengingat',
         deliveryHome: 'Beranda Pengiriman',

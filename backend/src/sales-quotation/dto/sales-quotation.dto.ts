@@ -4,6 +4,8 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsInt,
+  MaxLength,
   IsNotEmpty,
   IsNumber,
   IsBoolean,
@@ -117,6 +119,20 @@ bankAccountId?: string | null;
   @IsString()
   termsAndConditions?: string;
 
+  // Workshops only: the car quoted for, its odometer and the complaint — carried to the work order.
+  @IsOptional()
+  @IsString()
+  vehicleId?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  odometer?: number | null;
+
+  @IsOptional()
+  @IsString()
+  complaint?: string | null;
+
   @IsEnum(QuotationFormat)
   format: QuotationFormat;
 
@@ -159,6 +175,20 @@ bankAccountId?: string | null;
   @IsString()
   termsAndConditions?: string;
 
+  // Workshops only: the car quoted for, its odometer and the complaint — carried to the work order.
+  @IsOptional()
+  @IsString()
+  vehicleId?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  odometer?: number | null;
+
+  @IsOptional()
+  @IsString()
+  complaint?: string | null;
+
   @IsOptional()
   @IsEnum(QuotationFormat)
   format?: QuotationFormat;
@@ -168,4 +198,42 @@ bankAccountId?: string | null;
   @ValidateNested({ each: true })
   @Type(() => QuotationLineItemDto)
   items?: QuotationLineItemDto[];
+}
+// The customer's answer through the approval link: who they are, and (when declining) why. `version`
+// is the one they were shown — refused if the workshop changed the quotation since.
+export class RespondToQuotationDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  version: string;
+}
+
+// One quotation line and how much of it to order / invoice now.
+export class ConvertQuotationLineDto {
+  @IsString()
+  @IsNotEmpty()
+  quotationItemId: string;
+
+  @IsNumber()
+  @IsPositive()
+  quantity: number;
+}
+
+// Converting a quotation to a sales order or invoice: the lines and quantities to take now. Left out:
+// everything still left on the quotation.
+export class ConvertQuotationDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConvertQuotationLineDto)
+  lines?: ConvertQuotationLineDto[];
 }

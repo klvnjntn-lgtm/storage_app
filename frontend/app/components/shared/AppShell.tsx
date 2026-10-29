@@ -8,7 +8,6 @@ import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner'
 import {
   LayoutDashboard,
   Settings,
-  Search,
   Store,
   CreditCard,
   MessageCircle,
@@ -29,6 +28,7 @@ import {
   X,
   LogOut,
   TrendingUp,
+  ChartColumnIncreasing,
   Users,
   Contact,
   Car,
@@ -75,16 +75,16 @@ import { TourProvider } from '@/app/components/tour/TourProvider';
 import TourHelpMenu from '@/app/components/tour/TourHelpMenu';
 import { useAuth } from '@/app/context/AuthContext';
 import { WORK_ORDERS_CHANGED } from '@/app/components/workshop/workOrders';
+import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { isAdminRole, isMasterRole } from '@/lib/roles';
 
 // Accounting pages a branch ADMIN can use: their branch's expenses, fixed
-// assets and P&L, plus Sales Insights.
+// assets and P&L.
 const BRANCH_ADMIN_ACCOUNTING = new Set([
   '/accounting/expenses',
   '/accounting/fixed-assets',
   '/accounting/profit-loss',
-  '/accounting/sales-insights',
 ]);
 
 type LicenseStatus = {
@@ -162,6 +162,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, refreshProfile } = useAuth();
   const { t } = useLanguage();
+  const { multiBranch } = useBranches();
 
   // In the desktop app only the INVOICE_POS side exists; anything else
   // (including /home, where login lands) goes to Sales instead.
@@ -175,6 +176,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [pendingOrders, setPendingOrders] = useState<number | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [hasInvoicePos, setHasInvoicePos] = useState(false);
+  const [hasAccounting, setHasAccounting] = useState(false);
   const [hasWorkshopRms, setHasWorkshopRms] = useState(false);
   const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
   const [hasWarehouseOps, setHasWarehouseOps] = useState(false);
@@ -371,6 +373,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setHasDelivery(
           statuses.some((s) => s.module === 'DELIVERY_DMS' && s.enabled),
         );
+        setHasAccounting(
+          statuses.some((s) => s.module === 'ACCOUNTING' && s.enabled),
+        );
       } catch (err) {
         console.error('Module status fetch failed:', err);
       }
@@ -422,16 +427,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // A group the user hasn't toggled is open when they're on one of its
   // routes; once toggled, their choice sticks across navigation.
   const onPage = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-  const inGroup = (item: NavItem) => onPage(item.href) || !!item.children?.some((c) => onPage(c.href));
+  // A page with its own sidebar row (Reminders, at /workshop/reminders) isn't also in the group its URL sits under.
+  const ownRow = (href: string) => topLevelHrefs.some((h) => h !== href && h.startsWith(`${href}/`) && onPage(h));
+  const inGroup = (item: NavItem) =>
+    !ownRow(item.href) && (onPage(item.href) || !!item.children?.some((c) => onPage(c.href)));
   const isGroupOpen = (groups: Record<string, boolean>, item: NavItem) =>
     groups[item.href] ?? inGroup(item);
 
   const salesChildren: NavItem[] = [
     { href: '/sales', label: t('nav.items.salesHome'), icon: Home },
+    // In the order a sale goes: quoted, ordered, invoiced, delivered.
+    { href: '/sales/quotations', label: t('nav.items.salesQuotation'), icon: FileSpreadsheet },
     { href: '/sales/orders', label: t('nav.items.salesOrder'), icon: ClipboardList },
     { href: '/sales/invoices', label: t('nav.items.invoice'), icon: Receipt },
     { href: '/sales/delivery-orders', label: t('nav.items.deliveryOrder'), icon: Truck },
-    { href: '/sales/quotations', label: t('nav.items.salesQuotation'), icon: FileSpreadsheet },
   ];
 
   const salesItem: NavItem = {
@@ -484,7 +493,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/cash-statement/new', label: t('nav.items.cashStatement'), icon: ScrollText },
     { href: '/accounting/tax-export', label: t('nav.items.taxExport'), icon: FileSpreadsheet },
     { href: '/accounting/ledger', label: t('nav.items.accountLedger'), icon: BookOpen },
-    { href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 },
   ].filter((item) => isMaster || BRANCH_ADMIN_ACCOUNTING.has(item.href));
 
   const accountingItem: NavItem = {
@@ -527,17 +535,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     ],
   };
 
-  const salesWithExtras: NavItem = {
-    ...salesItem,
-    children: [
-      ...salesChildren,
-      { href: '/sales/reports', label: t('nav.items.salesMargin'), icon: TrendingUp },
-      ...(isAdminRole(profile?.role)
-        ? [{ href: '/sales/reports/performance', label: t('nav.items.staffPerformance'), icon: Award }]
-        : []),
-      { href: '/customers', label: t('nav.items.customers'), icon: Users },
-    ],
-  };
 
   // Stock and Customers are the pages people open most, so each gets its
   // own top-level row instead of hiding inside a module group. Customers
@@ -560,12 +557,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ? [{ href: '/workshop/work-orders', label: t('nav.items.workOrders'), icon: ClipboardList }]
         : []),
       { href: '/workshop/vehicles', label: t('nav.items.vehicles'), icon: Car },
-      { href: '/workshop/vehicles/search', label: t('nav.items.vehicleLookup'), icon: Search },
       { href: '/workshop/parts', label: t('nav.items.partsCatalog'), icon: Wrench },
-      { href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell },
-      ...(isAdminRole(profile?.role)
-        ? [{ href: '/sales/reports/performance', label: t('nav.items.staffPerformance'), icon: Award }]
-        : []),
     ],
   };
 
@@ -577,7 +569,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Home },
       { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
       { href: '/delivery/monitoring', label: t('nav.items.deliveryMonitoring'), icon: BarChart3 },
-      { href: '/delivery/reports', label: t('nav.items.deliveryReports'), icon: TrendingUp },
       // Staff handle drivers' phones too; locking and access hours on that
       // page stay admin-only.
       ...(isAdminRole(profile?.role) || profile?.role === 'USER'
@@ -592,7 +583,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     icon: Settings,
     children: [
       { href: '/settings', label: t('nav.items.settingsGeneral'), icon: Settings },
-      ...(isMaster ? [{ href: '/settings/branches', label: t('nav.items.branches'), icon: Store }] : []),
+      // One branch: no Branches item — General settings links to it for
+      // adding the second.
+      ...(isMaster && multiBranch ? [{ href: '/settings/branches', label: t('nav.items.branches'), icon: Store }] : []),
       { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
       ...(isMaster ? [{ href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard }] : []),
       { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },
@@ -610,16 +603,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ...(hasStock ? [stockItem] : []),
         ...(hasInvoicePos || hasDelivery ? [customersItem] : []),
         ...(hasStock ? [inventoryItem] : []),
-        ...(hasInvoicePos ? [salesWithExtras, purchasingItem] : []),
-        // The books are admin-only (backend enforces it too); staff keep
-        // Sales Insights, which reads invoice reports, not the ledger.
-        ...(!hasInvoicePos
-          ? []
-          : isAdminRole(profile?.role)
-            ? [accountingItem]
-            : [{ href: '/accounting/sales-insights', label: t('nav.items.salesInsights'), icon: BarChart3 }]),
+        ...(hasInvoicePos ? [salesItem, purchasingItem] : []),
+        // The books are their own module, and admin-only (backend enforces both).
+        ...(hasInvoicePos && hasAccounting && isAdminRole(profile?.role) ? [accountingItem] : []),
         ...(hasWorkshopRms ? [workshopItem] : []),
         ...(hasDelivery ? [deliveryItem] : []),
+        // Its own row rather than under Workshop. The page still needs WORKSHOP_RMS (/reminders is gated to it).
+        ...(hasWorkshopRms ? [{ href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell }] : []),
+        // Margins and rankings from the invoices — everyone in Sales, not just the books' admins.
+        ...(hasInvoicePos ? [{ href: '/reports/sales', label: t('nav.items.salesReports'), icon: ChartColumnIncreasing }] : []),
+        // Mechanics (Workshop, admins) and drivers (Delivery) as tabs of one page.
+        ...((hasWorkshopRms && isAdminRole(profile?.role)) || hasDelivery
+          ? [{ href: '/reports/staff', label: t('nav.items.staffReports'), icon: Award }]
+          : []),
       ],
     },
     {
@@ -644,6 +640,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           : [],
     },
   ];
+  // Used by inGroup (only at render, after this is set).
+  const topLevelHrefs = allNavGroups.flatMap((g) => g.items.filter((i) => !i.children).map((i) => i.href));
   const navGroups = desktopApp
     ? allNavGroups.map((group) => ({
         ...group,
@@ -779,6 +777,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     hasInvoicePos && 'INVOICE_POS',
     hasWorkshopRms && 'WORKSHOP_RMS',
     hasDelivery && 'DELIVERY_DMS',
+    hasAccounting && 'ACCOUNTING',
   ].filter((m): m is string => !!m);
 
   const roleLabel = (role: string) => {

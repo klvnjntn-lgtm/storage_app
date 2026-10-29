@@ -1,3 +1,4 @@
+import { assertNoOtherMechanicAccount } from '../auth/mechanic-account';
 import {
   BadRequestException,
   ForbiddenException,
@@ -14,7 +15,7 @@ import { PlanLimitsService } from '../billing/plan-limits.service';
 // the ADMINs/USERs of their own branch, never a MASTER.
 export type MemberActor = { sub: string; role: string; branchId?: string | null };
 
-type MemberRole = 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER';
+type MemberRole = 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER' | 'MECHANIC';
 
 @Injectable()
 export class UsersService {
@@ -201,6 +202,7 @@ export class UsersService {
     if (user.role === 'MASTER' && user.active) {
       await this.assertAnotherActiveMaster(organizationId, userId);
     }
+    if (role === 'MECHANIC') await assertNoOtherMechanicAccount(this.prisma, organizationId, userId);
     // Becoming branch staff needs a branch: keep theirs, else the acting
     // ADMIN's, else the first.
     const branchId =

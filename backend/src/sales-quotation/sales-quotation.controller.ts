@@ -89,6 +89,18 @@ export class SalesQuotationController {
     return this.quotationService.send(organizationId, id, req.user.sub);
   }
 
+  // Workshops: the customer's approval link (a draft is sent first).
+  @Post(':id/approval-link')
+  approvalLink(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
+    return this.quotationService.approvalLink(organizationId, id, req.user.sub);
+  }
+
+  // Workshops: a further quotation for parts found mid-job, linked to this one.
+  @Post(':id/additions')
+  createAddition(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
+    return this.quotationService.createAddition(organizationId, id, req.user.sub);
+  }
+
   @Post(':id/accept')
   accept(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
     return this.quotationService.accept(organizationId, id, req.user.sub);

@@ -237,7 +237,13 @@ await this.logActivity(tx, {
   // amounts verbatim — product prices/tax rates may have moved between
   // quotation and conversion, and a sales order should reflect current
   // pricing, not a stale snapshot.
-  async createFromQuotation(organizationId: string, userId: string, quotationId: string) {
+  // lines: what to order now (a quotation converts in parts); left out, everything still left on it.
+  async createFromQuotation(
+    organizationId: string,
+    userId: string,
+    quotationId: string,
+    lines?: { quotationItemId: string; quantity: number }[],
+  ) {
     try {
       return await this.prisma.$transaction(async (tx) => {
         // Lock the quotation row for the duration of this transaction so a
@@ -257,39 +263,12 @@ await this.logActivity(tx, {
         if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
           throw new BadRequestException('Only a sent or accepted quotation can be converted to an order');
         }
-        // NOTE: no separate "does an active SalesOrder already exist" check
-        // here, unlike Invoice's guard — status gating already covers it
-        // correctly. Once converted, status becomes CONVERTED (blocking this
-        // check on its own), and cancel()'s reopenIfConverted() flips it back
-        // to ACCEPTED specifically to allow a legitimate re-conversion after a
-        // cancelled order. Adding a raw "any salesOrders exist" check would
-        // break that flow, since a cancelled order would still count.
+        // Only what's still left on the quotation — it may already be partly ordered or invoiced.
+        const picks = await this.quotationService.linesToConvert(organizationId, quotation.id, lines, tx);
+        const { quotationItemIds, inputs: items, forcedUnitPriceByIndex, forcedPriceLevelIdByIndex } =
+          this.quotationService.pickedLineInputs(quotation.items, picks);
 
-        const items = quotation.items.map((i) => ({
-          productId: i.productId ?? undefined,
-          description: i.description ?? undefined,
-          locationId: i.locationId ?? undefined,
-          quantity: Number(i.quantity),
-          unitPrice: Number(i.unitPrice),
-          unit: i.unit ?? undefined,
-          discountType: i.discountType ?? undefined,
-          discountValue: i.discountValue != null ? Number(i.discountValue) : undefined,
-          // The quotation line's tax carries over (it used to be dropped).
-          taxRateIds: i.taxes.map((t) => t.taxRateId).filter((id): id is string => !!id),
-        }));
-
-        // Carry each source line's price and level forward unchanged — a
-        // quotation that said Rp100k must not become Rp110k on the order
-        // or invoice because a price level changed in between.
-        const forcedUnitPriceByIndex = new Map<number, number>();
-        const forcedPriceLevelIdByIndex = new Map<number, string | null>();
-        quotation.items.forEach((i, idx) => {
-          if (!i.productId) return;
-          forcedUnitPriceByIndex.set(idx, Number(i.unitPrice));
-          forcedPriceLevelIdByIndex.set(idx, i.priceLevelId ?? null);
-        });
-
-        const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
+        const { items: priced, subtotal, discountAmount, taxAmount, taxLines } =
           await this.pricing.priceLines(organizationId, items, tx, {
             forcedUnitPriceByIndex,
             forcedPriceLevelIdByIndex,
@@ -309,6 +288,8 @@ await this.logActivity(tx, {
             orderDate: new Date(), // NEW
 
             customerName: quotation.customerName,
+            // Workshops: the quoted car carries on to the order, and from it to the invoice.
+            vehicleId: quotation.vehicleId,
             quotationId: quotation.id,
             status: SalesOrderStatus.DRAFT,
             subtotal,
@@ -316,7 +297,8 @@ await this.logActivity(tx, {
             taxAmount,
             total: this.round2(subtotal - discountAmount + taxAmount),
             items: {
-              create: lines.map((l) => ({
+              create: priced.map((l, idx) => ({
+                quotationItemId: quotationItemIds[idx],
                 productId: l.productId,
                 description: l.description,
                 locationId: l.locationId,
@@ -711,7 +693,15 @@ async confirm(organizationId: string, id: string, userId: string) {
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.salesOrder.findMany({
-        where, include: { items: true, customer: true },
+        where,
+        include: {
+          items: true,
+          customer: true,
+          // Where it came from and what it became, for the list's links.
+          quotation: { select: { id: true, quotationNumber: true } },
+          deliveryOrders: { select: { id: true, doNumber: true, status: true }, orderBy: { createdAt: 'asc' } },
+          invoices: { select: { id: true, invoiceNumber: true, status: true }, orderBy: { createdAt: 'asc' } },
+        },
         orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
       }),
       this.prisma.salesOrder.count({ where }),

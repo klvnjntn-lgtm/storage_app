@@ -1,5 +1,14 @@
 // held: units on hand reserved for open work orders (not sellable here).
-export type StockAtLocation = { locationId: string; locationName: string; quantity: number; held?: number };
+export type StockAtLocation = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  // Promised to other customers (open jobs, accepted quotations, confirmed orders) — won't sell.
+  held?: number;
+  // On sent quotations still in date — sells, but someone was quoted it (offeredOn: their numbers).
+  offered?: number;
+  offeredOn?: string[];
+};
 
 export type ProductSearchResult = {
   id: string;
@@ -28,7 +37,6 @@ export type CartLine = {
     fulfilledQuantity?: number; // floor for quantity edits on an issued invoice
 
   locationName: string;
-  taxRateIds: string[];
   discountType: DiscountType | null;
   discountValue: number | null;
   // Serial-tracked products: the units this line sells.
@@ -79,7 +87,6 @@ export type ServiceLine = {
   key: string;
   description: string;
   unitPrice: number | null;
-  taxRateIds: string[];
   unit: string | null;
   discountType: DiscountType | null;
   discountValue: number | null;
@@ -88,13 +95,6 @@ export type ServiceLine = {
 export type InvoiceFormat = 'THERMAL_58' | 'RECEIPT' | 'A5' | 'A4';
 
 export type PaymentStatus = 'PAID' | 'UNPAID' | 'PARTIAL';
-
-export type TaxRate = {
-  id: string;
-  name: string;
-  percentage: number;
-  isDefault?: boolean;
-};
 
 // A selectable OrganizationBankAccount, as returned by
 // GET /organization/bank-accounts. isDefault marks the org's Settings-page
@@ -116,12 +116,6 @@ export type Employee = {
   id: string;
   name: string;
   position: string | null;
-};
-
-export type AppliedTax = {
-  name: string;
-  percentage: number;
-  amount: number;
 };
 
 export type InvoiceView = {
@@ -149,7 +143,6 @@ export type InvoiceView = {
     unit: string | null;
     unitPrice: number;
     itemDiscount: number;
-    itemTaxAmount: number;
     itemTotal: number;
     lineTotal: number;
     locationName: string;
@@ -157,12 +150,8 @@ export type InvoiceView = {
 
   subtotal: number;
   discount: number;
+  // Only documents issued while tax rates existed carry any.
   taxAmount: number;
-  taxes: {
-    name: string;
-    percentage: number;
-    amount: number;
-  }[];
   total: number;
 
   vehicleId: string | null;
@@ -170,9 +159,6 @@ export type InvoiceView = {
   vehicleModel: string | null;
   vehicleVin: string | null;
   vehicleOdometer: number | null;
-
-  employeeId: string | null;
-  employeeName: string | null;
 
   businessName: string;
   businessLegalName: string | null;

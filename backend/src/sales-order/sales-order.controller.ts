@@ -1,3 +1,4 @@
+import { ConvertQuotationDto } from '../sales-quotation/dto/sales-quotation.dto';
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { ModuleKey, SalesOrderStatus } from '@prisma/client';
@@ -27,8 +28,13 @@ export class SalesOrderController {
 
   @BranchRecord('salesQuotation', 'quotationId')
   @Post('from-quotation/:quotationId')
-  createFromQuotation(@CurrentOrg() organizationId: string, @Req() req, @Param('quotationId') quotationId: string) {
-    return this.orderService.createFromQuotation(organizationId, req.user.sub, quotationId);
+  createFromQuotation(
+    @CurrentOrg() organizationId: string,
+    @Req() req,
+    @Param('quotationId') quotationId: string,
+    @Body() dto: ConvertQuotationDto,
+  ) {
+    return this.orderService.createFromQuotation(organizationId, req.user.sub, quotationId, dto.lines);
   }
 
   @Get()

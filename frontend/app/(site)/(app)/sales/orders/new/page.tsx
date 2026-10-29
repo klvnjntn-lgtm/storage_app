@@ -1,5 +1,7 @@
 'use client';
 
+import { DocumentLayoutToggle } from '@/app/components/shared/DocumentLayoutToggle';
+import { documentGridClass, documentOrder, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
 import { BranchPicker } from '@/app/components/shared/BranchFilter';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -21,9 +23,7 @@ import {
   LocationOption,
   ProductSearchResult,
   ServiceLine,
-  TaxRate,
 } from '@/app/components/sales-orders/types';
-import type { TaxRateRow } from '@/lib/api-types';
 
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -70,13 +70,14 @@ export default function SalesOrderFormPage() {
 function SalesOrderFormPageInner() {
   const router = useRouter();
   const { t } = useLanguage();
+  // Office (document wide, search aside) or Cashier (search wide, cart aside); see useDocumentLayout.
+  const { layout, setLayout } = useDocumentLayout();
   const searchParams = useSearchParams();
   const urlDraftId = searchParams.get('draftId');
 
   // MASTER picks the branch; '' = the location's, else the first (see BranchPicker).
   const [branchId, setBranchId] = useState('');
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
 
   // Format is A4-only, same as quotations — no toggle, just a constant
   // baked into buildPayload().
@@ -133,24 +134,12 @@ function SalesOrderFormPageInner() {
 
   useEffect(() => {
     (async () => {
-      const [locRes, taxRes] = await Promise.all([
+      const [locRes] = await Promise.all([
         apiFetch('/locations'),
-        apiFetch('/organization/tax-rates'),
       ]);
       if (locRes.ok) {
         const data: LocationOption[] = await locRes.json();
         setLocations(data);
-      }
-      if (taxRes.ok) {
-        const rates = await taxRes.json();
-        setTaxRates(
-          rates.map((r: TaxRateRow) => ({
-            id: r.id,
-            name: r.name,
-            percentage: r.percentage,
-            isDefault: !!r.isDefault,
-          })),
-        );
       }
     })();
   }, [urlDraftId]);
@@ -208,9 +197,6 @@ function SalesOrderFormPageInner() {
             unit: item.unit ?? null,
             locationId: itemLocationId,
             locationName: item.location?.name ?? '',
-            taxRateIds: (item.taxes ?? [])
-              .map((t: { taxRateId: string | null }) => t.taxRateId)
-              .filter((tid: string | null): tid is string => !!tid),
             discountType: item.discountType ?? null,
             discountValue: item.discountValue != null ? Number(item.discountValue) : null,
             ...restoredLevelFields(item.priceLevelId),
@@ -222,9 +208,6 @@ function SalesOrderFormPageInner() {
             description: item.description ?? '',
             unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
             unit: item.unit ?? null,
-            taxRateIds: (item.taxes ?? [])
-              .map((t: { taxRateId: string | null }) => t.taxRateId)
-              .filter((tid: string | null): tid is string => !!tid),
             discountType: item.discountType ?? null,
             discountValue: item.discountValue != null ? Number(item.discountValue) : null,
           });
@@ -298,7 +281,6 @@ function SalesOrderFormPageInner() {
       quantity: number;
       unitPrice: number;
       unit: string | null;
-      taxRateIds: string[];
       discountType: DiscountType | null;
       discountValue: number | null;
     },
@@ -330,7 +312,6 @@ function SalesOrderFormPageInner() {
         unit: details.unit,
         locationId: resolvedTarget.locationId,
         locationName: resolvedTarget.locationName,
-        taxRateIds: details.taxRateIds,
         discountType: details.discountType,
         discountValue: details.discountValue,
         // A re-add keeps the line's level; a new line starts at the
@@ -386,22 +367,6 @@ function SalesOrderFormPageInner() {
     });
   }
 
-  function toggleLineTaxRate(key: string, taxRateId: string) {
-    setCart((prev) => {
-      const line = prev[key];
-      if (!line) return prev;
-      const has = line.taxRateIds.includes(taxRateId);
-      return {
-        ...prev,
-        [key]: {
-          ...line,
-          taxRateIds: has
-            ? line.taxRateIds.filter((id) => id !== taxRateId)
-            : [...line.taxRateIds, taxRateId],
-        },
-      };
-    });
-  }
 
   // Per-line discount setter. discountType === null clears the
   // discount entirely (back to "None" in the UI).
@@ -433,29 +398,8 @@ function SalesOrderFormPageInner() {
     );
   }
 
-  // "Apply to all" shortcuts. Tax stays modeled per-line internally —
-  // this just fans one toggle out to every existing line instead of
-  // making the user click each checkbox individually.
-  function applyTaxToAllLines(taxRateId: string, checked: boolean) {
-    setCart((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        const line = next[key];
-        const has = line.taxRateIds.includes(taxRateId);
-        if (checked && !has) next[key] = { ...line, taxRateIds: [...line.taxRateIds, taxRateId] };
-        if (!checked && has) next[key] = { ...line, taxRateIds: line.taxRateIds.filter((id) => id !== taxRateId) };
-      }
-      return next;
-    });
-    setServices((prev) =>
-      prev.map((s) => {
-        const has = s.taxRateIds.includes(taxRateId);
-        if (checked && !has) return { ...s, taxRateIds: [...s.taxRateIds, taxRateId] };
-        if (!checked && has) return { ...s, taxRateIds: s.taxRateIds.filter((id) => id !== taxRateId) };
-        return s;
-      }),
-    );
-  }
+  // "Apply to all" shortcut — fans one discount out to every existing
+  // line instead of making the user edit each one.
 
   function applyDiscountToAllLines(discountType: DiscountType | null, value: number) {
     setCart((prev) => {
@@ -471,7 +415,6 @@ function SalesOrderFormPageInner() {
   function addService() {
     serviceCounterRef.current += 1;
     const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
-    const defaultRate = taxRates.find((r) => r.isDefault);
     setServices((prev) => [
       ...prev,
       {
@@ -479,7 +422,6 @@ function SalesOrderFormPageInner() {
         description: '',
         unitPrice: null,
         unit: null,
-        taxRateIds: defaultRate ? [defaultRate.id] : [],
         discountType: null,
         discountValue: null,
       },
@@ -511,38 +453,19 @@ function SalesOrderFormPageInner() {
     setServices((prev) => prev.filter((s) => s.key !== key));
   }
 
-  function toggleServiceTaxRate(key: string, taxRateId: string) {
-    setServices((prev) =>
-      prev.map((s) => {
-        if (s.key !== key) return s;
-        const has = s.taxRateIds.includes(taxRateId);
-        return {
-          ...s,
-          taxRateIds: has ? s.taxRateIds.filter((id) => id !== taxRateId) : [...s.taxRateIds, taxRateId],
-        };
-      }),
-    );
-  }
 
-  // Tax is computed on the post-discount (net) amount, not the raw
-  // subtotal — otherwise a 100% discounted line would still carry tax.
   const cartLines = Object.entries(cart).map(([key, rawLine]) => {
     const line = applyPriceLevel(rawLine, basePriceLevelId, defaultLevelId, activeLevelIds);
     const lineSubtotal = line.unitPrice * line.quantity;
     const discAmt = lineDiscountAmount(lineSubtotal, line.discountType, line.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => line.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(
-      lineRates.reduce((sum, rate) => sum + netAmount * (rate.percentage / 100), 0),
-    );
     return {
       key,
       ...line,
       lineSubtotal,
       lineDiscountAmount: discAmt,
       netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
+      lineTotal: netAmount,
     };
   });
 
@@ -550,17 +473,12 @@ function SalesOrderFormPageInner() {
     const lineSubtotal = s.unitPrice ?? 0;
     const discAmt = lineDiscountAmount(lineSubtotal, s.discountType, s.discountValue);
     const netAmount = round2(lineSubtotal - discAmt);
-    const lineRates = taxRates.filter((r) => s.taxRateIds.includes(r.id));
-    const lineTaxAmount = round2(
-      lineRates.reduce((sum, rate) => sum + netAmount * (rate.percentage / 100), 0),
-    );
     return {
       ...s,
       lineSubtotal,
       lineDiscountAmount: discAmt,
       netAmount,
-      lineTaxAmount,
-      lineTotal: round2(netAmount + lineTaxAmount),
+      lineTotal: netAmount,
     };
   });
 
@@ -575,11 +493,7 @@ function SalesOrderFormPageInner() {
     cartLines.reduce((sum, l) => sum + l.lineDiscountAmount, 0) +
       serviceLinesWithTotals.reduce((sum, s) => sum + s.lineDiscountAmount, 0),
   );
-  const taxAmount = round2(
-    cartLines.reduce((sum, l) => sum + l.lineTaxAmount, 0) +
-      serviceLinesWithTotals.reduce((sum, s) => sum + s.lineTaxAmount, 0),
-  );
-  const total = round2(subtotal - discount + taxAmount);
+  const total = round2(subtotal - discount);
   const totalLineCount = cartLines.length + serviceLinesWithTotals.length;
 
   function buildPayload() {
@@ -591,7 +505,6 @@ function SalesOrderFormPageInner() {
       // A typed (custom) price comes from no level.
       priceLevelId: line.priceCustom ? undefined : (line.priceLevelId ?? undefined),
       unit: line.unit ?? undefined,
-      taxRateIds: line.taxRateIds,
       discountType: line.discountType ?? undefined,
       discountValue: line.discountValue ?? undefined,
     }));
@@ -602,7 +515,6 @@ function SalesOrderFormPageInner() {
         quantity: 1,
         unitPrice: s.unitPrice as number,
         unit: s.unit ?? undefined,
-        taxRateIds: s.taxRateIds,
         discountType: s.discountType ?? undefined,
         discountValue: s.discountValue ?? undefined,
       }));
@@ -797,6 +709,8 @@ function SalesOrderFormPageInner() {
                 {t('sales.ordersNew.history')}
               </button>
 
+              <DocumentLayoutToggle layout={layout} onChange={setLayout} />
+
               <span className="text-sm px-3 py-1.5 rounded-lg bg-blue-600/10 border border-blue-600/20 text-blue-700 font-medium">
                 A4
               </span>
@@ -805,7 +719,7 @@ function SalesOrderFormPageInner() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
+      <div className={`max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 ${documentGridClass(layout)}`}>
         <ProductSearch
           query={query}
           setQuery={setQuery}
@@ -816,11 +730,10 @@ function SalesOrderFormPageInner() {
           onSelectLocationFilter={selectLocationFilter}
           onAddToCart={addToCart}
           posModeEnabled={false}
-          taxRates={taxRates}
           basePriceLevelId={basePriceLevelId}
         />
 
-        <div ref={cartPanelRef} className="scroll-mt-24">
+        <div ref={cartPanelRef} className={`scroll-mt-24 ${layout === 'office' ? documentOrder : ''}`}>
           <BranchPicker value={branchId} onChange={setBranchId} />
           <SalesOrderCartPanel
             cartLines={cartLines}
@@ -843,13 +756,9 @@ function SalesOrderFormPageInner() {
             onSubmit={handleSubmit}
             saving={saving}
             error={error}
-            taxRates={taxRates}
-            onToggleLineTaxRate={toggleLineTaxRate}
-            onApplyTaxToAll={applyTaxToAllLines}
             onChangeLineDiscount={changeLineDiscount}
             onChangeServiceDiscount={changeServiceDiscount}
             onApplyDiscountToAll={applyDiscountToAllLines}
-            taxAmount={taxAmount}
             total={total}
             services={serviceLinesWithTotals}
             onAddService={addService}
@@ -857,7 +766,6 @@ function SalesOrderFormPageInner() {
             onChangeServicePrice={changeServicePrice}
             onChangeServiceUnit={changeServiceUnit}
             onRemoveService={removeService}
-            onToggleServiceTaxRate={toggleServiceTaxRate}
           />
         </div>
       </div>

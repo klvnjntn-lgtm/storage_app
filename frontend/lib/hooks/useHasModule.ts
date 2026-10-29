@@ -41,8 +41,14 @@ function fetchStatuses(): Promise<ModuleStatus[]> {
 }
 
 export function useHasModule(moduleKey: string): boolean {
-  const [enabled, setEnabled] = useState(
-    () => fresh()?.some((s) => s.module === moduleKey && s.enabled) ?? false,
+  return useModuleState(moduleKey) ?? false;
+}
+
+// Same, but null until the answer is known — for a page that redirects
+// away when the module is off, and mustn't do so while it's still loading.
+export function useModuleState(moduleKey: string): boolean | null {
+  const [enabled, setEnabled] = useState<boolean | null>(
+    () => fresh()?.some((s) => s.module === moduleKey && s.enabled) ?? null,
   );
 
   useEffect(() => {

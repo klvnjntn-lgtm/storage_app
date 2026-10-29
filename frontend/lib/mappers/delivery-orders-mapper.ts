@@ -30,8 +30,8 @@ type RawDeliveryOrder = Pick<DeliveryOrderDetail, 'id' | 'doNumber' | 'status' |
   > & {
     proofPhotoKey?: string | null;
     proofPhotoUrl?: string | null;
-    salesOrder?: { orderNumber: string | null; customerName?: string | null } | null;
-    invoice?: { invoiceNumber: string | null } | null;
+    salesOrder?: { id?: string; orderNumber: string | null; customerName?: string | null } | null;
+    invoice?: { id?: string; invoiceNumber: string | null; status?: string | null } | null;
     location?: { name: string } | null;
     items?: {
       id: string;
@@ -51,7 +51,11 @@ export function mapDeliveryOrderToListItem(raw: RawDeliveryOrder): DeliveryOrder
     createdAt: raw.createdAt,
     shippedAt: raw.shippedAt ?? null,
     salesOrder: raw.salesOrder
-      ? { orderNumber: raw.salesOrder.orderNumber, customerName: raw.salesOrder.customerName ?? null }
+      ? { id: raw.salesOrder.id ?? raw.salesOrderId ?? '', orderNumber: raw.salesOrder.orderNumber, customerName: raw.salesOrder.customerName ?? null }
+      : null,
+    // A delivery shipped straight from an invoice (no sales order).
+    invoice: raw.invoice?.id
+      ? { id: raw.invoice.id, invoiceNumber: raw.invoice.invoiceNumber, status: raw.invoice.status ?? null }
       : null,
     items: raw.items ?? [],
   };

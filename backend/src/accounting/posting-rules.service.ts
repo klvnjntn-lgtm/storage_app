@@ -1069,6 +1069,12 @@ export class PostingRulesService {
         'This bank account has no linked GL account — it may have been created before auto-linking was set up',
       );
     }
+    // Inactive = its bank account is archived (BankAccountGLLinkService keeps the two in step).
+    if (!linked.isActive) {
+      throw new BadRequestException(
+        `"${linked.name}" is archived — restore its bank account in the Chart of Accounts to post to it again`,
+      );
+    }
     return linked.id;
   }
 

@@ -56,13 +56,36 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   // Track the OS setting until the user picks a theme themselves.
+  // Printing re-evaluates media queries for paper (light), which fired this listener and left the
+  // page light after the print dialog closed — so it's ignored while printing, and the theme is
+  // restored once printing ends.
   useEffect(() => {
     const mq = window.matchMedia(MEDIA);
+    let printing = false;
+    let restoreTimer: ReturnType<typeof setTimeout> | undefined;
     const onChange = () => {
-      if (!readStored()) apply(systemTheme());
+      if (!printing && !readStored()) apply(systemTheme());
+    };
+    const onBeforePrint = () => {
+      printing = true;
+      clearTimeout(restoreTimer);
+    };
+    const onAfterPrint = () => {
+      // A beat later, once the browser is back to screen media.
+      restoreTimer = setTimeout(() => {
+        printing = false;
+        apply(readStored() ?? systemTheme());
+      }, 100);
     };
     mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    return () => {
+      clearTimeout(restoreTimer);
+      mq.removeEventListener('change', onChange);
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
   }, []);
 
   const toggleTheme = useCallback(() => {

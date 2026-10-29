@@ -118,7 +118,7 @@ export class AuthController {
   // Asked on every page load by every signed-in user; the global 100/min
   // per IP is too tight for a shop where all staff share one public IP.
   @Throttle({ default: { limit: 1000, ttl: 60000 } })
-  @Roles('ADMIN', 'USER', 'DRIVER')
+  @Roles('ADMIN', 'USER', 'DRIVER', 'MECHANIC')
   @AllowSuspendedOrg()
   @Get('me')
   async me(@CurrentUser() user: any) {

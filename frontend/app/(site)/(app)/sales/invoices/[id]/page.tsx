@@ -141,13 +141,20 @@ function PaymentBadge({ status }: { status: PaymentStatus }) {
 
 // NEW — surfaces InvoicePrintView.fulfillmentStatus. Renders nothing once
 // fully fulfilled, so it doesn't clutter the header for the common case.
-function FulfillmentBadge({ status }: { status: FulfillmentStatus }) {
+// Short of stock only when it was issued straight from the shelf
+// (DIRECT_ISSUE); otherwise the goods simply wait for their delivery order.
+function FulfillmentBadge({ status, path }: { status: FulfillmentStatus; path: string | null }) {
   const { t } = useLanguage();
   if (status === 'FULFILLED') return null;
+  const waitingDelivery = path !== 'DIRECT_ISSUE';
   return (
     <span className="inline-flex items-center gap-1 border-2 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide border-amber-600 text-amber-700 bg-amber-50">
       <Truck size={11} strokeWidth={2} />
-      {status === 'PARTIALLY_FULFILLED' ? t('sales.invoiceDetail.fulfillmentPartial') : t('sales.invoiceDetail.fulfillmentBackordered')}
+      {status === 'PARTIALLY_FULFILLED'
+        ? t('sales.invoiceDetail.fulfillmentPartial')
+        : waitingDelivery
+          ? t('sales.invoiceDetail.fulfillmentAwaitingDelivery')
+          : t('sales.invoiceDetail.fulfillmentBackordered')}
     </span>
   );
 }
@@ -477,7 +484,10 @@ export default function InvoiceDetailPage() {
                       : '\u00A0'}
                   </p>
                   {invoice && <PaymentBadge status={invoice.paymentStatus} />}
-                  {invoice && <FulfillmentBadge status={invoice.fulfillmentStatus} />}
+                  {/* Only once issued: a draft hasn't been fulfilled because it hasn't been sold yet. */}
+                  {invoice?.status === 'ISSUED' && (
+                    <FulfillmentBadge status={invoice.fulfillmentStatus} path={invoice.fulfillmentPath ?? null} />
+                  )}
                   {overdue && <OverdueBadge />}
                   {periodClosed && period && <ClosedPeriodBadge period={period} />}
                 </div>
@@ -622,18 +632,9 @@ export default function InvoiceDetailPage() {
               </div>
             )}
 
-            {(invoice.employeeName || invoice.mechanicName) && (
-              <p className="text-xs text-gray-500 mb-4 flex flex-wrap gap-x-4">
-                {invoice.employeeName && (
-                  <span>
-                    {t('sales.invoiceDetail.soldBy')} <span className="font-medium text-gray-800">{invoice.employeeName}</span>
-                  </span>
-                )}
-                {invoice.mechanicName && (
-                  <span>
-                    {t('sales.invoiceDetail.mechanicBy')} <span className="font-medium text-gray-800">{invoice.mechanicName}</span>
-                  </span>
-                )}
+            {invoice.mechanicName && (
+              <p className="text-xs text-gray-500 mb-4">
+                {t('sales.invoiceDetail.mechanicBy')} <span className="font-medium text-gray-800">{invoice.mechanicName}</span>
               </p>
             )}
 

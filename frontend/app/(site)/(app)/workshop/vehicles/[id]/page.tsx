@@ -23,6 +23,7 @@ import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
 import { CatalogCarCard } from '@/app/components/workshop/CatalogCarCard';
+import { VehicleQuickSearch } from '@/app/components/workshop/VehicleQuickSearch';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -30,6 +31,7 @@ type VehicleInvoiceItem = {
   id: string;
   quantity: number;
   description: string | null;
+  netAmount: string | number; // after discount, before tax
   product: { name: string } | null;
 };
 
@@ -65,7 +67,6 @@ type VehicleDetail = {
 };
 
 const PAGE_SIZE_DEFAULT = 20;
-const ITEMS_SUMMARY_MAX = 3;
 
 // Same rule as the invoices list page: only ISSUED, not fully PAID, and
 // past its due date (compared by local calendar day, not exact time).
@@ -96,36 +97,26 @@ function itemLabel(item: VehicleInvoiceItem, t: (key: string) => string): string
 
 // The whole point of this page per the customer's ask ("ganti barang apa
 // aja & tgl/bulan sekaligus 1 report") is scanning what was done without
-// opening every invoice — so the parts/services list is always visible
-// inline, never behind a click. Returns one line per item (with quantity
-// prefixed when >1) rather than a comma-joined string, since a 3-part job
-// joined into one sentence reads as an unreadable run-on. When a search
-// is active, matching items float to the top so the person can
-// immediately see *why* a row matched instead of it being buried behind
-// "+N more".
+// opening every invoice — so every item is listed inline with its amount,
+// one line each (quantity prefixed when >1), never behind "+N more". When a
+// search is active, matching items float to the top so the person can
+// immediately see *why* a row matched.
 function itemsToShow(
   items: VehicleInvoiceItem[],
   searchQuery: string,
   t: (key: string) => string,
-): { lines: string[]; overflow: number } {
-  if (items.length === 0) return { lines: [t('workshop.vehicleDetail.noItemsRecorded')], overflow: 0 };
-
+): { label: string; amount: number }[] {
   const q = searchQuery.trim().toLowerCase();
-  const labels = items.map((item) => {
+  const rows = items.map((item) => {
     const label = itemLabel(item, t);
-    return item.quantity > 1 ? `${item.quantity}× ${label}` : label;
+    return { label: item.quantity > 1 ? `${item.quantity}× ${label}` : label, amount: Number(item.netAmount) };
   });
-
-  const ordered = q
-    ? [...labels].sort((a, b) => {
-        const aMatch = a.toLowerCase().includes(q) ? 0 : 1;
-        const bMatch = b.toLowerCase().includes(q) ? 0 : 1;
-        return aMatch - bMatch;
-      })
-    : labels;
-
-  if (ordered.length <= ITEMS_SUMMARY_MAX) return { lines: ordered, overflow: 0 };
-  return { lines: ordered.slice(0, ITEMS_SUMMARY_MAX), overflow: ordered.length - ITEMS_SUMMARY_MAX };
+  if (!q) return rows;
+  return [...rows].sort((a, b) => {
+    const aMatch = a.label.toLowerCase().includes(q) ? 0 : 1;
+    const bMatch = b.label.toLowerCase().includes(q) ? 0 : 1;
+    return aMatch - bMatch;
+  });
 }
 
 // Whether an invoice matches the search query — checked against the
@@ -138,7 +129,15 @@ function invoiceMatchesSearch(inv: VehicleInvoice, q: string, t: (key: string) =
   return inv.items.some((item) => itemLabel(item, t).toLowerCase().includes(q));
 }
 
+// Keyed by id: the header's quick search moves between vehicles on this
+// same route, and every filter, page and the catalogue-car form below is
+// per vehicle, so a new id starts from a fresh mount.
 export default function VehicleDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  return <VehicleDetail key={id} />;
+}
+
+function VehicleDetail() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const { t, language } = useLanguage();
@@ -344,6 +343,10 @@ export default function VehicleDetailPage() {
               </div>
             )}
           </div>
+          {/* Jump to the next car without going back to the list. */}
+          <div className="mt-3">
+            <VehicleQuickSearch compact />
+          </div>
         </div>
       </div>
 
@@ -443,7 +446,7 @@ export default function VehicleDetailPage() {
             <div className="flex flex-col gap-2">
               {paginatedInvoices.map((inv) => {
                 const overdue = isOverdue(inv);
-                const { lines, overflow } = itemsToShow(inv.items, itemSearch, t);
+                const rows = itemsToShow(inv.items, itemSearch, t);
                 return (
                   <div data-tour="veh-visit"
                     key={inv.id}
@@ -475,16 +478,16 @@ export default function VehicleDetailPage() {
                     </div>
 
                     {/* Row 2 — the part the customer actually asked for: what
-                        was changed, one item per line so a multi-part job
-                        stays readable instead of collapsing into a
-                        comma-joined run-on sentence. */}
+                        was changed and what each line cost, one item per
+                        line so a multi-part job stays readable. */}
                     <div className="text-sm text-gray-700 leading-snug">
-                      {lines.map((line, i) => (
-                        <p key={i} className="truncate">
-                          {line}
-                        </p>
+                      {rows.length === 0 && <p>{t('workshop.vehicleDetail.noItemsRecorded')}</p>}
+                      {rows.map((row, i) => (
+                        <div key={i} className="flex items-baseline justify-between gap-3">
+                          <span className="min-w-0 break-words">{row.label}</span>
+                          <span className="shrink-0 text-xs text-gray-500 tabular-nums">{formatIDR(row.amount)}</span>
+                        </div>
                       ))}
-                      {overflow > 0 && <p className="text-xs text-gray-400">{t('workshop.vehicleDetail.more', { count: overflow })}</p>}
                     </div>
 
                     {/* Row 3 — odometer, total, and either draft actions or

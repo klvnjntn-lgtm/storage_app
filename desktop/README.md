@@ -28,7 +28,7 @@ seat limit at every license check: at startup and every 12 hours, when
 online. Without `seats`, the limit stays as it is (default 1).
 
 A company registers on first launch of the main PC and gets INVOICE_POS
-switched on automatically (`AUTO_ENABLE_MODULES` in
+and ACCOUNTING switched on automatically (`AUTO_ENABLE_MODULES` in
 `backend/src/auth/auth.service.ts`). In the app, the frontend hides
 everything else (`frontend/lib/desktop.ts`).
 

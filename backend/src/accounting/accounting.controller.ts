@@ -25,6 +25,7 @@ import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { AccountingReportsService, AgingBucket } from './accounting-reports.service';
 import { CashFlowService } from './cash-flow.service';
 import { CashStatementService } from './cash-statement.service';
+import { OpeningBalanceService } from './opening-balance.service';
 import { endOfBusinessDay, parseDateOnly, resolveTimezone, todayBusinessDate } from './business-date';
 import { CreateAccountDto, CreateManualJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -69,7 +70,7 @@ function parseEntryDate(value: string): Date {
 }
 
 @UseGuards(JwtAuthGuard, OrgGuard, ModuleGuard)
-@RequireModule(ModuleKey.INVOICE_POS)
+@RequireModule(ModuleKey.ACCOUNTING)
 // The books cover every branch, so they're MASTER-only. Exceptions: the
 // P&L, which a branch ADMIN gets for their own branch, and listPeriods.
 @Roles('MASTER')
@@ -83,6 +84,7 @@ export class AccountingController {
     private reports: AccountingReportsService,
     private cashFlow: CashFlowService,
     private cashStatement: CashStatementService,
+    private openingBalances: OpeningBalanceService,
   ) {}
 
   // Writes that change the books' structure or history are admin-only.
@@ -172,6 +174,14 @@ export class AccountingController {
   @Get('journal/:id')
   getEntry(@CurrentOrg() organizationId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.journal.getEntry(organizationId, id); // 404s if missing
+  }
+
+  // Recomputes the opening AR/AP for documents that never posted (the
+  // Accurate import does this itself; this is for data imported before
+  // it did, or after fixing documents). MASTER, like the rest of the books.
+  @Post('opening-balances/sync')
+  syncOpeningBalances(@CurrentOrg() organizationId: string, @Req() req) {
+    return this.openingBalances.sync(organizationId, req.user?.sub);
   }
 
   @Post('journal/manual')
@@ -360,7 +370,10 @@ export class AccountingController {
 
   // Open to staff: the invoice detail page reads period status to know
   // whether an issued invoice can still be edited. Only open/closed months.
+  // Closed periods lock invoices even without ACCOUNTING, so it only needs
+  // INVOICE_POS.
   @Roles('ADMIN', 'USER')
+  @RequireModule(ModuleKey.INVOICE_POS)
   @Get('fiscal-periods')
   listPeriods(@CurrentOrg() organizationId: string) {
     return this.prisma.fiscalPeriod.findMany({

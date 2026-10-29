@@ -30,7 +30,7 @@ const AGING_COLORS = ['#86b6ef', '#5598e7', '#2a78d6', '#1c5cab', '#d03b3b'];
 // value is a complete, literal Tailwind class (never interpolated) so
 // the JIT compiler can find it by scanning this file's source text.
 const ACCENTS: Record<string, { iconBg: string; iconBorder: string; iconText: string; hex: string }> = {
-  '/accounting/sales-insights': { iconBg: 'bg-blue-50', iconBorder: 'border-blue-200', iconText: 'text-blue-700', hex: '#2a78d6' },
+  '/reports/sales?tab=rankings': { iconBg: 'bg-blue-50', iconBorder: 'border-blue-200', iconText: 'text-blue-700', hex: '#2a78d6' },
   '/accounting/profit-loss': { iconBg: 'bg-emerald-50', iconBorder: 'border-emerald-200', iconText: 'text-emerald-700', hex: '#0ca30c' },
   '/accounting/cash-flow': { iconBg: 'bg-sky-50', iconBorder: 'border-sky-200', iconText: 'text-sky-700', hex: '#0ea5e9' },
   '/accounting/balance-sheet': { iconBg: 'bg-indigo-50', iconBorder: 'border-indigo-200', iconText: 'text-indigo-700', hex: '#4a3aa7' },
@@ -214,10 +214,10 @@ export default function AccountingHome() {
   const PRIMARY_ITEMS = usePrimaryItems(t);
   const SETUP_ITEMS = useSetupItems(t);
 
-  // Current-month data for the Sales Insights card's inline charts — not a
-  // filterable view of its own; the full page (date range + vehicle
-  // filter) lives at /accounting/sales-insights behind this card's "View
-  // all" button.
+  // Current-month data for the Sales Reports card's inline charts — not a
+  // filterable view of its own; the full rankings (date range + vehicle
+  // filter) are Sales Reports' Rankings tab, behind this card's "View all"
+  // button.
   const [preview, setPreview] = useState<TopReport | null>(null);
   useEffect(() => {
     const monthStart = new Date();
@@ -323,9 +323,9 @@ export default function AccountingHome() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Hero — full width, the one card built entirely around live graphics */}
           <ReportCard
-            title={t('nav.items.salesInsights')}
+            title={t('nav.items.salesReports')}
             description={t('accounting.overview.salesInsightsDescription')}
-            href="/accounting/sales-insights"
+            href="/reports/sales?tab=rankings"
             icon={BarChart3}
             span="full"
             viewAllLabel={viewAllLabel}

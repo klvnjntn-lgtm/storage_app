@@ -37,14 +37,12 @@ export type SalesOrderPrintView = {
   createdAt: string;
   invoiceNumber: string | null; // NEW — populated when this DO came from a direct Invoice instead
 
-  taxes: { name: string; percentage: number; amount: number }[];
   items: {
     id: string;
     productName: string;
     sku: string | null;
     quantity: number;
     unit: string | null;
-    itemTaxAmount: number;   
     itemDiscount: number;
     itemTotal: number;
     unitPrice: number;
@@ -75,7 +73,6 @@ export function toSalesOrderView(order: SalesOrderPrintView): SalesOrderView {
       sku: item.sku,
       quantity: item.quantity,
       unit: item.unit,
-        itemTaxAmount: Number(item.itemTaxAmount ?? 0),   // NEW
 
       unitPrice: Number(item.unitPrice),
       itemDiscount: Number(item.itemDiscount ?? 0),
@@ -85,11 +82,6 @@ export function toSalesOrderView(order: SalesOrderPrintView): SalesOrderView {
     subtotal: Number(order.subtotal),
     discount: Number(order.discount ?? 0),
     taxAmount: Number(order.taxAmount ?? 0),
-    taxes: (order.taxes ?? []).map((t) => ({
-      name: t.name,
-      percentage: Number(t.percentage),
-      amount: Number(t.amount),
-    })),
     total: Number(order.total),
 
     businessName: order.businessLegalName ?? order.businessName,

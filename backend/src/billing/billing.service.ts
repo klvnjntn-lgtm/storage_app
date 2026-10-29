@@ -40,6 +40,7 @@ const MODULE_NAMES: Record<ModuleKey, string> = {
   WAREHOUSE_OPS: 'Inventory',
   WORKSHOP_RMS: 'Workshop',
   DELIVERY_DMS: 'Delivery',
+  ACCOUNTING: 'Accounting',
 };
 
 // Applies a paid BillingPayment's effect inside the caller's transaction.

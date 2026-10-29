@@ -110,11 +110,13 @@ export class VehiclesService {
             issuedAt: true,
             createdAt: true,
             odometer: true, // per-visit snapshot for the history view
+            dueDate: true, // for the overdue flag
             items: {
               select: {
                 id: true,
                 quantity: true,
                 description: true,
+                netAmount: true, // line amount after discount, before tax — the printed "Total" column
                 product: { select: { name: true } },
               },
             },

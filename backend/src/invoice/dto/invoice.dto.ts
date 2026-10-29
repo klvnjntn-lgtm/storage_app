@@ -350,6 +350,11 @@ export class ListInvoicesQueryDto {
   @IsOptional()
   @IsString()
   employeeId?: string;
+
+  // Workshops: the mechanic (Employee) who did the work.
+  @IsOptional()
+  @IsString()
+  mechanicId?: string;
     @IsOptional()
   @Type(() => Number)
   @IsInt()

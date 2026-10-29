@@ -1,5 +1,7 @@
 'use client';
 
+import { DocumentLayoutToggle } from '@/app/components/shared/DocumentLayoutToggle';
+import { documentGridClass, documentOrder, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -71,7 +73,6 @@ type IssuedItemRow = {
   unit?: string | null;
   unitPrice: number | string;
   itemDiscount?: number | string | null;
-  itemTaxAmount?: number | string | null;
   itemTotal?: number | string | null;
   lineTotal: number | string;
   locationName?: string | null;
@@ -91,6 +92,8 @@ function NewInvoicePage() {
   const urlDraftId = searchParams.get('draftId');
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const { t } = useLanguage();
+  // Office (document wide, search aside) or Cashier (search wide, cart aside); see useDocumentLayout.
+  const { layout, setLayout } = useDocumentLayout();
 
   const initialCustomerId = searchParams.get('customerId');
   const initialVehicleId = searchParams.get('vehicleId');
@@ -139,10 +142,7 @@ function NewInvoicePage() {
   // OrganizationBankAccount id.
   const [bankAccountId, setBankAccountId] = useState<string>('');
 
-  // Employee (sales/cashier) picker. '' means unset — omitted from the
-  // payload, so the invoice carries no employee.
-  const [employeeId, setEmployeeId] = useState<string>('');
-  // Workshops: who did the work (separate from the salesperson).
+  // Workshops: who did the work.
   const [mechanicId, setMechanicId] = useState<string>('');
   // A draft made from a work order says so (and links back to it).
   const [sourceWorkOrder, setSourceWorkOrder] = useState<{ id: string; number: string } | null>(null);
@@ -168,7 +168,7 @@ function NewInvoicePage() {
 
   const loadedDraftIdRef = useRef<string | null | undefined>(undefined);
 
-  const { locations, taxRates, bankAccounts, employees } = useInvoiceReferenceData();
+  const { locations, bankAccounts, employees } = useInvoiceReferenceData();
   const warehouseOps = useWarehouseOps();
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
@@ -209,7 +209,7 @@ function NewInvoicePage() {
     formatRef.current = format;
     printDataRef.current = printData;
     servicesRef.current = services;
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, employeeId, activeBranchId, mechanicId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, bankAccountId, activeBranchId, mechanicId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -313,7 +313,6 @@ function NewInvoicePage() {
     setResults([]);
     draftIdRef.current = null;
     setBankAccountId('');
-    setEmployeeId('');
   }
 
   async function loadDraftById(id: string) {
@@ -334,7 +333,6 @@ function NewInvoicePage() {
     // (createDraft always resolves at create time) — so this is either a
     // real account id or NO_BANK_ACCOUNT, never the '' "untouched" state.
     setBankAccountId(draft.bankAccountId ?? NO_BANK_ACCOUNT);
-    setEmployeeId(draft.employeeId ?? '');
     setMechanicId(draft.mechanicId ?? '');
     setSourceWorkOrder(draft.workOrder ?? null);
     if (draft.branchId) setBranchIdState(draft.branchId);
@@ -364,9 +362,6 @@ function NewInvoicePage() {
         unit: item.unit ?? item.product?.unit ?? null,
         locationId,
         locationName,
-        taxRateIds: (item.taxes ?? [])
-          .map((t: { taxRateId: string | null }) => t.taxRateId)
-          .filter((id: string | null): id is string => !!id),
         discountType: item.discountType ?? null,
         discountValue: item.discountValue != null ? Number(item.discountValue) : null,
         ...restoredLevelFields(item.priceLevelId),
@@ -428,7 +423,6 @@ function NewInvoicePage() {
       quantity: number;
       unitPrice: number;
       unit: string | null;
-      taxRateIds: string[];
       discountType: DiscountType | null;
       discountValue: number | null;
     },
@@ -459,7 +453,6 @@ function NewInvoicePage() {
         unit: details.unit,
         locationId: resolvedTarget.locationId,
         locationName: resolvedTarget.locationName,
-        taxRateIds: details.taxRateIds,
         discountType: details.discountType,
         discountValue: details.discountValue,
         // A re-add keeps the line's level; a new line starts at the
@@ -481,16 +474,10 @@ function NewInvoicePage() {
   const removeFromCart = (key: string) => setCart((prev) => cartOps.removeLine(prev, key));
   // The line whose serial numbers are being picked (SerialPicker).
   const [serialKey, setSerialKey] = useState<string | null>(null);
-  const toggleLineTaxRate = (key: string, taxRateId: string) => setCart((prev) => cartOps.toggleLineTax(prev, key, taxRateId));
   const changeLineDiscount = (key: string, type: DiscountType | null, raw?: string) =>
     setCart((prev) => cartOps.setLineDiscount(prev, key, type, raw));
   const changeServiceDiscount = (key: string, type: DiscountType | null, raw?: string) =>
     setServices((prev) => cartOps.setServiceDiscount(prev, key, type, raw));
-
-  function applyTaxToAllLines(taxRateId: string, checked: boolean) {
-    setCart((prev) => cartOps.applyTaxToAllLines(prev, taxRateId, checked));
-    setServices((prev) => cartOps.applyTaxToAllServices(prev, taxRateId, checked));
-  }
 
   function applyDiscountToAllLines(discountType: DiscountType | null, value: number) {
     setCart((prev) => cartOps.applyDiscountToAllLines(prev, discountType, value));
@@ -500,7 +487,7 @@ function NewInvoicePage() {
   function addService() {
     serviceCounterRef.current += 1;
     const key = `svc_${serviceCounterRef.current}_${Date.now()}`;
-    setServices((prev) => [...prev, cartOps.newServiceLine(key, taxRates.find((r) => r.isDefault)?.id)]);
+    setServices((prev) => [...prev, cartOps.newServiceLine(key)]);
   }
 
   const changeServiceUnit = (key: string, value: string) => setServices((prev) => cartOps.setServiceUnit(prev, key, value));
@@ -508,8 +495,6 @@ function NewInvoicePage() {
     setServices((prev) => cartOps.setServiceDescription(prev, key, value));
   const changeServicePrice = (key: string, raw: string) => setServices((prev) => cartOps.setServicePrice(prev, key, raw));
   const removeService = (key: string) => setServices((prev) => prev.filter((s) => s.key !== key));
-  const toggleServiceTaxRate = (key: string, taxRateId: string) =>
-    setServices((prev) => cartOps.toggleServiceTax(prev, key, taxRateId));
 
   // FIX — was d.toISOString().slice(0, 10), which converts to UTC first
   // and rolls the date back one day in a timezone ahead of UTC.
@@ -518,12 +503,10 @@ function NewInvoicePage() {
     serviceLines: serviceLinesWithTotals,
     subtotal,
     discount,
-    taxAmount,
     total,
   } = cartOps.computeTotals(
     Object.entries(cart).map(([key, line]) => ({ key, ...applyPriceLevel(line, basePriceLevelId, defaultLevelId, activeLevelIds) })),
     services,
-    taxRates,
   );
   const distinctLocationNames = Array.from(new Set(cartLines.map((l) => l.locationName)));
   const totalLineCount = cartLines.length + serviceLinesWithTotals.length;
@@ -541,7 +524,6 @@ function NewInvoicePage() {
       odometer,
       hasWorkshopRms,
       bankAccountId,
-      employeeId,
       branchId: activeBranchId,
       ...(hasWorkshopRms && { mechanicId }),
     });
@@ -630,7 +612,7 @@ function NewInvoicePage() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, employeeId, activeBranchId, mechanicId]);
+  }, [cart, customerName, customer, format, services, dueDate, invoiceDate, odometer, customerPoNumber, paymentTerms, notes, hasWorkshopRms, bankAccountId, activeBranchId, mechanicId]);
 
   useEffect(() => {
     return () => {
@@ -774,9 +756,6 @@ function NewInvoicePage() {
         vehicleVin: issued.vehicleVin ?? null,
         vehicleOdometer: issued.vehicleOdometer ?? null,
 
-        employeeId: issued.employeeId ?? null,
-        employeeName: issued.employeeName ?? null,
-
         items: issued.items.map((item: IssuedItemRow) => ({
           id: item.id,
           productName: item.productName ?? '',
@@ -784,7 +763,6 @@ function NewInvoicePage() {
           unit: item.unit ?? null,
           unitPrice: Number(item.unitPrice),
           itemDiscount: Number(item.itemDiscount ?? 0),
-          itemTaxAmount: Number(item.itemTaxAmount ?? 0),
           itemTotal: Number(item.itemTotal ?? item.lineTotal),
           lineTotal: Number(item.lineTotal),
           locationName: item.locationName ?? '',
@@ -792,11 +770,6 @@ function NewInvoicePage() {
         subtotal: Number(issued.subtotal),
         discount: Number(issued.discount),
         taxAmount: Number(issued.taxAmount ?? 0),
-        taxes: (issued.taxes ?? []).map((t: { name: string; percentage: number | string; amount: number | string }) => ({
-          name: t.name,
-          percentage: Number(t.percentage),
-          amount: Number(t.amount),
-        })),
         total: Number(issued.total),
 
         businessName: issued.businessLegalName ?? issued.businessName,
@@ -844,7 +817,6 @@ function NewInvoicePage() {
       setOdometer('');
       setServices([]);
       setBankAccountId('');
-      setEmployeeId('');
       reminder.reset();
       draftIdRef.current = null;
       loadedDraftIdRef.current = null;
@@ -894,6 +866,8 @@ function NewInvoicePage() {
               >
                 {t('sales.invoicesNew.history')}
               </button>
+
+              <DocumentLayoutToggle layout={layout} onChange={setLayout} />
 
               <div data-tour="inv-format" className="flex items-center bg-blue-600/5 border border-blue-500/15 rounded-lg p-1 text-sm font-medium overflow-x-auto">
                 {(
@@ -955,7 +929,7 @@ function NewInvoicePage() {
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
+      <div className={`max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 ${documentGridClass(layout)}`}>
         <ProductSearch
           query={query}
           setQuery={setQuery}
@@ -967,11 +941,10 @@ function NewInvoicePage() {
           onAddToCart={addToCart}
           posModeEnabled={posModeEnabled}
           allowOversell={allowOversell}
-          taxRates={taxRates}
           basePriceLevelId={basePriceLevelId}
         />
 
-        <div ref={cartPanelRef} className="scroll-mt-24">
+        <div ref={cartPanelRef} className={`scroll-mt-24 ${layout === 'office' ? documentOrder : ''}`}>
           <CartPanel
             format={format}
             cartLines={cartLines}
@@ -1006,13 +979,9 @@ function NewInvoicePage() {
             onSubmit={handleCreateAndPrint}
             printing={printing}
             error={error}
-            taxRates={taxRates}
-            onToggleLineTaxRate={toggleLineTaxRate}
-            onApplyTaxToAll={applyTaxToAllLines}
             onChangeLineDiscount={changeLineDiscount}
             onChangeServiceDiscount={changeServiceDiscount}
             onApplyDiscountToAll={applyDiscountToAllLines}
-            taxAmount={taxAmount}
             total={total}
             hasWorkshopRms={hasWorkshopRms}
             vehicleId={vehicleId}
@@ -1040,7 +1009,6 @@ function NewInvoicePage() {
             onAddService={addService}
             onChangeServiceDescription={changeServiceDescription}
             onChangeServicePrice={changeServicePrice}
-            onToggleServiceTaxRate={toggleServiceTaxRate}
             // Bank-account picker. CartPanel needs to render a <select>
             // using these and call onChangeBankAccountId with '',
             // NO_BANK_ACCOUNT-equivalent, or a chosen id.
@@ -1049,8 +1017,6 @@ function NewInvoicePage() {
             onChangeBankAccountId={setBankAccountId}
             noBankAccountValue={NO_BANK_ACCOUNT}
             employees={employees}
-            employeeId={employeeId}
-            onChangeEmployeeId={setEmployeeId}
             branchId={branchId}
             onChangeBranchId={setBranchId}
             mechanicId={mechanicId}

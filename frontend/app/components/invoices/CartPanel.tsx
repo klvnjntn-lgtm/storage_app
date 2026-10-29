@@ -1,9 +1,9 @@
 'use client';
 
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Percent, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, UserRound, Store } from 'lucide-react';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, Store, User } from 'lucide-react';
 import { SerialButton } from '@/app/components/shared/SerialPicker';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
-import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine, TaxRate } from './types';
+import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
 import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
@@ -13,13 +13,13 @@ import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
+import { isOdometerBelowLast } from '@/lib/odometer';
 
 type CartLineWithTotals = CartLine & {
   key: string;
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -27,7 +27,6 @@ type ServiceLineWithTotals = ServiceLine & {
   lineSubtotal: number;
   lineDiscountAmount: number;
   netAmount: number;
-  lineTaxAmount: number;
   lineTotal: number;
 };
 
@@ -69,13 +68,9 @@ export function CartPanel({
   notes,
   onChangeNotes,
   error,
-  taxRates,
-  onToggleLineTaxRate,
-  onApplyTaxToAll,
   onChangeLineDiscount,
   onChangeServiceDiscount,
   onApplyDiscountToAll,
-  taxAmount,
   total,
   hasWorkshopRms,
   vehicleId,
@@ -106,14 +101,11 @@ export function CartPanel({
   onChangeServiceDescription,
   onChangeServicePrice,
   onRemoveService,
-  onToggleServiceTaxRate,
   bankAccounts,
   bankAccountId,
   onChangeBankAccountId,
   noBankAccountValue,
   employees,
-  employeeId,
-  onChangeEmployeeId,
   branchId,
   onChangeBranchId,
   mechanicId,
@@ -146,13 +138,9 @@ export function CartPanel({
   onSubmit: () => void;
   printing: boolean;
   error: string;
-  taxRates: TaxRate[];
-  onToggleLineTaxRate: (key: string, taxRateId: string) => void;
-  onApplyTaxToAll: (taxRateId: string, checked: boolean) => void;
   onChangeLineDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onChangeServiceDiscount: (key: string, discountType: DiscountType | null, rawValue?: string) => void;
   onApplyDiscountToAll: (discountType: DiscountType | null, value: number) => void;
-  taxAmount: number;
   total: number;
   hasWorkshopRms?: boolean;
   vehicleId?: string | null;
@@ -190,7 +178,6 @@ export function CartPanel({
   onChangeServiceDescription?: (key: string, value: string) => void;
   onChangeServicePrice?: (key: string, raw: string) => void;
   onRemoveService?: (key: string) => void;
-  onToggleServiceTaxRate?: (key: string, taxRateId: string) => void;
   // Bank-account picker. bankAccountId is '' (untouched -> backend uses
   // the org's current default), noBankAccountValue (explicit "no bank
   // details" -> sent as bankAccountId: null), or a real account id.
@@ -198,11 +185,8 @@ export function CartPanel({
   bankAccountId: string;
   onChangeBankAccountId: (id: string) => void;
   noBankAccountValue: string;
-  // Employee (sales/cashier) picker. '' means unset — the field is
-  // omitted from the payload and the invoice carries no employee.
+  // Payroll employees — the mechanic picker's list.
   employees: Employee[];
-  employeeId: string;
-  onChangeEmployeeId: (id: string) => void;
   // The selling branch — only asked of multi-branch businesses.
   branchId?: string;
   onChangeBranchId?: (id: string) => void;
@@ -220,6 +204,8 @@ export function CartPanel({
     ? bankAccounts.filter((a) => !a.branchId || a.branchId === branchId)
     : bankAccounts;
   const hasEmptyServicePrice = svc.some((s) => s.unitPrice === null);
+  const lastOdometer = vehicleId ? (customerVehicles?.find((v) => v.id === vehicleId)?.odometer ?? null) : null;
+  const odometerTooLow = isOdometerBelowLast(odometer, lastOdometer);
   const hasEmptyServiceDescription = svc.some((s) => !s.description.trim());
   const nothingToInvoice = cartLines.length === 0 && svc.length === 0;
   const showInvoiceInfoFields = format === 'A5' || format === 'A4';
@@ -229,7 +215,7 @@ export function CartPanel({
     customerNameRequired && (usesStructuredCustomer ? !customer : !customerName.trim());
 
   return (
-    <div className="border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
+    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
       {cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
@@ -256,304 +242,299 @@ export function CartPanel({
         </p>
       )}
 
-      <div className="mb-3">
-        <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-          <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
-          {t('sales.invoiceCart.invoiceDateLabel')}
-        </label>
-        <DatePicker
-          clearable
-          value={invoiceDate ?? ''}
-          onChange={(v) => onChangeInvoiceDate?.(v)}
-          placeholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
-          className="w-full"
-        />
-      </div>
-
-      {multiBranch && onChangeBranchId && (
+      {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
+      <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <Store size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.branchLabel')}
-          </label>
-          <select
-            value={branches.some((b) => b.id === branchId) ? branchId : ''}
-            onChange={(e) => onChangeBranchId(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">{t('sales.invoiceCart.branchDefault')}</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {employees.length > 0 && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <UserRound size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.employeeLabel')}
-          </label>
-          <select
-            value={employeeId}
-            onChange={(e) => onChangeEmployeeId(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">{t('sales.invoiceCart.noEmployee')}</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-                {e.position ? ` — ${e.position}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {employees.length > 0 && onChangeMechanicId && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.mechanicLabel')}
-          </label>
-          <select
-            value={mechanicId ?? ''}
-            onChange={(e) => onChangeMechanicId(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">{t('sales.invoiceCart.noMechanic')}</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-                {e.position ? ` — ${e.position}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {usesStructuredCustomer ? (
-        <CustomerPicker
-          value={customer}
-          onChange={setCustomer}
-          hasError={customerNameRequired && !customer}
-        />
-      ) : (
-        <div className="mb-3">
-          <input
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            placeholder={customerNameRequired ? t('sales.invoiceCart.customerNamePlaceholder') : t('sales.invoiceCart.customerNamePlaceholderOptional')}
-            className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
-              customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
-            }`}
-          />
-          {customerNameRequired && !customerName.trim() && (
-            <p className="flex items-start gap-1.5 text-xs text-red-600 mt-1.5">
-              <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-              {t('sales.invoiceCart.customerNameRequired')}
-            </p>
-          )}
-        </div>
-      )}
-
-      {showInvoiceInfoFields && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.dueDateLabel')}
+            <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.invoiceCart.invoiceDateLabel')}
           </label>
           <DatePicker
             clearable
-            value={dueDate ?? ''}
-            onChange={(v) => onChangeDueDate?.(v)}
+            value={invoiceDate ?? ''}
+            onChange={(v) => onChangeInvoiceDate?.(v)}
+            placeholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
             className="w-full"
           />
-          {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
-              <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-              {t('sales.invoiceCart.dueDateWarning')}
-            </p>
-          )}
         </div>
-      )}
 
-      {showInvoiceInfoFields && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.poNumberLabel')}</label>
-          <input
-            value={customerPoNumber ?? ''}
-            onChange={(e) => onChangeCustomerPoNumber?.(e.target.value)}
-            placeholder={t('sales.invoiceCart.poNumberPlaceholder')}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+        {multiBranch && onChangeBranchId && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <Store size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.invoiceCart.branchLabel')}
+            </label>
+            <select
+              value={branches.some((b) => b.id === branchId) ? branchId : ''}
+              onChange={(e) => onChangeBranchId(e.target.value)}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            >
+              <option value="">{t('sales.invoiceCart.branchDefault')}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {employees.length > 0 && onChangeMechanicId && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.invoiceCart.mechanicLabel')}
+            </label>
+            <select
+              value={mechanicId ?? ''}
+              onChange={(e) => onChangeMechanicId(e.target.value)}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            >
+              <option value="">{t('sales.invoiceCart.noMechanic')}</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                  {e.position ? ` — ${e.position}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {usesStructuredCustomer ? (
+          <CustomerPicker
+            value={customer}
+            onChange={setCustomer}
+            hasError={customerNameRequired && !customer}
           />
-        </div>
-      )}
+        ) : (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <User size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.customerPicker.label')}
+            </label>
+            <input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder={customerNameRequired ? t('sales.invoiceCart.customerNamePlaceholder') : t('sales.invoiceCart.customerNamePlaceholderOptional')}
+              className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
+                customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
+              }`}
+            />
+            {customerNameRequired && !customerName.trim() && (
+              <p className="flex items-start gap-1.5 text-xs text-red-600 mt-1.5">
+                <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
+                {t('sales.invoiceCart.customerNameRequired')}
+              </p>
+            )}
+          </div>
+        )}
 
-      {showInvoiceInfoFields && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.paymentTermsLabel')}</label>
-          <input
-            value={paymentTerms ?? ''}
-            onChange={(e) => onChangePaymentTerms?.(e.target.value)}
-            placeholder={t('sales.invoiceCart.paymentTermsPlaceholder')}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          />
-        </div>
-      )}
+        {showInvoiceInfoFields && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.invoiceCart.dueDateLabel')}
+            </label>
+            <DatePicker
+              clearable
+              value={dueDate ?? ''}
+              onChange={(v) => onChangeDueDate?.(v)}
+              className="w-full"
+            />
+            {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
+              <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
+                <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
+                {t('sales.invoiceCart.dueDateWarning')}
+              </p>
+            )}
+          </div>
+        )}
 
-      {/* Bank account picker. Only shown on A5/A4, matching the formats
-          whose print templates actually render a "Payment to" bank block
-          (see hasBankDetails in A4Template/A5Template). */}
-      {showInvoiceInfoFields && usableBankAccounts.length > 0 && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.bankAccountLabel')}
-          </label>
-          <select
-            value={bankAccountId}
-            onChange={(e) => onChangeBankAccountId(e.target.value)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">{t('sales.invoiceCart.defaultBankAccount')}</option>
-            <option value={noBankAccountValue}>{t('sales.invoiceCart.noBankDetails')}</option>
-            {usableBankAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.bankName} — {a.accountNumber}
-                {a.isDefault ? ` ${t('sales.invoiceCart.defaultSuffix')}` : ''}
+        {showInvoiceInfoFields && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.poNumberLabel')}</label>
+            <input
+              value={customerPoNumber ?? ''}
+              onChange={(e) => onChangeCustomerPoNumber?.(e.target.value)}
+              placeholder={t('sales.invoiceCart.poNumberPlaceholder')}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            />
+          </div>
+        )}
+
+        {showInvoiceInfoFields && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.paymentTermsLabel')}</label>
+            <input
+              value={paymentTerms ?? ''}
+              onChange={(e) => onChangePaymentTerms?.(e.target.value)}
+              placeholder={t('sales.invoiceCart.paymentTermsPlaceholder')}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            />
+          </div>
+        )}
+
+        {/* Bank account picker. Only shown on A5/A4, matching the formats
+            whose print templates actually render a "Payment to" bank block
+            (see hasBankDetails in A4Template/A5Template). */}
+        {showInvoiceInfoFields && usableBankAccounts.length > 0 && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <Landmark size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.invoiceCart.bankAccountLabel')}
+            </label>
+            <select
+              value={bankAccountId}
+              onChange={(e) => onChangeBankAccountId(e.target.value)}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            >
+              <option value="">{t('sales.invoiceCart.defaultBankAccount')}</option>
+              <option value={noBankAccountValue}>{t('sales.invoiceCart.noBankDetails')}</option>
+              {usableBankAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.bankName} — {a.accountNumber}
+                  {a.isDefault ? ` ${t('sales.invoiceCart.defaultSuffix')}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {showInvoiceInfoFields && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.notesLabel')}</label>
+            <textarea
+              value={notes ?? ''}
+              onChange={(e) => onChangeNotes?.(e.target.value)}
+              rows={2}
+              placeholder={t('sales.invoiceCart.notesPlaceholder')}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
+            />
+          </div>
+        )}
+
+        {usesStructuredCustomer && hasWorkshopRms && customer && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.vehicleLabel')}</label>
+            <select
+              value={vehicleId ?? ''}
+              onChange={(e) => onSelectVehicle?.(e.target.value || null)}
+              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+            >
+              <option value="">
+                {vehiclesLoading ? t('sales.invoiceCart.loadingVehicles') : t('sales.invoiceCart.noVehicleOption')}
               </option>
-            ))}
-          </select>
-        </div>
-      )}
+              {(customerVehicles ?? []).map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.plateNumber} · {v.vehicleModel}
+                </option>
+              ))}
+            </select>
+            {!vehiclesLoading && (customerVehicles ?? []).length === 0 && (
+              <p className="text-xs text-gray-400 mt-1">
+                {t('sales.invoiceCart.noVehiclesYet')}
+              </p>
+            )}
 
-      {showInvoiceInfoFields && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.notesLabel')}</label>
-          <textarea
-            value={notes ?? ''}
-            onChange={(e) => onChangeNotes?.(e.target.value)}
-            rows={2}
-            placeholder={t('sales.invoiceCart.notesPlaceholder')}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] resize-none"
-          />
-        </div>
-      )}
+            {vehicleId && (
+              <div className="mt-2">
+                <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.odometerLabel')}</label>
+                <input
+                  type="number"
+                  min={lastOdometer ?? 0}
+                  aria-invalid={odometerTooLow}
+                  value={odometer ?? ''}
+                  onChange={(e) => onChangeOdometer?.(e.target.value)}
+                  placeholder={
+                    lastOdometer != null
+                      ? t('workshop.workOrders.lastOdometer', { km: lastOdometer })
+                      : t('sales.invoiceCart.odometerPlaceholder')
+                  }
+                  className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
+                    odometerTooLow ? 'border-red-300' : 'border-blue-500/20'
+                  }`}
+                />
+                {odometerTooLow && (
+                  <p className="text-xs text-red-600 mt-1">{t('common.odometerTooLow', { km: lastOdometer ?? 0 })}</p>
+                )}
+              </div>
+            )}
 
-      {usesStructuredCustomer && hasWorkshopRms && customer && (
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.vehicleLabel')}</label>
-          <select
-            value={vehicleId ?? ''}
-            onChange={(e) => onSelectVehicle?.(e.target.value || null)}
-            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-          >
-            <option value="">
-              {vehiclesLoading ? t('sales.invoiceCart.loadingVehicles') : t('sales.invoiceCart.noVehicleOption')}
-            </option>
-            {(customerVehicles ?? []).map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.plateNumber} · {v.vehicleModel}
-              </option>
-            ))}
-          </select>
-          {!vehiclesLoading && (customerVehicles ?? []).length === 0 && (
-            <p className="text-xs text-gray-400 mt-1">
-              {t('sales.invoiceCart.noVehiclesYet')}
-            </p>
-          )}
+            {vehicleId && (
+              <div className="mt-2">
+                {!reminderOpen ? (
+                  <button
+                    onClick={onToggleReminderOpen}
+                    className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-800 underline"
+                  >
+                    <Bell size={12} strokeWidth={2} />
+                    {t('sales.invoiceCart.setReminderLink')}
+                  </button>
+                ) : (
+                  <div className="border border-blue-500/20 rounded-xl p-3 mt-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                        <Bell size={12} strokeWidth={2} className="text-blue-600/70" />
+                        {t('sales.invoiceCart.reminderHeading')}
+                      </span>
+                      <button aria-label={t('common.close')} onClick={onToggleReminderOpen} className="text-gray-400 hover:text-blue-700">
+                        <X size={14} strokeWidth={2} />
+                      </button>
+                    </div>
 
-          {vehicleId && (
-            <div className="mt-2">
-              <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.odometerLabel')}</label>
-              <input
-                type="number"
-                min={0}
-                value={odometer ?? ''}
-                onChange={(e) => onChangeOdometer?.(e.target.value)}
-                placeholder={t('sales.invoiceCart.odometerPlaceholder')}
-                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-              />
-            </div>
-          )}
+                    <textarea
+                      value={reminderNote ?? ''}
+                      onChange={(e) => onChangeReminderNote?.(e.target.value)}
+                      placeholder={t('sales.invoiceCart.reminderPlaceholder')}
+                      rows={2}
+                      className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 resize-none mb-2"
+                    />
 
-          {vehicleId && (
-            <div className="mt-2">
-              {!reminderOpen ? (
-                <button
-                  onClick={onToggleReminderOpen}
-                  className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-800 underline"
-                >
-                  <Bell size={12} strokeWidth={2} />
-                  {t('sales.invoiceCart.setReminderLink')}
-                </button>
-              ) : (
-                <div className="border border-blue-500/20 rounded-xl p-3 mt-1">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                      <Bell size={12} strokeWidth={2} className="text-blue-600/70" />
-                      {t('sales.invoiceCart.reminderHeading')}
-                    </span>
-                    <button aria-label={t('common.close')} onClick={onToggleReminderOpen} className="text-gray-400 hover:text-blue-700">
-                      <X size={14} strokeWidth={2} />
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {[
+                        { label: t('sales.invoiceCart.preset1Month'), months: 1 },
+                        { label: t('sales.invoiceCart.preset2Months'), months: 2 },
+                        { label: t('sales.invoiceCart.preset3Months'), months: 3 },
+                        { label: t('sales.invoiceCart.preset6Months'), months: 6 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.months}
+                          onClick={() => onPickReminderPreset?.(preset.months)}
+                          className="text-xs px-2.5 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <DatePicker
+                      clearable
+                      value={reminderDueDate ?? ''}
+                      onChange={(v) => onChangeReminderDueDate?.(v)}
+                      className="w-full mb-2"
+                    />
+
+                    {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
+                    {reminderSaved && <p className="text-xs text-green-700 mb-2">{t('sales.invoiceCart.reminderSaved')}</p>}
+                    {!reminderSaved && reminderStaged && (
+                      <p className="text-xs text-gray-500 mb-2">{t('sales.invoiceCart.reminderWillBeAdded')}</p>
+                    )}
+
+                    <button
+                      onClick={onSaveReminder}
+                      disabled={reminderSaving || reminderSaved || !reminderNote?.trim() || !reminderDueDate}
+                      className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-xs font-semibold disabled:bg-gray-300 transition-colors"
+                    >
+                      {reminderSaving ? t('common.saving') : reminderStaged ? t('sales.invoiceCart.updateReminder') : t('sales.invoiceCart.setReminder')}
                     </button>
                   </div>
-
-                  <textarea
-                    value={reminderNote ?? ''}
-                    onChange={(e) => onChangeReminderNote?.(e.target.value)}
-                    placeholder={t('sales.invoiceCart.reminderPlaceholder')}
-                    rows={2}
-                    className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 resize-none mb-2"
-                  />
-
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {[
-                      { label: t('sales.invoiceCart.preset1Month'), months: 1 },
-                      { label: t('sales.invoiceCart.preset2Months'), months: 2 },
-                      { label: t('sales.invoiceCart.preset3Months'), months: 3 },
-                      { label: t('sales.invoiceCart.preset6Months'), months: 6 },
-                    ].map((preset) => (
-                      <button
-                        key={preset.months}
-                        onClick={() => onPickReminderPreset?.(preset.months)}
-                        className="text-xs px-2.5 py-1 rounded-md border border-blue-500/20 text-gray-700 hover:border-blue-500/50 hover:bg-blue-50/50"
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <DatePicker
-                    clearable
-                    value={reminderDueDate ?? ''}
-                    onChange={(v) => onChangeReminderDueDate?.(v)}
-                    className="w-full mb-2"
-                  />
-
-                  {reminderError && <p className="text-xs text-red-600 mb-2">{reminderError}</p>}
-                  {reminderSaved && <p className="text-xs text-green-700 mb-2">{t('sales.invoiceCart.reminderSaved')}</p>}
-                  {!reminderSaved && reminderStaged && (
-                    <p className="text-xs text-gray-500 mb-2">{t('sales.invoiceCart.reminderWillBeAdded')}</p>
-                  )}
-
-                  <button
-                    onClick={onSaveReminder}
-                    disabled={reminderSaving || reminderSaved || !reminderNote?.trim() || !reminderDueDate}
-                    className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-xs font-semibold disabled:bg-gray-300 transition-colors"
-                  >
-                    {reminderSaving ? t('common.saving') : reminderStaged ? t('sales.invoiceCart.updateReminder') : t('sales.invoiceCart.setReminder')}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {cartLines.length === 0 && svc.length === 0 && (
         <p className="text-sm text-gray-400">{t('sales.invoiceCart.noItemsSelected')}</p>
@@ -561,8 +542,6 @@ export function CartPanel({
 
       {(cartLines.length > 0 || svc.length > 0) && (
         <BulkApplyBar
-          taxRates={taxRates}
-          onApplyTaxToAll={onApplyTaxToAll}
           onApplyDiscountToAll={onApplyDiscountToAll}
         />
       )}
@@ -678,36 +657,6 @@ export function CartPanel({
                 onChange={(discountType, rawValue) => onChangeLineDiscount(line.key, discountType, rawValue)}
               />
 
-              {taxRates.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                  <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                    <Percent size={10} strokeWidth={2} />
-                    {t('sales.invoiceCart.taxLabel')}
-                  </span>
-                  {taxRates.map((rate) => {
-                    const checked = line.taxRateIds.includes(rate.id);
-                    return (
-                      <label
-                        key={rate.id}
-                        className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => onToggleLineTaxRate(line.key, rate.id)}
-                          className="w-3.5 h-3.5 accent-blue-600"
-                        />
-                        {rate.name} ({rate.percentage}%)
-                      </label>
-                    );
-                  })}
-                  {line.lineTaxAmount > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">
-                      +{formatIDR(line.lineTaxAmount)}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
@@ -788,36 +737,6 @@ export function CartPanel({
                     onChange={(discountType, rawValue) => onChangeServiceDiscount(line.key, discountType, rawValue)}
                   />
 
-                  {taxRates.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5">
-                      <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                        <Percent size={10} strokeWidth={2} />
-                        {t('sales.invoiceCart.taxLabel')}
-                      </span>
-                      {taxRates.map((rate) => {
-                        const checked = line.taxRateIds.includes(rate.id);
-                        return (
-                          <label
-                            key={rate.id}
-                            className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => onToggleServiceTaxRate?.(line.key, rate.id)}
-                              className="w-3.5 h-3.5 accent-blue-600"
-                            />
-                            {rate.name} ({rate.percentage}%)
-                          </label>
-                        );
-                      })}
-                      {line.lineTaxAmount > 0 && (
-                        <span className="text-xs text-gray-400 ml-auto">
-                          +{formatIDR(line.lineTaxAmount)}
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -836,12 +755,6 @@ export function CartPanel({
             <span>−{formatIDR(discount)}</span>
           </div>
         )}
-        {taxAmount > 0 && (
-          <div className="flex justify-between items-center text-sm text-gray-600">
-            <span>{t('sales.invoiceCart.taxLabel')}</span>
-            <span>{formatIDR(taxAmount)}</span>
-          </div>
-        )}
         <div className="flex justify-between items-center font-bold pt-1">
           <span>{t('common.total')}</span>
           <span>{formatIDR(total)}</span>
@@ -855,7 +768,8 @@ export function CartPanel({
           printing ||
           missingRequiredCustomer ||
           hasEmptyServicePrice ||
-          hasEmptyServiceDescription
+          hasEmptyServiceDescription ||
+          odometerTooLow
         }
         className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >

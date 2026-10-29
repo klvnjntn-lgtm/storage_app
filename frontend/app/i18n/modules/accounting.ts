@@ -5,6 +5,25 @@
 export const accounting = {
   en: {
     accounting: {
+      moduleOff: {
+        title: 'Accounting isn\'t active',
+        body: 'The books, expenses, payroll, fixed assets and financial reports are part of the Accounting module. Your sales reports stay available without it.',
+        cta: 'See modules',
+      },
+      openingBalances: {
+        heading: 'Opening balances in the books',
+        side: { AR: 'Receivables', AP: 'Payables' },
+        action: { posted: 'posted', replaced: 'updated', removed: 'removed', unchanged: 'already up to date', none: 'nothing to post' },
+        line: '{side}: {amount} as of {date} — {action}.',
+        lineNone: '{side}: nothing owed, nothing posted.',
+        failed: '{side} could not be posted: {error}',
+        futureDated:
+          '{count} document(s) are dated in the future and were left out. Fix their dates (in Accurate) and import again, or they\'ll be included once the date arrives.',
+        syncHint:
+          'Documents imported from Accurate (or issued before the books existed) never posted to the ledger. This posts what they still owe against Opening Balance Equity, and updates it after each import.',
+        syncButton: 'Post opening balances',
+        syncing: 'Posting…',
+      },
       cashStatement: {
         title: 'Cash & Bank Statement',
         generateButton: 'Generate cash & bank statement',
@@ -174,6 +193,7 @@ export const accounting = {
           expense: 'Expense',
           payroll: 'Payroll',
           manual: 'Manual',
+          openingBalance: 'Opening balance',
         },
       },
       expenses: {
@@ -397,6 +417,8 @@ export const accounting = {
         codeAndNameRequired: 'Code and name are both required.',
         archive: 'Archive',
         reactivate: 'Reactivate',
+        bankBadge: 'BANK ACCOUNT',
+        bankManagedHint: 'Named and archived with its bank account — change it in Bank Accounts above',
         typeAssets: 'Assets',
         typeLiabilities: 'Liabilities',
         typeEquity: 'Equity',
@@ -575,6 +597,25 @@ export const accounting = {
   },
   id: {
     accounting: {
+      moduleOff: {
+        title: 'Akuntansi belum aktif',
+        body: 'Pembukuan, biaya, penggajian, aset tetap, dan laporan keuangan termasuk dalam modul Akuntansi. Laporan penjualan tetap tersedia tanpa modul ini.',
+        cta: 'Lihat modul',
+      },
+      openingBalances: {
+        heading: 'Saldo awal di pembukuan',
+        side: { AR: 'Piutang', AP: 'Utang' },
+        action: { posted: 'dicatat', replaced: 'diperbarui', removed: 'dihapus', unchanged: 'sudah sesuai', none: 'tidak ada yang dicatat' },
+        line: '{side}: {amount} per {date} — {action}.',
+        lineNone: '{side}: tidak ada saldo, tidak ada yang dicatat.',
+        failed: '{side} tidak dapat dicatat: {error}',
+        futureDated:
+          '{count} dokumen bertanggal di masa depan dan tidak disertakan. Perbaiki tanggalnya (di Accurate) lalu impor ulang, atau dokumen akan disertakan saat tanggalnya tiba.',
+        syncHint:
+          'Dokumen yang diimpor dari Accurate (atau diterbitkan sebelum pembukuan ada) tidak pernah tercatat di buku besar. Ini mencatat sisa saldonya terhadap Ekuitas Saldo Awal, dan diperbarui setiap kali impor.',
+        syncButton: 'Catat saldo awal',
+        syncing: 'Mencatat…',
+      },
       cashStatement: {
         title: 'Laporan Kas & Bank',
         generateButton: 'Buat laporan kas & bank',
@@ -744,6 +785,7 @@ export const accounting = {
           expense: 'Beban',
           payroll: 'Penggajian',
           manual: 'Manual',
+          openingBalance: 'Saldo awal',
         },
       },
       expenses: {
@@ -967,6 +1009,8 @@ export const accounting = {
         codeAndNameRequired: 'Kode dan nama wajib diisi.',
         archive: 'Arsipkan',
         reactivate: 'Aktifkan kembali',
+        bankBadge: 'REKENING BANK',
+        bankManagedHint: 'Nama dan status arsip mengikuti rekening banknya — ubah di Rekening Bank di atas',
         typeAssets: 'Aset',
         typeLiabilities: 'Liabilitas',
         typeEquity: 'Ekuitas',

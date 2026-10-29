@@ -11,6 +11,7 @@ export function PageFrame({
   title,
   subtitle,
   actions,
+  below,
   width = 'max-w-5xl',
   children,
 }: {
@@ -18,6 +19,8 @@ export function PageFrame({
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  // Under the title row, e.g. a page's tabs.
+  below?: ReactNode;
   width?: string;
   children: ReactNode;
 }) {
@@ -30,7 +33,7 @@ export function PageFrame({
         backgroundSize: '24px 24px',
       }}
     >
-      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-3 sm:px-6 py-3 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
+      <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className={`${width} mx-auto flex items-center justify-between gap-3`}>
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
@@ -43,8 +46,9 @@ export function PageFrame({
           </div>
           {actions && <div className="shrink-0 flex items-center gap-2">{actions}</div>}
         </div>
+        {below && <div className={`${width} mx-auto`}>{below}</div>}
       </div>
-      <div className={`${width} mx-auto p-3 sm:p-6 space-y-4`}>{children}</div>
+      <div className={`${width} mx-auto p-4 sm:p-6 space-y-4`}>{children}</div>
     </main>
   );
 }

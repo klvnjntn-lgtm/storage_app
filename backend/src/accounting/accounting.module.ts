@@ -12,6 +12,7 @@ import { AccountingReportsService } from './accounting-reports.service';
 import { AccountingController } from './accounting.controller';
 import { CashFlowService } from './cash-flow.service';
 import { CashStatementService } from './cash-statement.service';
+import { OpeningBalanceService } from './opening-balance.service';
 
 @Module({
   imports: [PrismaModule, GuardsModule, OrganizationModulesModule],
@@ -26,6 +27,7 @@ import { CashStatementService } from './cash-statement.service';
     ChartOfAccountsService,
     BankAccountGLLinkService,
     AccountingReportsService,
+    OpeningBalanceService,
   ],
   // PostingRulesService is what Invoice/Payment/Expense/Payroll modules
   // should import and call from their own services at the right lifecycle
@@ -38,6 +40,7 @@ import { CashStatementService } from './cash-statement.service';
     AccountResolverService,
     AccountingReportsService,
     BankAccountGLLinkService,
+    OpeningBalanceService,
   ],
 })
 export class AccountingModule {}

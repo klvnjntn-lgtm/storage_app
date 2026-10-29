@@ -65,10 +65,40 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
         </div>
       )}
 
-      {/* Items — Discount/Tax columns always render, even when every
+      {/* Vehicle — WORKSHOP_RMS, laid out like the invoice's */}
+      {quotation.vehiclePlateNumber && (
+        <div className="mt-4 border-t border-gray-300 pt-3">
+          <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
+            {t('sales.invoiceTemplate.vehicleLabel')}
+          </p>
+          <p className="font-semibold text-base text-black">
+            {quotation.vehiclePlateNumber}
+            {quotation.vehicleModel ? ` · ${quotation.vehicleModel}` : ''}
+          </p>
+          {quotation.vehicleOdometer != null && (
+            <p className="text-xs text-black">
+              {t('sales.invoiceTemplate.odometerLabel', { value: quotation.vehicleOdometer.toLocaleString('id-ID') })}
+            </p>
+          )}
+          {quotation.complaint && (
+            <p className="text-xs text-black whitespace-pre-wrap">
+              {t('sales.quotationWorkshop.complaint')}: {quotation.complaint}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Items — Discount column always render, even when every
           item is zero, so the table shape stays consistent across
           quotations. */}
-      <table className="w-full border-collapse mt-6">
+      <table className="w-full table-fixed border-collapse mt-6">
+        <colgroup>
+          <col />
+          <col className="w-[10%]" />
+          <col className="w-[17%]" />
+          <col className="w-[15%]" />
+          <col className="w-[18%]" />
+        </colgroup>
         <thead>
           <tr>
             <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">
@@ -83,9 +113,6 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
             <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">
               {t('sales.quotationTemplate.discountHeader')}
             </th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">
-              {t('sales.quotationTemplate.taxHeader')}
-            </th>
             <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">
               {t('sales.quotationTemplate.totalHeader')}
             </th>
@@ -95,21 +122,18 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
         <tbody>
           {quotation.items.map((item, index) => (
             <tr key={`${item.productName}-${index}`}>
-              <td className="border-b border-gray-100 py-2 pr-3 text-black">{item.productName}</td>
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 pr-3 text-black [overflow-wrap:anywhere]">{item.productName}</td>
+              <td className="border-b border-gray-100 py-2 px-3 text-black [overflow-wrap:anywhere]">
                 {item.quantity}
                 {item.unit && <span className="text-gray-400 text-xs ml-1">{item.unit}</span>}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.unitPrice)}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 [overflow-wrap:anywhere]">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
-                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-              </td>
-              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.itemTotal)}
               </td>
             </tr>
@@ -131,15 +155,13 @@ export function QuotationA4Template({ quotation }: { quotation: QuotationView })
           </div>
         )}
 
-        {quotation.taxAmount > 0 &&
-          quotation.taxes.map((tax, index) => (
-            <div key={`${tax.name}-${tax.percentage}-${index}`} className="flex justify-between py-1 text-gray-600">
-              <span>
-                {tax.name} ({tax.percentage}%)
-              </span>
-              <span>{formatIDR(tax.amount)}</span>
-            </div>
-          ))}
+        {/* Only documents issued while tax rates existed carry tax. */}
+        {quotation.taxAmount > 0 && (
+          <div className="flex justify-between py-1 text-gray-600">
+            <span>{t('sales.quotationTemplate.taxHeader')}</span>
+            <span>{formatIDR(quotation.taxAmount)}</span>
+          </div>
+        )}
 
         <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2 mt-2 text-black">
           <span>{t('sales.quotationTemplate.totalHeader')}</span>

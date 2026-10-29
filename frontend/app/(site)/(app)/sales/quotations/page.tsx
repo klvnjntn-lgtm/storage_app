@@ -12,6 +12,7 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { DocFlow, docRef } from '@/app/components/shared/DocFlow';
 
 
 type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'CONVERTED';
@@ -28,6 +29,10 @@ type QuotationListItem = {
   sentAt: string | null;
   location: { name: string } | null;
   items: { id: string }[];
+  parentQuotation: { id: string; quotationNumber: string | null } | null;
+  salesOrders: { id: string; orderNumber: string | null; status: string }[];
+  invoices: { id: string; invoiceNumber: string | null; status: string }[];
+  workOrder: { id: string; number: string; status: string } | null;
 };
 
 function formatIDR(amount: number): string {
@@ -414,6 +419,14 @@ export default function QuotationsPage() {
                         </span>
                       )}
                     </p>
+                    <DocFlow
+                      from={docRef('quotation', q.parentQuotation, q.parentQuotation?.quotationNumber)}
+                      to={[
+                        ...(q.salesOrders ?? []).flatMap((o) => docRef('salesOrder', o, o.orderNumber)),
+                        ...docRef('workOrder', q.workOrder, q.workOrder?.number),
+                        ...(q.invoices ?? []).flatMap((i) => docRef('invoice', i, i.invoiceNumber)),
+                      ]}
+                    />
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">

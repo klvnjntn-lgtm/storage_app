@@ -1,5 +1,6 @@
 'use client';
 
+import { homeFor } from '@/lib/roles';
 import { useEffect, useState } from 'react';
 import { PauseCircle, MessageCircle, Mail, LogOut, RotateCcw } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
@@ -24,7 +25,7 @@ export default function SuspendedPage() {
       const me = await res.json().catch(() => null);
       if (res.ok && me && !me.organization?.suspendedAt) {
         // Reactivated — a full load so AuthGuard re-reads the session.
-        window.location.href = me.role === 'DRIVER' ? '/driver' : '/home';
+        window.location.href = homeFor(me.role);
         return;
       }
       setReason(me?.organization?.suspendedReason ?? null);

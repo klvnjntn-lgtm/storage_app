@@ -31,6 +31,7 @@ const DESKTOP_ROUTES = [
   '/sales',
   '/purchasing',
   '/accounting',
+  '/reports/sales',
   '/customers',
   '/inventory/stock',
   '/settings',

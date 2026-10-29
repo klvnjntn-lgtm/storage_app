@@ -37,7 +37,6 @@ import { MediaModule } from './media/media.module';
 import { InvoiceModule } from './invoice/invoice.module';
 import { OrganizationModulesModule } from './organization-module/organization-modules.module';
 import { CustomersModule } from './customers/customers.module';
-import { TaxRateModule } from './tax-rate/tax-rate.module';
 import { PriceLevelModule } from './price-level/price-level.module';
 import { PaymentsModule } from './payments/payment.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
@@ -131,7 +130,6 @@ import { SerialsModule } from './serials/serials.module';
     PartCatalogModule,
     CustomersModule,
     VehicleRemindersModule,
-    TaxRateModule,
     PriceLevelModule,
     OrganizationModulesModule,
     IntegrationModule,

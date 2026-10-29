@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventType, Prisma } from '@prisma/client';
 import { applyOpeningCost, recordManualCost } from '../accounting/inventory-costing';
 import { PlanLimitsService } from '../billing/plan-limits.service';
-import { heldWorkOrderItemsWhere } from '../stock/work-order-holds';
+import { heldStock, holdKey, offeredStock } from '../stock/stock-holds';
 import { escapeLike } from '../common/text/escape-like';
 
 type Tx = PrismaService | Prisma.TransactionClient;
@@ -502,21 +502,14 @@ async create(
       take: 20,
     });
 
-    // Units held for open work orders, shown next to the stock so a cashier
-    // can see why some of it won't sell (StockService.fulfill enforces it).
-    const held = new Map<string, number>();
-    const org = await this.prisma.organization.findUnique({
-      where: { id: organizationId },
-      select: { workOrdersEnabled: true },
-    });
-    if (org?.workOrdersEnabled && products.length > 0) {
-      const rows = await this.prisma.workOrderItem.groupBy({
-        by: ['productId', 'locationId'],
-        _sum: { quantity: true },
-        where: { ...heldWorkOrderItemsWhere(organizationId), productId: { in: products.map((p) => p.id) } },
-      });
-      for (const r of rows) held.set(`${r.productId}|${r.locationId}`, Number(r._sum.quantity ?? 0));
-    }
+    // Shown next to the stock: units held for other customers (jobs, accepted quotations, confirmed
+    // orders), which won't sell — StockService.fulfill enforces it — and units offered on sent
+    // quotations, which still sell but warn that someone was quoted them (see stock-holds.ts).
+    const productIds = products.map((p) => p.id);
+    const [held, offered] = await Promise.all([
+      heldStock(this.prisma, organizationId, productIds),
+      offeredStock(this.prisma, organizationId, productIds),
+    ]);
 
     return products.map((p) => ({
       id: p.id,
@@ -533,7 +526,9 @@ async create(
         locationId: s.locationId,
         locationName: s.location.name,
         quantity: Number(s.quantity),
-        held: held.get(`${p.id}|${s.locationId}`) ?? 0,
+        held: held.get(holdKey(p.id, s.locationId)) ?? 0,
+        offered: offered.get(holdKey(p.id, s.locationId))?.quantity ?? 0,
+        offeredOn: offered.get(holdKey(p.id, s.locationId))?.quotationNumbers ?? [],
       })),
     }));
   }

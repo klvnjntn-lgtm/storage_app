@@ -27,6 +27,24 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+type DayRow = { day: Date; total: string | number | bigint };
+
+// One point per business day for the last SERIES_DAYS days, zero-filled.
+function fillSeries(rows: DayRow[], today: Date) {
+  const byDay = new Map(
+    rows.map((r) => [
+      new Date(r.day).toISOString().slice(0, 10),
+      Number(r.total),
+    ]),
+  );
+  return Array.from({ length: SERIES_DAYS }, (_, i) => {
+    const d = new Date(today.getTime() - (SERIES_DAYS - 1 - i) * DAY)
+      .toISOString()
+      .slice(0, 10);
+    return { date: d, total: round2(byDay.get(d) ?? 0) };
+  });
+}
+
 // The numbers on the home page. Everything is computed on request from
 // the documents themselves (no cached counters to drift), each section
 // only when the org has the module it belongs to. Money is admin-only —
@@ -41,7 +59,10 @@ export class DashboardService {
     private batches: BatchesService,
   ) {}
 
-  async summary(organizationId: string, user: { sub: string; role: string; branchId?: string | null }) {
+  async summary(
+    organizationId: string,
+    user: { sub: string; role: string; branchId?: string | null },
+  ) {
     const [org, enabled] = await Promise.all([
       this.prisma.organization.findUniqueOrThrow({
         where: { id: organizationId },
@@ -53,6 +74,9 @@ export class DashboardService {
     const isAdmin = isAdminRole(user.role);
     const selling = enabled.includes(ModuleKey.INVOICE_POS);
     const warehouse = enabled.includes(ModuleKey.WAREHOUSE_OPS);
+    const workshop = enabled.includes(ModuleKey.WORKSHOP_RMS);
+    const delivery = enabled.includes(ModuleKey.DELIVERY_DMS);
+    const branchId = user.branchId ?? undefined;
 
     const today = todayBusinessDate(tz);
     const startOfToday = wallTimeOnBusinessDay(today, '00:00', tz);
@@ -104,11 +128,59 @@ export class DashboardService {
       transfersInTransit: transfers,
       draftPurchaseOrders: draftPos,
     };
-    if (!isAdmin || !selling) return { operations, finance: null };
+
+    // Daily activity per enabled module, for the home page's chart
+    // carousel. Counts only (money stays in `finance`), scoped to the
+    // user's branch where the document has one — sessions don't.
+    const seriesEnd = endOfBusinessDay(today, tz);
+    const day = (col: string) =>
+      Prisma.sql`(${Prisma.raw(`"${col}"`)} AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date`;
+    const inBranch = branchId
+      ? Prisma.sql`AND "branchId" = ${branchId}`
+      : Prisma.empty;
+    const [invoicesIssued, sessionsDone, jobsDone, deliveriesShipped] =
+      await Promise.all([
+        selling
+          ? this.prisma.$queryRaw<DayRow[]>`
+              SELECT ${day('issuedAt')} AS day, COUNT(*) AS total FROM "Invoice"
+              WHERE "organizationId" = ${organizationId} AND status = 'ISSUED' ${inBranch}
+                AND "issuedAt" >= ${seriesStart} AND "issuedAt" <= ${seriesEnd}
+              GROUP BY 1`
+          : null,
+        warehouse
+          ? this.prisma.$queryRaw<DayRow[]>`
+              SELECT ${day('completedAt')} AS day, COUNT(*) AS total FROM "Session"
+              WHERE "organizationId" = ${organizationId} AND status = 'COMPLETED'
+                AND "completedAt" >= ${seriesStart} AND "completedAt" <= ${seriesEnd}
+              GROUP BY 1`
+          : null,
+        workshop
+          ? this.prisma.$queryRaw<DayRow[]>`
+              SELECT ${day('completedAt')} AS day, COUNT(*) AS total FROM "WorkOrder"
+              WHERE "organizationId" = ${organizationId} AND status = 'DONE' ${inBranch}
+                AND "completedAt" >= ${seriesStart} AND "completedAt" <= ${seriesEnd}
+              GROUP BY 1`
+          : null,
+        delivery
+          ? this.prisma.$queryRaw<DayRow[]>`
+              SELECT ${day('shippedAt')} AS day, COUNT(*) AS total FROM "DeliveryOrder"
+              WHERE "organizationId" = ${organizationId} AND "shippedAt" IS NOT NULL ${inBranch}
+                AND "shippedAt" >= ${seriesStart} AND "shippedAt" <= ${seriesEnd}
+              GROUP BY 1`
+          : null,
+      ]);
+    const activity = {
+      invoicesIssued: invoicesIssued && fillSeries(invoicesIssued, today),
+      sessionsCompleted: sessionsDone && fillSeries(sessionsDone, today),
+      workOrdersDone: jobsDone && fillSeries(jobsDone, today),
+      deliveriesShipped:
+        deliveriesShipped && fillSeries(deliveriesShipped, today),
+    };
+
+    if (!isAdmin || !selling) return { operations, activity, finance: null };
 
     // A branch ADMIN sees their branch's sales; payables stay business-wide
     // (purchasing isn't split by branch).
-    const branchId = user.branchId ?? undefined;
     const issued = (from: Date, to?: Date): Prisma.InvoiceWhereInput => ({
       organizationId,
       branchId,
@@ -159,22 +231,12 @@ export class DashboardService {
         ),
       0,
     );
-    const byDay = new Map(
-      series.map((r) => [
-        new Date(r.day).toISOString().slice(0, 10),
-        Number(r.total),
-      ]),
-    );
-    const salesSeries = Array.from({ length: SERIES_DAYS }, (_, i) => {
-      const d = new Date(today.getTime() - (SERIES_DAYS - 1 - i) * DAY)
-        .toISOString()
-        .slice(0, 10);
-      return { date: d, total: round2(byDay.get(d) ?? 0) };
-    });
+    const salesSeries = fillSeries(series, today);
     const apTotals = ap.totals;
 
     return {
       operations,
+      activity,
       finance: {
         salesToday: {
           total: round2(Number(todayAgg._sum.total ?? 0)),

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Receipt, Plus, RotateCcw, Trash2, FileText, AlertCircle, Search, X, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { parseCalendarDate, formatDMY } from '@/lib/dates';
 import { formatIDR, paymentStatusStyle, type PaymentStatus } from '@/lib/format';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -14,6 +15,7 @@ import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import Pagination from '@/app/components/shared/Pagination';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { DocFlow, docRef } from '@/app/components/shared/DocFlow';
 
 
 // Which date field the From/To range filters by. Only meaningful once a
@@ -39,6 +41,12 @@ type InvoiceListItem = {
   employee?: { name: string } | null;
   vehicle?: { plateNumber: string } | null;
   vehiclePlateNumber?: string | null;
+  quotation?: { id: string; quotationNumber: string | null } | null;
+  salesOrder?: { id: string; orderNumber: string | null } | null;
+  workOrder?: { id: string; number: string } | null;
+  replaces?: { id: string; invoiceNumber: string | null } | null;
+  replacedBy?: { id: string; invoiceNumber: string | null; status: string } | null;
+  deliveryOrders?: { id: string; doNumber: string | null; status: string }[];
 };
 
 function statusStyle(status: string) {
@@ -288,15 +296,18 @@ export default function InvoicesPage() {
   const [customerName, setCustomerName] = useState<string | null>(() => getInitialParam('customerName', '') || null);
   // MASTER's branch filter ('' = every branch); see BranchFilter.
   const [branchFilter, setBranchFilter] = useState<string>(() => getInitialParam('branchId', ''));
-  // Who sold it (the invoice's Employee).
-  const [salespersonFilter, setSalespersonFilter] = useState<string>(() => getInitialParam('employeeId', ''));
-  const [salespeople, setSalespeople] = useState<{ id: string; name: string }[]>([]);
+  // Workshops: who did the work (the invoice's mechanic).
+  const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const [mechanicFilter, setMechanicFilter] = useState<string>(() => getInitialParam('mechanicId', ''));
+  const [mechanics, setMechanics] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    apiFetch('/invoices/salespeople')
+    if (!hasWorkshopRms) return;
+    // Only the names on the Mechanic account.
+    apiFetch('/mechanics')
       .then((res) => (res.ok ? res.json() : []))
-      .then((list) => setSalespeople(Array.isArray(list) ? list : []))
+      .then((list) => setMechanics(Array.isArray(list) ? list : []))
       .catch(() => {});
-  }, []);
+  }, [hasWorkshopRms]);
 
   // Search by invoice number or customer name. `search` is what the input
   // shows immediately; `debouncedSearch` is what actually drives the
@@ -339,7 +350,7 @@ export default function InvoicesPage() {
     customerId,
     customerName: customerId ? customerName : null,
     branchId: branchFilter || null,
-    employeeId: salespersonFilter || null,
+    mechanicId: mechanicFilter || null,
     from,
     to,
     dateField: from && to ? dateField : null,
@@ -354,7 +365,7 @@ export default function InvoicesPage() {
     (paymentFilter !== 'ALL' ? 1 : 0) +
     (customerId ? 1 : 0) +
     (branchFilter ? 1 : 0) +
-    (salespersonFilter ? 1 : 0) +
+    (mechanicFilter ? 1 : 0) +
     (debouncedSearch ? 1 : 0);
 
   function clearFilters() {
@@ -365,7 +376,7 @@ export default function InvoicesPage() {
     setCustomerId(null);
     setCustomerName(null);
     setBranchFilter('');
-    setSalespersonFilter('');
+    setMechanicFilter('');
     setSearch('');
   }
 
@@ -384,7 +395,7 @@ export default function InvoicesPage() {
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (customerId) params.set('customerId', customerId);
       if (branchFilter) params.set('branchId', branchFilter);
-      if (salespersonFilter) params.set('employeeId', salespersonFilter);
+      if (mechanicFilter) params.set('mechanicId', mechanicFilter);
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (paymentFilter === 'OVERDUE') {
         params.set('overdue', 'true');
@@ -438,7 +449,7 @@ export default function InvoicesPage() {
   // URL (e.g. via the browser's Back button) back to 1 on mount: the ref
   // starts equal to the initial filtersKey, so the reset branch only ever
   // fires on an actual change, never on the first render.
-  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${customerId}|${branchFilter}|${salespersonFilter}|${debouncedSearch}`;
+  const filtersKey = `${from}|${to}|${statusFilter}|${dateField}|${paymentFilter}|${customerId}|${branchFilter}|${mechanicFilter}|${debouncedSearch}`;
   const prevFiltersKeyRef = useRef(filtersKey);
   useEffect(() => {
     if (prevFiltersKeyRef.current !== filtersKey) {
@@ -623,20 +634,20 @@ export default function InvoicesPage() {
 
             <BranchFilter value={branchFilter} onChange={setBranchFilter} />
 
-            {salespeople.length > 0 && (
+            {hasWorkshopRms && mechanics.length > 0 && (
               <div>
                 <p className="text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1.5">
-                  {t('sales.invoicesList.salespersonLabel')}
+                  {t('sales.invoicesList.mechanicLabel')}
                 </p>
                 <select
-                  value={salespersonFilter}
-                  onChange={(e) => setSalespersonFilter(e.target.value)}
+                  value={mechanicFilter}
+                  onChange={(e) => setMechanicFilter(e.target.value)}
                   className="w-full sm:w-auto text-sm border border-blue-500/20 rounded-md px-2.5 py-1.5 bg-white outline-none focus:border-blue-500/50"
                 >
-                  <option value="">{t('sales.invoicesList.allSalespeople')}</option>
-                  {salespeople.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
+                  <option value="">{t('sales.invoicesList.allMechanics')}</option>
+                  {mechanics.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
                     </option>
                   ))}
                 </select>
@@ -765,6 +776,19 @@ export default function InvoicesPage() {
                         </span>
                       )}
                     </p>
+                    <DocFlow
+                      from={[
+                        ...docRef('quotation', inv.quotation, inv.quotation?.quotationNumber),
+                        ...docRef('salesOrder', inv.salesOrder, inv.salesOrder?.orderNumber),
+                        ...docRef('workOrder', inv.workOrder, inv.workOrder?.number),
+                        // A corrected re-issue points back at the invoice it replaced.
+                        ...docRef('invoice', inv.replaces, inv.replaces?.invoiceNumber),
+                      ]}
+                      to={[
+                        ...(inv.deliveryOrders ?? []).flatMap((d) => docRef('delivery', d, d.doNumber)),
+                        ...docRef('invoice', inv.replacedBy, inv.replacedBy?.invoiceNumber),
+                      ]}
+                    />
                   </div>
 
                   {/* Amount + actions wrap onto their own line rather than

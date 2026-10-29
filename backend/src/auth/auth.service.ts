@@ -1,3 +1,4 @@
+import { assertNoOtherMechanicAccount } from './mechanic-account';
 import {
   Injectable,
   ConflictException,
@@ -234,13 +235,14 @@ export class AuthService {
     inviterOrgId: string,
     email: string,
     password: string,
-    role: 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER' = 'USER',
+    role: 'MASTER' | 'ADMIN' | 'USER' | 'DRIVER' | 'MECHANIC' = 'USER',
     inviter: { role: string; branchId?: string | null } = { role: 'MASTER' },
     requestedBranchId?: string,
   ) {
     if (role === 'MASTER' && inviter.role !== 'MASTER') {
       throw new ForbiddenException('Only a master account can invite another master');
     }
+    if (role === 'MECHANIC') await assertNoOtherMechanicAccount(this.prisma, inviterOrgId);
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },

@@ -46,7 +46,6 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
           </p>
 )}
 
-        {invoice.employeeName && <p>{t('sales.invoiceTemplate.cashier', { name: invoice.employeeName })}</p>}
       </div>
 
       <div className="border-t border-dashed border-black my-1" />
@@ -61,10 +60,10 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
         </div>
       )}
 
-      {/* Items — name, qty × price, then only the discount/tax lines that
-          are actually non-zero, then the final per-item total. Keeps a
-          plain item (no discount, no tax) down to two lines instead of
-          padding it with "Discount: Rp 0" / "Tax: Rp 0". */}
+      {/* Items — name, qty × price, then the discount line only when it
+          is non-zero, then the final per-item total. Keeps a
+          plain item (no discount) down to two lines instead of
+          padding it with "Discount: Rp 0". */}
       {invoice.items.map((item) => (
         <div key={item.id} className="mb-1.5">
           <p>{item.productName}</p>
@@ -83,12 +82,6 @@ export function ReceiptTemplate({ invoice }: { invoice: InvoiceView }) {
             </div>
           )}
 
-          {item.itemTaxAmount > 0 && (
-            <div className="flex justify-between text-gray-600">
-              <span>{t('sales.invoiceTemplate.tax')}</span>
-              <span>{formatIDR(item.itemTaxAmount)}</span>
-            </div>
-          )}
 
           <div className="flex justify-between font-semibold">
             <span>{t('common.total')}</span>

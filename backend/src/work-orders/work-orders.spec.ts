@@ -9,6 +9,7 @@ import { ChartOfAccountsSeedService } from '../accounting/chart-of-accounts-seed
 import { InvoiceService } from '../invoice/invoice.service';
 import { WorkOrdersModule } from './work-orders.module';
 import { WorkOrdersService } from './work-orders.service';
+import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { VehiclesModule } from '../vehicles/vehicles.module';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { heldWorkOrderItemsWhere } from '../stock/work-order-holds';
@@ -23,6 +24,7 @@ describe('Workshop work orders', () => {
   let prisma: PrismaService;
   let workOrders: WorkOrdersService;
   let invoices: InvoiceService;
+  let quotations: SalesQuotationService;
 
   let orgId: string;
   let userId: string;
@@ -31,6 +33,8 @@ describe('Workshop work orders', () => {
   let vehicleId: string;
   let customerId: string;
   let mechanicId: string;
+  // The quotation tests' own car, so their odometer readings don't race the job tests'.
+  let quotedCarId: string;
 
   const PRICE = 150_000;
 
@@ -39,6 +43,7 @@ describe('Workshop work orders', () => {
     prisma = module.get(PrismaService);
     workOrders = module.get(WorkOrdersService);
     invoices = module.get(InvoiceService);
+    quotations = module.get(SalesQuotationService);
 
     orgId = (await prisma.organization.create({ data: { name: `WO ${randomUUID()}`, workOrdersEnabled: true } })).id;
     await module.get(ChartOfAccountsSeedService).seedDefaults(orgId);
@@ -71,7 +76,14 @@ describe('Workshop work orders', () => {
         },
       })
     ).id;
-    mechanicId = (await prisma.employee.create({ data: { organizationId: orgId, name: 'Andi', baseSalary: 0 } })).id;
+    mechanicId = (
+      await prisma.employee.create({ data: { organizationId: orgId, name: 'Andi', baseSalary: 0, isMechanic: true } })
+    ).id;
+    quotedCarId = (
+      await prisma.vehicle.create({
+        data: { organizationId: orgId, customerId, plateNumber: 'B 777 QQ', plateNormalized: 'B777QQ', vehicleModel: 'Xenia' },
+      })
+    ).id;
   });
 
   afterAll(async () => {
@@ -307,120 +319,180 @@ describe('Workshop work orders', () => {
     expect(await sell(1)).toBe(1);
   });
 
-  it('waits as an estimate until approved: no hold, no invoice, no work', async () => {
-    const est = await workOrders.create(orgId, userId, {
-      vehicleId,
-      asEstimate: true,
-      items: [{ productId, locationId: rackId, quantity: 1 }],
-    });
-    expect(est.status).toBe(WorkOrderStatus.ESTIMATE);
-    expect(est.approvedAt).toBeNull();
-    const held = await prisma.workOrderItem.count({ where: { ...heldWorkOrderItemsWhere(orgId), workOrderId: est.id } });
-    expect(held).toBe(0);
-    await expect(workOrders.setStatus(orgId, est.id, WorkOrderStatus.IN_PROGRESS)).rejects.toThrow('approval');
-    await expect(workOrders.createInvoice(orgId, userId, est.id)).rejects.toThrow('approval');
+  // A workshop quotation for the test car: 2 × oil and one labour line.
+  function newQuotation(extra: Partial<Parameters<SalesQuotationService['create']>[2]> = {}) {
+    return quotations.create(orgId, userId, {
+      format: 'A4',
+      customerId,
+      vehicleId: quotedCarId,
+      odometer: 51_000,
+      complaint: 'Service and brake check',
+      locationId: rackId,
+      items: [
+        { productId, locationId: rackId, quantity: 2 },
+        { description: 'Labour: service', quantity: 1, unitPrice: 100_000 },
+      ],
+      ...extra,
+    } as never);
+  }
 
-    // The printed estimate carries today's prices.
-    const print = await workOrders.printView(orgId, est.id);
-    expect(print.pricing?.lines[0].unitPrice).toBe(PRICE);
-    expect(print.pricing?.total).toBe(PRICE);
-
-    // Declined, then reopened: still an estimate.
-    await workOrders.setStatus(orgId, est.id, WorkOrderStatus.CANCELLED);
-    expect((await workOrders.setStatus(orgId, est.id, WorkOrderStatus.QUEUED)).status).toBe(WorkOrderStatus.ESTIMATE);
-
-    const approved = await workOrders.approve(orgId, userId, est.id, 'Signed SPK');
-    expect(approved.status).toBe(WorkOrderStatus.QUEUED);
-    expect(approved.approvedAt).not.toBeNull();
-    expect(approved.approvalNote).toBe('Signed SPK');
-    await expect(workOrders.approve(orgId, userId, est.id)).rejects.toThrow('Only an estimate');
-    await expect(workOrders.setStatus(orgId, est.id, WorkOrderStatus.ESTIMATE)).rejects.toThrow();
-  });
-
-  it('lets the customer approve an estimate through the link', async () => {
-    const est = await workOrders.create(orgId, userId, {
-      vehicleId,
-      asEstimate: true,
-      notes: 'internal: customer haggles',
-      items: [{ productId, locationId: rackId, quantity: 2 }],
-    });
-    const link = await workOrders.approvalLink(orgId, est.id);
+  it('shares a quotation by link: the customer answers, then it becomes a job', async () => {
+    const q = await newQuotation({ notes: 'internal: customer haggles' } as never);
+    const link = await quotations.approvalLink(orgId, q.id, userId);
     expect(link.token.length).toBeGreaterThanOrEqual(32);
-    // Copying again gives the same link, so one already sent keeps working.
-    expect((await workOrders.approvalLink(orgId, est.id)).token).toBe(link.token);
+    // Copying the link sent the draft, so it has its number; copying again gives the same link.
+    expect((await quotations.getOne(orgId, q.id)).quotationNumber).toBeTruthy();
+    expect((await quotations.approvalLink(orgId, q.id, userId)).token).toBe(link.token);
 
-    const view = await workOrders.publicEstimate(link.token);
-    expect(view.total).toBe(2 * PRICE);
+    const view = await quotations.publicView(link.token);
+    expect(view.total).toBe(2 * PRICE + 100_000);
+    expect(view.vehicle?.plateNumber).toBe('B 777 QQ');
     expect(JSON.stringify(view)).not.toContain('haggles');
 
-    // Changed after the customer opened it: their answer is refused.
-    await workOrders.update(orgId, userId, est.id, { items: [{ productId, locationId: rackId, quantity: 3 }] });
-    await expect(
-      workOrders.respondToEstimate(link.token, true, { name: 'Budi', version: view.version }),
-    ).rejects.toThrow(ConflictException);
+    // Changed after the customer opened it: their answer is refused until it's sent again.
+    await quotations.update(orgId, q.id, userId, {
+      items: [{ productId, locationId: rackId, quantity: 3 }, { description: 'Labour: service', quantity: 1, unitPrice: 100_000 }],
+    } as never);
+    await expect(quotations.respond(link.token, true, { name: 'Budi', version: view.version })).rejects.toThrow(ConflictException);
+    await quotations.approvalLink(orgId, q.id, userId);
+    const fresh = await quotations.publicView(link.token);
+    expect((await quotations.respond(link.token, true, { name: 'Budi', version: fresh.version })).status).toBe('ACCEPTED');
+    await expect(quotations.respond(link.token, false, { name: 'Budi', version: fresh.version })).rejects.toThrow(
+      BadRequestException,
+    );
+    const note = await prisma.notification.findFirst({ where: { userId, type: 'QUOTATION_APPROVED' } });
+    expect(note?.link).toBe(`/sales/quotations/${q.id}`);
 
-    const fresh = await workOrders.publicEstimate(link.token);
-    const answered = await workOrders.respondToEstimate(link.token, true, { name: 'Budi', version: fresh.version });
-    expect(answered.status).toBe(WorkOrderStatus.QUEUED);
-    const wo = await workOrders.getOne(orgId, est.id);
-    expect(wo.approvalNote).toBe('Approved online by Budi');
-    expect(wo.approvedById).toBeNull();
-    const note = await prisma.notification.findFirst({ where: { userId, type: 'WORK_ORDER_APPROVED' } });
-    expect(note?.link).toBe(`/workshop/work-orders/${est.id}`);
+    const wo = await workOrders.createFromQuotation(orgId, userId, q.id, { mechanicId });
+    expect(wo.status).toBe(WorkOrderStatus.QUEUED);
+    expect(wo.mechanic?.id).toBe(mechanicId);
+    expect(wo.complaint).toBe('Service and brake check');
+    expect(wo.odometer).toBe(51_000);
+    expect(wo.items.map((i) => Number(i.quantity))).toEqual([3, 1]);
+    expect(Number(wo.items[1].unitPrice)).toBe(100_000);
+    expect(wo.approvalNote).toContain('Approved online by Budi');
+    const converted = await quotations.getOne(orgId, q.id);
+    expect(converted.status).toBe('CONVERTED');
+    expect(converted.workOrder?.id).toBe(wo.id);
+    // A quotation makes one job only.
+    await expect(workOrders.createFromQuotation(orgId, userId, q.id)).rejects.toThrow('already a work order');
+  });
 
-    // Answered once only.
-    await expect(
-      workOrders.respondToEstimate(link.token, false, { name: 'Budi', version: fresh.version }),
-    ).rejects.toThrow(BadRequestException);
-    await expect(workOrders.approvalLink(orgId, est.id)).rejects.toThrow('Only an estimate');
+  it('converts without waiting for the customer, and an additional quotation joins the same job', async () => {
+    const q = await newQuotation();
+    // Extra parts can only be quoted once the job exists.
+    await expect(quotations.createAddition(orgId, q.id, userId)).rejects.toThrow('Convert the quotation');
+    const wo = await workOrders.createFromQuotation(orgId, userId, q.id);
+    expect(wo.items).toHaveLength(2);
+
+    const addition = await quotations.createAddition(orgId, q.id, userId);
+    expect(addition.parentQuotationId).toBe(q.id);
+    expect(addition.vehicleId).toBe(quotedCarId);
+    await quotations.update(orgId, addition.id, userId, {
+      items: [{ description: 'Brake pads fitting', quantity: 1, unitPrice: 75_000 }],
+    } as never);
+
+    const same = await workOrders.createFromQuotation(orgId, userId, addition.id);
+    expect(same.id).toBe(wo.id);
+    expect(same.items.map((i) => i.description ?? i.productId)).toEqual([productId, 'Labour: service', 'Brake pads fitting']);
+    expect((await quotations.getOne(orgId, q.id)).additions.map((a) => a.id)).toEqual([addition.id]);
+    expect((await quotations.getOne(orgId, addition.id)).workOrder?.id).toBe(wo.id);
+  });
+
+  // A car of the test's own, so its odometer doesn't race the other tests'.
+  async function newCar(odometer: number) {
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    return (
+      await prisma.vehicle.create({
+        data: { organizationId: orgId, customerId, plateNumber: `B ${tag}`, plateNormalized: `B${tag}`, vehicleModel: 'Brio', odometer },
+      })
+    ).id;
+  }
+
+  it('starts the job with no odometer, and says why, when the car has since been read higher', async () => {
+    const car = await newCar(40_000);
+    const q = await newQuotation({ vehicleId: car, odometer: 41_000 });
+    await prisma.vehicle.update({ where: { id: car }, data: { odometer: 45_000 } });
+
+    const wo = await workOrders.createFromQuotation(orgId, userId, q.id);
+    expect(wo.odometer).toBeNull();
+    expect(wo.approvalNote).toContain('41.000 km');
+    expect(wo.approvalNote).toContain("enter today's reading");
+    expect((await prisma.vehicle.findUniqueOrThrow({ where: { id: car } })).odometer).toBe(45_000);
+  });
+
+  it('carries the quoted car and its reading onto an invoice made straight from the quotation', async () => {
+    const car = await newCar(30_000);
+    const q = await newQuotation({ vehicleId: car, odometer: 30_500 });
+    await quotations.send(orgId, q.id, userId);
+
+    const invoice = await invoices.createDraftFromQuotation(orgId, userId, q.id);
+    expect(invoice.vehicleId).toBe(car);
+    expect(invoice.odometer).toBe(30_500);
+    expect((await prisma.vehicle.findUniqueOrThrow({ where: { id: car } })).odometer).toBe(30_500);
   });
 
   it('records a decline from the link, and refuses bad or expired links', async () => {
-    const est = await workOrders.create(orgId, userId, { vehicleId, asEstimate: true });
-    const { token } = await workOrders.approvalLink(orgId, est.id);
-    const view = await workOrders.publicEstimate(token);
-    await workOrders.respondToEstimate(token, false, { name: 'Budi', reason: 'Too expensive', version: view.version });
-    const wo = await workOrders.getOne(orgId, est.id);
-    expect(wo.status).toBe(WorkOrderStatus.CANCELLED);
-    expect(wo.approvalNote).toBe('Declined online by Budi: Too expensive');
+    const q = await newQuotation();
+    const { token } = await quotations.approvalLink(orgId, q.id, userId);
+    const view = await quotations.publicView(token);
+    await quotations.respond(token, false, { name: 'Budi', reason: 'Too expensive', version: view.version });
+    const declined = await quotations.getOne(orgId, q.id);
+    expect(declined.status).toBe('REJECTED');
+    expect(declined.responseNote).toBe('Declined online by Budi: Too expensive');
+    await expect(workOrders.createFromQuotation(orgId, userId, q.id)).rejects.toThrow('declined');
 
-    await expect(workOrders.publicEstimate('nope')).rejects.toThrow(NotFoundException);
-    await prisma.workOrder.update({ where: { id: est.id }, data: { approvalTokenExpiresAt: new Date(Date.now() - 1000) } });
-    await expect(workOrders.publicEstimate(token)).rejects.toThrow(GoneException);
+    await expect(quotations.publicView('nope')).rejects.toThrow(NotFoundException);
+    await prisma.salesQuotation.update({ where: { id: q.id }, data: { approvalTokenExpiresAt: new Date(Date.now() - 1000) } });
+    await expect(quotations.publicView(token)).rejects.toThrow(GoneException);
   });
 
-  it('carries formal-estimate details to the invoice, and expires for the customer', async () => {
-    const est = await workOrders.create(orgId, userId, {
+  it('refuses a quotation past its validity on the link, and one without a vehicle', async () => {
+    const q = await newQuotation({ validUntil: '2020-01-31' } as never);
+    const { token } = await quotations.approvalLink(orgId, q.id, userId);
+    const view = await quotations.publicView(token);
+    await expect(quotations.respond(token, true, { name: 'Fleet manager', version: view.version })).rejects.toThrow(
+      'no longer valid',
+    );
+    const noCar = await newQuotation({ vehicleId: undefined } as never);
+    await expect(workOrders.createFromQuotation(orgId, userId, noCar.id)).rejects.toThrow('vehicle');
+  });
+
+  it('shows the floor on the mechanic board: active jobs, no prices', async () => {
+    const job = await workOrders.create(orgId, userId, {
       vehicleId,
-      asEstimate: true,
-      validUntil: '2020-01-31',
-      customerPoNumber: 'PO-FLEET-77',
-      paymentTerms: 'Net 30',
-      items: [{ description: 'Labour: service', quantity: 1, unitPrice: 100_000 }],
+      mechanicId,
+      items: [{ productId, locationId: rackId, quantity: 4 }],
     });
-    expect(est.customerPoNumber).toBe('PO-FLEET-77');
+    const board = await workOrders.board(orgId);
+    const shown = board.jobs.find((j) => j.id === job.id);
+    expect(shown?.plateNumber).toBe('B 1234 XY');
+    expect(shown?.mechanic).toBe('Andi');
+    expect(shown?.lines[0]).toEqual({ name: 'Engine oil 1L', isPart: true, quantity: 4 });
+    expect(JSON.stringify(board)).not.toMatch(/unitPrice|lineTotal|phone/);
 
-    // Past its validity the customer can't approve through the link…
-    const { token } = await workOrders.approvalLink(orgId, est.id);
-    const view = await workOrders.publicEstimate(token);
-    expect(view.customerPoNumber).toBe('PO-FLEET-77');
-    await expect(
-      workOrders.respondToEstimate(token, true, { name: 'Fleet manager', version: view.version }),
-    ).rejects.toThrow('no longer valid');
+    await workOrders.setStatus(orgId, job.id, WorkOrderStatus.DONE);
+    expect((await workOrders.board(orgId)).jobs.some((j) => j.id === job.id)).toBe(false);
+  });
 
-    // …staff can extend it, or approve it themselves.
-    await workOrders.update(orgId, userId, est.id, { validUntil: '2099-12-31' });
-    const fresh = await workOrders.publicEstimate(token);
-    await workOrders.respondToEstimate(token, true, { name: 'Fleet manager', version: fresh.version });
+  it('offers only the mechanic account’s names, made from what was written there', async () => {
+    const budi = await workOrders.addMechanic(orgId, '  Budi ');
+    expect(budi.name).toBe('Budi');
+    const asEmployee = await prisma.employee.findUniqueOrThrow({ where: { id: budi.id } });
+    expect(asEmployee).toMatchObject({ isMechanic: true, position: 'Mechanic' });
+    await expect(workOrders.addMechanic(orgId, 'budi')).rejects.toThrow('already a mechanic');
 
-    const { invoiceId } = await workOrders.createInvoice(orgId, userId, est.id);
-    const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    expect(invoice.customerPoNumber).toBe('PO-FLEET-77');
-    expect(invoice.paymentTerms).toBe('Net 30');
+    // A cashier on Payroll is no mechanic: not offered, and refused on a job.
+    const cashier = await prisma.employee.create({ data: { organizationId: orgId, name: 'Citra', baseSalary: 0 } });
+    const offered = (await workOrders.mechanics(orgId)).map((m) => m.name);
+    expect(offered).toEqual(expect.arrayContaining(['Andi', 'Budi']));
+    expect(offered).not.toContain('Citra');
+    await expect(workOrders.create(orgId, userId, { vehicleId, mechanicId: cashier.id })).rejects.toThrow('Mechanic not found');
 
-    // Clearing a field with ''.
-    const other = await workOrders.create(orgId, userId, { vehicleId, asEstimate: true, paymentTerms: 'COD' });
-    expect((await workOrders.update(orgId, userId, other.id, { paymentTerms: '' })).paymentTerms).toBeNull();
+    // Removed: off the picker, back when written again.
+    await workOrders.removeMechanic(orgId, budi.id);
+    expect((await workOrders.mechanics(orgId)).map((m) => m.name)).not.toContain('Budi');
+    expect((await workOrders.addMechanic(orgId, 'Budi')).id).toBe(budi.id);
   });
 
   it('leaves recommended work as a reminder that can start the next job', async () => {

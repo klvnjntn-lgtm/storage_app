@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'QUOTATION_APPROVED';
+ALTER TYPE "NotificationType" ADD VALUE 'QUOTATION_DECLINED';

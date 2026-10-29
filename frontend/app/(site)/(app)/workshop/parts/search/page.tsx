@@ -55,6 +55,7 @@ type Interpretation = {
   oems: string[];
   partBrands: string[];
   codes: { kind: 'chassis' | 'engine'; typed: string; code: string }[];
+  specs?: string[]; // H4, NS60, 10W-40 (older backends don't send it)
   corrections: { typed: string; as: string }[];
   ignored: string[];
 };
@@ -254,6 +255,7 @@ function PartsCatalogPageInner() {
           (c) => `${t(c.kind === 'chassis' ? 'workshop.partsCatalog.chassisCode' : 'workshop.partsCatalog.engineCode')} ${c.code}`,
         ),
         ...read.items.map((i) => i.item),
+        ...(read.specs ?? []),
         ...read.oems,
         ...read.partBrands,
       ]

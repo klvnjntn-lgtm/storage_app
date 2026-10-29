@@ -16,6 +16,7 @@ const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
 // What each role may do, low to high. Keys are USER or ADMIN only.
 const ROLE_RANK: Record<Role, number> = {
   [Role.DRIVER]: 0,
+  [Role.MECHANIC]: 0,
   [Role.USER]: 1,
   [Role.ADMIN]: 2,
   [Role.MASTER]: 3,
@@ -71,7 +72,7 @@ export class ApiKeysService {
       expiresInDays?: number;
     },
   ) {
-    if (dto.role === Role.DRIVER)
+    if (dto.role === Role.DRIVER || dto.role === Role.MECHANIC)
       throw new BadRequestException('Keys can be USER, ADMIN or MASTER');
     // Not above the creator's own role — authenticate() would refuse it anyway.
     const creator = await this.prisma.user.findFirst({

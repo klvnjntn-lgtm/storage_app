@@ -6,6 +6,7 @@ import { ModuleKey } from '@prisma/client';
 
 const MODULE_DEPENDENCIES: Partial<Record<ModuleKey, ModuleKey>> = {
   [ModuleKey.WORKSHOP_RMS]: ModuleKey.INVOICE_POS,
+  [ModuleKey.ACCOUNTING]: ModuleKey.INVOICE_POS,
 };
 
 @Injectable()

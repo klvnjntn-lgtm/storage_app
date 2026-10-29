@@ -10,6 +10,7 @@ import type { DraftLine, Mechanic } from './workOrders';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
 import { useBranches } from '@/lib/hooks/useBranches';
+import { isOdometerBelowLast } from '@/lib/odometer';
 
 export type WorkOrderFormValue = {
   mechanicId: string;
@@ -139,14 +140,18 @@ export default function WorkOrderForm({
             <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.odometer')}</span>
             <input
               type="number"
-              min={0}
+              min={vehicleOdometer ?? 0}
               inputMode="numeric"
-              className={`${inputCls} mt-1`}
+              className={`${inputCls} mt-1 ${!readOnly && isOdometerBelowLast(value.odometer, vehicleOdometer) ? '!border-red-300' : ''}`}
               value={value.odometer}
               disabled={readOnly}
+              aria-invalid={!readOnly && isOdometerBelowLast(value.odometer, vehicleOdometer)}
               placeholder={vehicleOdometer != null ? t('workshop.workOrders.lastOdometer', { km: vehicleOdometer }) : 'km'}
               onChange={(e) => set({ odometer: e.target.value })}
             />
+            {!readOnly && isOdometerBelowLast(value.odometer, vehicleOdometer) && (
+              <span className="block text-xs text-red-600 mt-1">{t('common.odometerTooLow', { km: vehicleOdometer ?? 0 })}</span>
+            )}
           </label>
           <label className="block sm:col-span-2">
             <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.complaint')}</span>

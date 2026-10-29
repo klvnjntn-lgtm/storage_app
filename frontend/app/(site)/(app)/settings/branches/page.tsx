@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
-import type { Branch } from '@/lib/hooks/useBranches';
+import { BRANCHES_CHANGED, type Branch } from '@/lib/hooks/useBranches';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 
 type StockLocation = { id: string; name: string; branchId: string | null };
@@ -71,6 +71,7 @@ export default function BranchesPage() {
       const next = await fetchAll();
       setBranches(next.branches);
       setLocations(next.locations);
+      window.dispatchEvent(new Event(BRANCHES_CHANGED));
       return true;
     } catch {
       setError(t('settings.branches.serverError'));

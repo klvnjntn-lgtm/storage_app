@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { CheckCircle2, Circle, Rocket, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useHasModule } from '@/lib/hooks/useHasModule';
 import { btnPrimary, btnSecondary } from '@/app/components/shared/PageFrame';
 
 type Step = { key: string; done: boolean; optional?: boolean };
@@ -17,16 +19,24 @@ const STEP_LINK: Record<string, string> = {
   company: '/settings#business-identity',
   location: '/inventory/warehouse',
   products: '/admin/products',
-  bankAccount: '/settings#bank-accounts',
+  // MASTER's link; see stepLink.
+  bankAccount: '/accounting/setup#bank-accounts',
   team: '/admin/members',
   firstInvoice: '/sales/invoices/new',
 };
+
+// Banks are set up in the Chart of Accounts, which only MASTER opens with the Accounting module; anyone
+// else goes to Settings, which holds the bank list itself without Accounting (or a note saying where it is).
+const stepLink = (key: string, role: string | undefined, hasAccounting: boolean) =>
+  key === 'bankAccount' && (role !== 'MASTER' || !hasAccounting) ? '/settings#bank-accounts' : STEP_LINK[key];
 
 // The getting-started list for a new self-serve organization. Renders
 // nothing for anyone else (non-admins get a 403, hand-managed orgs and
 // finished ones get show=false).
 export function OnboardingChecklist({ variant = 'card' }: { variant?: 'card' | 'page' }) {
   const { t } = useLanguage();
+  const { user } = useCurrentUser();
+  const hasAccounting = useHasModule('ACCOUNTING');
   const [status, setStatus] = useState<Status | null>(null);
 
   const load = useCallback(async () => {
@@ -83,7 +93,7 @@ export function OnboardingChecklist({ variant = 'card' }: { variant?: 'card' | '
         {status.steps.map((s) => (
           <li key={s.key}>
             <Link
-              href={STEP_LINK[s.key]}
+              href={stepLink(s.key, user?.role, hasAccounting)}
               className="flex items-start gap-3 rounded-lg border border-gray-100 hover:border-blue-300 hover:bg-blue-50/40 p-3"
             >
               {s.done ? (

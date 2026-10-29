@@ -6,7 +6,8 @@ export const WORK_ORDERS_CHANGED = 'waresys:work-orders-changed';
 
 export type WorkOrderStatus = 'ESTIMATE' | 'QUEUED' | 'IN_PROGRESS' | 'WAITING_PARTS' | 'DONE' | 'CANCELLED';
 
-export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['ESTIMATE', 'QUEUED', 'IN_PROGRESS', 'WAITING_PARTS', 'DONE', 'CANCELLED'];
+// ESTIMATE is legacy (estimates are quotations now), so it's not offered as a filter.
+export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['QUEUED', 'IN_PROGRESS', 'WAITING_PARTS', 'DONE', 'CANCELLED'];
 
 // Work recommended on a job for a later visit — a vehicle reminder.
 export type Recommendation = {
@@ -47,6 +48,8 @@ export type WorkOrder = {
   paymentTerms: string | null;
   approvedAt: string | null;
   approvalNote: string | null;
+  // The quotation it was made from, and additions for parts found mid-job.
+  quotations?: { id: string; quotationNumber: string | null; status: string; parentQuotationId: string | null }[];
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;

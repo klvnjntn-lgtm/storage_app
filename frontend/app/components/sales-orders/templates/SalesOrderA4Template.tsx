@@ -77,14 +77,20 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
 
       {/* Items */}
       {/* Items */}
-      <table className="w-full border-collapse mt-6">
+      <table className="w-full table-fixed border-collapse mt-6">
+        <colgroup>
+          <col />
+          <col className="w-[10%]" />
+          <col className="w-[17%]" />
+          <col className="w-[15%]" />
+          <col className="w-[18%]" />
+        </colgroup>
         <thead>
           <tr>
             <th className="text-left border-b-2 border-gray-300 py-2 pr-3 text-black">{t('sales.orderTemplate.colItem')}</th>
             <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.orderTemplate.colQty')}</th>
             <th className="text-left border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.orderTemplate.colPrice')}</th>
             <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.orderTemplate.colDiscount')}</th>
-            <th className="text-right border-b-2 border-gray-300 py-2 px-3 text-black">{t('sales.orderTemplate.colTax')}</th>
             <th className="text-right border-b-2 border-gray-300 py-2 pl-3 text-black">{t('sales.orderTemplate.colTotal')}</th>
           </tr>
         </thead>
@@ -92,24 +98,21 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
         <tbody>
           {order.items.map((item, index) => (
             <tr key={`${item.productName}-${index}`}>
-              <td className="border-b border-gray-100 py-2 pr-3 text-black">
+              <td className="border-b border-gray-100 py-2 pr-3 text-black [overflow-wrap:anywhere]">
                 {item.productName}
                 {item.sku && <span className="text-gray-400 text-xs ml-1">({item.sku})</span>}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-black [overflow-wrap:anywhere]">
                 {item.quantity}
                 {item.unit && <span className="text-gray-400 text-xs ml-1">{item.unit}</span>}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.unitPrice)}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 [overflow-wrap:anywhere]">
                 {item.itemDiscount > 0 ? `-${formatIDR(item.itemDiscount)}` : '—'}
               </td>
-              <td className="border-b border-gray-100 py-2 px-3 text-right text-gray-600 whitespace-nowrap">
-                {item.itemTaxAmount > 0 ? formatIDR(item.itemTaxAmount) : '—'}
-              </td>
-              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black whitespace-nowrap">
+              <td className="border-b border-gray-100 py-2 pl-3 text-right font-medium text-black [overflow-wrap:anywhere]">
                 {formatIDR(item.itemTotal)}
               </td>
             </tr>
@@ -131,15 +134,13 @@ export function SalesOrderA4Template({ order }: { order: SalesOrderView }) {
           </div>
         )}
 
-        {order.taxAmount > 0 &&
-          order.taxes.map((tax, index) => (
-            <div key={`${tax.name}-${tax.percentage}-${index}`} className="flex justify-between py-1 text-gray-600">
-              <span>
-                {tax.name} ({tax.percentage}%)
-              </span>
-              <span>{formatIDR(tax.amount)}</span>
-            </div>
-          ))}
+        {/* Only documents issued while tax rates existed carry tax. */}
+        {order.taxAmount > 0 && (
+          <div className="flex justify-between py-1 text-gray-600">
+            <span>{t('sales.orderTemplate.colTax')}</span>
+            <span>{formatIDR(order.taxAmount)}</span>
+          </div>
+        )}
 
         <div className="flex justify-between font-bold text-lg border-t-2 border-black pt-2 mt-2 text-black">
           <span>{t('common.total')}</span>

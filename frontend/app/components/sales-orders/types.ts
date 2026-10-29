@@ -8,7 +8,6 @@ export type {
   LocationOption,
   ProductSearchResult,
   ServiceLine,
-  TaxRate,
 } from '@/app/components/invoices/types';
 
 export type SalesOrderItemView = {
@@ -20,13 +19,6 @@ export type SalesOrderItemView = {
   itemDiscount: number;
   itemTotal: number;
   lineTotal: number;
-  itemTaxAmount: number;
-};
-
-export type SalesOrderTaxView = {
-  name: string;
-  percentage: number;
-  amount: number;
 };
 
 // Mirrors SalesOrderPrintView from the backend. No validUntil (that's a
@@ -54,8 +46,8 @@ export type SalesOrderView = {
   items: SalesOrderItemView[];
   subtotal: number;
   discount: number;
+  // Only documents issued while tax rates existed carry any.
   taxAmount: number;
-  taxes: SalesOrderTaxView[];
   total: number;
 
   businessName: string;

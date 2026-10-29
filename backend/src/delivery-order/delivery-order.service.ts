@@ -1284,7 +1284,9 @@ export class DeliveryOrderService {
         where,
         include: {
           items: true,
-          salesOrder: { select: { orderNumber: true, customerName: true } },
+          // Where it came from, for the list's links: a sales order, or an invoice shipped directly.
+          salesOrder: { select: { id: true, orderNumber: true, customerName: true } },
+          invoice: { select: { id: true, invoiceNumber: true, status: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,

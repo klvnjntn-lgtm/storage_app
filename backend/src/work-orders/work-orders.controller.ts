@@ -8,11 +8,13 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { WorkOrdersService } from './work-orders.service';
 import { BranchRecord } from '../auth/guards/branch-record.guard';
 import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import {
   AddWorkOrderLineDto,
-  ApproveWorkOrderDto,
   CreateRecommendationDto,
   CreateWorkOrderDto,
+  CreateWorkOrderFromQuotationDto,
   CreateWorkOrderInvoiceDto,
   SetWorkOrderStatusDto,
   UpdateWorkOrderDto,
@@ -32,6 +34,14 @@ export class WorkOrdersController {
   @Get('config')
   config(@CurrentOrg() orgId: string) {
     return this.workOrders.config(orgId);
+  }
+
+  // The Mechanic account's screen (and staff may look too): jobs on the floor, read-only.
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'MECHANIC')
+  @Get('board')
+  board(@CurrentOrg() orgId: string) {
+    return this.workOrders.board(orgId);
   }
 
   // Names only — /payroll/employees is admin-only since it carries pay.
@@ -89,15 +99,16 @@ export class WorkOrdersController {
     return this.workOrders.setStatus(orgId, id, dto.status);
   }
 
-  @Post(':id/approve')
-  approve(@CurrentOrg() orgId: string, @Req() req, @Param('id') id: string, @Body() dto: ApproveWorkOrderDto) {
-    return this.workOrders.approve(orgId, req.user.sub, id, dto.note);
-  }
-
-  // The customer approval link's secret; the page builds the URL.
-  @Post(':id/approval-link')
-  approvalLink(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    return this.workOrders.approvalLink(orgId, id);
+  // A quotation (accepted by the customer or not) becomes a job; an additional quotation joins its
+  // original's job.
+  @Post('from-quotation/:quotationId')
+  fromQuotation(
+    @CurrentOrg() orgId: string,
+    @Req() req,
+    @Param('quotationId') quotationId: string,
+    @Body() dto: CreateWorkOrderFromQuotationDto,
+  ) {
+    return this.workOrders.createFromQuotation(orgId, req.user.sub, quotationId, dto);
   }
 
   @Post(':id/recommendations')

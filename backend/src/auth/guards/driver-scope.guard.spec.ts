@@ -45,4 +45,14 @@ describe('DriverScopeGuard', () => {
       true,
     );
   });
+
+  // The shop PC's mechanic account is held the same way: only its own board.
+  it('holds the mechanic account to routes naming MECHANIC', () => {
+    expect(() => guard.canActivate(ctx('MECHANIC', {}))).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx('MECHANIC', { [ROLES_KEY]: ['ADMIN', 'USER'] }))).toThrow(ForbiddenException);
+    // A driver route isn't the mechanic's, nor the other way round.
+    expect(() => guard.canActivate(ctx('MECHANIC', { [ROLES_KEY]: ['DRIVER'] }))).toThrow(ForbiddenException);
+    expect(() => guard.canActivate(ctx('DRIVER', { [ROLES_KEY]: ['MECHANIC'] }))).toThrow(ForbiddenException);
+    expect(guard.canActivate(ctx('MECHANIC', { [ROLES_KEY]: ['ADMIN', 'USER', 'MECHANIC'] }))).toBe(true);
+  });
 });

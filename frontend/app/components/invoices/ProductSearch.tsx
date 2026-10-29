@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Search, MapPin, MapPinOff, ChevronDown, Check, List, LayoutGrid, ImageOff,
-  Minus, Plus, X, Percent, Pencil, ShoppingCart,
+  Minus, Plus, X, Pencil, ShoppingCart,
 } from 'lucide-react';
-import { DiscountType, LocationOption, ProductSearchResult, TaxRate } from './types';
+import { DiscountType, LocationOption, ProductSearchResult } from './types';
 import { formatIDR } from '@/lib/format';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -18,7 +18,7 @@ function round2(n: number): number {
 }
 
 // A product the user just clicked in the results, held here — not yet in
-// the cart — so its quantity/price/tax/discount can be set before it
+// the cart — so its quantity/price/discount can be set before it
 // joins the real cart (and shows up in CartPanel). Mirrors CartLine's
 // editable fields, minus the location bookkeeping the parent resolves at
 // confirm time.
@@ -27,7 +27,6 @@ type StagedLine = {
   quantity: number;
   unitPrice: number;
   unit: string | null;
-  taxRateIds: string[];
   discountType: DiscountType | null;
   discountValue: number | null;
 };
@@ -43,7 +42,6 @@ export function ProductSearch({
   onAddToCart,
   posModeEnabled,
   allowOversell,
-  taxRates,
   basePriceLevelId = null,
 }: {
   query: string;
@@ -62,7 +60,6 @@ export function ProductSearch({
       quantity: number;
       unitPrice: number;
       unit: string | null;
-      taxRateIds: string[];
       discountType: DiscountType | null;
       discountValue: number | null;
     },
@@ -71,7 +68,6 @@ export function ProductSearch({
   /** Whether lines may exceed stock (the org's WARN/ALLOW stock policy).
    *  Defaults to posModeEnabled for callers that don't pass it. */
   allowOversell?: boolean;
-  taxRates: TaxRate[];
   /** The document's starting price level (customer's, else default). */
   basePriceLevelId?: string | null;
 }) {
@@ -116,13 +112,11 @@ export function ProductSearch({
   }
 
   function selectProduct(product: ProductSearchResult) {
-    const defaultRate = taxRates.find((r) => r.isDefault);
     setStaged({
       product,
       quantity: 1,
       unitPrice: priceAtBase(product).unitPrice ?? 0,
       unit: product.unit ?? null,
-      taxRateIds: defaultRate ? [defaultRate.id] : [],
       discountType: null,
       discountValue: null,
     });
@@ -135,7 +129,6 @@ export function ProductSearch({
       quantity: staged.quantity,
       unitPrice: staged.unitPrice,
       unit: staged.unit,
-      taxRateIds: staged.taxRateIds,
       discountType: staged.discountType,
       discountValue: staged.discountValue,
     });
@@ -155,14 +148,7 @@ export function ProductSearch({
       : 0
     : 0;
   const stagedNet = round2(stagedSubtotal - stagedDiscountAmount);
-  const stagedTaxAmount = staged
-    ? round2(
-        taxRates
-          .filter((r) => staged.taxRateIds.includes(r.id))
-          .reduce((sum, r) => sum + stagedNet * (r.percentage / 100), 0),
-      )
-    : 0;
-  const stagedTotal = round2(stagedNet + stagedTaxAmount);
+  const stagedTotal = stagedNet;
 
   return (
     <div>
@@ -380,40 +366,6 @@ export function ProductSearch({
             }
           />
 
-          {taxRates.length > 0 && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-0.5 mt-1.5">
-              <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                <Percent size={10} strokeWidth={2} />
-                {t('sales.invoiceCart.taxLabel')}
-              </span>
-              {taxRates.map((rate) => {
-                const checked = staged.taxRateIds.includes(rate.id);
-                return (
-                  <label key={rate.id} className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setStaged((prev) => {
-                          if (!prev) return prev;
-                          const has = prev.taxRateIds.includes(rate.id);
-                          return {
-                            ...prev,
-                            taxRateIds: has
-                              ? prev.taxRateIds.filter((id) => id !== rate.id)
-                              : [...prev.taxRateIds, rate.id],
-                          };
-                        })
-                      }
-                      className="w-3.5 h-3.5 accent-blue-600"
-                    />
-                    {rate.name} ({rate.percentage}%)
-                  </label>
-                );
-              })}
-            </div>
-          )}
-
           <div className="flex items-center justify-between mt-3 pt-2 border-t border-blue-500/15">
             <span className="text-sm font-semibold">{formatIDR(stagedTotal)}</span>
             <button
@@ -528,6 +480,13 @@ export function ProductSearch({
                         <span className="text-amber-700"> · {t('sales.productSearch.heldForJobs', { qty: held })}</span>
                       ) : null;
                     })()}
+                    {(() => {
+                      const offered = product.stockByLocation.reduce((sum, l) => sum + (l.offered ?? 0), 0);
+                      const numbers = [...new Set(product.stockByLocation.flatMap((l) => l.offeredOn ?? []))];
+                      return offered > 0 ? (
+                        <span className="text-amber-700"> · {t('sales.productSearch.offeredOn', { qty: offered, numbers: numbers.join(', ') })}</span>
+                      ) : null;
+                    })()}
                   </span>
                 )}
                 {warehouseOps && product.stockByLocation.map((s) => (
@@ -543,6 +502,11 @@ export function ProductSearch({
                     <span className="truncate">
                       {s.locationName}: {s.quantity}
                       {!!s.held && <span className="text-amber-700"> · {t('sales.productSearch.heldForJobs', { qty: s.held })}</span>}
+                      {!!s.offered && (
+                        <span className="text-amber-700">
+                          {' '}· {t('sales.productSearch.offeredOn', { qty: s.offered, numbers: (s.offeredOn ?? []).join(', ') })}
+                        </span>
+                      )}
                     </span>
                   </span>
                 ))}

@@ -4,12 +4,13 @@ import { SendDocumentDialog } from '@/app/components/messaging/SendDocumentDialo
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, Printer, ThumbsUp, Lightbulb, Link2, Wrench, MessageCircle } from 'lucide-react';
+import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, Printer, Lightbulb, Wrench, MessageCircle, FileText, FilePlus2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { formatDMY, parseCalendarDate } from '@/lib/dates';
+import { formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, btnDanger } from '@/app/components/shared/PageFrame';
+import { isOdometerBelowLast } from '@/lib/odometer';
 import WorkOrderForm, { VehicleBadge, formToPayload, type WorkOrderFormValue } from '@/app/components/workshop/WorkOrderForm';
 import Recommendations from '@/app/components/workshop/Recommendations';
 import {
@@ -52,8 +53,6 @@ export default function WorkOrderDetailPage() {
   const [wo, setWo] = useState<WorkOrder | null>(null);
   const [form, setForm] = useState<WorkOrderFormValue | null>(null);
   const [dirty, setDirty] = useState(false);
-  // Read once: "has the estimate lapsed" needn't tick while the page is open.
-  const [now] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,29 +108,11 @@ export default function WorkOrderDetailPage() {
     if (next) apply(next);
   }
 
-  async function approve() {
-    const note = await dialog.prompt(t('workshop.workOrders.approvePrompt'), {
-      confirmLabel: t('workshop.workOrders.approve'),
-    });
-    if (note === null) return;
-    const next = await call(`/work-orders/${params.id}/approve`, 'POST', { note });
-    if (next) apply(next);
-  }
-
-  // The customer approves on their phone; staff paste the link by hand.
-  const [linkNote, setLinkNote] = useState<string | null>(null);
-  async function copyApprovalLink() {
-    const result = await call(`/work-orders/${params.id}/approval-link`, 'POST');
-    if (!result?.token) return;
-    const url = `${window.location.origin}/estimate/${result.token}`;
-    const until = formatDMY(new Date(result.expiresAt));
-    try {
-      await navigator.clipboard.writeText(url);
-      setLinkNote(t('workshop.workOrders.linkCopied', { date: until }));
-    } catch {
-      // No clipboard access (e.g. plain http): show it to copy by hand.
-      await dialog.prompt(t('workshop.workOrders.linkManual'), { defaultValue: url });
-    }
+  // Parts found mid-job are quoted on a further quotation linked to the job's own; converting it adds
+  // its lines here.
+  async function additionalQuotation(originalId: string) {
+    const addition = await call(`/sales-quotations/${originalId}/additions`, 'POST');
+    if (addition?.id) router.push(`/sales/quotations/new?draftId=${addition.id}`);
   }
 
   async function createInvoice() {
@@ -153,23 +134,13 @@ export default function WorkOrderDetailPage() {
 
   const locked = !!wo.invoicedId || wo.status === 'CANCELLED';
 
-  const isEstimate = wo.status === 'ESTIMATE';
-  // Approved later than check-in, i.e. it started as an estimate.
-  const approvedLater =
-    !!wo.approvedAt && new Date(wo.approvedAt).getTime() - new Date(wo.createdAt).getTime() > 60_000;
   const source = wo.followedUp[0];
-  // Past its validity date: the customer's link won't accept an approval.
-  const lapsedOn =
-    isEstimate && wo.validUntil && parseCalendarDate(wo.validUntil).getTime() + 24 * 60 * 60 * 1000 <= now
-      ? formatDMY(parseCalendarDate(wo.validUntil))
-      : null;
+  // The quotation the job was made from (the others are its additions).
+  const originalQuotation = wo.quotations?.find((q) => !q.parentQuotationId) ?? null;
 
   // The next sensible moves from each status; DONE can still be reopened.
-  // An estimate moves on only by approval (its own button).
   const transitions: { to: WorkOrderStatus; label: string; icon: typeof Play }[] =
-    isEstimate
-      ? []
-      : wo.status === 'QUEUED'
+    wo.status === 'QUEUED'
       ? [{ to: 'IN_PROGRESS', label: t('workshop.workOrders.start'), icon: Play }]
       : wo.status === 'IN_PROGRESS'
         ? [
@@ -214,7 +185,7 @@ export default function WorkOrderDetailPage() {
           {/* Prints the saved job — unsaved edits aren't on it. */}
           <Link href={`/workshop/work-orders/${wo.id}/print`} className={btnSecondary}>
             <Printer size={14} />
-            {isEstimate ? t('workshop.workOrders.printEstimate') : t('workshop.workOrders.printSpk')}
+            {t('workshop.workOrders.printSpk')}
           </Link>
         </div>
       }
@@ -226,12 +197,7 @@ export default function WorkOrderDetailPage() {
           </Link>
           <div className="text-xs text-gray-500 flex gap-3 flex-wrap">
             <span>{t('workshop.workOrders.checkedIn', { date: formatDMY(new Date(wo.createdAt)) })}</span>
-            {approvedLater && (
-              <span>
-                {t('workshop.workOrders.approvedOn', { date: formatDMY(new Date(wo.approvedAt!)) })}
-                {wo.approvalNote && ` · ${wo.approvalNote}`}
-              </span>
-            )}
+            {wo.approvalNote && <span>{wo.approvalNote}</span>}
             {wo.completedAt && <span>{t('workshop.workOrders.finishedOn', { date: formatDMY(new Date(wo.completedAt)) })}</span>}
           </div>
         </div>
@@ -281,15 +247,19 @@ export default function WorkOrderDetailPage() {
             </Link>
           </div>
         )}
-        {isEstimate && linkNote && <p className="mt-3 text-sm text-green-800">{linkNote}</p>}
-        {isEstimate && (
-          <p className="mt-3 text-sm text-purple-800 bg-purple-50 border border-purple-200 rounded-md px-3 py-2">
-            {t('workshop.workOrders.estimateHint')}
-          </p>
-        )}
-        {lapsedOn && (
-          <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            {t('workshop.workOrders.estimateLapsed', { date: lapsedOn })}
+        {(wo.quotations?.length ?? 0) > 0 && (
+          <p className="mt-3 text-sm text-gray-700 flex flex-wrap items-center gap-x-1.5">
+            <FileText size={14} className="shrink-0 text-blue-700" />
+            {t('workshop.workOrders.fromQuotations')}
+            {wo.quotations!.map((q, i) => (
+              <span key={q.id}>
+                {i > 0 && ', '}
+                <Link className="underline" href={`/sales/quotations/${q.id}`}>
+                  {q.quotationNumber ?? '—'}
+                </Link>
+                {q.parentQuotationId && ` (${t('workshop.workOrders.addition')}, ${q.status})`}
+              </span>
+            ))}
           </p>
         )}
         {source && (
@@ -313,18 +283,6 @@ export default function WorkOrderDetailPage() {
         )}
         {!wo.invoicedId && (
           <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
-            {isEstimate && (
-              <button type="button" className={btnPrimary} disabled={busy || dirty} onClick={approve}>
-                <ThumbsUp size={14} />
-                {t('workshop.workOrders.approve')}
-              </button>
-            )}
-            {isEstimate && (
-              <button type="button" className={btnSecondary} disabled={busy || dirty} onClick={copyApprovalLink}>
-                <Link2 size={14} />
-                {t('workshop.workOrders.copyLink')}
-              </button>
-            )}
             {transitions.map(({ to, label, icon: Icon }) => (
               <button key={to} type="button" className={btnSecondary} disabled={busy || dirty} onClick={() => setStatus(to)}>
                 <Icon size={14} />
@@ -334,7 +292,13 @@ export default function WorkOrderDetailPage() {
             {wo.status !== 'CANCELLED' && (
               <button type="button" className={btnDanger} disabled={busy} onClick={() => setStatus('CANCELLED')}>
                 <XCircle size={14} />
-                {isEstimate ? t('workshop.workOrders.decline') : t('workshop.workOrders.cancelJob')}
+                {t('workshop.workOrders.cancelJob')}
+              </button>
+            )}
+            {originalQuotation && wo.status !== 'CANCELLED' && (
+              <button type="button" className={btnSecondary} disabled={busy} onClick={() => additionalQuotation(originalQuotation.id)}>
+                <FilePlus2 size={14} />
+                {t('sales.quotationWorkshop.additionalQuotation')}
               </button>
             )}
           </div>
@@ -389,14 +353,13 @@ export default function WorkOrderDetailPage() {
         </p>
         {!locked && (
           <div className="flex gap-2 justify-end">
-            <button type="button" className={btnSecondary} disabled={busy || !dirty} onClick={save}>
+            <button type="button" className={btnSecondary} disabled={busy || !dirty || isOdometerBelowLast(form.odometer, wo.vehicle.odometer)} onClick={save}>
               {busy ? t('workshop.workOrders.saving') : t('workshop.workOrders.save')}
             </button>
             <button
               type="button"
               className={btnPrimary}
-              disabled={busy || form.lines.length === 0 || isEstimate}
-              title={isEstimate ? t('workshop.workOrders.approveFirst') : undefined}
+              disabled={busy || form.lines.length === 0}
               onClick={createInvoice}
             >
               <Receipt size={14} />

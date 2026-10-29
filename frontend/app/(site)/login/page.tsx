@@ -1,5 +1,6 @@
 'use client';
 
+import { homeFor } from '@/lib/roles';
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -146,7 +147,7 @@ function LoginForm() {
     // the dedicated /driver route instead (own minimal layout, no
     // sidebar). Every other role keeps the existing /home redirect.
     const meData = await meRes.json();
-    router.replace(meData?.role === 'DRIVER' ? '/driver' : '/home');
+    router.replace(homeFor(meData?.role));
   }
 
   return (
