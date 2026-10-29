@@ -945,10 +945,13 @@ model SalesQuotation {
 
   // Workshops (WORKSHOP_RMS): the car being quoted for and why it came in — carried to the work order the
   // quotation becomes.
-  vehicleId String?
-  vehicle   Vehicle? @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
-  odometer  Int?
-  complaint String?
+  vehicleId  String?
+  vehicle    Vehicle?  @relation(fields: [vehicleId, organizationId], references: [id, organizationId])
+  odometer   Int?
+  complaint  String?
+  // Workshops: the mechanic expected to do the job — carried to the order, invoice and work order.
+  mechanicId String?
+  mechanic   Employee? @relation("QuotationMechanic", fields: [mechanicId, organizationId], references: [id, organizationId])
 
   // Secret for the customer's approval page (/estimate/<token>), copied by staff into WhatsApp. Reused
   // while valid so a link already sent keeps working; expires 30 days after it was made.
@@ -1080,6 +1083,9 @@ model SalesOrder {
   customerName     String?
   customerPoNumber String? // NEW — customer's own reference/PO number
   vehicleId        String?
+  // Workshops: the mechanic doing the job, from the quotation or picked here; carried to the invoice.
+  mechanicId       String?
+  mechanic         Employee? @relation("SalesOrderMechanic", fields: [mechanicId, organizationId], references: [id, organizationId])
 
   subtotal   Decimal   @default(0) @db.Decimal(12, 2)
   discount   Decimal   @default(0) @db.Decimal(12, 2)
@@ -1707,7 +1713,11 @@ model PurchaseOrder {
   paymentTerms     String?
   // NEW — Accurate GDB import support
   externalId       String? // Accurate PO.POID — stable idempotency key, independent of poNumber
-  orderDate        DateTime?                    @db.Date // Accurate PODATE
+  orderDate        DateTime?                    @db.Date // Accurate PODATE; the PO form's date
+  // The branch ordering (branch staff only work in their own); left out: the receiving location's, else
+  // the first.
+  branchId         String?
+  branch           Branch?                      @relation(fields: [branchId], references: [id])
 
   @@unique([organizationId, poNumber])
   @@unique([organizationId, externalId]) // NEW
@@ -2285,26 +2295,28 @@ enum SalesOrderFormat {
 // ---- Payroll -------------------------------------------------------------
 
 model Employee {
-  id                String      @id @default(uuid())
-  organizationId    String
-  name              String
-  position          String?
+  id                  String           @id @default(uuid())
+  organizationId      String
+  name                String
+  position            String?
   // A mechanic: listed on the Mechanic account and picked on work orders / invoices (only these are
   // offered there). Set by adding the name to the Mechanic account, not typed as a position.
-  isMechanic        Boolean     @default(false)
-  nik               String? // employee ID number
-  bankName          String?
-  bankAccountNumber String?
-  baseSalary        Decimal     @db.Decimal(12, 2)
-  isActive          Boolean     @default(true)
-  createdAt         DateTime    @default(now())
-  archivedAt        DateTime?
-  invoices          Invoice[]   @relation("InvoiceSalesperson") // NEW — inverse relation
-  mechanicInvoices  Invoice[]   @relation("InvoiceMechanic")
-  workOrders        WorkOrder[]
+  isMechanic          Boolean          @default(false)
+  nik                 String? // employee ID number
+  bankName            String?
+  bankAccountNumber   String?
+  baseSalary          Decimal          @db.Decimal(12, 2)
+  isActive            Boolean          @default(true)
+  createdAt           DateTime         @default(now())
+  archivedAt          DateTime?
+  invoices            Invoice[]        @relation("InvoiceSalesperson") // NEW — inverse relation
+  mechanicInvoices    Invoice[]        @relation("InvoiceMechanic")
+  mechanicQuotations  SalesQuotation[] @relation("QuotationMechanic")
+  mechanicSalesOrders SalesOrder[]     @relation("SalesOrderMechanic")
+  workOrders          WorkOrder[]
   // Where their salary is booked in the P&L by branch; null = unassigned.
-  branchId          String?
-  branch            Branch?     @relation(fields: [branchId], references: [id])
+  branchId            String?
+  branch              Branch?          @relation(fields: [branchId], references: [id])
 
   organization     Organization              @relation(fields: [organizationId], references: [id])
   salaryComponents EmployeeSalaryComponent[]
@@ -3462,6 +3474,7 @@ model Branch {
   salesQuotations SalesQuotation[]
   salesOrders     SalesOrder[]
   deliveryOrders  DeliveryOrder[]
+  purchaseOrders  PurchaseOrder[]
 
   @@index([organizationId])
 }

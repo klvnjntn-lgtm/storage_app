@@ -1,14 +1,12 @@
 'use client';
 
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, Bell, CalendarClock, CalendarDays, Landmark, Store, User } from 'lucide-react';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, Bell, Landmark } from 'lucide-react';
 import { SerialButton } from '@/app/components/shared/SerialPicker';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
-import { BankAccount, CartLine, Customer, DiscountType, Employee, InvoiceFormat, ServiceLine } from './types';
+import { BankAccount, CartLine, Customer, DiscountType, InvoiceFormat, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
-import { CustomerPicker } from './CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
-import { useBranches } from '@/lib/hooks/useBranches';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -30,22 +28,14 @@ type ServiceLineWithTotals = ServiceLine & {
   lineTotal: number;
 };
 
-function isDueDateBeforeInvoiceDate(dueDate?: string, invoiceDate?: string): boolean {
-  if (!dueDate) return false;
-  const picked = new Date(dueDate + 'T00:00:00');
-  const reference = invoiceDate ? new Date(invoiceDate + 'T00:00:00') : new Date();
-  reference.setHours(0, 0, 0, 0);
-  return picked < reference;
-}
-
 export function CartPanel({
   format,
   cartLines,
   customerName,
-  setCustomerName,
   customer,
-  setCustomer,
   customerNameRequired,
+  showLines = true,
+  bare = false,
   editingPriceKey,
   setEditingPriceKey,
   changeQty,
@@ -79,10 +69,6 @@ export function CartPanel({
   onSelectVehicle,
   odometer,
   onChangeOdometer,
-  invoiceDate,
-  onChangeInvoiceDate,
-  dueDate,
-  onChangeDueDate,
   reminderOpen,
   onToggleReminderOpen,
   reminderNote,
@@ -105,19 +91,17 @@ export function CartPanel({
   bankAccountId,
   onChangeBankAccountId,
   noBankAccountValue,
-  employees,
   branchId,
-  onChangeBranchId,
-  mechanicId,
-  onChangeMechanicId,
 }: {
   format: InvoiceFormat;
   cartLines: CartLineWithTotals[];
   customerName: string;
-  setCustomerName: (v: string) => void;
   customer: Customer | null;
-  setCustomer: (c: Customer | null) => void;
   customerNameRequired: boolean;
+  // false: the lines and totals are in the page's LineItemsTable (Office layout).
+  showLines?: boolean;
+  // Inside a card the page draws: no border of its own.
+  bare?: boolean;
   editingPriceKey: string | null;
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
@@ -149,8 +133,6 @@ export function CartPanel({
   onSelectVehicle?: (id: string | null) => void;
   odometer?: string;
   onChangeOdometer?: (v: string) => void;
-  invoiceDate?: string;
-  onChangeInvoiceDate?: (v: string) => void;
   customerPoNumber?: string;
   onChangeServiceUnit?: (key: string, value: string) => void;
   onChangeCustomerPoNumber?: (v: string) => void;
@@ -159,8 +141,6 @@ export function CartPanel({
   notes?: string;
   onChangeNotes?: (v: string) => void;
 
-  dueDate?: string;
-  onChangeDueDate?: (v: string) => void;
   reminderOpen?: boolean;
   onToggleReminderOpen?: () => void;
   reminderNote?: string;
@@ -185,20 +165,13 @@ export function CartPanel({
   bankAccountId: string;
   onChangeBankAccountId: (id: string) => void;
   noBankAccountValue: string;
-  // Payroll employees — the mechanic picker's list.
-  employees: Employee[];
-  // The selling branch — only asked of multi-branch businesses.
+  // The selling branch (picked in the page's header): which bank accounts it may use.
   branchId?: string;
-  onChangeBranchId?: (id: string) => void;
-  // Workshops only: who did the work, from the same employee list.
-  mechanicId?: string;
-  onChangeMechanicId?: (id: string) => void;
 }) {
   const { t } = useLanguage();
   const svc = services ?? [];
   // Where stock comes from is shown to warehouse orgs only.
   const warehouseOps = useWarehouseOps();
-  const { branches, multiBranch } = useBranches();
   // A branch's documents can only use shared accounts and its own.
   const usableBankAccounts = branchId
     ? bankAccounts.filter((a) => !a.branchId || a.branchId === branchId)
@@ -215,8 +188,8 @@ export function CartPanel({
     customerNameRequired && (usesStructuredCustomer ? !customer : !customerName.trim());
 
   return (
-    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
-      {cartLines.length > 0 ? (
+    <div className={`@container p-4 h-fit ${bare ? '' : 'border border-blue-500/15 rounded-xl bg-white shadow-sm'}`}>
+      {!showLines ? null : cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
@@ -244,113 +217,6 @@ export function CartPanel({
 
       {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
       <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <CalendarDays size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.invoiceCart.invoiceDateLabel')}
-          </label>
-          <DatePicker
-            clearable
-            value={invoiceDate ?? ''}
-            onChange={(v) => onChangeInvoiceDate?.(v)}
-            placeholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
-            className="w-full"
-          />
-        </div>
-
-        {multiBranch && onChangeBranchId && (
-          <div className="mb-3">
-            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-              <Store size={12} strokeWidth={2} className="text-blue-600/70" />
-              {t('sales.invoiceCart.branchLabel')}
-            </label>
-            <select
-              value={branches.some((b) => b.id === branchId) ? branchId : ''}
-              onChange={(e) => onChangeBranchId(e.target.value)}
-              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-            >
-              <option value="">{t('sales.invoiceCart.branchDefault')}</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {employees.length > 0 && onChangeMechanicId && (
-          <div className="mb-3">
-            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-              <Wrench size={12} strokeWidth={2} className="text-blue-600/70" />
-              {t('sales.invoiceCart.mechanicLabel')}
-            </label>
-            <select
-              value={mechanicId ?? ''}
-              onChange={(e) => onChangeMechanicId(e.target.value)}
-              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-            >
-              <option value="">{t('sales.invoiceCart.noMechanic')}</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                  {e.position ? ` — ${e.position}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {usesStructuredCustomer ? (
-          <CustomerPicker
-            value={customer}
-            onChange={setCustomer}
-            hasError={customerNameRequired && !customer}
-          />
-        ) : (
-          <div className="mb-3">
-            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-              <User size={12} strokeWidth={2} className="text-blue-600/70" />
-              {t('sales.customerPicker.label')}
-            </label>
-            <input
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder={customerNameRequired ? t('sales.invoiceCart.customerNamePlaceholder') : t('sales.invoiceCart.customerNamePlaceholderOptional')}
-              className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
-                customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
-              }`}
-            />
-            {customerNameRequired && !customerName.trim() && (
-              <p className="flex items-start gap-1.5 text-xs text-red-600 mt-1.5">
-                <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-                {t('sales.invoiceCart.customerNameRequired')}
-              </p>
-            )}
-          </div>
-        )}
-
-        {showInvoiceInfoFields && (
-          <div className="mb-3">
-            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-              <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-              {t('sales.invoiceCart.dueDateLabel')}
-            </label>
-            <DatePicker
-              clearable
-              value={dueDate ?? ''}
-              onChange={(v) => onChangeDueDate?.(v)}
-              className="w-full"
-            />
-            {isDueDateBeforeInvoiceDate(dueDate, invoiceDate) && (
-              <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
-                <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
-                {t('sales.invoiceCart.dueDateWarning')}
-              </p>
-            )}
-          </div>
-        )}
-
         {showInvoiceInfoFields && (
           <div className="mb-3">
             <label className="text-xs text-gray-500 mb-1 block">{t('sales.invoiceCart.poNumberLabel')}</label>
@@ -536,6 +402,8 @@ export function CartPanel({
         )}
       </div>
 
+      {showLines && (
+      <>
       {cartLines.length === 0 && svc.length === 0 && (
         <p className="text-sm text-gray-400">{t('sales.invoiceCart.noItemsSelected')}</p>
       )}
@@ -760,6 +628,8 @@ export function CartPanel({
           <span>{formatIDR(total)}</span>
         </div>
       </div>
+      </>
+      )}
 
       <button data-tour="sales-submit"
         onClick={onSubmit}
@@ -771,7 +641,7 @@ export function CartPanel({
           hasEmptyServiceDescription ||
           odometerTooLow
         }
-        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        className={`w-full ${showLines ? 'mt-4' : ''} flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors`}
       >
         <Printer size={16} strokeWidth={2} />
         {printing ? t('sales.invoiceCart.printing') : t('sales.invoiceCart.createAndPrint')}

@@ -2507,6 +2507,7 @@ async createDraftFromQuotation(
             // Workshops: the quoted car and its reading.
             vehicleId: quotation.vehicleId,
             odometer,
+            mechanicId: quotation.mechanicId,
             quotationId: quotation.id,
             bankAccountId: quotation.bankAccountId,
             bankName: quotation.bankName,
@@ -2648,6 +2649,7 @@ async createDraftFromQuotation(
             customerId: order.customerId,
             vehicleId: order.vehicleId,
             odometer,
+            mechanicId: order.mechanicId,
             salesOrderId: order.id,
             bankAccountId: bank.bankAccountId,
             bankName: bank.bankName,

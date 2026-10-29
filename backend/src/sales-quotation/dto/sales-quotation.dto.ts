@@ -133,6 +133,11 @@ bankAccountId?: string | null;
   @IsString()
   complaint?: string | null;
 
+  // Workshops: the mechanic expected to do the job; null clears it.
+  @IsOptional()
+  @IsUUID()
+  mechanicId?: string | null;
+
   @IsEnum(QuotationFormat)
   format: QuotationFormat;
 
@@ -188,6 +193,11 @@ bankAccountId?: string | null;
   @IsOptional()
   @IsString()
   complaint?: string | null;
+
+  // Workshops: the mechanic expected to do the job; null clears it.
+  @IsOptional()
+  @IsUUID()
+  mechanicId?: string | null;
 
   @IsOptional()
   @IsEnum(QuotationFormat)

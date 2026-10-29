@@ -1,8 +1,13 @@
 'use client';
 
 import { DocumentLayoutToggle } from '@/app/components/shared/DocumentLayoutToggle';
-import { documentGridClass, documentOrder, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
-import { BranchPicker } from '@/app/components/shared/BranchFilter';
+import { documentGridClass, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
+import { DocumentHeader } from '@/app/components/shared/DocumentHeader';
+import { LineItemsTable } from '@/app/components/shared/LineItemsTable';
+import { describeSalesProduct, salesTableLines, searchSalesProducts } from '@/app/components/shared/salesLineTable';
+import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
+import { useHasModule } from '@/lib/hooks/useHasModule';
+import { toCalendarDateString } from '@/lib/dates';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -86,7 +91,13 @@ function SalesOrderFormPageInner() {
   // The document's price level: the customer's, else the org default.
   const basePriceLevelId = customer?.priceLevelId ?? defaultLevelId;
   const [customerPoNumber, setCustomerPoNumber] = useState('');
-  const [orderDate, setOrderDate] = useState('');
+  const [orderDate, setOrderDate] = useState(() => toCalendarDateString(new Date()));
+  // Workshops: the mechanic doing the job, carried to the invoice.
+  const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
+  const [mechanicId, setMechanicId] = useState('');
+  // Settings → Stock Enforcement (Invoice POS without Inventory Ops): anything but Block lets an order
+  // go past what's in stock. With Inventory Ops stock is always counted strictly.
+  const [stockPolicy, setStockPolicy] = useState<'BLOCK' | 'WARN' | 'ALLOW'>('BLOCK');
 
   // --- product search (mirrors invoices/new & quotations/new) ---
   const [query, setQuery] = useState('');
@@ -94,6 +105,7 @@ function SalesOrderFormPageInner() {
   const [searching, setSearching] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
   const warehouseOps = useWarehouseOps();
+  const allowOversell = !warehouseOps && stockPolicy !== 'BLOCK';
 
   // --- cart ---
   const [cart, setCart] = useState<Record<string, CartLine>>({});
@@ -124,22 +136,29 @@ function SalesOrderFormPageInner() {
   const customerRef = useRef(customer);
   const customerPoNumberRef = useRef(customerPoNumber);
   const orderDateRef = useRef(orderDate);
+  const mechanicIdRef = useRef(mechanicId);
   useEffect(() => {
     cartRef.current = cart;
     servicesRef.current = services;
     customerRef.current = customer;
     customerPoNumberRef.current = customerPoNumber;
     orderDateRef.current = orderDate;
-  }, [cart, services, customer, customerPoNumber, orderDate]);
+    mechanicIdRef.current = mechanicId;
+  }, [cart, services, customer, customerPoNumber, orderDate, mechanicId]);
 
   useEffect(() => {
     (async () => {
-      const [locRes] = await Promise.all([
+      const [locRes, settingsRes] = await Promise.all([
         apiFetch('/locations'),
+        apiFetch('/organization/settings'),
       ]);
       if (locRes.ok) {
         const data: LocationOption[] = await locRes.json();
         setLocations(data);
+      }
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        setStockPolicy(settings.stockPolicy ?? 'BLOCK');
       }
     })();
   }, [urlDraftId]);
@@ -147,7 +166,8 @@ function SalesOrderFormPageInner() {
   function resetFormState() {
     setCustomer(null);
     setCustomerPoNumber('');
-    setOrderDate('');
+    setOrderDate(toCalendarDateString(new Date()));
+    setMechanicId('');
     setServices([]);
     setCart({});
     setQuery('');
@@ -172,6 +192,7 @@ function SalesOrderFormPageInner() {
       setCustomer(o.customer ? { id: o.customerId, ...o.customer } : null);
       setCustomerPoNumber(o.customerPoNumber ?? '');
       setOrderDate(o.orderDate ? String(o.orderDate).slice(0, 10) : '');
+      setMechanicId(o.mechanicId ?? '');
 
       const restoredCart: Record<string, CartLine> = {};
       const restoredServices: ServiceLine[] = [];
@@ -286,14 +307,14 @@ function SalesOrderFormPageInner() {
     },
   ): boolean {
     setError('');
-    // Same rules as the invoice cart, minus overselling. Without warehouse
+    // Same rules as the invoice cart, overselling as the stock policy says. Without warehouse
     // ops everything comes from CENTRE, unasked.
     const placed = resolveCartTarget(
       cart,
       product,
       details.quantity,
       warehouseOps ? locationFilter : (defaultLocation(locations) ?? null),
-      false,
+      allowOversell,
       { locationHidden: !warehouseOps },
     );
     if (!placed.ok) {
@@ -336,8 +357,24 @@ function SalesOrderFormPageInner() {
         return rest;
       }
       const available = stockAtLineLocation(line);
-      if (nextQty > available) return prev;
+      if (!allowOversell && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
+    });
+  }
+
+  // The table types a quantity rather than stepping it.
+  function setQty(key: string, qty: number) {
+    const line = cart[key];
+    if (line) changeQty(key, qty - line.quantity);
+  }
+
+  function addFromTable(product: ProductSearchResult) {
+    addToCart(product, {
+      quantity: 1,
+      unitPrice: resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice ?? 0,
+      unit: product.unit ?? null,
+      discountType: null,
+      discountValue: null,
     });
   }
 
@@ -525,7 +562,8 @@ function SalesOrderFormPageInner() {
       customerId: customer?.id,
       customerName: customer?.name,
       customerPoNumber: customerPoNumber.trim() || undefined,
-      orderDate: orderDate || undefined,
+      orderDate: orderDateRef.current || undefined,
+      ...(hasWorkshopRms && { mechanicId: mechanicIdRef.current || null }),
       items: [...productItems, ...serviceItems],
     };
   }
@@ -589,7 +627,7 @@ function SalesOrderFormPageInner() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, services, customer, customerPoNumber, orderDate]);
+  }, [cart, services, customer, customerPoNumber, orderDate, mechanicId]);
 
   useEffect(() => {
     return () => {
@@ -662,6 +700,61 @@ function SalesOrderFormPageInner() {
     }
   }
 
+  // Office: one document card — header, lines and the submit. Cashier: the header over search + cart.
+  const header = (
+    <DocumentHeader
+      bare={layout === 'office'}
+      date={orderDate}
+      onDateChange={setOrderDate}
+      party={<CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />}
+      mechanic={hasWorkshopRms ? { value: mechanicId, onChange: setMechanicId } : undefined}
+      branch={{ value: branchId, onChange: setBranchId }}
+      fields={
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 block">{t('sales.orderCart.poNumber')}</label>
+          <input
+            type="text"
+            value={customerPoNumber}
+            onChange={(e) => setCustomerPoNumber(e.target.value)}
+            placeholder={t('common.optional')}
+            className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+          />
+        </div>
+      }
+    />
+  );
+  const panel = (
+    <SalesOrderCartPanel
+      bare={layout === 'office'}
+      showLines={layout === 'retail'}
+      cartLines={cartLines}
+      customer={customer}
+      editingPriceKey={editingPriceKey}
+      setEditingPriceKey={setEditingPriceKey}
+      changeQty={changeQty}
+      changeUnitPrice={changeUnitPrice}
+      onChangePriceLevel={changePriceLevel}
+      removeFromCart={removeFromCart}
+      stockAtLineLocation={stockAtLineLocation}
+      subtotal={subtotal}
+      discount={discount}
+      distinctLocationNames={distinctLocationNames}
+      onSubmit={handleSubmit}
+      saving={saving}
+      error={error}
+      onChangeLineDiscount={changeLineDiscount}
+      onChangeServiceDiscount={changeServiceDiscount}
+      onApplyDiscountToAll={applyDiscountToAllLines}
+      total={total}
+      services={serviceLinesWithTotals}
+      onAddService={addService}
+      onChangeServiceDescription={changeServiceDescription}
+      onChangeServicePrice={changeServicePrice}
+      onChangeServiceUnit={changeServiceUnit}
+      onRemoveService={removeService}
+    />
+  );
+
   if (loading) {
     return (
       <main
@@ -719,55 +812,63 @@ function SalesOrderFormPageInner() {
         </div>
       </div>
 
-      <div className={`max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 ${documentGridClass(layout)}`}>
-        <ProductSearch
-          query={query}
-          setQuery={setQuery}
-          results={results}
-          searching={searching}
-          locations={locations}
-          locationFilter={locationFilter}
-          onSelectLocationFilter={selectLocationFilter}
-          onAddToCart={addToCart}
-          posModeEnabled={false}
-          basePriceLevelId={basePriceLevelId}
-        />
-
-        <div ref={cartPanelRef} className={`scroll-mt-24 ${layout === 'office' ? documentOrder : ''}`}>
-          <BranchPicker value={branchId} onChange={setBranchId} />
-          <SalesOrderCartPanel
-            cartLines={cartLines}
-            customer={customer}
-            setCustomer={setCustomer}
-            customerPoNumber={customerPoNumber}
-            setCustomerPoNumber={setCustomerPoNumber}
-            orderDate={orderDate}
-            setOrderDate={setOrderDate}
-            editingPriceKey={editingPriceKey}
-            setEditingPriceKey={setEditingPriceKey}
-            changeQty={changeQty}
-            changeUnitPrice={changeUnitPrice}
-            onChangePriceLevel={changePriceLevel}
-            removeFromCart={removeFromCart}
-            stockAtLineLocation={stockAtLineLocation}
-            subtotal={subtotal}
-            discount={discount}
-            distinctLocationNames={distinctLocationNames}
-            onSubmit={handleSubmit}
-            saving={saving}
-            error={error}
-            onChangeLineDiscount={changeLineDiscount}
-            onChangeServiceDiscount={changeServiceDiscount}
-            onApplyDiscountToAll={applyDiscountToAllLines}
-            total={total}
-            services={serviceLinesWithTotals}
-            onAddService={addService}
-            onChangeServiceDescription={changeServiceDescription}
-            onChangeServicePrice={changeServicePrice}
-            onChangeServiceUnit={changeServiceUnit}
-            onRemoveService={removeService}
-          />
-        </div>
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 space-y-6">
+        {layout === 'office' ? (
+          <div
+            ref={cartPanelRef}
+            className="scroll-mt-24 border border-blue-500/15 rounded-xl bg-white shadow-sm divide-y divide-blue-500/15"
+          >
+            {header}
+            <LineItemsTable
+              bare
+              lines={salesTableLines({
+                cartLines,
+                services: serviceLinesWithTotals,
+                // Order prices are typed freely here, as in the cart.
+                posPricingEnabled: true,
+                showLocation: warehouseOps,
+                noPriceLabel: t('common.lineTable.noPrice'),
+                onChangePriceLevel: changePriceLevel,
+              })}
+              search={searchSalesProducts}
+              describe={(p) => describeSalesProduct(p, (qty) => t('common.lineTable.inStock', { qty }), !allowOversell)}
+              onPick={addFromTable}
+              onChangeQty={(key, qty) => (cart[key] ? setQty(key, qty) : undefined)}
+              onChangePrice={(key, raw) => (cart[key] ? changeUnitPrice(key, raw) : changeServicePrice(key, raw))}
+              onChangeDescription={changeServiceDescription}
+              onChangeUnit={changeServiceUnit}
+              onChangeDiscount={(key, type, raw) =>
+                cart[key] ? changeLineDiscount(key, type, raw) : changeServiceDiscount(key, type, raw)
+              }
+              onRemove={(key) => (cart[key] ? removeFromCart(key) : removeService(key))}
+              onAddService={addService}
+              totals={{ subtotal, discount, total }}
+            />
+            {panel}
+          </div>
+        ) : (
+          <>
+            {header}
+            <div className={documentGridClass(layout)}>
+              <ProductSearch
+                query={query}
+                setQuery={setQuery}
+                results={results}
+                searching={searching}
+                locations={locations}
+                locationFilter={locationFilter}
+                onSelectLocationFilter={selectLocationFilter}
+                onAddToCart={addToCart}
+                posModeEnabled={false}
+                allowOversell={allowOversell}
+                basePriceLevelId={basePriceLevelId}
+              />
+              <div ref={cartPanelRef} className="scroll-mt-24">
+                {panel}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {totalLineCount > 0 && (

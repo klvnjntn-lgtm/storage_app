@@ -166,11 +166,17 @@ export class SalesQuotationService {
   }
 
   // Only the workshop fields the request sent; null / '' clears one.
-  private workshopFields(dto: { vehicleId?: string | null; odometer?: number | null; complaint?: string | null }) {
+  private workshopFields(dto: {
+    vehicleId?: string | null;
+    odometer?: number | null;
+    complaint?: string | null;
+    mechanicId?: string | null;
+  }) {
     return {
       ...(dto.vehicleId !== undefined && { vehicleId: dto.vehicleId || null }),
       ...(dto.odometer !== undefined && { odometer: dto.odometer ?? null }),
       ...(dto.complaint !== undefined && { complaint: dto.complaint?.trim() || null }),
+      ...(dto.mechanicId !== undefined && { mechanicId: dto.mechanicId || null }),
     };
   }
 
@@ -840,6 +846,7 @@ export class SalesQuotationService {
           customerName: original.customerName,
           customerPoNumber: original.customerPoNumber,
           vehicleId: original.vehicleId,
+          mechanicId: original.mechanicId,
           format: original.format,
           quotationDate: new Date(),
           termsAndConditions: original.termsAndConditions,

@@ -1,15 +1,13 @@
 'use client';
 
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
-import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, CalendarClock, FileSignature, Landmark } from 'lucide-react';
+import { Minus, Plus, Trash2, Printer, AlertCircle, MapPin, Pencil, Wrench, X, FileSignature, Landmark } from 'lucide-react';
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { BankAccount, CartLine, Customer, DiscountType, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
-import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
-import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
 
 type CartLineWithTotals = CartLine & {
@@ -30,7 +28,8 @@ type ServiceLineWithTotals = ServiceLine & {
 export function QuotationCartPanel({
   cartLines,
   customer,
-  setCustomer,
+  showLines = true,
+  bare = false,
   editingPriceKey,
   setEditingPriceKey,
   changeQty,
@@ -42,8 +41,6 @@ export function QuotationCartPanel({
   discount,
   distinctLocationNames,
   onChangeServiceUnit,
-  validUntil,
-  onChangeValidUntil,
   termsAndConditions,
   onChangeTermsAndConditions,
   onSubmit,
@@ -66,8 +63,13 @@ export function QuotationCartPanel({
   noBankAccountValue,
 }: {
   cartLines: CartLineWithTotals[];
+  // Picked in the page's DocumentHeader; the panel only needs it to allow submit.
   customer: Customer | null;
-  setCustomer: (c: Customer | null) => void;
+  // false: the lines and totals are in the page's LineItemsTable (Office layout) — the panel keeps the
+  // remaining fields and the submit.
+  showLines?: boolean;
+  // Inside a card the page draws: no border of its own.
+  bare?: boolean;
   editingPriceKey: string | null;
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
@@ -79,8 +81,6 @@ export function QuotationCartPanel({
   subtotal: number;
   discount: number;
   distinctLocationNames: string[];
-  validUntil: string;
-  onChangeValidUntil: (v: string) => void;
   termsAndConditions: string;
   onChangeTermsAndConditions: (v: string) => void;
   onSubmit: () => void;
@@ -116,8 +116,8 @@ export function QuotationCartPanel({
   const warehouseOps = useWarehouseOps();
 
   return (
-    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
-      {cartLines.length > 0 ? (
+    <div className={`@container p-4 h-fit ${bare ? '' : 'border border-blue-500/15 rounded-xl bg-white shadow-sm'}`}>
+      {!showLines ? null : cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
           <MapPin size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-blue-600/70" />
@@ -140,21 +140,6 @@ export function QuotationCartPanel({
 
       {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
       <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
-        <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
-
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
-            {t('sales.quotationCart.validUntilLabel')}
-          </label>
-          <DatePicker
-            clearable
-            value={validUntil}
-            onChange={(v) => onChangeValidUntil(v)}
-            className="w-full"
-          />
-        </div>
-
         <div className="mb-3">
           <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
             <FileSignature size={12} strokeWidth={2} className="text-blue-600/70" />
@@ -195,6 +180,8 @@ export function QuotationCartPanel({
         )}
       </div>
 
+      {showLines && (
+      <>
       {cartLines.length === 0 && services.length === 0 && (
         <p className="text-sm text-gray-400">{t('sales.quotationCart.noItemsSelected')}</p>
       )}
@@ -397,7 +384,10 @@ export function QuotationCartPanel({
           })}
         </div>
       </div>
+      </>
+      )}
 
+      {showLines && (
       <div className="border-t border-blue-500/15 mt-3 pt-3 space-y-1">
         <div className="flex justify-between items-center text-sm text-gray-600">
           <span>{t('common.subtotal')}</span>
@@ -414,6 +404,7 @@ export function QuotationCartPanel({
           <span>{formatIDR(total)}</span>
         </div>
       </div>
+      )}
 
       <button data-tour="sales-submit"
         onClick={onSubmit}

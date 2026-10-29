@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Car, Plus, Trash2, Wrench, Package, Building2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -54,7 +54,7 @@ export function useMechanics() {
 
 // Without POS pricing a part is always invoiced at the catalogue price,
 // so its price box is locked (the server drops a typed one too).
-function usePosPricing() {
+export function usePosPricing() {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     apiFetch('/work-orders/config')
@@ -66,17 +66,20 @@ function usePosPricing() {
 }
 
 // Job details + parts/labour lines. Shared by the new and detail pages;
-// `readOnly` once the job is invoiced or cancelled.
+// `readOnly` once the job is invoiced or cancelled. `inDocument` (the new page's single document card):
+// just the job's details — the mechanic and branch are in its header, the lines in its table.
 export default function WorkOrderForm({
   value,
   onChange,
   readOnly,
   vehicleOdometer,
+  inDocument,
 }: {
   value: WorkOrderFormValue;
   onChange: (next: WorkOrderFormValue) => void;
   readOnly?: boolean;
   vehicleOdometer?: number | null;
+  inDocument?: boolean;
 }) {
   const { t } = useLanguage();
   const mechanics = useMechanics();
@@ -94,10 +97,12 @@ export default function WorkOrderForm({
     set({ lines: value.lines.map((l) => (l.key === key ? ({ ...l, ...patch } as DraftLine) : l)) });
   }
 
+  const Details = inDocument ? DocumentSection : Card;
   return (
     <>
-      <Card title={t('workshop.workOrders.jobDetails')}>
+      <Details title={t('workshop.workOrders.jobDetails')}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {!inDocument && (
           <label className="block">
             <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.mechanic')}</span>
             <select
@@ -118,7 +123,8 @@ export default function WorkOrderForm({
               <span className="text-xs text-gray-400 mt-1 block">{t('workshop.workOrders.noMechanics')}</span>
             )}
           </label>
-          {multiBranch && (
+          )}
+          {multiBranch && !inDocument && (
             <label className="block">
               <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.branch')}</span>
               <select
@@ -228,8 +234,9 @@ export default function WorkOrderForm({
             </button>
           )
         )}
-      </Card>
+      </Details>
 
+      {!inDocument && (
       <Card title={t('workshop.workOrders.partsAndLabour')}>
         {value.lines.length === 0 && <p className="text-sm text-gray-400 mb-3">{t('workshop.workOrders.noLines')}</p>}
         <div className="space-y-2">
@@ -362,7 +369,18 @@ export default function WorkOrderForm({
           </div>
         )}
       </Card>
+      )}
     </>
+  );
+}
+
+// Card's heading and spacing without its border, for a section inside a card the page draws.
+function DocumentSection({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <section className="p-4">
+      {title && <h2 className="text-sm font-semibold mb-3">{title}</h2>}
+      {children}
+    </section>
   );
 }
 

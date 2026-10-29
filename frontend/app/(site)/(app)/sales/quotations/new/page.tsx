@@ -1,12 +1,17 @@
 'use client';
 
 import { DocumentLayoutToggle } from '@/app/components/shared/DocumentLayoutToggle';
-import { documentGridClass, documentOrder, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
-import { BranchPicker } from '@/app/components/shared/BranchFilter';
+import { documentGridClass, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
+import { DocumentHeader } from '@/app/components/shared/DocumentHeader';
+import { LineItemsTable } from '@/app/components/shared/LineItemsTable';
+import { describeSalesProduct, salesTableLines, searchSalesProducts } from '@/app/components/shared/salesLineTable';
+import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
+import { toCalendarDateString } from '@/lib/dates';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { FileText, ShoppingCart } from 'lucide-react';
+import { CalendarClock, FileText, ShoppingCart } from 'lucide-react';
+import DatePicker from '@/app/components/shared/DatePicker';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { ProductSearch } from '@/app/components/invoices/ProductSearch';
@@ -91,16 +96,21 @@ function QuotationFormPageInner() {
   const [branchId, setBranchId] = useState('');
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [posPricingEnabled, setPosPricingEnabled] = useState<boolean>(false);
+  // Settings → Stock Enforcement (Invoice POS without Inventory Ops): anything but Block lets a quote
+  // go past what's in stock. With Inventory Ops stock is always counted strictly.
+  const [stockPolicy, setStockPolicy] = useState<'BLOCK' | 'WARN' | 'ALLOW'>('BLOCK');
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const { defaultLevelId, activeLevelIds } = usePriceLevels();
   // The document's price level: the customer's, else the org default.
   const basePriceLevelId = customer?.priceLevelId ?? defaultLevelId;
+  const [quotationDate, setQuotationDate] = useState(() => toCalendarDateString(new Date()));
   const [validUntil, setValidUntil] = useState('');
   const [termsAndConditions, setTermsAndConditions] = useState('');
   // Workshops: the car, odometer and complaint, carried to the work order.
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const [workshop, setWorkshop] = useState<WorkshopQuote>(EMPTY_WORKSHOP_QUOTE);
+  const [mechanicId, setMechanicId] = useState('');
   // The picked car's last odometer reading; a lower one holds the submit (the backend refuses it).
   const [lastOdometer, setLastOdometer] = useState<number | null>(null);
   const odometerTooLow = hasWorkshopRms && !!workshop.vehicleId && isOdometerBelowLast(workshop.odometer, lastOdometer);
@@ -114,6 +124,7 @@ function QuotationFormPageInner() {
   const [searching, setSearching] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
   const warehouseOps = useWarehouseOps();
+  const allowOversell = !warehouseOps && stockPolicy !== 'BLOCK';
 
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [editingPriceKey, setEditingPriceKey] = useState<string | null>(null);
@@ -144,6 +155,8 @@ function QuotationFormPageInner() {
   const termsAndConditionsRef = useRef(termsAndConditions);
   const bankAccountIdRef = useRef(bankAccountId);
   const workshopRef = useRef(workshop);
+  const mechanicIdRef = useRef(mechanicId);
+  const quotationDateRef = useRef(quotationDate);
   useEffect(() => {
     cartRef.current = cart;
     servicesRef.current = services;
@@ -152,7 +165,9 @@ function QuotationFormPageInner() {
     termsAndConditionsRef.current = termsAndConditions;
     bankAccountIdRef.current = bankAccountId;
     workshopRef.current = workshop;
-  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId, workshop]);
+    mechanicIdRef.current = mechanicId;
+    quotationDateRef.current = quotationDate;
+  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId, workshop, mechanicId, quotationDate]);
 
   useEffect(() => {
     (async () => {
@@ -168,6 +183,7 @@ function QuotationFormPageInner() {
       if (settingsRes.ok) {
         const settings = await settingsRes.json();
         setPosPricingEnabled(!!settings.posPricingEnabled);
+        setStockPolicy(settings.stockPolicy ?? 'BLOCK');
       }
       if (bankRes.ok) {
         const accounts = await bankRes.json();
@@ -188,6 +204,8 @@ function QuotationFormPageInner() {
 
   function resetFormState() {
     setCustomer(null);
+    setQuotationDate(toCalendarDateString(new Date()));
+    setMechanicId('');
     setValidUntil('');
     setTermsAndConditions('');
     setWorkshop(EMPTY_WORKSHOP_QUOTE);
@@ -206,6 +224,8 @@ function QuotationFormPageInner() {
       const q = await res.json();
       setCustomer(q.customer ? { id: q.customerId, ...q.customer } : null);
       setValidUntil(q.validUntil ? q.validUntil.slice(0, 10) : '');
+      if (q.quotationDate) setQuotationDate(q.quotationDate.slice(0, 10));
+      setMechanicId(q.mechanicId ?? '');
       setTermsAndConditions(q.termsAndConditions ?? '');
       setWorkshop({
         vehicleId: q.vehicleId ?? null,
@@ -329,14 +349,14 @@ function QuotationFormPageInner() {
     },
   ): boolean {
     setError('');
-    // Same rules as the invoice cart, minus overselling. Without warehouse
+    // Same rules as the invoice cart, overselling as the stock policy says. Without warehouse
     // ops everything comes from CENTRE, unasked.
     const placed = resolveCartTarget(
       cart,
       product,
       details.quantity,
       warehouseOps ? locationFilter : (defaultLocation(locations) ?? null),
-      false,
+      allowOversell,
       { locationHidden: !warehouseOps },
     );
     if (!placed.ok) {
@@ -379,8 +399,24 @@ function QuotationFormPageInner() {
         return rest;
       }
       const available = stockAtLineLocation(line);
-      if (nextQty > available) return prev;
+      if (!allowOversell && nextQty > available) return prev;
       return { ...prev, [key]: { ...line, quantity: nextQty } };
+    });
+  }
+
+  // The table types a quantity rather than stepping it.
+  function setQty(key: string, qty: number) {
+    const line = cart[key];
+    if (line) changeQty(key, qty - Number(line.quantity));
+  }
+
+  function addFromTable(product: ProductSearchResult) {
+    addToCart(product, {
+      quantity: 1,
+      unitPrice: resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice ?? 0,
+      unit: product.unit ?? null,
+      discountType: null,
+      discountValue: null,
     });
   }
 
@@ -569,10 +605,11 @@ function QuotationFormPageInner() {
       format: 'A4' as const,
       customerId: customer?.id,
       customerName: customer?.name,
+      quotationDate: quotationDateRef.current || undefined,
       validUntil: validUntil || undefined,
       termsAndConditions: termsAndConditions.trim() || undefined,
       ...buildBankAccountField(),
-      ...(hasWorkshopRms && workshopPayload(workshopRef.current)),
+      ...(hasWorkshopRms && { ...workshopPayload(workshopRef.current), mechanicId: mechanicIdRef.current || null }),
       items: [...productItems, ...serviceItems],
     };
   }
@@ -636,7 +673,7 @@ function QuotationFormPageInner() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId, workshop]);
+  }, [cart, services, customer, validUntil, termsAndConditions, bankAccountId, workshop, mechanicId, quotationDate]);
 
   useEffect(() => {
     return () => {
@@ -710,6 +747,78 @@ function QuotationFormPageInner() {
     }
   }
 
+  // Office: one document card — header, lines and summary. Cashier: the header over search + cart.
+  const header = (
+    <DocumentHeader
+      bare={layout === 'office'}
+      date={quotationDate}
+      onDateChange={setQuotationDate}
+      party={<CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />}
+      mechanic={hasWorkshopRms ? { value: mechanicId, onChange: setMechanicId } : undefined}
+      branch={{ value: branchId, onChange: setBranchId }}
+      fields={
+        <div className="mb-3">
+          <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+            <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
+            {t('sales.quotationCart.validUntilLabel')}
+          </label>
+          <DatePicker clearable value={validUntil} onChange={setValidUntil} className="w-full" />
+        </div>
+      }
+    >
+      {hasWorkshopRms && (
+        // Keyed on the customer: another customer's cars are another list, and the picked one is cleared.
+        <WorkshopQuoteFields
+          key={customer?.id ?? 'none'}
+          customerId={customer?.id}
+          value={workshop}
+          onChange={setWorkshop}
+          onLastOdometerChange={setLastOdometer}
+        />
+      )}
+    </DocumentHeader>
+  );
+  const panel = (
+    <QuotationCartPanel
+      bare={layout === 'office'}
+      cartLines={cartLines}
+      customer={customer}
+      showLines={layout === 'retail'}
+      editingPriceKey={editingPriceKey}
+      setEditingPriceKey={setEditingPriceKey}
+      changeQty={changeQty}
+      onChangeServiceUnit={changeServiceUnit}
+      changeUnitPrice={changeUnitPrice}
+      onChangePriceLevel={changePriceLevel}
+      removeFromCart={removeFromCart}
+      stockAtLineLocation={stockAtLineLocation}
+      subtotal={subtotal}
+      discount={discount}
+      distinctLocationNames={distinctLocationNames}
+      termsAndConditions={termsAndConditions}
+      onChangeTermsAndConditions={setTermsAndConditions}
+      onSubmit={handleSubmit}
+      submitBlocked={odometerTooLow}
+      printing={printing}
+      error={error}
+      posPricingEnabled={posPricingEnabled}
+      onChangeLineDiscount={changeLineDiscount}
+      onChangeServiceDiscount={changeServiceDiscount}
+      onApplyDiscountToAll={applyDiscountToAllLines}
+      total={total}
+      services={serviceLinesWithTotals}
+      onAddService={addService}
+      onChangeServiceDescription={changeServiceDescription}
+      onChangeServicePrice={changeServicePrice}
+      onRemoveService={removeService}
+      // Bank-account picker, same shape as invoices/new.
+      bankAccounts={bankAccounts}
+      bankAccountId={bankAccountId}
+      onChangeBankAccountId={setBankAccountId}
+      noBankAccountValue={NO_BANK_ACCOUNT}
+    />
+  );
+
   if (loading) {
     return (
       <main
@@ -767,72 +876,62 @@ function QuotationFormPageInner() {
         </div>
       </div>
 
-      <div className={`max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 ${documentGridClass(layout)}`}>
-        <ProductSearch
-          query={query}
-          setQuery={setQuery}
-          results={results}
-          searching={searching}
-          locations={locations}
-          locationFilter={locationFilter}
-          onSelectLocationFilter={selectLocationFilter}
-          onAddToCart={addToCart}
-          posModeEnabled={false}
-          basePriceLevelId={basePriceLevelId}
-        />
-
-        <div ref={cartPanelRef} className={`scroll-mt-24 ${layout === 'office' ? documentOrder : ''}`}>
-          <BranchPicker value={branchId} onChange={setBranchId} />
-          {hasWorkshopRms && (
-            // Keyed on the customer: another customer's cars are another list, and the picked one is cleared.
-            <WorkshopQuoteFields
-              key={customer?.id ?? 'none'}
-              customerId={customer?.id}
-              value={workshop}
-              onChange={setWorkshop}
-              onLastOdometerChange={setLastOdometer}
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 space-y-6">
+        {layout === 'office' ? (
+          <div
+            ref={cartPanelRef}
+            className="scroll-mt-24 border border-blue-500/15 rounded-xl bg-white shadow-sm divide-y divide-blue-500/15"
+          >
+            {header}
+            <LineItemsTable
+              bare
+              lines={salesTableLines({
+                cartLines,
+                services: serviceLinesWithTotals,
+                posPricingEnabled,
+                showLocation: warehouseOps,
+                noPriceLabel: t('common.lineTable.noPrice'),
+                onChangePriceLevel: changePriceLevel,
+              })}
+              search={searchSalesProducts}
+              describe={(p) => describeSalesProduct(p, (qty) => t('common.lineTable.inStock', { qty }), !allowOversell)}
+              onPick={addFromTable}
+              onChangeQty={(key, qty) => (cart[key] ? setQty(key, qty) : undefined)}
+              onChangePrice={(key, raw) => (cart[key] ? changeUnitPrice(key, raw) : changeServicePrice(key, raw))}
+              onChangeDescription={changeServiceDescription}
+              onChangeUnit={changeServiceUnit}
+              onChangeDiscount={(key, type, raw) =>
+                cart[key] ? changeLineDiscount(key, type, raw) : changeServiceDiscount(key, type, raw)
+              }
+              onRemove={(key) => (cart[key] ? removeFromCart(key) : removeService(key))}
+              onAddService={addService}
+              totals={{ subtotal, discount, total }}
             />
-          )}
-          <QuotationCartPanel
-            cartLines={cartLines}
-            customer={customer}
-            setCustomer={setCustomer}
-            editingPriceKey={editingPriceKey}
-            setEditingPriceKey={setEditingPriceKey}
-            changeQty={changeQty}
-            onChangeServiceUnit={changeServiceUnit}
-            changeUnitPrice={changeUnitPrice}
-            onChangePriceLevel={changePriceLevel}
-            removeFromCart={removeFromCart}
-            stockAtLineLocation={stockAtLineLocation}
-            subtotal={subtotal}
-            discount={discount}
-            distinctLocationNames={distinctLocationNames}
-            validUntil={validUntil}
-            onChangeValidUntil={setValidUntil}
-            termsAndConditions={termsAndConditions}
-            onChangeTermsAndConditions={setTermsAndConditions}
-            onSubmit={handleSubmit}
-            submitBlocked={odometerTooLow}
-            printing={printing}
-            error={error}
-            posPricingEnabled={posPricingEnabled}
-            onChangeLineDiscount={changeLineDiscount}
-            onChangeServiceDiscount={changeServiceDiscount}
-            onApplyDiscountToAll={applyDiscountToAllLines}
-            total={total}
-            services={serviceLinesWithTotals}
-            onAddService={addService}
-            onChangeServiceDescription={changeServiceDescription}
-            onChangeServicePrice={changeServicePrice}
-            onRemoveService={removeService}
-            // Bank-account picker, same shape as invoices/new.
-            bankAccounts={bankAccounts}
-            bankAccountId={bankAccountId}
-            onChangeBankAccountId={setBankAccountId}
-            noBankAccountValue={NO_BANK_ACCOUNT}
-          />
-        </div>
+            {panel}
+          </div>
+        ) : (
+          <>
+            {header}
+            <div className={documentGridClass(layout)}>
+              <ProductSearch
+                query={query}
+                setQuery={setQuery}
+                results={results}
+                searching={searching}
+                locations={locations}
+                locationFilter={locationFilter}
+                onSelectLocationFilter={selectLocationFilter}
+                onAddToCart={addToCart}
+                posModeEnabled={false}
+                allowOversell={allowOversell}
+                basePriceLevelId={basePriceLevelId}
+              />
+              <div ref={cartPanelRef} className="scroll-mt-24">
+                {panel}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {totalLineCount > 0 && (

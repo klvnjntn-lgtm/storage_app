@@ -5,11 +5,9 @@ import { Minus, Plus, Trash2, Send, AlertCircle, MapPin, Pencil, Wrench, X } fro
 import PriceLevelSelect from '@/app/components/shared/PriceLevelSelect';
 import { CartLine, Customer, DiscountType, ServiceLine } from './types';
 import { formatIDR } from '@/lib/format';
-import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
 import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
-import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
 
 type CartLineWithTotals = CartLine & {
@@ -30,11 +28,8 @@ type ServiceLineWithTotals = ServiceLine & {
 export function SalesOrderCartPanel({
   cartLines,
   customer,
-  setCustomer,
-  customerPoNumber,
-  setCustomerPoNumber,
-  orderDate,
-  setOrderDate,
+  showLines = true,
+  bare = false,
   editingPriceKey,
   setEditingPriceKey,
   changeQty,
@@ -60,12 +55,14 @@ export function SalesOrderCartPanel({
   onRemoveService,
 }: {
   cartLines: CartLineWithTotals[];
+  // Picked in the page's DocumentHeader (with the date and PO number); the panel only needs it to
+  // allow submit.
   customer: Customer | null;
-  setCustomer: (c: Customer | null) => void;
-  customerPoNumber: string;
-  setCustomerPoNumber: (v: string) => void;
-  orderDate: string;
-  setOrderDate: (v: string) => void;
+  // false: the lines and totals are in the page's LineItemsTable (Office layout) — the panel is just
+  // the submit.
+  showLines?: boolean;
+  // Inside a card the page draws: no border of its own.
+  bare?: boolean;
   editingPriceKey: string | null;
   setEditingPriceKey: (key: string | null) => void;
   changeQty: (key: string, delta: number) => void;
@@ -100,7 +97,9 @@ export function SalesOrderCartPanel({
   const warehouseOps = useWarehouseOps();
 
   return (
-    <div className="@container border border-blue-500/15 rounded-xl bg-white p-4 h-fit shadow-sm">
+    <div className={`@container p-4 h-fit ${bare ? '' : 'border border-blue-500/15 rounded-xl bg-white shadow-sm'}`}>
+      {showLines && (
+      <>
       {cartLines.length > 0 ? (
         warehouseOps && (
         <div className="flex items-start gap-1.5 text-xs text-gray-600 mb-3">
@@ -121,33 +120,6 @@ export function SalesOrderCartPanel({
       ) : (
         <p className="text-xs text-gray-400 mb-3">{t('sales.orderCart.emptyHint')}</p>
       )}
-
-      {/* The document's fields: one column in a narrow panel, two once it has room (Office layout). */}
-      <div className="grid @lg:grid-cols-2 @lg:gap-x-4 [&>*]:min-w-0">
-        <CustomerPicker value={customer} onChange={setCustomer} hasError={!customer} />
-
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <div>
-            <label className="text-[11px] text-gray-500">{t('sales.orderCart.poNumber')}</label>
-            <input
-              type="text"
-              value={customerPoNumber}
-              onChange={(e) => setCustomerPoNumber(e.target.value)}
-              placeholder={t('common.optional')}
-              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-gray-500">{t('sales.orderCart.orderDateLabel')}</label>
-            <DatePicker
-              clearable
-              value={orderDate}
-              onChange={(v) => setOrderDate(v)}
-              className="w-full"
-            />
-          </div>
-        </div>
-      </div>
 
       {cartLines.length === 0 && services.length === 0 && (
         <p className="text-sm text-gray-400 mt-3">{t('sales.orderCart.noItemsYet')}</p>
@@ -363,11 +335,13 @@ export function SalesOrderCartPanel({
           <span>{formatIDR(total)}</span>
         </div>
       </div>
+      </>
+      )}
 
       <button data-tour="sales-submit"
         onClick={onSubmit}
         disabled={nothingToOrder || saving || !customer || hasEmptyServicePrice || hasEmptyServiceDescription}
-        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        className={`w-full flex items-center justify-center gap-2 ${showLines ? 'mt-4' : ''} bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors`}
       >
         <Send size={16} strokeWidth={2} />
         {saving ? t('common.saving') : t('sales.orderCart.saveOrder')}

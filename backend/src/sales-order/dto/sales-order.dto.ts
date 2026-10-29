@@ -105,6 +105,11 @@ export class CreateSalesOrderDto {
   @IsDateString()
   orderDate?: string;
 
+  // Workshops: the mechanic doing the job; null clears it.
+  @IsOptional()
+  @IsUUID()
+  mechanicId?: string | null;
+
   @IsOptional()
   @IsEnum(SalesOrderFormat)
   format?: SalesOrderFormat;
@@ -137,6 +142,11 @@ export class UpdateSalesOrderDto {
   @IsOptional()
   @IsDateString()
   orderDate?: string;
+
+  // Workshops: the mechanic doing the job; null clears it.
+  @IsOptional()
+  @IsUUID()
+  mechanicId?: string | null;
 
   @IsOptional()
   @IsEnum(SalesOrderFormat)

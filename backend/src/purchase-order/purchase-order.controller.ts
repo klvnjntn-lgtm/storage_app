@@ -7,6 +7,7 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
+import { bookingBranchId } from '../auth/branch-scope';
 import { PurchaseOrderService } from './purchase-order.service';
 import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto } from './dto/purchase-order.dto';
 
@@ -21,7 +22,7 @@ export class PurchaseOrderController {
 
   @Post()
   create(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: CreatePurchaseOrderDto) {
-    return this.purchaseOrderService.create(organizationId, req.user.sub, dto);
+    return this.purchaseOrderService.create(organizationId, req.user.sub, { ...dto, branchId: bookingBranchId(req.user, dto.branchId) });
   }
 
 @Get()
@@ -65,7 +66,11 @@ export class PurchaseOrderController {
     @Req() req,
     @Body() dto: UpdatePurchaseOrderDto,
   ) {
-    return this.purchaseOrderService.update(organizationId, id, req.user.sub, dto);
+    // Branch staff can't move a PO to another branch; a request without one leaves it as it is.
+    return this.purchaseOrderService.update(organizationId, id, req.user.sub, {
+      ...dto,
+      branchId: dto.branchId && bookingBranchId(req.user, dto.branchId),
+    });
   }
 
   @Post(':id/send')

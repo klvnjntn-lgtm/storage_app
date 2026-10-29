@@ -13,6 +13,7 @@ import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
 import { escapeLike } from '../common/text/escape-like';
 import { lineMatches } from '../common/text/document-search';
+import { resolveBranchId } from '../branches/resolve-branch';
 
 export type PurchaseOrderPrintView = {
   id: string;
@@ -160,6 +161,14 @@ export class PurchaseOrderService {
 
   // ---- activity log ---------------------------------------------------
 
+  // An edit's date and branch: only what the request sent; a blank date clears it.
+  private async headerFields(tx: Prisma.TransactionClient, organizationId: string, dto: UpdatePurchaseOrderDto) {
+    return {
+      ...(dto.orderDate !== undefined && { orderDate: dto.orderDate ? new Date(dto.orderDate) : null }),
+      ...(dto.branchId && { branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId }) }),
+    };
+  }
+
   private async logActivity(
     tx: Prisma.TransactionClient,
     params: {
@@ -219,6 +228,8 @@ export class PurchaseOrderService {
           organizationId,
           userId,
           locationId: dto.locationId,
+          branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId, locationId: dto.locationId }),
+          orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
           supplierId: dto.supplierId,
           status: PurchaseOrderStatus.DRAFT,
           subtotal,
@@ -291,6 +302,7 @@ export class PurchaseOrderService {
               ? (dto.dueDate ? new Date(dto.dueDate) : null)
               : po.dueDate,
             paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : po.paymentTerms, // NEW
+            ...(await this.headerFields(tx, organizationId, dto)),
           },
           include: { items: true },
         });
@@ -335,6 +347,7 @@ export class PurchaseOrderService {
             ? (dto.dueDate ? new Date(dto.dueDate) : null)
             : po.dueDate,
           paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : po.paymentTerms, // NEW
+          ...(await this.headerFields(tx, organizationId, dto)),
           items: { create: lines },
         },
         include: { items: true },

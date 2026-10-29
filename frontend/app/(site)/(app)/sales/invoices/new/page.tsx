@@ -1,11 +1,18 @@
 'use client';
 
 import { DocumentLayoutToggle } from '@/app/components/shared/DocumentLayoutToggle';
-import { documentGridClass, documentOrder, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
+import { documentGridClass, useDocumentLayout } from '@/lib/hooks/useDocumentLayout';
+import { DocumentHeader } from '@/app/components/shared/DocumentHeader';
+import { LineItemsTable } from '@/app/components/shared/LineItemsTable';
+import { describeSalesProduct, salesTableLines, searchSalesProducts } from '@/app/components/shared/salesLineTable';
+import { CustomerPicker } from '@/app/components/invoices/CustomerPicker';
+import { SerialButton } from '@/app/components/shared/SerialPicker';
+import DatePicker from '@/app/components/shared/DatePicker';
+import { toCalendarDateString } from '@/lib/dates';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Receipt, PackageCheck, ShoppingCart } from 'lucide-react';
+import { AlertCircle, CalendarClock, Receipt, PackageCheck, ShoppingCart, User } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useHasModule } from '@/lib/hooks/useHasModule';
@@ -168,7 +175,7 @@ function NewInvoicePage() {
 
   const loadedDraftIdRef = useRef<string | null | undefined>(undefined);
 
-  const { locations, bankAccounts, employees } = useInvoiceReferenceData();
+  const { locations, bankAccounts } = useInvoiceReferenceData();
   const warehouseOps = useWarehouseOps();
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
 
@@ -465,6 +472,22 @@ function NewInvoicePage() {
       },
     }));
     return true;
+  }
+
+  // The table types a quantity rather than stepping it.
+  function setQty(key: string, qty: number) {
+    const line = cart[key];
+    if (line) changeQty(key, qty - Number(line.quantity));
+  }
+
+  function addFromTable(product: ProductSearchResult) {
+    addToCart(product, {
+      quantity: 1,
+      unitPrice: resolveLinePrice(product, basePriceLevelId, defaultLevelId).unitPrice ?? 0,
+      unit: product.unit ?? null,
+      discountType: null,
+      discountValue: null,
+    });
   }
 
   // Line edits — the transforms themselves live in lib/invoice-cart.ts.
@@ -826,6 +849,132 @@ function NewInvoicePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printData]);
 
+  // A4/A5 invoices name a customer from the list; receipts just take a typed name.
+  const usesStructuredCustomer = format === 'A5' || format === 'A4';
+  const dueBeforeInvoiceDate =
+    !!dueDate && new Date(dueDate + 'T00:00:00') < new Date((invoiceDate || toCalendarDateString(new Date())) + 'T00:00:00');
+
+  // Office: one document card — header, lines and the rest. Cashier: the header over search + cart.
+  const header = (
+    <DocumentHeader
+      bare={layout === 'office'}
+      date={invoiceDate}
+      onDateChange={setInvoiceDate}
+      datePlaceholder={t('sales.invoiceCart.invoiceDatePlaceholder')}
+      party={
+        usesStructuredCustomer ? (
+          <CustomerPicker value={customer} onChange={setCustomer} hasError={customerNameRequired && !customer} />
+        ) : (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <User size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.customerPicker.label')}
+            </label>
+            <input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder={
+                customerNameRequired
+                  ? t('sales.invoiceCart.customerNamePlaceholder')
+                  : t('sales.invoiceCart.customerNamePlaceholderOptional')
+              }
+              className={`w-full border rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] ${
+                customerNameRequired && !customerName.trim() ? 'border-red-300' : 'border-blue-500/20'
+              }`}
+            />
+          </div>
+        )
+      }
+      mechanic={hasWorkshopRms ? { value: mechanicId, onChange: setMechanicId } : undefined}
+      branch={{ value: branchId, onChange: setBranchId }}
+      fields={
+        usesStructuredCustomer && (
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
+              {t('sales.invoiceCart.dueDateLabel')}
+            </label>
+            <DatePicker clearable value={dueDate} onChange={setDueDate} className="w-full" />
+            {dueBeforeInvoiceDate && (
+              <p className="flex items-start gap-1.5 text-xs text-amber-700 mt-1.5">
+                <AlertCircle size={12} strokeWidth={2} className="shrink-0 mt-0.5" />
+                {t('sales.invoiceCart.dueDateWarning')}
+              </p>
+            )}
+          </div>
+        )
+      }
+    />
+  );
+  const panel = (
+    <CartPanel
+      bare={layout === 'office'}
+      showLines={layout === 'retail'}
+      format={format}
+      cartLines={cartLines}
+      onRemoveService={removeService}
+      customerPoNumber={customerPoNumber}
+      onChangeCustomerPoNumber={setCustomerPoNumber}
+      paymentTerms={paymentTerms}
+      onChangePaymentTerms={setPaymentTerms}
+      notes={notes}
+      onChangeNotes={setNotes}
+      customerName={customerName}
+      customer={customer}
+      customerNameRequired={customerNameRequired}
+      editingPriceKey={editingPriceKey}
+      setEditingPriceKey={setEditingPriceKey}
+      changeQty={changeQty}
+      changeUnitPrice={changeUnitPrice}
+      onChangePriceLevel={changePriceLevel}
+      removeFromCart={removeFromCart}
+      onPickSerials={setSerialKey}
+      stockAtLineLocation={stockAtLineLocation}
+      posModeEnabled={posModeEnabled}
+      allowOversell={allowOversell}
+      subtotal={subtotal}
+      discount={discount}
+      distinctLocationNames={distinctLocationNames}
+      onSubmit={handleCreateAndPrint}
+      printing={printing}
+      error={error}
+      onChangeLineDiscount={changeLineDiscount}
+      onChangeServiceDiscount={changeServiceDiscount}
+      onApplyDiscountToAll={applyDiscountToAllLines}
+      total={total}
+      hasWorkshopRms={hasWorkshopRms}
+      vehicleId={vehicleId}
+      customerVehicles={customerVehicles}
+      vehiclesLoading={vehiclesLoading}
+      onSelectVehicle={handleSelectVehicle}
+      odometer={odometer}
+      onChangeOdometer={setOdometer}
+      reminderOpen={reminder.open}
+      onToggleReminderOpen={reminder.toggleOpen}
+      reminderNote={reminder.note}
+      onChangeReminderNote={reminder.setNote}
+      reminderDueDate={reminder.dueDate}
+      onChangeReminderDueDate={reminder.setDueDate}
+      onPickReminderPreset={reminder.pickPreset}
+      onSaveReminder={reminder.stage}
+      reminderStaged={reminder.staged}
+      reminderSaving={reminder.saving}
+      reminderSaved={reminder.saved}
+      reminderError={reminder.error}
+      services={serviceLinesWithTotals}
+      onChangeServiceUnit={changeServiceUnit}
+      onAddService={addService}
+      onChangeServiceDescription={changeServiceDescription}
+      onChangeServicePrice={changeServicePrice}
+      // Bank-account picker: '', NO_BANK_ACCOUNT or a chosen id.
+      bankAccounts={bankAccounts}
+      bankAccountId={bankAccountId}
+      onChangeBankAccountId={setBankAccountId}
+      noBankAccountValue={NO_BANK_ACCOUNT}
+      branchId={branchId}
+    />
+  );
+
   return (
     <main
       className="min-h-screen text-black"
@@ -929,100 +1078,71 @@ function NewInvoicePage() {
         </div>
       )}
 
-      <div className={`max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 ${documentGridClass(layout)}`}>
-        <ProductSearch
-          query={query}
-          setQuery={setQuery}
-          results={results}
-          searching={searching}
-          locations={locations}
-          locationFilter={locationFilter}
-          onSelectLocationFilter={selectLocationFilter}
-          onAddToCart={addToCart}
-          posModeEnabled={posModeEnabled}
-          allowOversell={allowOversell}
-          basePriceLevelId={basePriceLevelId}
-        />
-
-        <div ref={cartPanelRef} className={`scroll-mt-24 ${layout === 'office' ? documentOrder : ''}`}>
-          <CartPanel
-            format={format}
-            cartLines={cartLines}
-            dueDate={dueDate}
-            onRemoveService={removeService}
-
-            onChangeDueDate={setDueDate}
-            customerPoNumber={customerPoNumber}
-            onChangeCustomerPoNumber={setCustomerPoNumber}
-            paymentTerms={paymentTerms}
-            onChangePaymentTerms={setPaymentTerms}
-            notes={notes}
-            onChangeNotes={setNotes}
-            customerName={customerName}
-            setCustomerName={setCustomerName}
-            customer={customer}
-            setCustomer={setCustomer}
-            customerNameRequired={customerNameRequired}
-            editingPriceKey={editingPriceKey}
-            setEditingPriceKey={setEditingPriceKey}
-            changeQty={changeQty}
-            changeUnitPrice={changeUnitPrice}
-            onChangePriceLevel={changePriceLevel}
-            removeFromCart={removeFromCart}
-            onPickSerials={setSerialKey}
-            stockAtLineLocation={stockAtLineLocation}
-            posModeEnabled={posModeEnabled}
-            allowOversell={allowOversell}
-            subtotal={subtotal}
-            discount={discount}
-            distinctLocationNames={distinctLocationNames}
-            onSubmit={handleCreateAndPrint}
-            printing={printing}
-            error={error}
-            onChangeLineDiscount={changeLineDiscount}
-            onChangeServiceDiscount={changeServiceDiscount}
-            onApplyDiscountToAll={applyDiscountToAllLines}
-            total={total}
-            hasWorkshopRms={hasWorkshopRms}
-            vehicleId={vehicleId}
-            customerVehicles={customerVehicles}
-            vehiclesLoading={vehiclesLoading}
-            onSelectVehicle={handleSelectVehicle}
-            odometer={odometer}
-            onChangeOdometer={setOdometer}
-            invoiceDate={invoiceDate}
-            onChangeInvoiceDate={setInvoiceDate}
-            reminderOpen={reminder.open}
-            onToggleReminderOpen={reminder.toggleOpen}
-            reminderNote={reminder.note}
-            onChangeReminderNote={reminder.setNote}
-            reminderDueDate={reminder.dueDate}
-            onChangeReminderDueDate={reminder.setDueDate}
-            onPickReminderPreset={reminder.pickPreset}
-            onSaveReminder={reminder.stage}
-            reminderStaged={reminder.staged}
-            reminderSaving={reminder.saving}
-            reminderSaved={reminder.saved}
-            reminderError={reminder.error}
-            services={serviceLinesWithTotals}
-            onChangeServiceUnit={changeServiceUnit}
-            onAddService={addService}
-            onChangeServiceDescription={changeServiceDescription}
-            onChangeServicePrice={changeServicePrice}
-            // Bank-account picker. CartPanel needs to render a <select>
-            // using these and call onChangeBankAccountId with '',
-            // NO_BANK_ACCOUNT-equivalent, or a chosen id.
-            bankAccounts={bankAccounts}
-            bankAccountId={bankAccountId}
-            onChangeBankAccountId={setBankAccountId}
-            noBankAccountValue={NO_BANK_ACCOUNT}
-            employees={employees}
-            branchId={branchId}
-            onChangeBranchId={setBranchId}
-            mechanicId={mechanicId}
-            onChangeMechanicId={hasWorkshopRms ? setMechanicId : undefined}
-          />
-        </div>
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 pb-24 md:pb-6 space-y-6">
+        {layout === 'office' ? (
+          <div
+            ref={cartPanelRef}
+            className="scroll-mt-24 border border-blue-500/15 rounded-xl bg-white shadow-sm divide-y divide-blue-500/15"
+          >
+            {header}
+            <LineItemsTable
+              bare
+              lines={salesTableLines({
+                cartLines,
+                services: serviceLinesWithTotals,
+                posPricingEnabled: posModeEnabled,
+                showLocation: warehouseOps,
+                noPriceLabel: t('common.lineTable.noPrice'),
+                onChangePriceLevel: changePriceLevel,
+                lineExtra: (line) =>
+                  line.product.trackSerials && (
+                    <SerialButton
+                      count={line.serialNumbers?.length ?? 0}
+                      quantity={line.quantity}
+                      onClick={() => setSerialKey(line.key)}
+                    />
+                  ),
+              })}
+              search={searchSalesProducts}
+              describe={(p) => describeSalesProduct(p, (qty) => t('common.lineTable.inStock', { qty }), !allowOversell)}
+              onPick={addFromTable}
+              onChangeQty={(key, qty) => (cart[key] ? setQty(key, qty) : undefined)}
+              onChangePrice={(key, raw) => (cart[key] ? changeUnitPrice(key, raw) : changeServicePrice(key, raw))}
+              onChangeDescription={changeServiceDescription}
+              onChangeUnit={changeServiceUnit}
+              onChangeDiscount={(key, type, raw) =>
+                cart[key] ? changeLineDiscount(key, type, raw) : changeServiceDiscount(key, type, raw)
+              }
+              onRemove={(key) => (cart[key] ? removeFromCart(key) : removeService(key))}
+              // Service lines are a workshop thing on invoices.
+              onAddService={hasWorkshopRms ? addService : undefined}
+              totals={{ subtotal, discount, total }}
+            />
+            {panel}
+          </div>
+        ) : (
+          <>
+            {header}
+            <div className={documentGridClass(layout)}>
+              <ProductSearch
+                query={query}
+                setQuery={setQuery}
+                results={results}
+                searching={searching}
+                locations={locations}
+                locationFilter={locationFilter}
+                onSelectLocationFilter={selectLocationFilter}
+                onAddToCart={addToCart}
+                posModeEnabled={posModeEnabled}
+                allowOversell={allowOversell}
+                basePriceLevelId={basePriceLevelId}
+              />
+              <div ref={cartPanelRef} className="scroll-mt-24">
+                {panel}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {!printData && totalLineCount > 0 && (

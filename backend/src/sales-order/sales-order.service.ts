@@ -173,6 +173,7 @@ export class SalesOrderService {
             format: dto.format,
             customerPoNumber: dto.customerPoNumber ?? null, // NEW
             orderDate, // NEW
+            mechanicId: dto.mechanicId || null,
 
             status: SalesOrderStatus.DRAFT,
             subtotal,
@@ -290,6 +291,7 @@ await this.logActivity(tx, {
             customerName: quotation.customerName,
             // Workshops: the quoted car carries on to the order, and from it to the invoice.
             vehicleId: quotation.vehicleId,
+            mechanicId: quotation.mechanicId,
             quotationId: quotation.id,
             status: SalesOrderStatus.DRAFT,
             subtotal,
@@ -424,6 +426,7 @@ await this.logActivity(tx, {
               orderDate: dto.orderDate !== undefined
                 ? (dto.orderDate ? new Date(dto.orderDate) : null)
                 : order.orderDate, // NEW
+              ...(dto.mechanicId !== undefined && { mechanicId: dto.mechanicId || null }),
               format: dto.format ?? order.format,
             },
             include: { items: true, taxes: true, customer: true },
@@ -486,6 +489,7 @@ await this.logActivity(tx, {
             orderDate: dto.orderDate !== undefined
               ? (dto.orderDate ? new Date(dto.orderDate) : null)
               : order.orderDate, // NEW
+            ...(dto.mechanicId !== undefined && { mechanicId: dto.mechanicId || null }),
             subtotal,
             discount: discountAmount,
             taxAmount,

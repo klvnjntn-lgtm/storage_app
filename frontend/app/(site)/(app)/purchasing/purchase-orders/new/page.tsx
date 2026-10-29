@@ -4,11 +4,14 @@
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ClipboardList, Trash2, Plus } from 'lucide-react';
+import { CalendarClock, ClipboardList } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { formatIDR } from '@/lib/format';
-import { POProductSearch } from '@/app/components/purchase-orders/POProductSearch';
 import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker';
+import { DocumentHeader } from '@/app/components/shared/DocumentHeader';
+import { LineItemsTable, type TableLine } from '@/app/components/shared/LineItemsTable';
+import { describeSalesProduct, searchSalesProducts } from '@/app/components/shared/salesLineTable';
+import DatePicker from '@/app/components/shared/DatePicker';
+import { toCalendarDateString } from '@/lib/dates';
 import { Supplier } from '@/app/components/suppliers/types';
 import { defaultLocation } from '@/lib/locations';
 import { LocationOption, POCartLine, PONewProductLine, POProduct } from '@/app/components/purchase-orders/types';
@@ -59,6 +62,10 @@ function PurchaseOrderFormPageInner() {
   const [locations, setLocations] = useState<LocationOption[]>([]);
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
+  const [orderDate, setOrderDate] = useState(() => toCalendarDateString(new Date()));
+  const [expectedDate, setExpectedDate] = useState('');
+  // MASTER picks the branch; '' = the receiving location's, else the first (see BranchPicker).
+  const [branchId, setBranchId] = useState('');
   const [locationId, setLocationId] = useState('');
   const [discountAmount, setDiscountAmount] = useState('0');
 
@@ -86,7 +93,7 @@ function PurchaseOrderFormPageInner() {
     cartRef.current = cart;
     newProductLinesRef.current = newProductLines;
     supplierRef.current = supplier;
-  }, [cart, newProductLines, supplier, locationId, discountAmount]);
+  }, [cart, newProductLines, supplier, locationId, discountAmount, orderDate, expectedDate, branchId]);
 
   useEffect(() => {
     (async () => {
@@ -117,6 +124,9 @@ function PurchaseOrderFormPageInner() {
         }
 
         setLocationId(po.locationId ?? '');
+        setOrderDate(po.orderDate ? String(po.orderDate).slice(0, 10) : '');
+        setExpectedDate(po.expectedDate ? String(po.expectedDate).slice(0, 10) : '');
+        setBranchId(po.branchId ?? '');
         setDiscountAmount(String(Number(po.discountAmount ?? 0)));
 
         if (po.supplierId) {
@@ -206,6 +216,17 @@ function PurchaseOrderFormPageInner() {
     setNewProductLines((prev) => prev.filter((l) => l.key !== key));
   }
 
+  // The table's edits, routed to a catalogue line (keyed by product id) or a new-product row.
+  function tableQty(key: string, qty: number) {
+    if (cart[key]) changeQty(key, String(qty));
+    else updateNewProductLine(key, { quantity: qty });
+  }
+  function tableCost(key: string, raw: string) {
+    if (cart[key]) return changeUnitCost(key, raw);
+    const parsed = Number(raw);
+    updateNewProductLine(key, { unitCost: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0 });
+  }
+
   const cartLines = Object.values(cart).map((l) => ({ ...l, lineTotal: round2(l.quantity * l.unitCost) }));
   const newProductLineTotals = newProductLines.map((l) => ({ ...l, lineTotal: round2(l.quantity * l.unitCost) }));
   const subtotal = round2(
@@ -217,6 +238,65 @@ function PurchaseOrderFormPageInner() {
   const total = round2(subtotal - clampedDiscount);
   const itemCount = cartLines.length + newProductLineTotals.length;
 
+  const newProductInput = (missing: boolean) =>
+    `w-1/2 h-8 border rounded-md px-2 text-xs bg-white outline-none ${
+      missing ? 'border-red-300 focus:border-red-500' : 'border-gray-300 focus:border-blue-500/60'
+    }`;
+  const tableLines: TableLine[] = [
+    ...cartLines.map(
+      (l): TableLine => ({
+        key: l.product.id,
+        kind: 'product',
+        name: l.product.name,
+        sub: l.product.sku,
+        quantity: l.quantity,
+        unit: null,
+        unitPrice: l.unitCost,
+        discountType: null,
+        discountValue: null,
+        discountAmount: 0,
+        total: l.lineTotal,
+      }),
+    ),
+    ...newProductLineTotals.map(
+      (l): TableLine => ({
+        key: l.key,
+        kind: 'product',
+        typedName: true,
+        name: l.name,
+        quantity: l.quantity,
+        unit: null,
+        unitPrice: l.unitCost,
+        discountType: null,
+        discountValue: null,
+        discountAmount: 0,
+        total: l.lineTotal,
+        // Not in the catalogue yet: it's created with its SKU and category when the PO is saved.
+        extra: (
+          <div className="space-y-1">
+            <div className="flex gap-1">
+              <input
+                type="text"
+                placeholder={t('purchasing.purchaseOrderNew.skuPlaceholder')}
+                value={l.sku}
+                onChange={(e) => updateNewProductLine(l.key, { sku: e.target.value })}
+                className={newProductInput(!l.sku.trim())}
+              />
+              <input
+                type="text"
+                placeholder={t('purchasing.purchaseOrderNew.categoryPlaceholder')}
+                value={l.category}
+                onChange={(e) => updateNewProductLine(l.key, { category: e.target.value })}
+                className={newProductInput(!l.category.trim())}
+              />
+            </div>
+            <p className="text-[11px] text-gray-400 italic">{t('purchasing.purchaseOrderNew.newProductLabel')}</p>
+          </div>
+        ),
+      }),
+    ),
+  ];
+
   function buildPayload() {
     const invalidNewProduct = newProductLines.find(
       (l) => !l.name.trim() || !l.sku.trim() || !l.category.trim(),
@@ -227,6 +307,9 @@ function PurchaseOrderFormPageInner() {
     return {
       locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
+      orderDate: orderDate || undefined,
+      expectedDate: expectedDate || undefined,
+      ...(branchId && { branchId }),
       discountAmount: clampedDiscount,
       // Explicit null so saving a draft from before tax rates were removed drops its tax.
       taxRateId: null,
@@ -259,6 +342,9 @@ function PurchaseOrderFormPageInner() {
     return {
       locationId: (hasWarehouseOps ? locationId : defaultLocation(locations)?.id) || undefined,
       supplierId: supplier?.id,
+      orderDate: orderDate || undefined,
+      expectedDate: expectedDate || undefined,
+      ...(branchId && { branchId }),
       discountAmount: clampedDiscount,
       // Explicit null so saving a draft from before tax rates were removed drops its tax.
       taxRateId: null,
@@ -338,7 +424,7 @@ function PurchaseOrderFormPageInner() {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, newProductLines, supplier, locationId, discountAmount]);
+  }, [cart, newProductLines, supplier, locationId, discountAmount, orderDate, expectedDate, branchId]);
 
   // Safety net for leaving via client-side navigation (component unmount) —
   // the debounce above may not have fired yet.
@@ -436,9 +522,6 @@ function PurchaseOrderFormPageInner() {
     );
   }
 
-  const inputClass =
-    'border border-blue-500/20 rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]';
-
   return (
     <main className="min-h-screen text-black" style={pageStyle}>
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
@@ -466,206 +549,96 @@ function PurchaseOrderFormPageInner() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
-        <div className="space-y-4 min-w-0">
-          <POProductSearch onAddProduct={addProduct} />
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
+        {/* One document card: header, lines, then the discount and save. */}
+        <div className="border border-blue-500/15 rounded-xl bg-white shadow-sm divide-y divide-blue-500/15">
+          <DocumentHeader
+            bare
+            date={orderDate}
+            onDateChange={setOrderDate}
+            party={
+              <div className="mb-3">
+                <label className="block text-xs text-gray-500 mb-1">{t('common.docHeader.supplier')}</label>
+                <SupplierPicker supplier={supplier} onChange={setSupplier} />
+              </div>
+            }
+            branch={{ value: branchId, onChange: setBranchId }}
+            fields={
+              <>
+                <div className="mb-3">
+                  <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                    <CalendarClock size={12} strokeWidth={2} className="text-blue-600/70" />
+                    {t('purchasing.purchaseOrderNew.expectedDate')}
+                  </label>
+                  <DatePicker clearable value={expectedDate} onChange={setExpectedDate} className="w-full" />
+                </div>
+                {hasWarehouseOps && (
+                  <div className="mb-3">
+                    <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.receivingLocation')}</label>
+                    <select
+                      value={locationId}
+                      onChange={(e) => setLocationId(e.target.value)}
+                      className="w-full border border-blue-500/20 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+                    >
+                      <option value="">{t('purchasing.purchaseOrderNew.selectLocationPlaceholder')}</option>
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </>
+            }
+          />
 
-          {cartLines.length === 0 && newProductLineTotals.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8 border border-dashed border-blue-500/20 rounded-xl bg-white/60">
-              {t('purchasing.purchaseOrderNew.noItemsYet')}
-            </p>
-          ) : (
-            <div className="border border-blue-500/15 rounded-xl overflow-x-auto bg-white shadow-sm">
-              <table className="w-full text-sm">
-                <thead className="bg-blue-50/60 border-b border-blue-500/15">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2">{t('purchasing.purchaseOrderNew.colItem')}</th>
-                    <th className="text-right font-semibold px-3 py-2 w-20">{t('purchasing.purchaseOrderNew.colQty')}</th>
-                    <th className="text-right font-semibold px-3 py-2 w-32">{t('purchasing.purchaseOrderNew.colUnitCost')}</th>
-                    <th className="text-right font-semibold px-3 py-2 w-32">{t('purchasing.purchaseOrderNew.colLineTotal')}</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cartLines.map((l) => (
-                    <tr key={l.product.id} className="border-b border-blue-500/10 last:border-0">
-                      <td className="px-3 py-2">
-                        <p className="font-medium">{l.product.name}</p>
-                        {l.product.sku && <p className="text-xs text-gray-500">{t('purchasing.purchaseOrderNew.skuLabel', { sku: l.product.sku })}</p>}
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={1}
-                          value={l.quantity}
-                          onChange={(e) => changeQty(l.product.id, e.target.value)}
-                          className={`w-16 text-right ${inputClass}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={l.unitCost}
-                          onChange={(e) => changeUnitCost(l.product.id, e.target.value)}
-                          className={`w-28 text-right ${inputClass}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
-                      <td className="px-3 py-2">
-                        <button aria-label={t('common.remove')} onClick={() => removeProduct(l.product.id)} className="text-red-500 hover:text-red-700">
-                          <Trash2 size={15} strokeWidth={2} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {newProductLineTotals.map((l) => (
-                    <tr key={l.key} className="border-b border-blue-500/10 last:border-0 align-top">
-                      <td className="px-3 py-2">
-                        <div className="space-y-1">
-                          <input
-                            type="text"
-                            placeholder={t('purchasing.purchaseOrderNew.productNamePlaceholder')}
-                            value={l.name}
-                            onChange={(e) => updateNewProductLine(l.key, { name: e.target.value })}
-                            className={`w-full border rounded-lg px-2 py-1 text-sm outline-none ${
-                              l.name.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
-                            }`}
-                          />
-                          <div className="flex gap-1">
-                            <input
-                              type="text"
-                              placeholder={t('purchasing.purchaseOrderNew.skuPlaceholder')}
-                              value={l.sku}
-                              onChange={(e) => updateNewProductLine(l.key, { sku: e.target.value })}
-                              className={`w-1/2 border rounded-lg px-2 py-1 text-xs outline-none ${
-                                l.sku.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
-                              }`}
-                            />
-                            <input
-                              type="text"
-                              placeholder={t('purchasing.purchaseOrderNew.categoryPlaceholder')}
-                              value={l.category}
-                              onChange={(e) => updateNewProductLine(l.key, { category: e.target.value })}
-                              className={`w-1/2 border rounded-lg px-2 py-1 text-xs outline-none ${
-                                l.category.trim() ? 'border-blue-500/20 focus:border-blue-500/50' : 'border-red-300 focus:border-red-500'
-                              }`}
-                            />
-                          </div>
-                          <p className="text-xs text-gray-400 italic">{t('purchasing.purchaseOrderNew.newProductLabel')}</p>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={1}
-                          value={l.quantity}
-                          onChange={(e) => {
-                            const parsed = Number(e.target.value);
-                            updateNewProductLine(l.key, {
-                              quantity: Number.isFinite(parsed) && parsed > 0 ? parsed : l.quantity,
-                            });
-                          }}
-                          className={`w-16 text-right ${inputClass}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={l.unitCost}
-                          onChange={(e) => {
-                            const parsed = Number(e.target.value);
-                            updateNewProductLine(l.key, {
-                              unitCost: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
-                            });
-                          }}
-                          className={`w-28 text-right ${inputClass}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium">{formatIDR(l.lineTotal)}</td>
-                      <td className="px-3 py-2">
-                        <button aria-label={t('common.remove')} onClick={() => removeNewProductLine(l.key)} className="text-red-500 hover:text-red-700">
-                          <Trash2 size={15} strokeWidth={2} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <LineItemsTable
+            bare
+            hideUnit
+            priceLabel={t('purchasing.purchaseOrderNew.colUnitCost')}
+            lines={tableLines}
+            search={searchSalesProducts}
+            // Buying, so nothing is out of reach: stock is shown, never greyed out.
+            describe={(p) => describeSalesProduct(p, (qty) => t('common.lineTable.inStock', { qty }))}
+            onPick={(p) =>
+              addProduct({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, image: p.image }, { quantity: 1, unitCost: 0 })
+            }
+            onChangeQty={tableQty}
+            onChangePrice={tableCost}
+            onChangeDescription={(key, name) => updateNewProductLine(key, { name })}
+            onRemove={(key) => (cart[key] ? removeProduct(key) : removeNewProductLine(key))}
+            onAddService={addNewProductLine}
+            addServiceLabel={t('purchasing.purchaseOrderNew.addNewProduct')}
+            totals={{ subtotal, discount: clampedDiscount, total }}
+          />
 
-          <button
-            onClick={addNewProductLine}
-            className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2.5 rounded-xl border border-dashed border-blue-500/30 bg-white/60 text-gray-600 hover:border-blue-500/50 hover:text-blue-700 hover:bg-blue-50/40 transition-colors"
-          >
-            <Plus size={14} strokeWidth={2} />
-            {t('purchasing.purchaseOrderNew.addNewProduct')}
-          </button>
-        </div>
-
-        <div className="border border-blue-500/15 rounded-xl bg-white p-4 shadow-sm space-y-4">
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>
-          )}
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.supplier')}</label>
-            <SupplierPicker supplier={supplier} onChange={setSupplier} />
-          </div>
-
-          {hasWarehouseOps && (
+          <div className="p-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr] sm:items-end">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.receivingLocation')}</label>
-              <select
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+              <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
+              <input
+                type="number"
+                min={0}
+                value={discountAmount}
+                onChange={(e) => setDiscountAmount(e.target.value)}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-              >
-                <option value="">{t('purchasing.purchaseOrderNew.selectLocationPlaceholder')}</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
-          )}
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
-            <input
-              type="number"
-              min={0}
-              value={discountAmount}
-              onChange={(e) => setDiscountAmount(e.target.value)}
-              className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-            />
+            <button
+              onClick={handleSave}
+              disabled={saving || itemCount === 0}
+              className="w-full bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving
+                ? t('purchasing.purchaseOrderNew.saving')
+                : currentId
+                  ? t('purchasing.purchaseOrderNew.saveChanges')
+                  : t('purchasing.purchaseOrderNew.saveDraft')}
+            </button>
+            {error && (
+              <p className="sm:col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>
+            )}
           </div>
-
-          <div className="border-t border-blue-500/15 pt-3 space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.subtotal')}</span>
-              <span>{formatIDR(subtotal)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">{t('purchasing.purchaseOrderNew.discountRow')}</span>
-              <span>-{formatIDR(clampedDiscount)}</span>
-            </div>
-            <div className="flex justify-between font-bold text-base pt-1">
-              <span>{t('purchasing.purchaseOrderNew.total')}</span>
-              <span>{formatIDR(total)}</span>
-            </div>
-          </div>
-
-          <button
-            onClick={handleSave}
-            disabled={saving || itemCount === 0}
-            className="w-full bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving ? t('purchasing.purchaseOrderNew.saving') : currentId ? t('purchasing.purchaseOrderNew.saveChanges') : t('purchasing.purchaseOrderNew.saveDraft')}
-          </button>
         </div>
       </div>
     </main>

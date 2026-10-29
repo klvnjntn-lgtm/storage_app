@@ -450,7 +450,7 @@ export class WorkOrdersService {
           quotation.odometer != null && vehicle.odometer != null && quotation.odometer < vehicle.odometer;
         const created = await this.create(organizationId, userId, {
           vehicleId: quotation.vehicleId!,
-          mechanicId: dto.mechanicId,
+          mechanicId: dto.mechanicId ?? quotation.mechanicId ?? undefined,
           branchId: quotation.branchId ?? undefined,
           odometer: quotation.odometer != null && !staleOdometer ? quotation.odometer : undefined,
           complaint: quotation.complaint ?? undefined,

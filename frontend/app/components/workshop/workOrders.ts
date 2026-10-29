@@ -91,7 +91,18 @@ export type Mechanic = { id: string; name: string; position: string | null };
 // One editable line in the form. A part has product + location; a labour
 // line has a description and its own price.
 export type DraftLine =
-  | { kind: 'part'; key: string; productId: string; name: string; sku: string | null; locationId: string; quantity: number; unitPrice: number | null }
+  | {
+      kind: 'part';
+      key: string;
+      productId: string;
+      name: string;
+      sku: string | null;
+      locationId: string;
+      quantity: number;
+      unitPrice: number | null;
+      // The catalogue price when picked (for the form's running total); the server prices it on save.
+      catalogPrice?: number | null;
+    }
   | { kind: 'labour'; key: string; description: string; quantity: number; unitPrice: number };
 
 export function toDraftLines(items: WorkOrderItem[]): DraftLine[] {

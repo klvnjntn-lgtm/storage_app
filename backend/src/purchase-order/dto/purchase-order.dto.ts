@@ -80,6 +80,15 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @IsString() @MaxLength(200)
   paymentTerms?: string;
 
+  // The PO's date (shown as its order date); left out on create: today.
+  @IsOptional() @IsDateString()
+  orderDate?: string;
+
+  // The ordering branch; left out on create: the receiving location's, else the first. Branch staff
+  // always get their own (the controller pins it).
+  @IsOptional() @IsUUID()
+  branchId?: string;
+
   // No @ArrayMinSize — empty on create is how a supplier-only/no-items
   // draft gets persisted (autosave, exit-save). send() rejects an empty
   // PO at the real transition point instead.
@@ -111,6 +120,15 @@ export class UpdatePurchaseOrderDto {
 
   @IsOptional() @IsString() @MaxLength(200)
   paymentTerms?: string;
+
+  // The PO's date (shown as its order date); left out on create: today.
+  @IsOptional() @IsDateString()
+  orderDate?: string;
+
+  // The ordering branch; left out on create: the receiving location's, else the first. Branch staff
+  // always get their own (the controller pins it).
+  @IsOptional() @IsUUID()
+  branchId?: string;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)
   items?: PurchaseOrderItemDto[];
