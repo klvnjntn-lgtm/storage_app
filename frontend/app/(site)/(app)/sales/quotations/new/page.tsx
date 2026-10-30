@@ -99,6 +99,7 @@ function QuotationFormPageInner() {
   // Settings → Stock Enforcement (Invoice POS without Inventory Ops): anything but Block lets a quote
   // go past what's in stock. With Inventory Ops stock is always counted strictly.
   const [stockPolicy, setStockPolicy] = useState<'BLOCK' | 'WARN' | 'ALLOW'>('BLOCK');
+  const [workOrdersEnabled, setWorkOrdersEnabled] = useState(false);
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const { defaultLevelId, activeLevelIds } = usePriceLevels();
@@ -124,7 +125,9 @@ function QuotationFormPageInner() {
   const [searching, setSearching] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationOption | null>(null);
   const warehouseOps = useWarehouseOps();
-  const allowOversell = !warehouseOps && stockPolicy !== 'BLOCK';
+  // A workshop quotes parts it will order for the job (the job's Parts panel orders them); the invoice
+  // still enforces the stock policy once they've arrived.
+  const allowOversell = workOrdersEnabled || (!warehouseOps && stockPolicy !== 'BLOCK');
 
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [editingPriceKey, setEditingPriceKey] = useState<string | null>(null);
@@ -184,6 +187,7 @@ function QuotationFormPageInner() {
         const settings = await settingsRes.json();
         setPosPricingEnabled(!!settings.posPricingEnabled);
         setStockPolicy(settings.stockPolicy ?? 'BLOCK');
+        setWorkOrdersEnabled(!!settings.workOrdersEnabled);
       }
       if (bankRes.ok) {
         const accounts = await bankRes.json();
@@ -792,6 +796,7 @@ function QuotationFormPageInner() {
       onChangePriceLevel={changePriceLevel}
       removeFromCart={removeFromCart}
       stockAtLineLocation={stockAtLineLocation}
+      allowOversell={allowOversell}
       subtotal={subtotal}
       discount={discount}
       distinctLocationNames={distinctLocationNames}

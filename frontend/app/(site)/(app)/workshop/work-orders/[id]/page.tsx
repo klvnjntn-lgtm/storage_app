@@ -13,6 +13,7 @@ import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, btnDanger } from 
 import { isOdometerBelowLast } from '@/lib/odometer';
 import WorkOrderForm, { VehicleBadge, formToPayload, type WorkOrderFormValue } from '@/app/components/workshop/WorkOrderForm';
 import Recommendations from '@/app/components/workshop/Recommendations';
+import WorkOrderParts from '@/app/components/workshop/WorkOrderParts';
 import {
   statusStyle,
   toDraftLines,
@@ -333,6 +334,22 @@ export default function WorkOrderDetailPage() {
           setForm(next);
           setDirty(true);
         }}
+      />
+
+      {/* Saved lines only: re-mounted when a save replaces them (new line ids). Ordering or receiving
+          parts can change the status — only that is refreshed, so unsaved edits stay. */}
+      <WorkOrderParts
+        key={wo.items.map((i) => i.id).join()}
+        workOrderId={wo.id}
+        plate={wo.vehicle.plateNumber}
+        model={wo.vehicle.vehicleModel}
+        locked={locked}
+        onStatusChange={() =>
+          apiFetch(`/work-orders/${wo.id}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((fresh: WorkOrder | null) => fresh && setWo((prev) => (prev ? { ...prev, status: fresh.status } : prev)))
+            .catch(() => {})
+        }
       />
 
       {/* Only the list is refreshed — unsaved edits to the job stay. */}

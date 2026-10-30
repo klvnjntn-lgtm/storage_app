@@ -5,12 +5,23 @@ import { SharedDocumentsModule } from '../shared/documents/shared-documents.modu
 import { InvoiceModule } from '../invoice/invoice.module';
 import { SalesQuotationModule } from '../sales-quotation/sales-quotation.module';
 import { OrganizationModulesModule } from '../organization-module/organization-modules.module';
+import { PurchaseOrderModule } from '../purchase-order/purchase-order.module';
+import { GoodsReceiptModule } from '../goods-receipt/goods-receipt.module';
 import { WorkOrdersController } from './work-orders.controller';
 import { MechanicsController } from './mechanics.controller';
 import { WorkOrdersService } from './work-orders.service';
 
 @Module({
-  imports: [PrismaModule, GuardsModule, SharedDocumentsModule, InvoiceModule, SalesQuotationModule, OrganizationModulesModule],
+  imports: [
+    PrismaModule,
+    GuardsModule,
+    SharedDocumentsModule,
+    InvoiceModule,
+    SalesQuotationModule,
+    OrganizationModulesModule,
+    PurchaseOrderModule,
+    GoodsReceiptModule,
+  ],
   controllers: [WorkOrdersController, MechanicsController],
   providers: [WorkOrdersService],
 })

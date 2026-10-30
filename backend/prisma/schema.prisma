@@ -1718,9 +1718,14 @@ model PurchaseOrder {
   // the first.
   branchId         String?
   branch           Branch?                      @relation(fields: [branchId], references: [id])
+  // The workshop job these parts were ordered for (from the job's Waiting for parts); receiving them
+  // there resumes the job.
+  workOrderId      String?
+  workOrder        WorkOrder?                   @relation(fields: [workOrderId], references: [id])
 
   @@unique([organizationId, poNumber])
   @@unique([organizationId, externalId]) // NEW
+  @@index([workOrderId])
 }
 
 model PurchaseOrderItem {
@@ -3400,6 +3405,8 @@ model WorkOrder {
   invoices        Invoice[]
   // The quotation(s) it was made from: the original and any additions.
   quotations      SalesQuotation[]
+  // Parts ordered for it while it waits for them.
+  purchaseOrders  PurchaseOrder[]
   // Work this job recommended for later, and reminders this job followed up.
   recommendations VehicleReminder[] @relation("ReminderSourceWorkOrder")
   followedUp      VehicleReminder[] @relation("ReminderFollowUpWorkOrder")

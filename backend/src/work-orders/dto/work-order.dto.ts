@@ -231,3 +231,54 @@ export class CreateWorkOrderInvoiceDto {
   @IsEnum(InvoiceFormat)
   format?: InvoiceFormat;
 }
+
+export class OrderPartLineDto {
+  @IsUUID()
+  productId: string;
+
+  @IsUUID()
+  locationId: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity: number;
+}
+
+// Parts the job is short of, ordered from the workshop's agent (by WhatsApp, from the staff's own phone):
+// kept as a draft purchase order on the job until they arrive.
+export class OrderPartsDto {
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  expectedDate?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrderPartLineDto)
+  lines: OrderPartLineDto[];
+}
+
+export class ArrivedPartLineDto {
+  @IsUUID()
+  productId: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  quantity: number;
+
+  // What was paid per unit; only used while the order is still a draft (a sent PO keeps its own cost).
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  unitCost?: number;
+}
+
+export class PartsArrivedDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ArrivedPartLineDto)
+  lines: ArrivedPartLineDto[];
+}

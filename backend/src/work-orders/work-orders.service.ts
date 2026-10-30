@@ -1,12 +1,23 @@
 import { randomBytes } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceFormat, InvoiceStatus, ModuleKey, Prisma, ReminderStatus, WorkOrderStatus } from '@prisma/client';
+import {
+  InvoiceFormat,
+  InvoiceStatus,
+  ModuleKey,
+  Prisma,
+  PurchaseOrderStatus,
+  ReminderStatus,
+  WorkOrderStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
+import { PurchaseOrderService } from '../purchase-order/purchase-order.service';
+import { GoodsReceiptService } from '../goods-receipt/goods-receipt.service';
+import { heldStock, holdKey } from '../stock/stock-holds';
 import { resolveBranchId } from '../branches/resolve-branch';
 import { normalizePlate } from '../lib/plate';
 import { escapeLike } from '../common/text/escape-like';
@@ -16,6 +27,8 @@ import {
   CreateWorkOrderFromQuotationDto,
   UpdateWorkOrderDto,
   AddWorkOrderLineDto,
+  OrderPartsDto,
+  PartsArrivedDto,
   WorkOrderLineInput,
 } from './dto/work-order.dto';
 
@@ -68,6 +81,13 @@ const BOARD_STATUSES: WorkOrderStatus[] = [
   WorkOrderStatus.QUEUED,
 ];
 
+// Parts orders still to arrive: a draft (ordered by WhatsApp, not yet priced) or a sent PO not fully received.
+const OPEN_PARTS_ORDER: PurchaseOrderStatus[] = [
+  PurchaseOrderStatus.DRAFT,
+  PurchaseOrderStatus.SENT,
+  PurchaseOrderStatus.PARTIALLY_RECEIVED,
+];
+
 // Job cards for the workshop: a quotation (or a car checked straight in)
 // becomes a job, a mechanic works through QUEUED → IN_PROGRESS
 // (→ WAITING_PARTS) → DONE, and the job becomes a draft invoice. The
@@ -83,6 +103,8 @@ export class WorkOrdersService {
     private invoices: InvoiceService,
     private quotations: SalesQuotationService,
     private modules: OrganizationModulesService,
+    private purchaseOrders: PurchaseOrderService,
+    private goodsReceipts: GoodsReceiptService,
   ) {}
 
   async isEnabled(organizationId: string): Promise<boolean> {
@@ -570,6 +592,7 @@ export class WorkOrdersService {
           orderBy: { sortOrder: 'asc' },
           select: { productId: true, description: true, quantity: true, product: { select: { name: true } } },
         },
+        purchaseOrders: { where: { status: { in: OPEN_PARTS_ORDER } }, select: { expectedDate: true } },
       },
     });
     jobs.sort((a, b) => BOARD_STATUSES.indexOf(a.status) - BOARD_STATUSES.indexOf(b.status));
@@ -588,6 +611,12 @@ export class WorkOrdersService {
         branch: j.branch?.name ?? null,
         createdAt: j.createdAt,
         startedAt: j.startedAt,
+        // When the parts it's waiting for should arrive: the latest date among its open orders.
+        partsExpectedAt:
+          j.purchaseOrders
+            .map((po) => po.expectedDate)
+            .filter((d): d is Date => !!d)
+            .sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
         lines: j.items.map((i) => ({
           name: i.product?.name ?? i.description ?? '',
           isPart: !!i.productId,
@@ -614,6 +643,244 @@ export class WorkOrdersService {
       },
     });
     return this.getOne(organizationId, id);
+  }
+
+  // ── Parts it's waiting for ───────────────────────────────────────────
+
+  // Per part on the job (product + location): what it needs, what the shelf can give it once other
+  // jobs, quotations and orders have their holds, what's short, and what's already ordered for it.
+  async parts(organizationId: string, id: string) {
+    await this.assertEnabled(organizationId);
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id, organizationId },
+      select: {
+        status: true,
+        items: {
+          where: { productId: { not: null }, locationId: { not: null } },
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            productId: true,
+            locationId: true,
+            quantity: true,
+            product: { select: { name: true, sku: true, costPrice: true } },
+          },
+        },
+        invoices: { where: { status: InvoiceStatus.ISSUED }, select: { id: true } },
+        purchaseOrders: {
+          where: { status: { not: PurchaseOrderStatus.CANCELLED } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            poNumber: true,
+            status: true,
+            expectedDate: true,
+            createdAt: true,
+            location: { select: { id: true, name: true } },
+            supplier: { select: { id: true, name: true, phone: true } },
+            items: {
+              select: {
+                productId: true,
+                quantity: true,
+                unitCost: true,
+                product: { select: { name: true, sku: true } },
+                goodsReceiptItems: { select: { quantity: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!wo) throw new NotFoundException('Work order not found');
+
+    type Needed = { productId: string; locationId: string; quantity: number; product: (typeof wo.items)[number]['product'] };
+    const needed = new Map<string, Needed>();
+    for (const i of wo.items) {
+      const key = holdKey(i.productId!, i.locationId!);
+      const line = needed.get(key) ?? { productId: i.productId!, locationId: i.locationId!, quantity: 0, product: i.product };
+      line.quantity = round2(line.quantity + Number(i.quantity));
+      needed.set(key, line);
+    }
+    const productIds = [...new Set([...needed.values()].map((l) => l.productId))];
+    const [stock, held, locations] = await Promise.all([
+      this.prisma.stock.findMany({
+        where: { organizationId, productId: { in: productIds } },
+        select: { productId: true, locationId: true, quantity: true },
+      }),
+      heldStock(this.prisma, organizationId, productIds),
+      this.prisma.location.findMany({
+        where: { organizationId, id: { in: [...new Set([...needed.values()].map((l) => l.locationId))] } },
+        select: { id: true, name: true },
+      }),
+    ]);
+    const onHandBy = new Map(stock.map((s) => [holdKey(s.productId, s.locationId), Number(s.quantity)]));
+    const locationName = new Map(locations.map((l) => [l.id, l.name]));
+    // The job's own lines are among the holds while it holds anything (see work-order-holds.ts).
+    const holdsOwn =
+      wo.status !== WorkOrderStatus.CANCELLED && wo.status !== WorkOrderStatus.ESTIMATE && wo.invoices.length === 0;
+
+    const orders = wo.purchaseOrders.map((po) => ({
+      id: po.id,
+      poNumber: po.poNumber,
+      status: po.status,
+      expectedDate: po.expectedDate,
+      createdAt: po.createdAt,
+      location: po.location,
+      supplier: po.supplier,
+      lines: po.items
+        .filter((i) => i.productId)
+        .map((i) => {
+          const received = round2(i.goodsReceiptItems.reduce((sum, r) => sum + Number(r.quantity), 0));
+          return {
+            productId: i.productId!,
+            name: i.product?.name ?? '',
+            sku: i.product?.sku ?? null,
+            quantity: Number(i.quantity),
+            unitCost: Number(i.unitCost),
+            received,
+            remaining: Math.max(0, round2(Number(i.quantity) - received)),
+          };
+        }),
+    }));
+    const onOrderBy = new Map<string, number>();
+    for (const po of orders) {
+      if (!OPEN_PARTS_ORDER.includes(po.status) || !po.location) continue;
+      for (const l of po.lines) {
+        const key = holdKey(l.productId, po.location.id);
+        onOrderBy.set(key, round2((onOrderBy.get(key) ?? 0) + l.remaining));
+      }
+    }
+
+    const lines = [...needed.entries()].map(([key, l]) => {
+      const onHand = onHandBy.get(key) ?? 0;
+      const heldElsewhere = Math.max(0, round2((held.get(key) ?? 0) - (holdsOwn ? l.quantity : 0)));
+      const available = Math.max(0, round2(onHand - heldElsewhere));
+      const short = Math.max(0, round2(l.quantity - available));
+      const onOrder = onOrderBy.get(key) ?? 0;
+      return {
+        productId: l.productId,
+        locationId: l.locationId,
+        locationName: locationName.get(l.locationId) ?? '',
+        name: l.product?.name ?? '',
+        sku: l.product?.sku ?? null,
+        costPrice: l.product?.costPrice != null ? Number(l.product.costPrice) : null,
+        needed: l.quantity,
+        onHand,
+        heldElsewhere,
+        available,
+        short,
+        onOrder,
+        toOrder: Math.max(0, round2(short - onOrder)),
+      };
+    });
+    return { lines, orders };
+  }
+
+  // The parts the job is short of, ordered from the agent: one draft purchase order per stock location,
+  // at the catalogue cost until what was paid is entered on arrival. The job then waits for them.
+  async orderParts(organizationId: string, userId: string, id: string, dto: OrderPartsDto) {
+    const wo = await this.getEditable(organizationId, id);
+    const lines = dto.lines.filter((l) => l.quantity > 0);
+    if (lines.length === 0) throw new BadRequestException('Pick at least one part to order');
+    const onJob = await this.prisma.workOrderItem.findMany({
+      where: { workOrderId: id, productId: { in: lines.map((l) => l.productId) } },
+      select: { productId: true, locationId: true, product: { select: { costPrice: true } } },
+    });
+    const costBy = new Map(onJob.map((i) => [holdKey(i.productId!, i.locationId ?? ''), i.product?.costPrice]));
+    for (const l of lines) {
+      if (!costBy.has(holdKey(l.productId, l.locationId))) {
+        throw new BadRequestException('Only parts on this job can be ordered for it');
+      }
+    }
+    const vehicle = await this.prisma.vehicle.findUniqueOrThrow({
+      where: { id: wo.vehicleId },
+      select: { plateNumber: true },
+    });
+    const byLocation = new Map<string, typeof lines>();
+    for (const l of lines) byLocation.set(l.locationId, [...(byLocation.get(l.locationId) ?? []), l]);
+    for (const [locationId, group] of byLocation) {
+      const po = await this.purchaseOrders.create(organizationId, userId, {
+        locationId,
+        supplierId: dto.supplierId,
+        expectedDate: dto.expectedDate,
+        branchId: wo.branchId ?? undefined,
+        notes: `${wo.number} · ${vehicle.plateNumber}`,
+        items: group.map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+          unitCost: Number(costBy.get(holdKey(l.productId, locationId)) ?? 0),
+        })),
+      });
+      await this.prisma.purchaseOrder.update({ where: { id: po.id }, data: { workOrderId: id } });
+    }
+    if (wo.status === WorkOrderStatus.QUEUED || wo.status === WorkOrderStatus.IN_PROGRESS) {
+      await this.setStatus(organizationId, id, WorkOrderStatus.WAITING_PARTS);
+    }
+    return this.parts(organizationId, id);
+  }
+
+  // The agent delivered: a draft order is priced at what was paid and sent, then received into stock
+  // (Inventory/AP posted as for any goods receipt). Whatever didn't come is dropped from a draft — the
+  // job shows it short again to reorder. Once nothing is short the job goes back in progress.
+  async partsArrived(
+    organizationId: string,
+    userId: string,
+    role: string | undefined,
+    id: string,
+    purchaseOrderId: string,
+    dto: PartsArrivedDto,
+  ) {
+    const wo = await this.getEditable(organizationId, id);
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, organizationId, workOrderId: id },
+      include: { items: { include: { product: { select: { trackBatches: true, trackSerials: true } } } } },
+    });
+    if (!po) throw new NotFoundException('Parts order not found on this job');
+    if (!OPEN_PARTS_ORDER.includes(po.status)) throw new BadRequestException('These parts have already arrived');
+    if (!po.locationId) throw new BadRequestException('Pick where the parts go on the purchase order first');
+    if (po.items.some((i) => i.product?.trackBatches || i.product?.trackSerials)) {
+      throw new BadRequestException('Batch- or serial-tracked parts are received on the purchase order page');
+    }
+    const arrived = dto.lines.filter((l) => l.quantity > 0);
+    if (arrived.length === 0) throw new BadRequestException('Enter how many arrived');
+    const poItemBy = new Map(po.items.filter((i) => i.productId).map((i) => [i.productId!, i]));
+    for (const l of arrived) {
+      if (!poItemBy.has(l.productId)) throw new BadRequestException('That part is not on this order');
+    }
+
+    let receiveLines: { purchaseOrderItemId: string; quantity: number }[];
+    if (po.status === PurchaseOrderStatus.DRAFT) {
+      if (arrived.some((l) => !l.unitCost)) throw new BadRequestException('Enter what was paid for each part');
+      await this.purchaseOrders.update(organizationId, po.id, userId, {
+        items: arrived.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: l.unitCost! })),
+      });
+      const sent = await this.purchaseOrders.send(organizationId, po.id, userId, role);
+      receiveLines = sent.items.map((i) => ({ purchaseOrderItemId: i.id, quantity: Number(i.quantity) }));
+    } else {
+      receiveLines = arrived.map((l) => ({ purchaseOrderItemId: poItemBy.get(l.productId)!.id, quantity: l.quantity }));
+    }
+    await this.goodsReceipts.receive(organizationId, userId, po.id, {
+      locationId: po.locationId,
+      notes: wo.number,
+      items: receiveLines,
+    });
+
+    if (wo.status === WorkOrderStatus.WAITING_PARTS) {
+      const { lines } = await this.parts(organizationId, id);
+      if (lines.every((l) => l.short === 0)) await this.setStatus(organizationId, id, WorkOrderStatus.IN_PROGRESS);
+    }
+    return this.parts(organizationId, id);
+  }
+
+  // The agent can't supply them: the order is cancelled and the parts show short again.
+  async cancelPartsOrder(organizationId: string, userId: string, id: string, purchaseOrderId: string) {
+    await this.getEditable(organizationId, id);
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, organizationId, workOrderId: id },
+      select: { id: true },
+    });
+    if (!po) throw new NotFoundException('Parts order not found on this job');
+    await this.purchaseOrders.cancel(organizationId, po.id, userId);
+    return this.parts(organizationId, id);
   }
 
   // Makes a draft invoice from the job's lines. Product lines are priced
@@ -729,6 +996,10 @@ export class WorkOrdersService {
     }
     await tx.vehicle.update({ where: { id: vehicleId }, data: { odometer } });
   }
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 function toItemData(line: WorkOrderLineInput, index: number) {

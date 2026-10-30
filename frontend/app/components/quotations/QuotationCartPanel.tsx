@@ -37,6 +37,7 @@ export function QuotationCartPanel({
   onChangePriceLevel,
   removeFromCart,
   stockAtLineLocation,
+  allowOversell = false,
   subtotal,
   discount,
   distinctLocationNames,
@@ -78,6 +79,8 @@ export function QuotationCartPanel({
   onChangePriceLevel?: (key: string, levelId: string) => void;
   removeFromCart: (key: string) => void;
   stockAtLineLocation: (line: CartLine) => number;
+  // Lines may go past the stock on hand (stock policy, or a workshop quoting parts to order).
+  allowOversell?: boolean;
   subtotal: number;
   discount: number;
   distinctLocationNames: string[];
@@ -204,6 +207,12 @@ export function QuotationCartPanel({
                       widen the panel); long product names now wrap like
                       a normal paragraph instead. */}
                   <p className="text-sm break-words leading-snug">{line.product.name}</p>
+                  {line.quantity > available && (
+                    <p className="flex items-center gap-1 text-[11px] text-amber-700 mt-0.5">
+                      <AlertCircle size={11} strokeWidth={2} className="shrink-0" />
+                      {t('sales.quotationCart.beyondStock', { qty: Math.max(0, available) })}
+                    </p>
+                  )}
                   {warehouseOps && (
                     <div className="flex items-center gap-1 text-[11px] text-gray-400 mt-0.5">
                       <MapPin size={10} strokeWidth={2} className="shrink-0" />
@@ -279,7 +288,7 @@ export function QuotationCartPanel({
                   <QtyInput value={Number(line.quantity)} onCommit={(q) => changeQty(line.key, q - Number(line.quantity))} />
                   <button aria-label={t('common.increaseQty')}
                     onClick={() => changeQty(line.key, 1)}
-                    disabled={line.quantity >= available}
+                    disabled={!allowOversell && line.quantity >= available}
                     className="w-7 h-7 flex items-center justify-center border border-blue-500/20 rounded-md hover:bg-blue-50/60 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={14} strokeWidth={2} />

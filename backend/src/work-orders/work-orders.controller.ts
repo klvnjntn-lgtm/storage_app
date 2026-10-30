@@ -16,6 +16,8 @@ import {
   CreateWorkOrderDto,
   CreateWorkOrderFromQuotationDto,
   CreateWorkOrderInvoiceDto,
+  OrderPartsDto,
+  PartsArrivedDto,
   SetWorkOrderStatusDto,
   UpdateWorkOrderDto,
 } from './dto/work-order.dto';
@@ -109,6 +111,34 @@ export class WorkOrdersController {
     @Body() dto: CreateWorkOrderFromQuotationDto,
   ) {
     return this.workOrders.createFromQuotation(orgId, req.user.sub, quotationId, dto);
+  }
+
+  // What the job is short of and what's ordered for it.
+  @Get(':id/parts')
+  parts(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.workOrders.parts(orgId, id);
+  }
+
+  @Post(':id/parts-orders')
+  orderParts(@CurrentOrg() orgId: string, @Req() req, @Param('id') id: string, @Body() dto: OrderPartsDto) {
+    return this.workOrders.orderParts(orgId, req.user.sub, id, dto);
+  }
+
+  // Receiving goes through the purchase order's approval rules, so the caller's role is passed on.
+  @Post(':id/parts-orders/:poId/arrived')
+  partsArrived(
+    @CurrentOrg() orgId: string,
+    @Req() req,
+    @Param('id') id: string,
+    @Param('poId') poId: string,
+    @Body() dto: PartsArrivedDto,
+  ) {
+    return this.workOrders.partsArrived(orgId, req.user.sub, req.user.role, id, poId, dto);
+  }
+
+  @Post(':id/parts-orders/:poId/cancel')
+  cancelPartsOrder(@CurrentOrg() orgId: string, @Req() req, @Param('id') id: string, @Param('poId') poId: string) {
+    return this.workOrders.cancelPartsOrder(orgId, req.user.sub, id, poId);
   }
 
   @Post(':id/recommendations')

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Wrench, PauseCircle, Clock, Package, User, StickyNote, LogOut } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { formatDMY } from '@/lib/dates';
+import { formatDMY, parseCalendarDate } from '@/lib/dates';
 import { apiFetch } from '@/lib/apifetch';
 import { clearSession } from '@/lib/session';
 
@@ -19,6 +19,7 @@ type Job = {
   branch: string | null;
   createdAt: string;
   startedAt: string | null;
+  partsExpectedAt: string | null;
   lines: { name: string; isPart: boolean; quantity: number }[];
 };
 type Board = { business: { name: string; logoUrl: string | null }; generatedAt: string; jobs: Job[] };
@@ -141,6 +142,12 @@ export default function MechanicBoardPage() {
                       <User size={14} className="text-slate-500" />
                       {job.mechanic ?? <span className="text-amber-300">{b('unassigned')}</span>}
                     </p>
+                    {job.status === 'WAITING_PARTS' && job.partsExpectedAt && (
+                      <p className="mt-2 flex items-center gap-1.5 text-sm text-amber-300">
+                        <Package size={14} />
+                        {b('partsDue', { date: formatDMY(parseCalendarDate(job.partsExpectedAt)) })}
+                      </p>
+                    )}
                     {job.complaint && <p className="mt-2 text-base text-slate-200 whitespace-pre-wrap">{job.complaint}</p>}
                     {job.lines.length > 0 && (
                       <ul className="mt-3 space-y-1 border-t border-slate-800 pt-2">

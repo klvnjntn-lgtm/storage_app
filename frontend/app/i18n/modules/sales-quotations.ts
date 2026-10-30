@@ -113,6 +113,7 @@ export const salesQuotations = {
         loadingPreview: 'Loading preview...',
       },
       quotationCart: {
+        beyondStock: 'Only {qty} in stock',
         pricedFromPrefix: 'Priced from',
         pricedAcrossPrefix: 'Priced across',
         locationsCount: '{count} locations',
@@ -268,6 +269,7 @@ export const salesQuotations = {
         loadingPreview: 'Memuat pratinjau...',
       },
       quotationCart: {
+        beyondStock: 'Stok hanya {qty}',
         pricedFromPrefix: 'Harga dari',
         pricedAcrossPrefix: 'Harga dari',
         locationsCount: '{count} lokasi',
