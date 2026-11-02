@@ -1,6 +1,6 @@
 // src/customers/customer-pin-backfill.ts
 import { BadRequestException } from '@nestjs/common';
-import { PinSource, Prisma } from '@prisma/client';
+import { PinSource, Prisma, RouteStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 // A GPS pin vaguer than this still gets saved, but the office sees it
@@ -64,21 +64,24 @@ export async function backfillCustomerPin(
       { pinSource: PinSource.GPS, pinAccuracy: { gt: accuracy } },
     ],
   } satisfies Prisma.CustomerWhereInput & Prisma.CustomerAddressWhereInput;
+  const fill = { organizationId, customerId, latitude, longitude };
   if (params.customerAddressId) {
-    await prisma.customerAddress.updateMany({
+    const { count } = await prisma.customerAddress.updateMany({
       where: { id: params.customerAddressId, organizationId, customerId, ...replaceable },
       data: pin,
     });
+    if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: params.customerAddressId });
     return;
   }
 
   const target = normalizeAddress(params.deliveryAddress);
 
   if (!target || target === normalizeAddress(customer.address)) {
-    await prisma.customer.updateMany({
+    const { count } = await prisma.customer.updateMany({
       where: { id: customerId, organizationId, ...replaceable },
       data: pin,
     });
+    if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: null, address: customer.address });
     return;
   }
 
@@ -88,9 +91,58 @@ export async function backfillCustomerPin(
   });
   const match = saved.find((a) => normalizeAddress(a.address) === target);
   if (!match) return;
-  await prisma.customerAddress.updateMany({
+  const { count } = await prisma.customerAddress.updateMany({
     where: { id: match.id, ...replaceable },
     data: pin,
+  });
+  if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: match.id });
+}
+
+// Stops copy the customer's pin when they're added, so stops already
+// planned on routes still to be driven (the rest of the week's schedule)
+// were added with no pin. Give the ones still without one the new pin,
+// so the next driver there can navigate. A stop with a pin of its own
+// (set on the route) keeps it.
+// For the main address (customerAddressId null), only stops going to that
+// address text — not one-off sites for the same customer.
+async function fillOpenStopPins(
+  prisma: PrismaService,
+  params: {
+    organizationId: string;
+    customerId: string;
+    customerAddressId: string | null;
+    address?: string | null;
+    latitude: number;
+    longitude: number;
+  },
+): Promise<void> {
+  const stops = await prisma.routeStop.findMany({
+    where: {
+      customerId: params.customerId,
+      customerAddressId: params.customerAddressId,
+      destinationLatitude: null,
+      signedAt: null,
+      failedAt: null,
+      supersededAt: null,
+      route: {
+        organizationId: params.organizationId,
+        status: { in: [RouteStatus.PLANNED, RouteStatus.ACTIVE] },
+      },
+    },
+    select: { id: true, address: true },
+  });
+  const main = normalizeAddress(params.address);
+  const ids = stops
+    .filter((s) => {
+      if (params.customerAddressId) return true;
+      const a = normalizeAddress(s.address);
+      return !a || a === main;
+    })
+    .map((s) => s.id);
+  if (!ids.length) return;
+  await prisma.routeStop.updateMany({
+    where: { id: { in: ids }, destinationLatitude: null },
+    data: { destinationLatitude: params.latitude, destinationLongitude: params.longitude },
   });
 }
 

@@ -10,8 +10,10 @@
 // that, the original goes up unchanged and unstamped — the server accepts
 // up to 10 MB.
 
-export const MAX_PROOF_PHOTO_BYTES = 500 * 1024;
-const MAX_DIMENSION = 1600;
+// 1280px still reads a shop sign or a house number, at around 150–200 KB:
+// a day of 30 stops is a few MB of a driver's mobile data.
+export const MAX_PROOF_PHOTO_BYTES = 200 * 1024;
+const MAX_DIMENSION = 1280;
 const QUALITIES = [0.82, 0.7, 0.58];
 
 function toJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {

@@ -999,22 +999,29 @@ export default function DeliveryRouteDetailPage() {
                       {t('delivery.routeDetail.reschedule')}
                     </button>
                   )}
-                  <button
-                    onClick={() => openLocationPicker(stop)}
-                    disabled={isDriver || !routeOpen || stop.status !== 'PENDING'}
-                    title={t('delivery.routeDetail.setLocation')}
-                    className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:cursor-default ${
-                      stop.destinationLatitude
-                        ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100 disabled:hover:bg-green-50'
-                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:hover:bg-amber-50'
-                    }`}
-                  >
-                    {stop.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
-                    {stop.destinationLatitude
-                      ? t('delivery.routeDetail.locationSet')
-                      : t('delivery.routeDetail.noLocation')}
-                  </button>
-                  <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} />
+                  {/* A finished stop that had no pin was placed by the
+                      driver's GPS (shown with the proof), and the customer
+                      was pinned from it — "No location" there misleads. */}
+                  {(stop.status === 'PENDING' || stop.destinationLatitude) && (
+                    <>
+                      <button
+                        onClick={() => openLocationPicker(stop)}
+                        disabled={isDriver || !routeOpen || stop.status !== 'PENDING'}
+                        title={t('delivery.routeDetail.setLocation')}
+                        className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:cursor-default ${
+                          stop.destinationLatitude
+                            ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100 disabled:hover:bg-green-50'
+                            : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:hover:bg-amber-50'
+                        }`}
+                      >
+                        {stop.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
+                        {stop.destinationLatitude
+                          ? t('delivery.routeDetail.locationSet')
+                          : t('delivery.routeDetail.noLocation')}
+                      </button>
+                      <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} />
+                    </>
+                  )}
                   {!isDriver && routeOpen && (
                     <>
                       <button

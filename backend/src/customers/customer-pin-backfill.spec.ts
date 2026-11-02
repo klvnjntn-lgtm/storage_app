@@ -4,8 +4,13 @@ import { backfillCustomerPin, manualPinData } from './customer-pin-backfill';
 function makePrisma(
   customer: { address: string | null } | null,
   saved: { id: string; address: string | null }[] = [],
+  openStops: { id: string; address: string | null }[] = [],
 ) {
   return {
+    routeStop: {
+      findMany: jest.fn().mockResolvedValue(openStops),
+      updateMany: jest.fn().mockResolvedValue({ count: openStops.length }),
+    },
     customer: {
       findFirst: jest.fn().mockResolvedValue(customer),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -88,6 +93,31 @@ describe('backfillCustomerPin', () => {
       where: { id: 'c1', organizationId: 'org1', ...replaceable(250) },
       data: gpsPin(250),
     });
+  });
+
+  it('gives the new pin to open stops at that address still without one', async () => {
+    const prisma = makePrisma({ address: base.deliveryAddress }, [], [
+      { id: 's1', address: 'komplek xyz blok b no. 6' },
+      { id: 's2', address: 'Proyek Lain' },
+      { id: 's3', address: null },
+    ]);
+    await backfillCustomerPin(prisma, base);
+    expect(prisma.routeStop.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ customerId: 'c1', customerAddressId: null, destinationLatitude: null }),
+      }),
+    );
+    expect(prisma.routeStop.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['s1', 's3'] }, destinationLatitude: null },
+      data: { destinationLatitude: -6.2, destinationLongitude: 106.8 },
+    });
+  });
+
+  it('leaves open stops alone when the pin was not replaced', async () => {
+    const prisma = makePrisma({ address: base.deliveryAddress }, [], [{ id: 's1', address: null }]);
+    prisma.customer.updateMany.mockResolvedValue({ count: 0 });
+    await backfillCustomerPin(prisma, base);
+    expect(prisma.routeStop.findMany).not.toHaveBeenCalled();
   });
 
   it.each([

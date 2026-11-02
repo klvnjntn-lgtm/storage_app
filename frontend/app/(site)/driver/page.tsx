@@ -32,6 +32,7 @@ import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/c
 import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
+import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -540,6 +541,11 @@ export default function DriverRoutePage() {
   // When the photo was taken — that, not the tap on Done, is when the
   // delivery happened.
   const [photoTakenAt, setPhotoTakenAt] = useState<Record<string, string>>({});
+  // The stop the in-app camera is open for (InAppCamera), and the one the
+  // phone's camera app was opened for when the in-app one can't be used.
+  const [cameraFor, setCameraFor] = useState<{ routeId: string; stop: Stop } | null>(null);
+  const phoneCameraFor = useRef<{ routeId: string; stop: Stop } | null>(null);
+  const phoneCameraInput = useRef<HTMLInputElement>(null);
   // The current values, for the background retry and for uploads that
   // finish after a retake.
   const latest = useRef({ routes, photoDraft, photoFix, photoTakenAt, receivedByDraft });
@@ -587,6 +593,19 @@ export default function DriverRoutePage() {
   // was taken, so a photo without one would leave it nowhere. Saved on
   // the phone straight away (driverDrafts) so a refresh or closed tab
   // loses nothing. A retake replaces all of it.
+  function openCamera(routeId: string, stop: Stop) {
+    if (inAppCameraSupported()) setCameraFor({ routeId, stop });
+    else openPhoneCamera(routeId, stop);
+  }
+
+  // Must run inside the driver's tap — browsers only open a file picker
+  // from one.
+  function openPhoneCamera(routeId: string, stop: Stop) {
+    phoneCameraFor.current = { routeId, stop };
+    rememberReturnTo(stop.id);
+    phoneCameraInput.current?.click();
+  }
+
   async function onPhotoPicked(routeId: string, stop: Stop, file: File) {
     const stopId = stop.id;
     clearReturnTo();
@@ -1223,48 +1242,28 @@ export default function DriverRoutePage() {
                             <CheckCircle2 size={20} className="shrink-0" />
                             {t(photoDraft[doId] ? 'delivery.driver.photoTaken' : 'delivery.driver.photoAlreadySent')}
                           </div>
-                          <label
-                            onClick={() => rememberReturnTo(doId)}
-                            className="shrink-0 h-12 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer"
+                          <button
+                            type="button"
+                            disabled={gpsBlocked}
+                            onClick={() => openCamera(route.id, stop)}
+                            className="shrink-0 h-12 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <RotateCcw size={16} />
                             {t('delivery.driver.retakePhoto')}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              className="hidden"
-                              disabled={gpsBlocked}
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) onPhotoPicked(route.id, stop, file);
-                                e.target.value = '';
-                              }}
-                            />
-                          </label>
+                          </button>
                         </div>
                       ) : (
-                        <label
-                          onClick={() => rememberReturnTo(doId)}
-                          className={`flex flex-col items-center justify-center gap-1 h-24 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 text-blue-700 text-base font-semibold ${
+                        <button
+                          type="button"
+                          disabled={gpsBlocked}
+                          onClick={() => openCamera(route.id, stop)}
+                          className={`w-full flex flex-col items-center justify-center gap-1 h-24 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 text-blue-700 text-base font-semibold ${
                             gpsBlocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer active:bg-blue-50'
                           }`}
                         >
                           <Camera size={30} />
                           {t(stop.deliveryOrder ? 'delivery.driver.photoLabel' : 'delivery.driver.photoRequired')}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            className="hidden"
-                            disabled={gpsBlocked}
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) onPhotoPicked(route.id, stop, file);
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
+                        </button>
                       )}
                       {preparingPhotoFor === doId && (
                         <p className="text-base text-gray-500">{t('delivery.driver.preparingPhoto')}</p>
@@ -1349,6 +1348,35 @@ export default function DriverRoutePage() {
           })}
         </div>
       ))}
+
+      {cameraFor && (
+        <InAppCamera
+          onCapture={(file) => {
+            const { routeId, stop } = cameraFor;
+            setCameraFor(null);
+            onPhotoPicked(routeId, stop, file);
+          }}
+          onClose={() => setCameraFor(null)}
+          onUsePhoneCamera={() => {
+            const { routeId, stop } = cameraFor;
+            setCameraFor(null);
+            openPhoneCamera(routeId, stop);
+          }}
+        />
+      )}
+      <input
+        ref={phoneCameraInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          const target = phoneCameraFor.current;
+          if (file && target) onPhotoPicked(target.routeId, target.stop, file);
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }
