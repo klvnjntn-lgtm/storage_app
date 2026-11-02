@@ -6,6 +6,7 @@ import { Search, Plus, Minus, X, List, LayoutGrid, ImageOff, ShoppingCart } from
 import { apiFetch } from '@/lib/apifetch';
 import { POProduct } from './types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -158,8 +159,7 @@ export function POProductSearch({ onAddProduct }: Props) {
 
             <div>
               <label className="block text-[11px] text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.colUnitCost')}</label>
-              <input
-                type="number"
+              <NumberInput
                 min={0}
                 value={staged.unitCost}
                 onChange={(e) => {

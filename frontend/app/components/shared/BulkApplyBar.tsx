@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { DiscountType } from '@/app/components/invoices/types';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export function BulkApplyBar({
   onApplyDiscountToAll,
@@ -25,8 +26,7 @@ export function BulkApplyBar({
           <option value="PERCENTAGE">%</option>
           <option value="FIXED">Rp</option>
         </select>
-        <input
-          type="number"
+        <NumberInput
           min={0}
           value={discValue}
           onChange={(e) => setDiscValue(e.target.value)}

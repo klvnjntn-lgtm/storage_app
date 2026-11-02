@@ -21,6 +21,7 @@ import {
   type PlatformResult,
 } from './api';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type Billing = { plan: string; seatLimit: string; paidUntil: string; trialEndsAt: string; billingNote: string };
 
@@ -230,8 +231,7 @@ export default function OrganizationDetail({
                   </label>
                   <label className="block">
                     <span className={label}>{t('platform.detail.seatLimit')}</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={10000}
                       required

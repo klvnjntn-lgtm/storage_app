@@ -15,6 +15,7 @@ import { useBranches } from '@/lib/hooks/useBranches';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 type FixedAsset = {
@@ -497,8 +498,7 @@ export default function FixedAssetsPage() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.costRp')}</label>
-                <input
-                  type="number"
+                <NumberInput
                   min="0"
                   step="1"
                   placeholder="0"
@@ -511,8 +511,7 @@ export default function FixedAssetsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.salvageValueRp')}</label>
-                <input
-                  type="number"
+                <NumberInput
                   min="0"
                   step="1"
                   value={form.salvageValue}
@@ -522,8 +521,7 @@ export default function FixedAssetsPage() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.usefulLifeMonths')}</label>
-                <input
-                  type="number"
+                <NumberInput
                   min="1"
                   step="1"
                   value={form.usefulLifeMonths}
@@ -631,8 +629,7 @@ export default function FixedAssetsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('common.amount')}</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               min="0.01"
                               step="0.01"
                               max={balance}
@@ -720,8 +717,7 @@ export default function FixedAssetsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.fixedAssets.proceedsRp')}</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               min="0"
                               step="1"
                               value={disposeForm.proceeds}

@@ -24,6 +24,7 @@ import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 import { isAdminRole } from '@/lib/roles';
+import NumberInput from '@/app/components/shared/NumberInput';
 type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
 // NEW — mirrors InvoicePrintView.fulfillmentStatus / InvoiceItem.fulfilledQuantity
@@ -696,8 +697,7 @@ export default function InvoiceDetailPage() {
                       onChange={(v) => setReminderDueDate(v)}
                       className="w-full mb-2"
                     />
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       inputMode="numeric"
                       value={reminderKm}

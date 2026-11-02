@@ -9,6 +9,7 @@ import { defaultLocation } from '@/lib/locations';
 import { usePriceLevels } from '@/lib/price-levels';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ComboBox from '@/app/components/shared/ComboBox';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export type EditableProduct = {
   id: string;
@@ -101,8 +102,7 @@ function MoneyInput({
   return (
     <div className="relative">
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">Rp</span>
-      <input
-        type="number"
+      <NumberInput
         min="0"
         inputMode="decimal"
         value={value}
@@ -537,8 +537,7 @@ export default function ProductEditorDrawer({
                       </Field>
                     )}
                     <Field label={t('admin.products.qtyLabel')}>
-                      <input
-                        type="number"
+                      <NumberInput
                         value={stockDelta}
                         onChange={(e) => setStockDelta(e.target.value)}
                         placeholder="0"

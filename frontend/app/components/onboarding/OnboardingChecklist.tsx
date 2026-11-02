@@ -18,7 +18,7 @@ type Status = { completedAt: string | null; show: boolean; steps: Step[] };
 const STEP_LINK: Record<string, string> = {
   company: '/settings#business-identity',
   location: '/inventory/warehouse',
-  products: '/admin/products',
+  products: '/inventory/stock',
   // MASTER's link; see stepLink.
   bankAccount: '/accounting/setup#bank-accounts',
   team: '/admin/members',

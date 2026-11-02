@@ -8,6 +8,7 @@ import { formatDMY } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 import type { Recommendation, WorkOrder } from './workOrders';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 // Three months out, as yyyy-mm-dd for the date input.
 function defaultDue() {
@@ -113,8 +114,7 @@ export default function Recommendations({
           aria-label={t('workshop.workOrders.dueDate')}
           onChange={(e) => setDueDate(e.target.value)}
         />
-        <input
-          type="number"
+        <NumberInput
           min={0}
           inputMode="numeric"
           className={`${inputCls} sm:w-40`}

@@ -9,6 +9,7 @@ import { BulkApplyBar } from '@/app/components/shared/BulkApplyBar';
 import { LineDiscountControl } from '@/app/components/shared/LineDiscountControl';
 import { useLanguage } from '@/app/context/LanguageContext';
 import QtyInput from '@/app/components/shared/QtyInput';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type CartLineWithTotals = CartLine & {
   key: string;
@@ -166,8 +167,7 @@ export function SalesOrderCartPanel({
                     {editing ? (
                       <div className="flex items-center gap-1 bg-white border-2 border-blue-600 rounded-md pl-2 pr-1 py-1">
                         <span className="text-xs text-gray-400">Rp</span>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           autoFocus
                           value={line.unitPrice}
@@ -284,8 +284,7 @@ export function SalesOrderCartPanel({
                     }`}
                   >
                     <span className="text-xs text-gray-400">Rp</span>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       value={line.unitPrice ?? ''}
                       onChange={(e) => onChangeServicePrice(line.key, e.target.value)}

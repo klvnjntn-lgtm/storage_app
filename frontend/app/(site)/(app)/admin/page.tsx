@@ -26,7 +26,8 @@ export default function AdminPage() {
       icon: Database,
     },
     {
-      href: '/admin/products',
+      // Products are created and edited on the Stock page.
+      href: '/inventory/stock',
       title: t('admin.overview.productsTitle'),
       description: t('admin.overview.productsDescription'),
       icon: Package,

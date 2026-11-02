@@ -3,6 +3,7 @@
 import { DiscountType } from '@/app/components/invoices/types';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export function LineDiscountControl({
   discountType,
@@ -32,8 +33,7 @@ export function LineDiscountControl({
         <option value="FIXED">Rp</option>
       </select>
       {discountType && (
-        <input
-          type="number"
+        <NumberInput
           min={0}
           value={discountValue ?? ''}
           onChange={(e) => onChange(discountType, e.target.value)}

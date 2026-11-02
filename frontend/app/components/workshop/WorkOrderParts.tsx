@@ -8,6 +8,7 @@ import { formatDMY, parseCalendarDate } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { Card, ErrorNote, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type PartLine = {
   productId: string;
@@ -254,8 +255,7 @@ export default function WorkOrderParts({
             .map((l) => (
               <div key={key(l)} className="flex items-center gap-3">
                 <span className="flex-1 min-w-0 text-sm truncate">{l.name}</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   step="any"
                   inputMode="decimal"
@@ -342,8 +342,7 @@ export default function WorkOrderParts({
                           <span className="flex-1 min-w-[8rem] text-sm">{l.name}</span>
                           <label className="text-xs text-gray-600 space-y-1">
                             <span>{p('qtyArrived')}</span>
-                            <input
-                              type="number"
+                            <NumberInput
                               min={0}
                               step="any"
                               inputMode="decimal"
@@ -355,8 +354,7 @@ export default function WorkOrderParts({
                           {o.status === 'DRAFT' && (
                             <label className="text-xs text-gray-600 space-y-1">
                               <span>{p('paid')}</span>
-                              <input
-                                type="number"
+                              <NumberInput
                                 min={0}
                                 step="any"
                                 inputMode="decimal"

@@ -161,11 +161,24 @@ export class DashboardService {
                 AND "completedAt" >= ${seriesStart} AND "completedAt" <= ${seriesEnd}
               GROUP BY 1`
           : null,
+        // Delivered = signed for: delivery orders, plus customer stops on
+        // routes (businesses without Sales deliver those, with no delivery
+        // order behind them). Routes have no branch, so their stops count
+        // business-wide.
         delivery
           ? this.prisma.$queryRaw<DayRow[]>`
-              SELECT ${day('shippedAt')} AS day, COUNT(*) AS total FROM "DeliveryOrder"
-              WHERE "organizationId" = ${organizationId} AND "shippedAt" IS NOT NULL ${inBranch}
-                AND "shippedAt" >= ${seriesStart} AND "shippedAt" <= ${seriesEnd}
+              SELECT day, SUM(total) AS total FROM (
+                SELECT ${day('signedAt')} AS day, COUNT(*) AS total FROM "DeliveryOrder"
+                WHERE "organizationId" = ${organizationId} AND "signedAt" IS NOT NULL ${inBranch}
+                  AND "signedAt" >= ${seriesStart} AND "signedAt" <= ${seriesEnd}
+                GROUP BY 1
+                UNION ALL
+                SELECT ${day('signedAt')} AS day, COUNT(*) AS total
+                FROM "RouteStop" JOIN "Route" ON "Route".id = "RouteStop"."routeId"
+                WHERE "Route"."organizationId" = ${organizationId} AND "RouteStop"."deliveryOrderId" IS NULL
+                  AND "signedAt" >= ${seriesStart} AND "signedAt" <= ${seriesEnd}
+                GROUP BY 1
+              ) delivered
               GROUP BY 1`
           : null,
       ]);

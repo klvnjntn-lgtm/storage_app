@@ -84,6 +84,8 @@ const nextConfig: NextConfig = {
   // tabs of Sales Reports; old links and bookmarks still land there.
   async redirects() {
     return [
+      // Products are managed on the Stock page now.
+      { source: "/admin/products", destination: "/inventory/stock", permanent: false },
       { source: "/sales/reports", destination: "/reports/sales?tab=invoices", permanent: false },
       { source: "/accounting/sales-insights", destination: "/reports/sales?tab=rankings", permanent: false },
       { source: "/sales/reports/performance", destination: "/reports/staff?tab=mechanics", permanent: false },

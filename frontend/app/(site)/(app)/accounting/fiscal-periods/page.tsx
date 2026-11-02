@@ -11,6 +11,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { formatDMY } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { isAdminRole } from '@/lib/roles';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 const MONTH_NAMES_EN = [
@@ -214,8 +215,7 @@ export default function FiscalPeriodsPage() {
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold text-gray-500">{t('accounting.payroll.year')}</label>
-              <input
-                type="number"
+              <NumberInput
                 value={manualYear}
                 onChange={(e) => setManualYear(Number(e.target.value))}
                 className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white w-24"

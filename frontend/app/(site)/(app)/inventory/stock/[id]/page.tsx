@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Package, ImageOff, Upload, Trash2, Loader2 } from 'lucide-react';
+import { Package, ImageOff, Upload, Trash2, Loader2, Minus, Plus, ArrowRight } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
@@ -15,6 +15,7 @@ import { CostHistoryPanel } from '@/app/components/inventory/CostHistoryPanel';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { isAdminRole } from '@/lib/roles';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 type StockRow = {
@@ -93,11 +94,28 @@ const eventColor = (type: string) => {
 };
   const [product, setProduct] = useState<Product | null>(null);
   const [locationId, setLocationId] = useState('');
-  const [qtyDelta, setQtyDelta] = useState<number>(0);
+  // Adjust stock: what happened, and how many (as typed).
+  const [adjustMode, setAdjustMode] = useState<'add' | 'remove' | 'set'>('add');
+  const [adjustQty, setAdjustQty] = useState('');
+  const [adjusting, setAdjusting] = useState(false);
   const [reason, setReason] = useState('');
   const [stock, setStock] = useState<StockRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const totalStock = stock.reduce((acc, s) => acc + s.quantity, 0);
+  // On hand at the chosen location, and the signed change /stock/adjust
+  // takes: "set to" is the counted number minus what's there now.
+  const qtyHere = stock.find((s) => s.location.id === locationId)?.quantity ?? 0;
+  const typedQty = adjustQty.trim() === '' ? NaN : Number(adjustQty.replace(',', '.'));
+  const qtyDelta = !Number.isFinite(typedQty) || typedQty < 0
+    ? 0
+    : Math.round((adjustMode === 'add' ? typedQty : adjustMode === 'remove' ? -typedQty : typedQty - qtyHere) * 100) / 100;
+  const canApplyAdjust = !!locationId && !!reason.trim() && qtyDelta !== 0;
+  const quickReasons = [
+    t('inventory.stockDetail.reasonCount'),
+    t('inventory.stockDetail.reasonDamaged'),
+    t('inventory.stockDetail.reasonReceived'),
+    t('inventory.stockDetail.reasonCorrection'),
+  ];
 
   // --- Product image ---
   // /products/[id] is the source of truth for image management — this is
@@ -380,95 +398,175 @@ const eventColor = (type: string) => {
           </div>
         </section>
 
-        {/* ADJUST STOCK */}
-        <section className="border-2 border-gray-300 rounded-md p-4 space-y-3 bg-white">
+        {/* ADJUST STOCK — say what happened (add / remove / set to a counted
+            number), see the result before applying, and pick a common
+            reason in one tap. Sent to /stock/adjust as a signed delta. */}
+        <section className="border-2 border-gray-300 rounded-md p-4 space-y-4 bg-white">
           <h2 className="text-lg font-bold">{t('inventory.stockDetail.adjustStock')}</h2>
 
-          <div className="flex flex-wrap gap-3 items-end">
-            {/* Location picker only shown for warehouse orgs. Non-warehouse
-                orgs are silently locked to CENTRE via the effect above — no
-                picker needed since there's nothing to choose between. */}
-            {hasWarehouseModule ? (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.location')}</label>
-                <select
-                  className="border-2 border-gray-300 rounded-md p-2 w-44 outline-none focus:border-blue-500"
-                  value={locationId}
-                  onChange={(e) => setLocationId(e.target.value)}
-                >
-                  <option value="">{t('inventory.stockDetail.selectLocation')}</option>
-                  {stock.map((s, i) => (
-                    <option key={i} value={s.location.id}>
-                      {s.location.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
+          {/* Location picker only for warehouse orgs; everyone else is
+              locked to CENTRE via the effect above. */}
+          {hasWarehouseModule && (
+            <div className="flex flex-col gap-1 max-w-xs">
+              <label htmlFor="adjust-location" className="text-xs font-semibold text-gray-600">
+                {t('inventory.stockDetail.location')}
+              </label>
+              <select
+                id="adjust-location"
+                className="border-2 border-gray-300 rounded-md p-2 outline-none focus:border-blue-500"
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+              >
+                <option value="">{t('inventory.stockDetail.selectLocation')}</option>
+                {stock.map((s) => (
+                  <option key={s.location.id} value={s.location.id}>
+                    {s.location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
+          <div role="radiogroup" aria-label={t('inventory.stockDetail.adjustStock')} className="inline-flex rounded-lg border-2 border-gray-300 p-0.5 bg-gray-50">
+            {(['add', 'remove', 'set'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={adjustMode === m}
+                onClick={() => setAdjustMode(m)}
+                className={`px-4 py-2 rounded-md text-sm font-semibold cursor-pointer transition-colors ${
+                  adjustMode === m ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {t(`inventory.stockDetail.mode_${m}`)}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.qtyInOut')}</label>
-              <input
-                type="number"
-                className="border-2 border-gray-300 rounded-md p-2 w-28 outline-none focus:border-blue-500"
-                value={qtyDelta}
-                onChange={(e) => setQtyDelta(Number(e.target.value))}
-              />
+              <label htmlFor="adjust-qty" className="text-xs font-semibold text-gray-600">
+                {t(adjustMode === 'set' ? 'inventory.stockDetail.countedQty' : 'inventory.stockDetail.qty')}
+              </label>
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => setAdjustQty((q) => String(Math.max(0, (Number(q) || 0) - 1)))}
+                  aria-label={t('inventory.stockDetail.decrease')}
+                  className="w-11 h-11 flex items-center justify-center rounded-l-md border-2 border-r-0 border-gray-300 bg-gray-50 hover:bg-gray-100 cursor-pointer"
+                >
+                  <Minus size={16} aria-hidden="true" />
+                </button>
+                <NumberInput
+                  id="adjust-qty"
+                  min={0}
+                  inputMode="decimal"
+                  value={adjustQty}
+                  onChange={(e) => setAdjustQty(e.target.value)}
+                  className="w-24 h-11 border-2 border-gray-300 text-center text-lg font-semibold tabular-nums outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAdjustQty((q) => String((Number(q) || 0) + 1))}
+                  aria-label={t('inventory.stockDetail.increase')}
+                  className="w-11 h-11 flex items-center justify-center rounded-r-md border-2 border-l-0 border-gray-300 bg-gray-50 hover:bg-gray-100 cursor-pointer"
+                >
+                  <Plus size={16} aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-              <label className="text-xs font-semibold text-gray-600">{t('inventory.stockDetail.reason')}</label>
-              <input
-                type="text"
-                placeholder={t('inventory.stockDetail.reasonPlaceholder')}
-                className="border-2 border-gray-300 rounded-md p-2 w-full outline-none focus:border-blue-500"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
+            {/* What the stock will be after applying. */}
+            {locationId && (
+              <p className="h-11 flex items-center gap-2 text-sm text-gray-600" aria-live="polite">
+                {t('inventory.stockDetail.stockNow')}
+                <span className="font-semibold tabular-nums text-gray-900">{qtyHere}</span>
+                <ArrowRight size={14} aria-hidden="true" />
+                <span
+                  className={`font-bold tabular-nums ${
+                    qtyHere + qtyDelta < 0 ? 'text-red-700' : qtyDelta === 0 ? 'text-gray-900' : 'text-blue-700'
+                  }`}
+                >
+                  {qtyHere + qtyDelta}
+                </span>
+                {qtyDelta !== 0 && (
+                  <span className="text-xs text-gray-500 tabular-nums">({qtyDelta > 0 ? `+${qtyDelta}` : qtyDelta})</span>
+                )}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="adjust-reason" className="text-xs font-semibold text-gray-600">
+              {t('inventory.stockDetail.reason')}
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {quickReasons.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setReason(r)}
+                  aria-pressed={reason === r}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border cursor-pointer transition-colors ${
+                    reason === r ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
             </div>
+            <input
+              id="adjust-reason"
+              type="text"
+              placeholder={t('inventory.stockDetail.reasonPlaceholder')}
+              className="border-2 border-gray-300 rounded-md p-2 w-full max-w-md outline-none focus:border-blue-500"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
 
-            <button
-              className="bg-blue-600 text-white font-semibold px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              disabled={!locationId || !reason.trim() || qtyDelta === 0 || Number.isNaN(qtyDelta)}
-              onClick={async () => {
-                if (!locationId || !reason.trim() || qtyDelta === 0 || Number.isNaN(qtyDelta)) return;
-
+          <button
+            className="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            disabled={!canApplyAdjust || adjusting}
+            onClick={async () => {
+              if (!canApplyAdjust) return;
+              setAdjusting(true);
+              try {
                 const res = await apiFetch('/stock/adjust', {
                   method: 'POST',
                   body: JSON.stringify({
                     productId: product.id,
                     locationId,
-                    qtyDelta: Number(qtyDelta),
+                    qtyDelta,
                     reason: reason.trim(),
                   }),
                 });
-
                 const data = await res.json().catch(() => null);
-
-                console.log('STATUS:', res.status);
-
                 if (!res.ok) {
                   await dialog.alert(data?.message || t('inventory.stockDetail.adjustFailed'));
                   return;
                 }
-
-                setQtyDelta(0);
+                setAdjustQty('');
                 setReason('');
-                // Note: locationId is intentionally NOT cleared here — for
-                // warehouse orgs it used to reset to force a re-pick each
-                // time; now that non-warehouse orgs depend on it staying
-                // put, we leave it as-is for both cases and let the admin
-                // change it manually if they want a different location next.
-
-                const eventsRes = await apiFetch(`/products/${product.id}/events`);
-                const eventsData = await eventsRes.json();
-                setEvents(eventsData);
-                setEventsPage(1);
-              }}
-            >
-              {t('inventory.stockDetail.apply')}
-            </button>
-          </div>
+                // locationId stays: non-warehouse orgs depend on it, and a
+                // warehouse admin can change it for the next one.
+                const [stockRes, eventsRes] = await Promise.all([
+                  apiFetch(`/stock/${product.id}`),
+                  apiFetch(`/products/${product.id}/events`),
+                ]);
+                if (stockRes.ok) setStock(await stockRes.json());
+                if (eventsRes.ok) {
+                  setEvents(await eventsRes.json());
+                  setEventsPage(1);
+                }
+              } finally {
+                setAdjusting(false);
+              }
+            }}
+          >
+            {t('inventory.stockDetail.apply')}
+          </button>
         </section>
 
         {/* STOCK BY LOCATION — warehouse orgs; everyone else has only the

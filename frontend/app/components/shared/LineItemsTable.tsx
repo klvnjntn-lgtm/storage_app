@@ -6,6 +6,7 @@ import QtyInput from '@/app/components/shared/QtyInput';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import type { DiscountType } from '@/app/components/invoices/types';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -305,8 +306,7 @@ function DiscountInputs({
         <option value="FIXED">Rp</option>
       </select>
       {line.discountType && (
-        <input
-          type="number"
+        <NumberInput
           min={0}
           value={line.discountValue ?? ''}
           aria-label={t('common.lineTable.discount')}
@@ -329,8 +329,7 @@ function PriceInput({ line, onChangePrice, boxed }: { line: TableLine; onChangeP
   }
   const missing = line.unitPrice === null;
   return (
-    <input
-      type="number"
+    <NumberInput
       min={0}
       inputMode="decimal"
       value={line.unitPrice ?? ''}

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 // One quotation line's progress (from GET /sales-quotations/:id → conversion).
 export type ConversionLine = { id: string; name: string; quoted: number; ordered: number; invoiced: number; remaining: number };
@@ -67,8 +68,7 @@ export function ConvertQuotationDialog({
                     <td className="py-2 px-2 text-right tabular-nums font-semibold">{l.remaining}</td>
                     <td className="py-2 pl-2 text-right">
                       {l.remaining > 0 ? (
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={l.remaining}
                           step="any"

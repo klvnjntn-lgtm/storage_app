@@ -5,6 +5,7 @@ import { Hash } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { readErrorMessage } from '@/lib/api-error';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type NumberingConfig = { format: string; isDefault: boolean; nextNumber: number; preview: string };
 
@@ -164,8 +165,7 @@ export default function InvoiceNumberingSettings() {
             </label>
             <label className="block">
               <span className="block text-xs font-semibold text-gray-600 mb-1">{t('settings.invoiceNumbering.nextNumberLabel')}</span>
-              <input
-                type="number"
+              <NumberInput
                 inputMode="numeric"
                 min={config.nextNumber}
                 step={1}

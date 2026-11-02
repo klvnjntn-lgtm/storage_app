@@ -18,6 +18,7 @@ import {
   type LabelLayout, type PrinterSettings,
 } from '@/lib/labels/layouts';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 const SETTINGS_STORAGE_KEY = 'label-printer-settings';
 const MAX_LABELS_PER_PRINT = 2000;
@@ -102,8 +103,7 @@ const LabelCard = memo(function LabelCard({
           >
             <Minus size={14} strokeWidth={2.5} />
           </button>
-          <input
-            type="number"
+          <NumberInput
             min={1}
             max={1000}
             value={quantity}
@@ -409,16 +409,14 @@ function LabelsPageInner() {
                   </label>
                   <label className="text-xs font-semibold text-gray-600 space-y-1">
                     <span className="block">{t('inventory.labelsPage.offsetX')}</span>
-                    <input
-                      type="number" step={0.5} value={settings.offsetXMm}
+                    <NumberInput step={0.5} value={settings.offsetXMm}
                       onChange={(e) => updateSettings({ offsetXMm: Number(e.target.value) || 0 })}
                       className="w-full border-2 border-gray-300 rounded-md p-2 text-sm font-normal"
                     />
                   </label>
                   <label className="text-xs font-semibold text-gray-600 space-y-1">
                     <span className="block">{t('inventory.labelsPage.offsetY')}</span>
-                    <input
-                      type="number" step={0.5} value={settings.offsetYMm}
+                    <NumberInput step={0.5} value={settings.offsetYMm}
                       onChange={(e) => updateSettings({ offsetYMm: Number(e.target.value) || 0 })}
                       className="w-full border-2 border-gray-300 rounded-md p-2 text-sm font-normal"
                     />
@@ -426,8 +424,7 @@ function LabelsPageInner() {
                   {layout.kind === 'sheet' && (
                     <label className="text-xs font-semibold text-gray-600 space-y-1">
                       <span className="block">{t('inventory.labelsPage.startAt', { max: labelsPerPage(layout) })}</span>
-                      <input
-                        type="number" min={1} max={labelsPerPage(layout)} value={startAt}
+                      <NumberInput min={1} max={labelsPerPage(layout)} value={startAt}
                         onChange={(e) => setStartAt(Math.min(labelsPerPage(layout), Math.max(1, parseInt(e.target.value, 10) || 1)))}
                         className="w-full border-2 border-gray-300 rounded-md p-2 text-sm font-normal"
                       />

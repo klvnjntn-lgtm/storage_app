@@ -269,6 +269,8 @@ const base = {
       changePasswordResend: 'Resend code',
       changePasswordVerifyFailed: 'Failed to confirm code',
       mainNavigation: 'Main navigation',
+      hideSidebar: 'Hide menu',
+      showSidebar: 'Show menu',
       more: 'More',
       closeMenu: 'Close menu',
       roles: {
@@ -629,6 +631,8 @@ const base = {
       changePasswordResend: 'Kirim ulang kode',
       changePasswordVerifyFailed: 'Gagal mengonfirmasi kode',
       mainNavigation: 'Navigasi utama',
+      hideSidebar: 'Sembunyikan menu',
+      showSidebar: 'Tampilkan menu',
       more: 'Lainnya',
       closeMenu: 'Tutup menu',
       roles: {

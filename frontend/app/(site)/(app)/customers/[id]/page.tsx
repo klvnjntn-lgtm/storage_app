@@ -24,6 +24,7 @@ import { useDialog } from '@/app/components/shared/DialogProvider';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 import { isAdminRole } from '@/lib/roles';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 type CustomerInvoice = {
@@ -428,11 +429,10 @@ export default function CustomerDetailPage() {
                     placeholder={t('customers.detailPage.vinPlaceholder')}
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />
-                  <input
+                  <NumberInput
                     value={newVehicle.odometer}
                     onChange={(e) => setNewVehicle({ ...newVehicle, odometer: e.target.value })}
                     placeholder={t('customers.detailPage.odometerPlaceholder')}
-                    type="number"
                     inputMode="numeric"
                     className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
                   />

@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { BranchRecordGuard } from './auth/guards/branch-record.guard';
-import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
+import { SentryModule } from '@sentry/nestjs/setup';
+import { TranslatingExceptionFilter } from './i18n/translating-exception.filter';
+import { TranslateMessageInterceptor } from './i18n/translate-message.interceptor';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -160,9 +162,10 @@ import { SerialsModule } from './serials/serials.module';
     AppService,
     {
       // Reports unexpected errors (not 4xx HttpExceptions) to Sentry, then
-      // responds exactly as Nest's default filter would.
+      // responds exactly as Nest's default filter would — with the message
+      // in Indonesian for people using the app in Indonesian.
       provide: APP_FILTER,
-      useClass: SentryGlobalFilter,
+      useClass: TranslatingExceptionFilter,
     },
     {
       provide: APP_GUARD,
@@ -203,6 +206,10 @@ import { SerialsModule } from './serials/serials.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: DecimalQuantityInterceptor, // quantities go out as numbers, not Decimal strings
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TranslateMessageInterceptor, // "Password has been reset" etc. in the person's language
     },
   ],
 })

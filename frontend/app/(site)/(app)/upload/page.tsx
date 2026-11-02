@@ -10,6 +10,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import React from 'react'
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 // Shape of a row as it comes straight out of the sheet, before we coerce
@@ -693,8 +694,7 @@ export default function ImportPage() {
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="text-[10px] font-semibold text-gray-500">{t('common.quantity')}</label>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={r.qty ?? ''}
                           onChange={(e) => updateRow(i, 'qty', e.target.value)}
                           className={`${fieldClass} font-bold`}
@@ -702,8 +702,7 @@ export default function ImportPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold text-gray-500">{t('upload.uploadPage.sellPrice')}</label>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={r.sellingPrice ?? ''}
                           placeholder="—"
                           onChange={(e) => updateRow(i, 'sellingPrice', e.target.value)}
@@ -712,8 +711,7 @@ export default function ImportPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold text-gray-500">{t('upload.uploadPage.costPrice')}</label>
-                        <input
-                          type="number"
+                        <NumberInput
                           value={r.costPrice ?? ''}
                           placeholder="—"
                           onChange={(e) => updateRow(i, 'costPrice', e.target.value)}
@@ -814,16 +812,14 @@ export default function ImportPage() {
                             </td>
                           )}
                           <td className="px-1 py-1">
-                            <input
-                              type="number"
+                            <NumberInput
                               value={r.qty ?? ''}
                               onChange={(e) => updateRow(i, 'qty', e.target.value)}
                               className="w-20 bg-transparent border border-transparent focus:border-blue-500/40 focus:bg-white rounded px-2 py-1 text-sm outline-none font-bold"
                             />
                           </td>
                           <td className="px-1 py-1">
-                            <input
-                              type="number"
+                            <NumberInput
                               value={r.sellingPrice ?? ''}
                               placeholder="—"
                               onChange={(e) => updateRow(i, 'sellingPrice', e.target.value)}
@@ -831,8 +827,7 @@ export default function ImportPage() {
                             />
                           </td>
                           <td className="px-1 py-1">
-                            <input
-                              type="number"
+                            <NumberInput
                               value={r.costPrice ?? ''}
                               placeholder="—"
                               onChange={(e) => updateRow(i, 'costPrice', e.target.value)}

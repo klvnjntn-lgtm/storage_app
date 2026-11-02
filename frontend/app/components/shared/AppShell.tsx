@@ -7,6 +7,10 @@ import { useEffect, useRef, useState } from 'react';
 import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner';
 import {
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelBottomClose,
+  PanelBottomOpen,
   Settings,
   Store,
   CreditCard,
@@ -157,6 +161,8 @@ function useModalBehavior(
   }, [open, dialogRef, closeRef, suspendRef]);
 }
 
+const SIDEBAR_HIDDEN_KEY = 'appShell.sidebarHidden';
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -175,6 +181,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [pendingOrders, setPendingOrders] = useState<number | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  // Desktop sidebar folded away for more room, remembered per browser.
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read once after mount; localStorage isn't there on the server
+      setSidebarHidden(localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1');
+    } catch {
+      // ignore
+    }
+  }, []);
+  // iPad/iPhone Safari: after the on-screen keyboard closes, the page can
+  // stay scrolled by the keyboard's offset while drawing as if it isn't,
+  // so taps land above the button that was hit. Re-setting the scroll
+  // position once the keyboard is gone makes Safari line them up again.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let lastHeight = vv.height;
+    const onResize = () => {
+      if (vv.height > lastHeight + 100) window.scrollTo(window.scrollX, window.scrollY);
+      lastHeight = vv.height;
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+  const toggleSidebar = () =>
+    setSidebarHidden((hidden) => {
+      try {
+        localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? '0' : '1');
+      } catch {
+        // ignore
+      }
+      return !hidden;
+    });
   const [hasInvoicePos, setHasInvoicePos] = useState(false);
   const [hasAccounting, setHasAccounting] = useState(false);
   const [hasWorkshopRms, setHasWorkshopRms] = useState(false);
@@ -602,7 +642,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         { href: '/home', label: t('nav.items.home'), icon: Home },
         ...(hasStock ? [stockItem] : []),
         ...(hasInvoicePos || hasDelivery ? [customersItem] : []),
-        ...(hasStock ? [inventoryItem] : []),
+        // The Inventory group is the warehouse module's; without it the
+        // group would open on a locked page — Stock above is enough.
+        ...(hasWarehouseOps ? [inventoryItem] : []),
         ...(hasInvoicePos ? [salesItem, purchasingItem] : []),
         // The books are their own module, and admin-only (backend enforces both).
         ...(hasInvoicePos && hasAccounting && isAdminRole(profile?.role) ? [accountingItem] : []),
@@ -788,7 +830,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="min-h-dvh text-black flex flex-col md:flex-row [--app-bottom-nav-h:calc(3.5rem+env(safe-area-inset-bottom))] md:[--app-bottom-nav-h:0px]"
+      // The bottom tab bar's height, for page bars that sit above it — none
+      // when the menu is hidden.
+      className={`min-h-dvh text-black flex flex-col md:flex-row ${
+        sidebarHidden
+          ? '[--app-bottom-nav-h:0px]'
+          : '[--app-bottom-nav-h:calc(3.5rem+env(safe-area-inset-bottom))] md:[--app-bottom-nav-h:0px]'
+      }`}
       style={{
         backgroundColor: 'var(--page-bg)',
         backgroundImage:
@@ -803,7 +851,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         pendingDevices={pendingDevices}
       />
 
-      <aside className="hidden md:flex md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0">
+      {/* Folded sidebar: a slim rail that keeps the way back in the same place. */}
+      {sidebarHidden && (
+        <div className="hidden md:flex md:flex-col items-center w-14 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0 py-4">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={t('appShell.showSidebar')}
+            title={t('appShell.showSidebar')}
+            aria-expanded={false}
+            className="h-10 w-10 flex items-center justify-center rounded-lg text-gray-600 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          >
+            <PanelLeftOpen size={20} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      <aside
+        className={`${sidebarHidden ? 'hidden' : 'hidden md:flex'} md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0`}
+      >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-blue-500/15">
           <h1 className="min-w-0 flex-1">
@@ -819,6 +885,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-1.5 shrink-0">
             <ThemeToggle />
             <LanguageSwitcher />
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={t('appShell.hideSidebar')}
+              title={t('appShell.hideSidebar')}
+              aria-expanded={true}
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-gray-500 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            >
+              <PanelLeftClose size={18} aria-hidden="true" />
+            </button>
           </div>
         </div>
 
@@ -880,6 +956,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </h1>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Hide/show the bottom tab bar — the phone's menu. */}
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                aria-label={t(sidebarHidden ? 'appShell.showSidebar' : 'appShell.hideSidebar')}
+                title={t(sidebarHidden ? 'appShell.showSidebar' : 'appShell.hideSidebar')}
+                aria-expanded={!sidebarHidden}
+                className="h-11 w-11 flex items-center justify-center rounded-md border border-blue-500/20 text-blue-700 hover:bg-blue-50 active:scale-95 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              >
+                {sidebarHidden ? (
+                  <PanelBottomOpen size={18} aria-hidden="true" />
+                ) : (
+                  <PanelBottomClose size={18} aria-hidden="true" />
+                )}
+              </button>
               <TourHelpMenu variant="icon" />
               <ThemeToggle />
               <LanguageSwitcher />
@@ -902,7 +993,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             --app-bottom-nav-h so page-level fixed bars can sit above it. */}
         <nav
           aria-label={t('appShell.mainNavigation')}
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-blue-500/15 pb-[env(safe-area-inset-bottom)]"
+          className={`${sidebarHidden ? 'hidden' : 'md:hidden'} fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-blue-500/15 pb-[env(safe-area-inset-bottom)]`}
         >
           <div className="grid grid-cols-5 h-14">
             {bottomTabs.map(({ href, label, icon: Icon }) => {

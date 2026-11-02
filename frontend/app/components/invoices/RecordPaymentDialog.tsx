@@ -6,6 +6,7 @@ import { Plus, X } from 'lucide-react';
 import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type BankAccountOption = { id: string; bankName: string; accountNumber: string; isDefault?: boolean; archivedAt?: string | null };
 type Part = { key: number; amount: number; method: string; bankAccountId: string };
@@ -152,8 +153,7 @@ export function RecordPaymentDialog({
           )}
           <label className="block">
             <span className="text-sm">{t('sales.recordPayment.amountLabel')}</span>
-            <input
-              type="number"
+            <NumberInput
               min={1}
               max={balanceDue}
               value={p.amount}

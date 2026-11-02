@@ -11,6 +11,7 @@ import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
 import { useBranches } from '@/lib/hooks/useBranches';
 import { isOdometerBelowLast } from '@/lib/odometer';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export type WorkOrderFormValue = {
   mechanicId: string;
@@ -144,8 +145,7 @@ export default function WorkOrderForm({
           )}
           <label className="block">
             <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.odometer')}</span>
-            <input
-              type="number"
+            <NumberInput
               min={vehicleOdometer ?? 0}
               inputMode="numeric"
               className={`${inputCls} mt-1 ${!readOnly && isOdometerBelowLast(value.odometer, vehicleOdometer) ? '!border-red-300' : ''}`}
@@ -285,8 +285,7 @@ export default function WorkOrderForm({
               </div>
               <label className="block sm:w-20">
                 <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.qty')}</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0.01}
                   step="any"
                   className={`${inputCls} mt-1`}
@@ -297,8 +296,7 @@ export default function WorkOrderForm({
               </label>
               <label className="block sm:w-36">
                 <span className="text-xs font-semibold text-gray-600">{t('workshop.workOrders.price')}</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   className={`${inputCls} mt-1`}
                   value={l.kind === 'part' && !posPricing ? '' : (l.unitPrice ?? '')}

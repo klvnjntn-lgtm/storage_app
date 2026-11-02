@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export type CreditTarget = { invoiceId: string; invoiceNumber: string | null; balance: number };
 
@@ -82,8 +83,7 @@ export function ApplyCreditDialog({
           </label>
           <label className="block">
             <span className="text-sm">{t('sales.invoiceDetail.applyCreditAmount')}</span>
-            <input
-              type="number"
+            <NumberInput
               min={1}
               max={limit}
               value={amount}

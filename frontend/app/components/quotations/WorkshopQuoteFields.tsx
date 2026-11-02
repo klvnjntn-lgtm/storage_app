@@ -5,6 +5,7 @@ import { Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { isOdometerBelowLast } from '@/lib/odometer';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 export type WorkshopQuote = { vehicleId: string | null; odometer: string; complaint: string };
 export const EMPTY_WORKSHOP_QUOTE: WorkshopQuote = { vehicleId: null, odometer: '', complaint: '' };
@@ -85,8 +86,7 @@ export function WorkshopQuoteFields({
       {vehicles?.length === 0 && <p className="text-xs text-gray-400">{t('sales.invoiceCart.noVehiclesYet')}</p>}
       {value.vehicleId && (
         <div>
-          <input
-            type="number"
+          <NumberInput
             min={lastOdometer ?? 0}
             aria-label={t('sales.invoiceCart.odometerLabel')}
             aria-invalid={odometerTooLow}

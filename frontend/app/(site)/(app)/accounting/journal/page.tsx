@@ -16,6 +16,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { isAdminRole } from '@/lib/roles';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -358,8 +359,7 @@ export default function JournalPage() {
                     <option value="debit">{t('accounting.journal.debit')}</option>
                     <option value="credit">{t('accounting.journal.credit')}</option>
                   </select>
-                  <input
-                    type="number"
+                  <NumberInput
                     min="0"
                     placeholder={t('common.amount')}
                     value={line.amount}

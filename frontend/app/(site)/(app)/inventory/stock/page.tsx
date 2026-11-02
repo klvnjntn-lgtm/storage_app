@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { LayoutDashboard, Search, AlertTriangle, List, LayoutGrid, ImageOff, ArrowUpDown, X } from 'lucide-react';
+import { LayoutDashboard, Search, AlertTriangle, List, LayoutGrid, ImageOff, ArrowUpDown, X, Plus, Pencil, Archive, ArchiveRestore, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import type { SortState } from '@/lib/hooks/useSortableData';
 import SortableTh from '@/app/components/shared/SortableTh';
@@ -11,7 +11,9 @@ import Pagination from '@/app/components/shared/Pagination';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
-import { NewProductForm } from '@/app/components/inventory/NewProductForm';
+import ProductEditorDrawer, { type EditableProduct } from '@/app/components/admin/ProductEditorDrawer';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { toCalendarDateString } from '@/lib/dates';
 import { isAdminRole } from '@/lib/roles';
 
@@ -20,6 +22,8 @@ type ProductSummary = {
   productId: string;
   sku: string | null;
   name: string;
+  // false = archived (shown greyed, admins can restore it).
+  active: boolean;
   sellingPrice: number | null;
   costPrice: number | null;
   totalStock: number;
@@ -135,6 +139,13 @@ export default function StockPage() {
   const [oversoldSales, setOversoldSales] = useState<OversoldSale[] | null>(null);
   const [oversoldSalesLoading, setOversoldSalesLoading] = useState(false);
   const router = useRouter();
+  const dialog = useDialog();
+  const warehouseOps = useWarehouseOps();
+  // Creating and editing products (admins) happen here in the side drawer,
+  // as they did on the old admin Products page: { product: null } is a new
+  // product, null is closed.
+  const [editor, setEditor] = useState<{ product: EditableProduct | null; row?: ProductSummary } | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!oversoldOnly) return;
@@ -290,6 +301,72 @@ export default function StockPage() {
     loadBrands();
     loadLocations();
   }, []);
+
+  async function openEditor(row: ProductSummary | null) {
+    setNotice(null);
+    if (!row) {
+      setEditor({ product: null });
+      return;
+    }
+    const res = await apiFetch(`/products/${row.productId}`);
+    const p = await res.json().catch(() => null);
+    if (!res.ok || !p) {
+      setNotice({ kind: 'error', text: p?.message ?? t('inventory.stockPage.loadFailed') });
+      return;
+    }
+    setEditor({
+      row,
+      product: {
+        id: p.id,
+        sku: p.sku,
+        oem: p.oem,
+        name: p.name,
+        category: p.category?.name ?? null,
+        brand: p.brand?.name ?? null,
+        sellingPrice: p.sellingPrice != null ? Number(p.sellingPrice) : null,
+        costPrice: p.costPrice != null ? Number(p.costPrice) : null,
+        prices: p.prices,
+      },
+    });
+  }
+
+  async function onEditorSaved(message: string) {
+    const wasNew = editor?.product == null;
+    setEditor(null);
+    setNotice({ kind: 'ok', text: message });
+    if (wasNew) setPage(1);
+    await Promise.all([loadProducts(), loadCategories(), loadBrands()]);
+  }
+
+  // Archive keeps the product in history but out of normal use; restore
+  // brings it back.
+  async function setArchived(row: ProductSummary, archive: boolean) {
+    setNotice(null);
+    if (
+      archive &&
+      !(await dialog.confirm(
+        `${t('admin.products.archiveConfirmPrefix')} "${row.name}"${t('admin.products.archiveConfirmSuffix')}`,
+        { danger: true },
+      ))
+    )
+      return;
+    const res = await apiFetch(archive ? `/products/${row.productId}` : `/products/${row.productId}/restore`, {
+      method: archive ? 'DELETE' : 'PATCH',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setNotice({
+        kind: 'error',
+        text: body?.message ?? t(archive ? 'admin.products.archiveFailed' : 'admin.products.restoreFailed'),
+      });
+      return;
+    }
+    setNotice({
+      kind: 'ok',
+      text: t(archive ? 'admin.products.archivedSuccess' : 'admin.products.restoredSuccess', { name: row.name }),
+    });
+    await loadProducts();
+  }
 
   const showCostPrice =
     enabledModules.includes('INVOICE_POS') && isAdminRole(currentUser?.role);
@@ -522,17 +599,37 @@ export default function StockPage() {
           </div>
         )}
 
-        {/* New Product dropdown (admins only) */}
+        {/* New product (admins only) — opens the same drawer as Edit. */}
         {canCreateProduct && (
-          <NewProductForm
-            categories={categories}
-            brands={brands}
-            showCostPrice={showCostPrice}
-            onCreated={async () => {
-              setPage(1);
-              await Promise.all([loadProducts(), loadCategories(), loadBrands()]);
-            }}
-          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => openEditor(null)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
+              {t('admin.products.newProduct')}
+            </button>
+          </div>
+        )}
+
+        {notice && (
+          <div
+            role={notice.kind === 'error' ? 'alert' : 'status'}
+            className={`flex items-start gap-2 rounded-xl p-3 text-sm border ${
+              notice.kind === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'
+            }`}
+          >
+            {notice.kind === 'error' ? (
+              <AlertTriangle size={18} strokeWidth={2} className="shrink-0 mt-0.5" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 size={18} strokeWidth={2} className="shrink-0 mt-0.5" aria-hidden="true" />
+            )}
+            <span className="flex-1">{notice.text}</span>
+            <button onClick={() => setNotice(null)} aria-label={t('common.close')} className="opacity-60 hover:opacity-100 cursor-pointer">
+              <X size={16} />
+            </button>
+          </div>
         )}
 
         {oversoldOnly && (
@@ -642,6 +739,7 @@ export default function StockPage() {
                     {showLocations && (
                       <th className="text-left px-4 py-3 font-semibold">{t('inventory.stockPage.colLocations')}</th>
                     )}
+                    {canCreateProduct && <th className="px-4 py-3" />}
                   </tr>
                 </thead>
 
@@ -660,7 +758,14 @@ export default function StockPage() {
                       <td className={`px-4 py-3 text-gray-500 font-mono whitespace-nowrap ${cellHighlight('sku')}`}>
                         {product.sku ?? '-'}
                       </td>
-                      <td className={`px-4 py-3 font-medium ${cellHighlight('name')}`}>{product.name}</td>
+                      <td className={`px-4 py-3 font-medium ${cellHighlight('name')} ${product.active === false ? 'text-gray-400' : ''}`}>
+                        {product.name}
+                        {product.active === false && (
+                          <span className="ml-1.5 align-middle text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">
+                            {t('admin.products.archived')}
+                          </span>
+                        )}
+                      </td>
                       <td className={`px-4 py-3 whitespace-nowrap ${cellHighlight('sellingPrice')}`}>
                         {product.sellingPrice != null ? (
                           formatIDR(product.sellingPrice)
@@ -698,6 +803,42 @@ export default function StockPage() {
                               </div>
                             ))
                           )}
+                        </td>
+                      )}
+                      {canCreateProduct && (
+                        <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openEditor(product)}
+                              title={t('admin.products.editProductTitle')}
+                              aria-label={t('admin.products.editProductTitle')}
+                              className="p-2 rounded-md text-gray-500 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
+                            >
+                              <Pencil size={16} strokeWidth={2} />
+                            </button>
+                            {product.active === false ? (
+                              <button
+                                type="button"
+                                onClick={() => setArchived(product, false)}
+                                title={t('admin.products.restore')}
+                                aria-label={t('admin.products.restore')}
+                                className="p-2 rounded-md text-gray-500 hover:text-green-700 hover:bg-green-50 transition-colors cursor-pointer"
+                              >
+                                <ArchiveRestore size={16} strokeWidth={2} />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setArchived(product, true)}
+                                title={t('admin.products.archive')}
+                                aria-label={t('admin.products.archive')}
+                                className="p-2 rounded-md text-gray-500 hover:text-red-700 hover:bg-red-50 transition-colors cursor-pointer"
+                              >
+                                <Archive size={16} strokeWidth={2} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -817,6 +958,19 @@ export default function StockPage() {
           />
         )}
       </div>
+
+      {editor && (
+        <ProductEditorDrawer
+          product={editor.product}
+          stock={editor.row ? { totalStock: editor.row.totalStock, locations: editor.row.locations } : undefined}
+          categories={categories}
+          brands={brands}
+          locations={locationOptions}
+          warehouseOps={warehouseOps}
+          onClose={() => setEditor(null)}
+          onSaved={onEditorSaved}
+        />
+      )}
     </main>
   );
 }

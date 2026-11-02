@@ -26,6 +26,12 @@ const LanguageContext = createContext<LanguageContextValue>({
   t: (key: string) => key,
 });
 
+// The API answers errors in this language (backend i18n/translate-message.ts);
+// a cookie reaches every request, uploads included.
+function mirrorToCookie(lang: Locale) {
+  document.cookie = `waresys_lang=${lang}; path=/; max-age=31536000; SameSite=Lax`;
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Locale>('en');
 
@@ -35,12 +41,14 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       setLanguageState(stored);
       document.documentElement.lang = stored;
     }
+    mirrorToCookie(stored === 'id' ? 'id' : 'en');
   }, []);
 
   const setLanguage = useCallback((lang: Locale) => {
     setLanguageState(lang);
     localStorage.setItem(STORAGE_KEY, lang);
     document.documentElement.lang = lang;
+    mirrorToCookie(lang);
   }, []);
 
   const t = useCallback(

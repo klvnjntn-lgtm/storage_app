@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Tag, ClipboardList, Warehouse, Package } from 'lucide-react';
+import { LayoutDashboard, Tag, ClipboardList, Warehouse } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { HubCard, HubGrid, HubLocked, HubPage, HubSection } from '@/app/components/shared/Hub';
@@ -16,14 +16,6 @@ const INVENTORY_ITEM_DEFS = [
     href: '/inventory/stock',
     icon: LayoutDashboard,
     gradient: 'from-emerald-400 to-teal-600',
-  },
-  {
-    key: 'products' as const,
-    // FIX — was '/inventory/products', which doesn't exist. Product
-    // management actually lives under Admin.
-    href: '/admin/products',
-    icon: Package,
-    gradient: 'from-rose-400 to-red-600',
   },
   {
     key: 'sessions' as const,

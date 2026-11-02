@@ -6,6 +6,7 @@ import { Truck, Package, RotateCcw, AlertCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import CustomerAddressPicker, { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 type DeliveryOrderStatus = 'PACKED' | 'SHIPPED' | 'FAILED' | 'CANCELLED' | 'PARTIALLY_RETURNED' | 'RETURNED';
 
@@ -308,8 +309,7 @@ export function DeliveryOrdersPanel({
                       </p>
                     </div>
                     {isReturning && canReturn && (
-                      <input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={remainingQty}
                         value={returnQty[deliveryOrder.id]?.[item.id] ?? ''}
@@ -370,8 +370,7 @@ export function DeliveryOrdersPanel({
                       {t('sales.deliveryOrdersPanel.remainingOf', { max, total: item.quantity })}
                     </p>
                   </div>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={max}
                     value={createQty[item.id] ?? ''}

@@ -24,7 +24,7 @@ type ReturnReason = (typeof RETURN_REASONS)[number];
 const MOVE_STAGES: EventType[] = [EventType.PICK, EventType.MOVE];
 
 const SUMMARY_PRODUCT_SELECT = {
-  id: true, sku: true, name: true, image: true,
+  id: true, sku: true, name: true, image: true, active: true,
   sellingPrice: true, costPrice: true,
   stocks: { select: { quantity: true, location: { select: { id: true, name: true } } } },
 } satisfies Prisma.ProductSelect;
@@ -366,6 +366,7 @@ export class SessionsService {
       productId: product.id,
       sku: product.sku,
       name: product.name,
+      active: product.active,
       image: product.image,
       sellingPrice: product.sellingPrice != null ? Number(product.sellingPrice) : null,
       costPrice: canSeeCostPrice && product.costPrice != null ? Number(product.costPrice) : null,

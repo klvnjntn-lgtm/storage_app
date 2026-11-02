@@ -505,9 +505,11 @@ body {
 }
 
 /* iOS Safari zooms the page when a focused field's text is under 16px, and
-   most fields use text-sm. Phones get 16px everywhere; this is deliberately
-   outside any @layer so it beats Tailwind's (layered) text-* utilities. */
-@media (max-width: 639.98px) {
+   most fields use text-sm. Phones and touch tablets (iPad) get 16px
+   everywhere — on an iPad the zoom left taps landing off from what was
+   drawn. Deliberately outside any @layer so it beats Tailwind's (layered)
+   text-* utilities. */
+@media (max-width: 639.98px), (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea {

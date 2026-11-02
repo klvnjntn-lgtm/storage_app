@@ -74,7 +74,9 @@ export function CostHistoryPanel({ productId, currentCost }: { productId: string
                     : '—'}
                 </td>
                 <td className="p-3 whitespace-nowrap">
-                  {money(r.previousCost)} → <span className="font-semibold">{money(r.newCost)}</span>
+                  {/* The first cost has nothing before it — just the price, no "— →". */}
+                  {r.previousCost != null && <>{money(r.previousCost)} → </>}
+                  <span className="font-semibold">{money(r.newCost)}</span>
                 </td>
                 <td className="p-3 text-gray-700">{r.user ?? '—'}</td>
               </tr>

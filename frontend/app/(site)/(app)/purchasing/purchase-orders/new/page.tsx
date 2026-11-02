@@ -18,6 +18,7 @@ import { LocationOption, POCartLine, PONewProductLine, POProduct } from '@/app/c
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { errorMessage } from '@/lib/api-error';
+import NumberInput from '@/app/components/shared/NumberInput';
 
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -616,8 +617,7 @@ function PurchaseOrderFormPageInner() {
           <div className="p-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr] sm:items-end">
             <div>
               <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
-              <input
-                type="number"
+              <NumberInput
                 min={0}
                 value={discountAmount}
                 onChange={(e) => setDiscountAmount(e.target.value)}
