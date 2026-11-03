@@ -1,5 +1,9 @@
 // src/delivery-routes/driver-proof.ts
 import { BadRequestException } from '@nestjs/common';
+import {
+  resolveTimezone,
+  todayBusinessDate,
+} from '../accounting/business-date';
 
 // Rules for a delivery a DRIVER records from the phone (customer stops and
 // DO stops alike). Office staff recording proof at a desk aren't held to
@@ -8,6 +12,10 @@ import { BadRequestException } from '@nestjs/common';
 // The phone keeps an unfinished delivery for this long (driverDrafts on
 // the frontend); a time older than that isn't one of its drafts.
 const MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+
+// A driver can still finish a stop left pending on a route this many days
+// back (the driver page offers it); older ones are for the office.
+export const DRIVER_CATCH_UP_DAYS = 7;
 
 // Small allowance for a phone clock a few minutes behind the server's.
 const CLOCK_SLACK_MS = 10 * 60 * 1000;
@@ -36,6 +44,24 @@ export function driverSignedAt(
     );
   }
   return raw;
+}
+
+// Refuses a driver acting on a stop whose route is more than
+// DRIVER_CATCH_UP_DAYS old. Office staff aren't held to it.
+export function assertDriverCatchUpWindow(
+  route: { routeDate: Date; organization: { timezone: string | null } },
+  role: string,
+) {
+  if (role !== 'DRIVER') return;
+  const today = todayBusinessDate(resolveTimezone(route.organization));
+  const daysBack = Math.round(
+    (today.getTime() - route.routeDate.getTime()) / 86_400_000,
+  );
+  if (daysBack > DRIVER_CATCH_UP_DAYS) {
+    throw new BadRequestException(
+      'This route is more than 7 days old — ask the office to record this stop',
+    );
+  }
 }
 
 // A driver's delivery is placed by GPS; a weak reading is fine, none isn't.

@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  assertDriverCatchUpWindow,
   assertDriverLocation,
   driverSignedAt,
   movePhotoToFailure,
@@ -1381,6 +1382,7 @@ export class DeliveryRoutesService {
     if (stop.route.status === RouteStatus.CANCELLED) {
       throw new BadRequestException('This route was cancelled');
     }
+    assertDriverCatchUpWindow(stop.route, requester.role);
     if (!stop.proofPhotoKey) {
       throw new BadRequestException('Take a proof photo before completing the stop');
     }
@@ -1454,6 +1456,7 @@ export class DeliveryRoutesService {
     if (stop.route.status === RouteStatus.CANCELLED) {
       throw new BadRequestException('This route was cancelled');
     }
+    assertDriverCatchUpWindow(stop.route, requester.role);
     const failedAt = new Date();
     // A photo taken at the stop becomes the failed attempt's photo, and
     // its GPS the failure's location if the phone sent none.

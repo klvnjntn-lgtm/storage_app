@@ -526,6 +526,7 @@ export const ERROR_MESSAGES_ID: ReadonlyArray<readonly [string, string]> = [
   ["The job this comes back to must be an earlier job on this vehicle", "Pekerjaan yang dirujuk harus pekerjaan sebelumnya untuk kendaraan ini"],
   ["The only branch can’t be archived", "Satu-satunya cabang tidak bisa diarsipkan"],
   ["The payment provider could not create a checkout. Please try again.", "Penyedia pembayaran tidak bisa membuat checkout. Silakan coba lagi."],
+  ["This route is more than 7 days old — ask the office to record this stop", "Rute ini sudah lebih dari 7 hari — minta kantor untuk mencatat pemberhentian ini"],
   ["The phone's date or time looks wrong — check it in the phone's settings, then take the photo again", "Tanggal atau jam HP sepertinya salah — periksa di pengaturan HP, lalu ambil foto lagi"],
   ["The proof photo was changed at the same time — try again", "Foto bukti diganti pada saat yang sama — coba lagi"],
   ["The range can be at most {} days", "Rentang maksimal {} hari"],

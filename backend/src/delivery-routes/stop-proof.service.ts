@@ -19,7 +19,7 @@ import {
   DeliveryRoutesService,
   routeDayStart,
 } from './delivery-routes.service';
-import { photoCaptureData } from './driver-proof';
+import { assertDriverCatchUpWindow, photoCaptureData } from './driver-proof';
 import { landmarkFromProof } from '../customers/landmark-from-proof';
 import type { ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
 
@@ -57,6 +57,7 @@ export class StopProofService {
       stopId,
       requester,
     );
+    assertDriverCatchUpWindow(stop.route, requester.role);
     if (stop.failedAt) {
       throw new BadRequestException('This stop was marked as failed');
     }
@@ -128,6 +129,7 @@ export class StopProofService {
       stopId,
       requester,
     );
+    assertDriverCatchUpWindow(stop.route, requester.role);
     if (stop.signedAt || stop.failedAt) {
       throw new BadRequestException('This stop is already resolved');
     }

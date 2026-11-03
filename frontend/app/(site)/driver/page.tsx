@@ -192,12 +192,14 @@ async function uploadProofPhoto(
 // Android often drops the page while the camera app is open; it comes back
 // as a fresh load at the top. Remember which stop opened the camera so the
 // reload can scroll back to it (ignored after a couple of minutes, e.g.
-// when the camera was cancelled).
+// when the camera was cancelled). daysBack: the stop may be on an earlier
+// day's route, which the reload has to go back to first.
 const RETURN_TO_KEY = 'driver.returnTo';
 const RETURN_TO_MAX_AGE_MS = 2 * 60 * 1000;
-function rememberReturnTo(stopId: string) {
+type ReturnTo = { stopId: string; at: number; daysBack?: number };
+function rememberReturnTo(stopId: string, daysBack: number) {
   try {
-    sessionStorage.setItem(RETURN_TO_KEY, JSON.stringify({ stopId, at: Date.now() }));
+    sessionStorage.setItem(RETURN_TO_KEY, JSON.stringify({ stopId, at: Date.now(), daysBack }));
   } catch {
     // ignore
   }
@@ -209,16 +211,22 @@ function clearReturnTo() {
     // ignore
   }
 }
-function takeReturnTo(): string | null {
+function readReturnTo(): ReturnTo | null {
   try {
     const raw = sessionStorage.getItem(RETURN_TO_KEY);
-    sessionStorage.removeItem(RETURN_TO_KEY);
     if (!raw) return null;
-    const { stopId, at } = JSON.parse(raw) as { stopId: string; at: number };
-    return Date.now() - at < RETURN_TO_MAX_AGE_MS ? stopId : null;
+    const saved = JSON.parse(raw) as ReturnTo;
+    return Date.now() - saved.at < RETURN_TO_MAX_AGE_MS ? saved : null;
   } catch {
     return null;
   }
+}
+// The stop to scroll back to, once the day it's on is showing.
+function takeReturnTo(daysBack: number): string | null {
+  const saved = readReturnTo();
+  if (saved && (saved.daysBack ?? 0) !== daysBack) return null;
+  clearReturnTo();
+  return saved?.stopId ?? null;
 }
 
 // The server said no (wrong date, stop already resolved…) rather than the
@@ -487,6 +495,10 @@ function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Sto
   );
 }
 
+// How many days back a stop left pending can still be finished from here
+// (the server holds drivers to the same: assertDriverCatchUpWindow).
+const CATCH_UP_DAYS = 7;
+
 // Days back from today the driver can look through: 0 = today.
 function dayAt(offset: number): string {
   const d = new Date();
@@ -552,12 +564,23 @@ export default function DriverRoutePage() {
   useEffect(() => {
     latest.current = { routes, photoDraft, photoFix, photoTakenAt, receivedByDraft };
   });
-  // 0 = today; past days are view-only, to look back at what was done.
+  // 0 = today. Stops left pending up to CATCH_UP_DAYS back can still be
+  // finished; older days are view-only, to look back at what was done.
   const [daysBack, setDaysBack] = useState(0);
   const isToday = daysBack === 0;
+  const canAct = daysBack <= CATCH_UP_DAYS;
 
-  // GPS stays warm only while there's something left to deliver today.
-  const hasPending = isToday && routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
+  // Reopened after the phone dropped the page during the camera: back to
+  // the day that stop is on.
+  useEffect(() => {
+    const day = readReturnTo()?.daysBack;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (day) setDaysBack(day);
+  }, []);
+
+  // GPS stays warm only while there's something left to deliver on the
+  // day showing.
+  const hasPending = canAct && routes.some((r) => r.stops.some((s) => s.status === 'PENDING'));
   const gps = useGpsWatch(user?.role === 'DRIVER' && hasPending);
   // Location can't work at all here, so no photo can be taken.
   const gpsBlocked = gps.status === 'denied' || gps.status === 'insecure' || gps.status === 'unsupported';
@@ -602,7 +625,7 @@ export default function DriverRoutePage() {
   // from one.
   function openPhoneCamera(routeId: string, stop: Stop) {
     phoneCameraFor.current = { routeId, stop };
-    rememberReturnTo(stop.id);
+    rememberReturnTo(stop.id, daysBack);
     phoneCameraInput.current?.click();
   }
 
@@ -720,7 +743,7 @@ export default function DriverRoutePage() {
   }
 
   useEffect(() => {
-    if (!isToday) return;
+    if (!canAct) return;
     const onVisible = () => {
       if (document.visibilityState === 'visible') retryQueuedPhotos();
     };
@@ -733,7 +756,7 @@ export default function DriverRoutePage() {
       document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isToday]);
+  }, [canAct]);
 
   // Names typed but not yet sent go now if the page is being left — the
   // phone closing the tab, switching apps — rather than after the pause.
@@ -848,7 +871,7 @@ export default function DriverRoutePage() {
   useEffect(() => {
     if (loading) return;
     retryQueuedPhotos();
-    const stopId = takeReturnTo();
+    const stopId = takeReturnTo(daysBack);
     if (stopId) requestAnimationFrame(() => document.getElementById(`stop-${stopId}`)?.scrollIntoView({ block: 'start' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
@@ -1030,7 +1053,17 @@ export default function DriverRoutePage() {
         </button>
         <div className="flex-1 text-center">
           <p className={`${display.className} text-lg font-bold`}>{dayLabel}</p>
-          {!isToday && <p className="text-xs text-gray-500">{t('delivery.driver.pastDayViewOnly')}</p>}
+          {!isToday && (
+            <p className="text-xs text-gray-500">
+              {t(
+                !canAct
+                  ? 'delivery.driver.pastDayViewOnly'
+                  : allStops.some((s) => s.status === 'PENDING')
+                    ? 'delivery.driver.pastDayCatchUp'
+                    : 'delivery.driver.pastDay',
+              )}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -1094,8 +1127,8 @@ export default function DriverRoutePage() {
             const mapsUrl = googleMapsUrl(stop);
 
             // Finished stops collapse to one line so the remaining work
-            // stands out; a past day shows every stop that way.
-            if (stop.status !== 'PENDING' || !isToday) {
+            // stands out; a day too far back shows every stop that way.
+            if (stop.status !== 'PENDING' || !canAct) {
               return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} />;
             }
 
