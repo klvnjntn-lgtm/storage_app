@@ -15,6 +15,7 @@ import {
 } from '../storage/file-storage.interface';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
+import { fillOpenStopPins } from './customer-pin-backfill';
 import type { PhotoCaptureMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 
 export const MAX_LOCATION_PHOTOS = 2;
@@ -97,7 +98,7 @@ export class CustomerLocationService {
     // the office and a later, tighter driver fix still replaces it. Only
     // when empty, checked in the UPDATE so a pin set meanwhile wins.
     if (hasFix) {
-      await this.prisma.customer.updateMany({
+      const { count: pinned } = await this.prisma.customer.updateMany({
         where: { id: customerId, organizationId, latitude: null },
         data: {
           latitude: meta.latitude,
@@ -107,6 +108,20 @@ export class CustomerLocationService {
           pinSetAt: new Date(),
         },
       });
+      if (pinned) {
+        const customer = await this.prisma.customer.findUniqueOrThrow({
+          where: { id: customerId },
+          select: { address: true },
+        });
+        await fillOpenStopPins(this.prisma, {
+          organizationId,
+          customerId,
+          customerAddressId: null,
+          address: customer.address,
+          latitude: meta.latitude!,
+          longitude: meta.longitude!,
+        });
+      }
     }
     return this.list(organizationId, customerId);
   }

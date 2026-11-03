@@ -5,9 +5,11 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UploadedFiles,
@@ -43,6 +45,7 @@ import {
 } from './dto/customer-stop-actions.dto';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import { ProofDraftDto, ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
+import { DriverEventDto } from './dto/driver-event.dto';
 import {
   ApplyRoutePlanDto,
   PlanCandidatesQueryDto,
@@ -53,6 +56,8 @@ import {
 @RequireModule(ModuleKey.DELIVERY_DMS)
 @Controller('delivery-routes')
 export class DeliveryRoutesController {
+  private readonly logger = new Logger('DriverPage');
+
   constructor(
     private readonly deliveryRoutesService: DeliveryRoutesService,
     private readonly routePlanner: RoutePlannerService,
@@ -90,6 +95,23 @@ export class DeliveryRoutesController {
     );
   }
 
+  // Where every route leaves from — one point for the business. Above the
+  // :id routes, like `mine`.
+  @Get('start-point')
+  getStartPoint(@CurrentOrg() organizationId: string) {
+    return this.deliveryRoutesService.getStartPoint(organizationId);
+  }
+
+  @Put('start-point')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  setStartPoint(
+    @CurrentOrg() organizationId: string,
+    @Body() dto: SetRouteStartDto,
+  ) {
+    return this.deliveryRoutesService.setStartPoint(organizationId, dto);
+  }
+
   // Driver's own routes — MUST stay declared above the :id routes below,
   // same reasoning as VehiclesController's /vehicles/search: a static
   // segment placed after :id would be swallowed as an id param instead.
@@ -106,6 +128,22 @@ export class DeliveryRoutesController {
       req.user.sub,
       date,
     );
+  }
+
+  // What the driver's phone showed without asking the server (see
+  // DriverEventDto) — to the log only, nothing stored.
+  @Post('driver-events')
+  @UseGuards(RolesGuard)
+  @Roles('DRIVER')
+  driverEvent(@Req() req, @Body() dto: DriverEventDto) {
+    const flat = (v?: string) => v?.replace(/\s+/g, ' ');
+    this.logger.warn(
+      `driver=${req.user.sub} kind=${flat(dto.kind)}` +
+        (dto.stopId ? ` stop=${flat(dto.stopId)}` : '') +
+        (dto.message ? ` message="${flat(dto.message)}"` : '') +
+        (dto.detail ? ` detail="${flat(dto.detail)}"` : ''),
+    );
+    return { ok: true };
   }
 
   // Performance over a date range (YYYY-MM-DD, inclusive) — see
@@ -244,23 +282,6 @@ export class DeliveryRoutesController {
     return this.deliveryRoutesService.updateRoute(
       organizationId,
       id,
-      dto,
-      req.user.sub,
-    );
-  }
-
-  @Patch(':id/start')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'USER')
-  setStart(
-    @CurrentOrg() organizationId: string,
-    @Param('id') routeId: string,
-    @Req() req,
-    @Body() dto: SetRouteStartDto,
-  ) {
-    return this.deliveryRoutesService.setStart(
-      organizationId,
-      routeId,
       dto,
       req.user.sub,
     );

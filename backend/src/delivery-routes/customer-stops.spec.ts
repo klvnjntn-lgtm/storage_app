@@ -11,6 +11,8 @@ import {
 import { Test } from '@nestjs/testing';
 import { DeliveryOrderStatus, ModuleKey, RouteStatus } from '@prisma/client';
 import sharp from 'sharp';
+import { CustomersModule } from '../customers/customers.module';
+import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageModule } from '../storage/storage.module';
 import { DeliveryRoutesModule } from './delivery-routes.module';
@@ -23,6 +25,7 @@ describe('Team routes & customer stops', () => {
   let prisma: PrismaService;
   let routes: DeliveryRoutesService;
   let proofs: StopProofService;
+  let customers: CustomersService;
   let root: string;
   let orgId: string;
   let adminId: string;
@@ -45,11 +48,12 @@ describe('Team routes & customer stops', () => {
     process.env.FILE_URL_SECRET = 'test-file-secret';
 
     const module = await Test.createTestingModule({
-      imports: [StorageModule, DeliveryRoutesModule],
+      imports: [StorageModule, DeliveryRoutesModule, CustomersModule],
     }).compile();
     prisma = module.get(PrismaService);
     routes = module.get(DeliveryRoutesService);
     proofs = module.get(StopProofService);
+    customers = module.get(CustomersService);
 
     orgId = (
       await prisma.organization.create({
@@ -158,13 +162,19 @@ describe('Team routes & customer stops', () => {
   const mkRoute = (team = teamId) =>
     routes.createRoute(orgId, adminId, { teamId: team, routeDate: nextDate() });
   // A route that has already started, so deliveries recorded now aren't
-  // before its day (driver-proof.ts refuses those as a wrong phone clock).
+  // before its day (driver-proof.ts refuses those as a wrong phone clock) —
+  // a day or so back, still inside the driver's catch-up window.
   let pastDay = 0;
   const mkStartedRoute = async () => {
     const route = await mkRoute();
+    const today = new Date();
     await prisma.route.update({
       where: { id: route.id },
-      data: { routeDate: new Date(Date.UTC(2020, 0, ++pastDay)) },
+      data: {
+        routeDate: new Date(
+          Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - (++pastDay % 6) - 1),
+        ),
+      },
     });
     return route;
   };
@@ -478,6 +488,47 @@ describe('Team routes & customer stops', () => {
     await expect(
       proofs.photoLink(orgId, route.id, stop.id, driver(), 'failure'),
     ).resolves.toMatchObject({ kind: 'signed' });
+  });
+
+  it('keeps one start point for the business, shown on every route', async () => {
+    expect(await routes.getStartPoint(orgId)).toBeNull();
+    await routes.setStartPoint(orgId, { latitude: 1.106452, longitude: 104.071004 });
+    const view = await routes.getRoute(orgId, (await mkRoute()).id);
+    expect(view.startPoint).toEqual({ latitude: 1.106452, longitude: 104.071004 });
+  });
+
+  it('needs a reason for a failed visit from a driver, not from the office', async () => {
+    const route = await mkStartedRoute();
+    const mk = async (name: string) =>
+      routes.addStop(orgId, route.id, { customerId: (await mkCustomer(name)).id });
+    const byDriver = await mk('No Reason Co');
+    await expect(
+      routes.recordCustomerStopFailure(orgId, route.id, byDriver.id, { reason: '  ' }, driver()),
+    ).rejects.toThrow(/reason/);
+
+    const byOffice = await mk('Office Fail Co');
+    const view = await routes.recordCustomerStopFailure(orgId, route.id, byOffice.id, {}, admin());
+    expect(view.stops.find((s) => s.id === byOffice.id)!.status).toBe('FAILED');
+  });
+
+  it("gives a location set in the office to the customer's stops still to be driven", async () => {
+    const customer = await mkCustomer('Pinned Later', false);
+    const route = await mkRoute();
+    const plain = await routes.addStop(orgId, route.id, { customerId: customer.id });
+    const own = await routes.addStop(orgId, (await mkRoute()).id, { customerId: customer.id });
+    await prisma.routeStop.update({
+      where: { id: own.id },
+      data: { destinationLatitude: 1.9, destinationLongitude: 104.9 },
+    });
+    const pinOf = async (id: string) =>
+      Number((await prisma.routeStop.findUniqueOrThrow({ where: { id } })).destinationLatitude);
+
+    await customers.update(orgId, customer.id, { latitude: 1.3, longitude: 104.3 });
+    expect(await pinOf(plain.id)).toBeCloseTo(1.3);
+    // A correction moves the stops that copied the old pin, not one set on the route.
+    await customers.update(orgId, customer.id, { latitude: 1.4, longitude: 104.4 });
+    expect(await pinOf(plain.id)).toBeCloseTo(1.4);
+    expect(await pinOf(own.id)).toBeCloseTo(1.9);
   });
 
   it('fills in a landmark photo from the proof photo, only for a customer without one', async () => {

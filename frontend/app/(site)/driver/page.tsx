@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useReloadOnNewVersion } from '@/lib/hooks/useReloadOnNewVersion';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -194,6 +195,9 @@ async function uploadProofPhoto(
 // reload can scroll back to it (ignored after a couple of minutes, e.g.
 // when the camera was cancelled). daysBack: the stop may be on an earlier
 // day's route, which the reload has to go back to first.
+// The day on screen when the page reloads itself for a new version.
+const RELOAD_DAY_KEY = 'driver.reloadDay';
+
 const RETURN_TO_KEY = 'driver.returnTo';
 const RETURN_TO_MAX_AGE_MS = 2 * 60 * 1000;
 type ReturnTo = { stopId: string; at: number; daysBack?: number };
@@ -495,6 +499,19 @@ function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Sto
   );
 }
 
+// Tells the server what the page showed or did that it would otherwise
+// never hear about (GPS failure, camera trouble, a photo kept for later,
+// an error message), so "some text appeared" can be traced in the log.
+// Best effort: never in the driver's way.
+type DriverEvent = { kind: string; message?: string; stopId?: string; detail?: string };
+function reportDriverEvent(event: DriverEvent) {
+  apiFetch('/delivery-routes/driver-events', {
+    method: 'POST',
+    body: JSON.stringify(event),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 // How many days back a stop left pending can still be finished from here
 // (the server holds drivers to the same: assertDriverCatchUpWindow).
 const CATCH_UP_DAYS = 7;
@@ -539,6 +556,7 @@ export default function DriverRoutePage() {
   const [stopErrors, setStopErrors] = useState<Record<string, string | undefined>>({});
   function setStopError(stopId: string, message: string | null) {
     setStopErrors((e) => ({ ...e, [stopId]: message ?? undefined }));
+    if (message) reportDriverEvent({ kind: 'stop-error', stopId, message });
   }
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [receivedByDraft, setReceivedByDraft] = useState<Record<string, string>>({});
@@ -570,10 +588,46 @@ export default function DriverRoutePage() {
   const isToday = daysBack === 0;
   const canAct = daysBack <= CATCH_UP_DAYS;
 
-  // Reopened after the phone dropped the page during the camera: back to
-  // the day that stop is on.
   useEffect(() => {
-    const day = readReturnTo()?.daysBack;
+    if (error) reportDriverEvent({ kind: 'page-error', message: error });
+  }, [error]);
+
+  // Never mid-photo: not while a camera is open or was just opened, a
+  // photo is being prepared or sent, a stop is being recorded, or a
+  // failure reason is being typed (not saved on the phone).
+  useReloadOnNewVersion(() => {
+    const busyNow =
+      cameraFor ||
+      readReturnTo() ||
+      preparingPhotoFor ||
+      uploadingPhotoFor ||
+      actionLoading ||
+      failingStopId ||
+      Object.values(uploads.current).some(Boolean);
+    if (busyNow) return false;
+    try {
+      sessionStorage.setItem(RELOAD_DAY_KEY, String(daysBack));
+    } catch {
+      // reloads on today
+    }
+    return true;
+  });
+
+  // Reopened after the phone dropped the page during the camera: back to
+  // the day that stop is on. Or reloaded for a new version: back to the
+  // day that was on screen.
+  useEffect(() => {
+    const back = readReturnTo();
+    if (back) reportDriverEvent({ kind: 'page-restarted-during-camera', stopId: back.stopId });
+    let reloadDay: number | null = null;
+    try {
+      const raw = sessionStorage.getItem(RELOAD_DAY_KEY);
+      sessionStorage.removeItem(RELOAD_DAY_KEY);
+      if (raw != null) reloadDay = Number(raw) || null;
+    } catch {
+      // storage blocked — today it is
+    }
+    const day = back?.daysBack ?? reloadDay;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (day) setDaysBack(day);
   }, []);
@@ -618,7 +672,10 @@ export default function DriverRoutePage() {
   // loses nothing. A retake replaces all of it.
   function openCamera(routeId: string, stop: Stop) {
     if (inAppCameraSupported()) setCameraFor({ routeId, stop });
-    else openPhoneCamera(routeId, stop);
+    else {
+      reportDriverEvent({ kind: 'phone-camera', stopId: stop.id, detail: 'in-app camera unavailable or failed before' });
+      openPhoneCamera(routeId, stop);
+    }
   }
 
   // Must run inside the driver's tap — browsers only open a file picker
@@ -639,6 +696,12 @@ export default function DriverRoutePage() {
       const fix = await takeFix();
       if (fix.latitude == null || fix.longitude == null) {
         setPhotoGpsFailedFor(stopId);
+        reportDriverEvent({
+          kind: 'photo-no-gps',
+          stopId,
+          message: t('delivery.driver.photoNeedsGps'),
+          detail: `gps=${gps.status}`,
+        });
         return;
       }
       // No landmark photo for this customer yet (or only one this delivery
@@ -697,6 +760,7 @@ export default function DriverRoutePage() {
             setStopError(key, upload.message ?? t('delivery.driver.photoUploadFailed'));
           } else {
             setPhotoQueuedFor((q) => ({ ...q, [key]: true }));
+            reportDriverEvent({ kind: 'photo-queued', stopId: key, detail: `status=${upload.status ?? '-'}` });
           }
           return false;
         }
@@ -715,8 +779,13 @@ export default function DriverRoutePage() {
           rs.map((r) => ({ ...r, stops: r.stops.map((s) => (s.id === key ? { ...s, hasProofPhoto: true } : s)) })),
         );
         return true;
-      } catch {
+      } catch (err) {
         setPhotoQueuedFor((q) => ({ ...q, [key]: true }));
+        reportDriverEvent({
+          kind: 'photo-queued',
+          stopId: key,
+          detail: err instanceof Error ? `${err.name}: ${err.message}`.slice(0, 300) : 'network',
+        });
         return false;
       } finally {
         delete uploads.current[key];
@@ -970,6 +1039,12 @@ export default function DriverRoutePage() {
 
   async function handleMarkFailed(routeId: string, stop: Stop) {
     const key = stop.id;
+    const reason = failureDraft[key]?.trim();
+    if (!reason) {
+      setStopError(key, t('delivery.driver.needFailureReason'));
+      document.getElementById(`failure-reason-${key}`)?.focus();
+      return;
+    }
     setActionLoading(key);
     setStopError(key, null);
     try {
@@ -984,7 +1059,7 @@ export default function DriverRoutePage() {
       const res = await apiFetch(stopEndpoints(routeId, stop).failure, {
         method: 'POST',
         body: JSON.stringify({
-          reason: failureDraft[key]?.trim() || undefined,
+          reason,
           latitude,
           longitude,
         }),
@@ -1261,6 +1336,7 @@ export default function DriverRoutePage() {
                   {actionable && (
                     <div className="space-y-3 pt-3 border-t border-gray-100">
                       <input
+                        id={`received-by-${doId}`}
                         type="text"
                         placeholder={t(stop.deliveryOrder ? 'delivery.driver.receivedByLabel' : 'delivery.driver.receivedByRequired')}
                         value={receivedByDraft[doId] ?? ''}
@@ -1323,6 +1399,7 @@ export default function DriverRoutePage() {
                             {t('delivery.driver.failurePhotoHint')}
                           </p>
                           <input
+                            id={`failure-reason-${doId}`}
                             type="text"
                             placeholder={t('delivery.driver.failureReasonPlaceholder')}
                             value={failureDraft[doId] ?? ''}
@@ -1350,9 +1427,24 @@ export default function DriverRoutePage() {
                       ) : (
                         <div className="space-y-2">
                           <button
-                            disabled={busy || proofMissing || preparingPhotoFor === doId}
-                            onClick={() => handleMarkDelivered(route.id, stop)}
-                            className="w-full h-14 flex items-center justify-center gap-2 bg-green-600 text-white text-lg font-bold rounded-xl shadow-sm disabled:opacity-40 active:bg-green-700"
+                            disabled={busy || preparingPhotoFor === doId}
+                            // Not greyed out while the name or photo is
+                            // missing: a dead button looked like the app had
+                            // hung. Tapping says what's missing instead.
+                            onClick={() => {
+                              if (!proofMissing) return void handleMarkDelivered(route.id, stop);
+                              if (!receivedByDraft[doId]?.trim()) {
+                                setStopError(doId, t('delivery.driver.needReceivedBy'));
+                                const input = document.getElementById(`received-by-${doId}`) as HTMLInputElement | null;
+                                input?.scrollIntoView({ block: 'center' });
+                                input?.focus();
+                              } else {
+                                setStopError(doId, t('delivery.driver.needPhoto'));
+                              }
+                            }}
+                            className={`w-full h-14 flex items-center justify-center gap-2 bg-green-600 text-white text-lg font-bold rounded-xl shadow-sm disabled:opacity-40 active:bg-green-700 ${
+                              proofMissing ? 'opacity-60' : ''
+                            }`}
                           >
                             <CheckCircle2 size={24} />
                             {busy ? t('delivery.driver.marking') : t('delivery.driver.markDelivered')}
@@ -1393,8 +1485,17 @@ export default function DriverRoutePage() {
           onUsePhoneCamera={() => {
             const { routeId, stop } = cameraFor;
             setCameraFor(null);
+            reportDriverEvent({ kind: 'phone-camera', stopId: stop.id, detail: 'tapped Pakai Kamera HP' });
             openPhoneCamera(routeId, stop);
           }}
+          onFailed={(reason) =>
+            reportDriverEvent({
+              kind: 'camera-failed',
+              stopId: cameraFor.stop.id,
+              message: t(reason === 'NotAllowedError' ? 'delivery.driver.cameraBlocked' : 'delivery.driver.cameraUnavailable'),
+              detail: reason ?? undefined,
+            })
+          }
         />
       )}
       <input

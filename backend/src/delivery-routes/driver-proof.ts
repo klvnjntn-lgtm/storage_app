@@ -76,6 +76,18 @@ export function assertDriverLocation(
   }
 }
 
+// A driver's failed visit says why (shop closed, nobody home) — without
+// it the office can't tell a retry from a lost customer. Office staff
+// recording one afterwards may not know, so they aren't held to it.
+export function assertDriverFailureReason(
+  reason: string | undefined | null,
+  role: string | undefined,
+) {
+  if (role === 'DRIVER' && !reason?.trim()) {
+    throw new BadRequestException('Give a reason for the failed delivery');
+  }
+}
+
 // What a proof photo upload stores besides the photo: when and where it
 // was taken (GPS required from a driver), and the receiver name if one
 // came along. Same columns on DeliveryOrder and RouteStop.

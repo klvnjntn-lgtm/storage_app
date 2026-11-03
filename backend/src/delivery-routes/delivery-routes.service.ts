@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   assertDriverCatchUpWindow,
+  assertDriverFailureReason,
   assertDriverLocation,
   driverSignedAt,
   movePhotoToFailure,
@@ -732,8 +733,9 @@ export class DeliveryRoutesService {
       route.stops.map((stop) => this.presentStop(stop)),
     );
     const currentStop = stops.find((stop) => stop.status === 'PENDING') ?? null;
+    const startPoint = await this.getStartPoint(organizationId);
 
-    return { ...route, team: presentTeam(route.team), stops, currentStop };
+    return { ...route, team: presentTeam(route.team), stops, currentStop, startPoint };
   }
 
   async updateRoute(
@@ -781,26 +783,30 @@ export class DeliveryRoutesService {
     return updated;
   }
 
-  async setStart(
-    organizationId: string,
-    routeId: string,
-    dto: SetRouteStartDto,
-    userId?: string,
-  ) {
-    const route = await this.prisma.route.findFirst({
-      where: { id: routeId, organizationId },
+  // Where every route leaves from — one point for the business, set once
+  // (routes pages) and kept until someone changes it.
+  async getStartPoint(organizationId: string) {
+    const org = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { deliveryStartLatitude: true, deliveryStartLongitude: true },
     });
-    if (!route) throw new NotFoundException('Route not found');
+    return org.deliveryStartLatitude != null && org.deliveryStartLongitude != null
+      ? {
+          latitude: Number(org.deliveryStartLatitude),
+          longitude: Number(org.deliveryStartLongitude),
+        }
+      : null;
+  }
 
-    const updated = await this.prisma.route.update({
-      where: { id: routeId },
-      data: { startLatitude: dto.latitude, startLongitude: dto.longitude },
+  async setStartPoint(organizationId: string, dto: SetRouteStartDto) {
+    await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: {
+        deliveryStartLatitude: dto.latitude,
+        deliveryStartLongitude: dto.longitude,
+      },
     });
-    await this.recordHistory(routeId, RouteHistoryEventType.START_SET, userId, {
-      latitude: dto.latitude,
-      longitude: dto.longitude,
-    });
-    return updated;
+    return this.getStartPoint(organizationId);
   }
 
   // Re-sequences and re-ETAs only the still-PENDING stops — resolved
@@ -832,10 +838,9 @@ export class DeliveryRoutesService {
       },
     });
     if (!route) throw new NotFoundException('Route not found');
-    if (route.startLatitude == null || route.startLongitude == null) {
-      throw new BadRequestException(
-        "Set the route's start point before optimizing",
-      );
+    const start = await this.getStartPoint(organizationId);
+    if (!start) {
+      throw new BadRequestException('Set the start point before optimizing');
     }
 
     const pendingStops = route.stops.filter(
@@ -875,10 +880,7 @@ export class DeliveryRoutesService {
     };
 
     const { routes, unassigned } = await this.optimizer.optimize({
-      depot: {
-        lat: Number(route.startLatitude),
-        lng: Number(route.startLongitude),
-      },
+      depot: { lat: start.latitude, lng: start.longitude },
       vehicles: [vehicle],
       jobs: pendingStops.map((s) => {
         const t = stopTarget(s);
@@ -1457,6 +1459,7 @@ export class DeliveryRoutesService {
       throw new BadRequestException('This route was cancelled');
     }
     assertDriverCatchUpWindow(stop.route, requester.role);
+    assertDriverFailureReason(params.reason, requester.role);
     const failedAt = new Date();
     // A photo taken at the stop becomes the failed attempt's photo, and
     // its GPS the failure's location if the phone sent none.
@@ -1471,7 +1474,7 @@ export class DeliveryRoutesService {
       where: { id: stopId, signedAt: null, failedAt: null },
       data: {
         failedAt,
-        failureReason: params.reason ?? null,
+        failureReason: params.reason?.trim() || null,
         failureLatitude: photoFix.latitude ?? null,
         failureLongitude: photoFix.longitude ?? null,
         completedByUserId: requester.sub,
@@ -1958,13 +1961,16 @@ export class DeliveryRoutesService {
 
   async monitoringByTeam(organizationId: string, date?: string) {
     const routeDate = date ?? (await this.orgToday(organizationId));
-    const routes = await this.prisma.route.findMany({
-      where: { organizationId, routeDate: this.dayRange(routeDate) },
-      include: {
-        team: { select: teamSelect },
-        stops: { select: stopSelect },
-      },
-    });
+    const [routes, start] = await Promise.all([
+      this.prisma.route.findMany({
+        where: { organizationId, routeDate: this.dayRange(routeDate) },
+        include: {
+          team: { select: teamSelect },
+          stops: { select: stopSelect },
+        },
+      }),
+      this.getStartPoint(organizationId),
+    ]);
 
     return routes.map((route) => {
       const counts = {
@@ -1989,7 +1995,7 @@ export class DeliveryRoutesService {
         team: presentTeam(route.team),
         routeStatus: route.status,
         ...counts,
-        ...this.whereabouts(route),
+        ...this.whereabouts(route, start),
       };
     });
   }
@@ -1999,12 +2005,10 @@ export class DeliveryRoutesService {
   // failed, else that stop's pin), or the depot if they haven't resolved
   // one yet. Plus the stop they're presumably heading to. The monitoring
   // page turns these into "last seen 25 min ago at X, next: Y".
-  private whereabouts(route: {
-    startLatitude: Prisma.Decimal | null;
-    startLongitude: Prisma.Decimal | null;
-    plannedDepartureAt: Date | null;
-    stops: StopRow[];
-  }) {
+  private whereabouts(
+    route: { plannedDepartureAt: Date | null; stops: StopRow[] },
+    start: { latitude: number; longitude: number } | null,
+  ) {
     const stops = route.stops.map((stop) => this.presentStop(stop));
     const resolved = stops
       .map((stop) => ({ stop, at: stop.signedAt ?? stop.failedAt }))
@@ -2038,7 +2042,6 @@ export class DeliveryRoutesService {
         }
       : null;
 
-    const depot = latLng([route.startLatitude, route.startLongitude]);
     return {
       lastStop,
       nextStop,
@@ -2047,8 +2050,8 @@ export class DeliveryRoutesService {
       position:
         lastStop?.latitude != null
           ? { latitude: lastStop.latitude, longitude: lastStop.longitude, source: 'LAST_STOP' as const }
-          : depot.latitude != null
-            ? { latitude: depot.latitude, longitude: depot.longitude, source: 'DEPOT' as const }
+          : start
+            ? { latitude: start.latitude, longitude: start.longitude, source: 'DEPOT' as const }
             : null,
     };
   }

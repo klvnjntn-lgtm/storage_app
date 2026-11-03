@@ -237,16 +237,20 @@ model Organization {
   logoUrl                     String?
   purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
-  npwp          String?
-  taxEnabled    Boolean  @default(false)
-  taxName       String?
-  taxPercentage Decimal? @db.Decimal(5, 2)
-  address       String?
-  phone         String?
+  npwp                   String?
+  taxEnabled             Boolean  @default(false)
+  taxName                String?
+  taxPercentage          Decimal? @db.Decimal(5, 2)
+  address                String?
+  phone                  String?
   // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
   // period a journal entry posts into (business-date.ts) — was a single
   // global ACCOUNTING_TIMEZONE env var before; now per-org.
-  timezone      String   @default("Asia/Jakarta")
+  timezone               String   @default("Asia/Jakarta")
+  // DELIVERY_DMS — where every route leaves from (warehouse/depot). One
+  // per business, set once from the routes pages; optimizing needs it.
+  deliveryStartLatitude  Decimal? @db.Decimal(9, 6)
+  deliveryStartLongitude Decimal? @db.Decimal(9, 6)
 
   // Platform billing/admin (see src/platform). Set only from the platform
   // console, never by the org's own users. suspendedAt blocks every API
@@ -1369,10 +1373,6 @@ model Route {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  // NEW — depot/starting point pin, same click-to-pin UX as
-  // DeliveryOrder.destinationLatitude. Required before optimize() can run.
-  startLatitude      Decimal?  @db.Decimal(9, 6)
-  startLongitude     Decimal?  @db.Decimal(9, 6)
   plannedDepartureAt DateTime?
   // Bumped on every change to the stop list/order (see
   // DeliveryRoutesService.recordHistory); each such history event stores

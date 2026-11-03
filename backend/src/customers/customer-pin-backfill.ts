@@ -101,11 +101,13 @@ export async function backfillCustomerPin(
 // Stops copy the customer's pin when they're added, so stops already
 // planned on routes still to be driven (the rest of the week's schedule)
 // were added with no pin. Give the ones still without one the new pin,
-// so the next driver there can navigate. A stop with a pin of its own
-// (set on the route) keeps it.
+// so the next driver there can navigate — whether the pin came from a
+// driver's fix or the office. When the office corrects a pin (previous),
+// stops that copied the old one move with it. A stop with a pin of its
+// own (set on the route) keeps it.
 // For the main address (customerAddressId null), only stops going to that
 // address text — not one-off sites for the same customer.
-async function fillOpenStopPins(
+export async function fillOpenStopPins(
   prisma: PrismaService,
   params: {
     organizationId: string;
@@ -114,13 +116,24 @@ async function fillOpenStopPins(
     address?: string | null;
     latitude: number;
     longitude: number;
+    previous?: { latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null };
   },
 ): Promise<void> {
+  const { previous } = params;
+  const replaceable: Prisma.RouteStopWhereInput =
+    previous?.latitude != null && previous.longitude != null
+      ? {
+          OR: [
+            { destinationLatitude: null },
+            { destinationLatitude: previous.latitude, destinationLongitude: previous.longitude },
+          ],
+        }
+      : { destinationLatitude: null };
   const stops = await prisma.routeStop.findMany({
     where: {
       customerId: params.customerId,
       customerAddressId: params.customerAddressId,
-      destinationLatitude: null,
+      ...replaceable,
       signedAt: null,
       failedAt: null,
       supersededAt: null,
@@ -141,7 +154,7 @@ async function fillOpenStopPins(
     .map((s) => s.id);
   if (!ids.length) return;
   await prisma.routeStop.updateMany({
-    where: { id: { in: ids }, destinationLatitude: null },
+    where: { id: { in: ids }, ...replaceable },
     data: { destinationLatitude: params.latitude, destinationLongitude: params.longitude },
   });
 }

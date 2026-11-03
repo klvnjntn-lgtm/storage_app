@@ -16,21 +16,38 @@ export function inAppCameraSupported(): boolean {
   return !recentlyFailed();
 }
 
-// A phone where the in-app camera failed goes straight to its camera app
-// for a while, instead of showing the failure screen at every stop.
-const FAILED_KEY = 'driver.inAppCameraFailedAt';
-const FAILED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
-function recentlyFailed(): boolean {
+// A phone where the in-app camera keeps failing goes straight to its
+// camera app for a while, instead of showing the failure screen at every
+// stop. Kept short and only after failures in a row: the camera app is
+// what gets Chrome closed on a phone short of memory, so a one-off (camera
+// busy for a moment) mustn't send the driver there for the rest of the
+// day. A picture showing clears it.
+const FAILED_KEY = 'driver.inAppCameraFailures';
+const FAILED_FOR_MS = 60 * 60 * 1000;
+const FAILURES_TO_SKIP = 2;
+function readFailures(): { count: number; at: number } {
   try {
-    const at = Number(localStorage.getItem(FAILED_KEY));
-    return !!at && Date.now() - at < FAILED_FOR_MS;
+    const saved = JSON.parse(localStorage.getItem(FAILED_KEY) ?? 'null') as { count?: number; at?: number } | null;
+    if (!saved?.at || Date.now() - saved.at >= FAILED_FOR_MS) return { count: 0, at: 0 };
+    return { count: saved.count ?? 0, at: saved.at };
   } catch {
-    return false;
+    return { count: 0, at: 0 };
   }
+}
+function recentlyFailed(): boolean {
+  return readFailures().count >= FAILURES_TO_SKIP;
 }
 function rememberFailure() {
   try {
-    localStorage.setItem(FAILED_KEY, String(Date.now()));
+    localStorage.setItem(FAILED_KEY, JSON.stringify({ count: readFailures().count + 1, at: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+function forgetFailures() {
+  try {
+    localStorage.removeItem(FAILED_KEY);
+    localStorage.removeItem('driver.inAppCameraFailedAt'); // the old 7-day memory
   } catch {
     // ignore
   }
@@ -73,10 +90,13 @@ export default function InAppCamera({
   onCapture,
   onClose,
   onUsePhoneCamera,
+  onFailed,
 }: {
   onCapture: (file: File) => void;
   onClose: () => void;
   onUsePhoneCamera: () => void;
+  // Why it couldn't show a picture (a DOMException name, or 'NoPicture').
+  onFailed?: (reason: string | null) => void;
 }) {
   const { t } = useLanguage();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -87,6 +107,11 @@ export default function InAppCamera({
   const [failReason, setFailReason] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
+  // Latest onFailed without restarting the camera when it changes.
+  const onFailedRef = useRef(onFailed);
+  useEffect(() => {
+    onFailedRef.current = onFailed;
+  });
 
   function releaseCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -112,8 +137,10 @@ export default function InAppCamera({
         // Refused by the driver: they can still allow it, so ask again
         // next time rather than skipping the in-app camera.
         if (!(err instanceof DOMException && err.name === 'NotAllowedError')) rememberFailure();
-        setFailReason(err instanceof DOMException ? err.name : null);
+        const reason = err instanceof DOMException ? err.name : null;
+        setFailReason(reason);
         setFailed(true);
+        onFailedRef.current?.(reason);
       });
     return () => {
       cancelled = true;
@@ -128,6 +155,7 @@ export default function InAppCamera({
       rememberFailure();
       setFailReason('NoPicture');
       setFailed(true);
+      onFailedRef.current?.('NoPicture');
     }, NO_PICTURE_MS);
     return () => clearTimeout(timer);
   }, [ready, failed]);
@@ -183,7 +211,10 @@ export default function InAppCamera({
             ref={videoRef}
             playsInline
             muted
-            onLoadedMetadata={() => setReady(true)}
+            onLoadedMetadata={() => {
+              setReady(true);
+              forgetFailures();
+            }}
             className="flex-1 min-h-0 w-full object-contain"
           />
           <div className="flex items-center justify-between px-6 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">

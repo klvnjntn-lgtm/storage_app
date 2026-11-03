@@ -3,7 +3,7 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerLocationService } from './customer-location.service';
-import { manualPinData } from './customer-pin-backfill';
+import { fillOpenStopPins, manualPinData } from './customer-pin-backfill';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ImportCustomerRowDto } from './dto/import-customers.dto';
@@ -253,12 +253,24 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
 }
 
 async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
-  await this.get(organizationId, id);
+  const before = await this.get(organizationId, id);
   await this.assertPriceLevel(organizationId, dto.priceLevelId);
-  return this.prisma.customer.update({
+  const customer = await this.prisma.customer.update({
     where: { id, organizationId },
     data: { ...dto, ...manualPinData(dto.latitude, dto.longitude) },
   });
+  if (dto.latitude != null && dto.longitude != null) {
+    await fillOpenStopPins(this.prisma, {
+      organizationId,
+      customerId: id,
+      customerAddressId: null,
+      address: customer.address,
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      previous: before,
+    });
+  }
+  return customer;
 }
 
 // The FK alone would accept another org's level id.
@@ -331,8 +343,8 @@ async remove(organizationId: string, id: string) {
     addressId: string,
     dto: UpdateCustomerAddressDto,
   ) {
-    await this.getAddress(organizationId, customerId, addressId);
-    return this.prisma.customerAddress.update({
+    const before = await this.getAddress(organizationId, customerId, addressId);
+    const saved = await this.prisma.customerAddress.update({
       where: { id: addressId },
       data: {
         label: dto.label?.trim(),
@@ -340,6 +352,17 @@ async remove(organizationId: string, id: string) {
         ...manualPinData(dto.latitude, dto.longitude),
       },
     });
+    if (dto.latitude != null && dto.longitude != null) {
+      await fillOpenStopPins(this.prisma, {
+        organizationId,
+        customerId,
+        customerAddressId: addressId,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        previous: before,
+      });
+    }
+    return saved;
   }
 
   async removeAddress(

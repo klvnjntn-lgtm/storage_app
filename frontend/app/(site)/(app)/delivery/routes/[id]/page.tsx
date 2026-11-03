@@ -97,9 +97,9 @@ type RouteDetail = {
   team: PickerTeam;
   stops: Stop[];
   currentStop: Stop | null;
-  // Prisma Decimal/DateTime fields serialize as strings over JSON.
-  startLatitude: string | null;
-  startLongitude: string | null;
+  // Where every route leaves from — the business's, not this route's.
+  startPoint: { latitude: number; longitude: number } | null;
+  // Prisma DateTime fields serialize as strings over JSON.
   plannedDepartureAt: string | null;
 };
 
@@ -399,9 +399,7 @@ export default function DeliveryRouteDetailPage() {
   function openStartPicker() {
     setPickingStart(true);
     setPickedPosition(
-      route?.startLatitude && route.startLongitude
-        ? { lat: Number(route.startLatitude), lng: Number(route.startLongitude) }
-        : null,
+      route?.startPoint ? { lat: route.startPoint.latitude, lng: route.startPoint.longitude } : null,
     );
   }
 
@@ -410,8 +408,8 @@ export default function DeliveryRouteDetailPage() {
     setSavingLocation(true);
     setError(null);
     try {
-      const res = await apiFetch(`/delivery-routes/${id}/start`, {
-        method: 'PATCH',
+      const res = await apiFetch('/delivery-routes/start-point', {
+        method: 'PUT',
         body: JSON.stringify({ latitude: pickedPosition.lat, longitude: pickedPosition.lng }),
       });
       const body = await res.json().catch(() => null);
@@ -624,13 +622,13 @@ export default function DeliveryRouteDetailPage() {
             <button data-tour="dlv-route-start"
               onClick={openStartPicker}
               className={`flex items-center justify-center gap-1.5 text-sm font-medium border rounded-md px-3 py-2.5 sm:py-1.5 ${
-                route.startLatitude
+                route.startPoint
                   ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
                   : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
               }`}
             >
-              {route.startLatitude ? <Check size={14} /> : <MapPinOff size={14} />}
-              {route.startLatitude ? t('delivery.routeDetail.startSet') : t('delivery.routeDetail.setStart')}
+              {route.startPoint ? <Check size={14} /> : <MapPinOff size={14} />}
+              {route.startPoint ? t('delivery.routeDetail.startSet') : t('delivery.routeDetail.setStart')}
             </button>
             <div data-tour="dlv-route-departure">
               <label className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
@@ -646,9 +644,9 @@ export default function DeliveryRouteDetailPage() {
             {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
             {SHOW_OPTIMIZE && (
               <button data-tour="dlv-route-optimize"
-                disabled={optimizing || !route.startLatitude || route.stops.every((s) => s.status !== 'PENDING')}
+                disabled={optimizing || !route.startPoint || route.stops.every((s) => s.status !== 'PENDING')}
                 onClick={handleOptimize}
-                title={!route.startLatitude ? t('delivery.routeDetail.setStart') : undefined}
+                title={!route.startPoint ? t('delivery.routeDetail.setStart') : undefined}
                 className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
               >
                 <Navigation size={14} />
@@ -1153,6 +1151,11 @@ export default function DeliveryRouteDetailPage() {
             {pickingStop?.kind === 'CUSTOMER' && (
               <p className="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded-md px-2 py-1.5">
                 {t('delivery.routeDetail.customerPinThisRouteOnly')}
+              </p>
+            )}
+            {pickingStart && (
+              <p className="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded-md px-2 py-1.5">
+                {t('delivery.routeDetail.startForAllRoutes')}
               </p>
             )}
             {pickingStop && savedAddresses.length > 0 && (

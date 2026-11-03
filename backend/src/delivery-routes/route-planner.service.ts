@@ -173,14 +173,10 @@ export class RoutePlannerService {
   // route yet, or on a not-yet-started route that day.
   async candidates(organizationId: string, routeDate: string) {
     this.routes.dayRange(routeDate); // validates the date
-    const [teams, dayRoutes, lastStart] = await Promise.all([
+    const [teams, dayRoutes, start] = await Promise.all([
       this.loadTeams(organizationId),
       this.routesOnDate(organizationId, routeDate),
-      this.prisma.route.findFirst({
-        where: { organizationId, startLatitude: { not: null } },
-        select: { startLatitude: true, startLongitude: true },
-        orderBy: { createdAt: 'desc' },
-      }),
+      this.routes.getStartPoint(organizationId),
     ]);
     const unlockedRouteIds = dayRoutes.filter((r) => !r.locked).map((r) => r.id);
     const availability = await this.routes.teamAvailability(
@@ -204,12 +200,7 @@ export class RoutePlannerService {
 
     return {
       routeDate,
-      defaultDepot: lastStart
-        ? {
-            latitude: Number(lastStart.startLatitude),
-            longitude: Number(lastStart.startLongitude),
-          }
-        : null,
+      defaultDepot: start,
       teams: teams.map((t) => {
         const a = availability.get(t.id)!;
         const mine = dayRoutes.filter((r) => r.teamId === t.id);
@@ -495,6 +486,9 @@ export class RoutePlannerService {
     }
 
     const depot = { lat: dto.depot.latitude, lng: dto.depot.longitude };
+    // The planner's depot is the business's start point — a change here is
+    // a change for every route.
+    await this.routes.setStartPoint(organizationId, dto.depot);
     const planned = await Promise.all(
       dto.routes
         .filter((r) => r.deliveryOrderIds.length > 0)
@@ -558,11 +552,7 @@ export class RoutePlannerService {
         }
         await tx.route.update({
           where: { id: routeId },
-          data: {
-            startLatitude: dto.depot.latitude,
-            startLongitude: dto.depot.longitude,
-            plannedDepartureAt: p.departAt,
-          },
+          data: { plannedDepartureAt: p.departAt },
         });
         // Customer stops left on a reused route go after the planned ones
         // (moved out of the way first — @@unique([routeId, sequence])).

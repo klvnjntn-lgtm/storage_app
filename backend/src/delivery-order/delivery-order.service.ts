@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  assertDriverFailureReason,
   assertDriverLocation,
   driverSignedAt,
   movePhotoToFailure,
@@ -608,6 +609,7 @@ export class DeliveryOrderService {
       );
     }
     await this.assertRequesterCanActOnDeliveryOrder(id, requester);
+    assertDriverFailureReason(params.reason, requester?.role);
 
     const failedAt = params.failedAt ?? new Date();
     // A photo taken at the stop becomes the failed attempt's photo (see
@@ -620,7 +622,7 @@ export class DeliveryOrderService {
       data: {
         status: DeliveryOrderStatus.FAILED,
         failedAt,
-        failureReason: params.reason ?? null,
+        failureReason: params.reason?.trim() || null,
         failureLatitude: useFix
           ? deliveryOrder.proofPhotoLatitude
           : (params.latitude ?? null),
