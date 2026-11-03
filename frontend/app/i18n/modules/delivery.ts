@@ -493,6 +493,8 @@ export const delivery = {
         closeCamera: 'Close',
         usePhoneCamera: 'Use phone camera',
         cameraUnavailable: 'The camera could not open here. Allow camera access for this site, or use the phone camera.',
+        cameraBlocked:
+          'Camera access is blocked. Allow it for this site (the lock icon by the address), and for Chrome in the phone\'s Settings → Apps → Chrome → Permissions. Or use the phone camera.',
         photoTaken: 'Photo taken',
         photoAlreadySent: 'Photo already sent',
         photoQueued: 'Photo saved on this phone — it will be sent as soon as there is signal.',
@@ -1085,6 +1087,8 @@ export const delivery = {
         closeCamera: 'Tutup',
         usePhoneCamera: 'Pakai kamera HP',
         cameraUnavailable: 'Kamera tidak bisa dibuka di sini. Izinkan akses kamera untuk situs ini, atau pakai kamera HP.',
+        cameraBlocked:
+          'Akses kamera diblokir. Izinkan untuk situs ini (ikon gembok di samping alamat), dan untuk Chrome di Setelan HP → Aplikasi → Chrome → Izin. Atau pakai kamera HP.',
         photoTaken: 'Foto sudah diambil',
         photoAlreadySent: 'Foto sudah terkirim',
         photoQueued: 'Foto tersimpan di HP ini — akan dikirim begitu ada sinyal.',

@@ -27,36 +27,55 @@ export async function shrinkPhoto(
   if (stamp.length === 0 && file.size <= maxBytes && (file.type === 'image/jpeg' || file.type === 'image/webp')) {
     return file;
   }
+  const [small] = await shrinkPhotoVariants(file, [{ maxBytes, stamp }]);
+  return small;
+}
+
+// Several shrunk copies of one photo (e.g. stamped proof + plain landmark),
+// decoding it only once: a full-size camera photo takes a cheap phone a
+// second or two, and the memory of tens of MB, to decode.
+export async function shrinkPhotoVariants(
+  file: File,
+  variants: { maxBytes?: number; stamp?: string[] }[],
+): Promise<File[]> {
   let bitmap: ImageBitmap | null = null;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return file;
-
-    let scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
-    let smallest: Blob | null = null;
-    for (let step = 0; step < 5; step++) {
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      drawStamp(ctx, canvas.width, canvas.height, stamp);
-      for (const quality of QUALITIES) {
-        const blob = await toJpeg(canvas, quality);
-        if (!blob) return file;
-        if (!smallest || blob.size < smallest.size) smallest = blob;
-        if (blob.size <= maxBytes) return asFile(blob, file.name);
-      }
-      scale *= 0.75;
+    const out: File[] = [];
+    for (const { maxBytes = MAX_PROOF_PHOTO_BYTES, stamp = [] } of variants) {
+      out.push(await encode(bitmap, file, maxBytes, stamp));
     }
-    // Still over after every step (very detailed scene): send the smallest
-    // try rather than the full original.
-    return smallest && smallest.size < file.size ? asFile(smallest, file.name) : file;
+    return out;
   } catch {
-    return file;
+    return variants.map(() => file);
   } finally {
     bitmap?.close();
   }
+}
+
+async function encode(bitmap: ImageBitmap, file: File, maxBytes: number, stamp: string[]): Promise<File> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return file;
+
+  let scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  let smallest: Blob | null = null;
+  for (let step = 0; step < 5; step++) {
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    drawStamp(ctx, canvas.width, canvas.height, stamp);
+    for (const quality of QUALITIES) {
+      const blob = await toJpeg(canvas, quality);
+      if (!blob) return file;
+      if (!smallest || blob.size < smallest.size) smallest = blob;
+      if (blob.size <= maxBytes) return asFile(blob, file.name);
+    }
+    scale *= 0.75;
+  }
+  // Still over after every step (very detailed scene): send the smallest
+  // try rather than the full original.
+  return smallest && smallest.size < file.size ? asFile(smallest, file.name) : file;
 }
 
 // White text on a dark band in the bottom-left corner, sized to the photo

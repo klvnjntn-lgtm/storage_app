@@ -27,7 +27,7 @@ import { display } from '@/lib/fonts';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
-import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { shrinkPhotoVariants } from '@/lib/shrinkPhoto';
 import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/captureLocation';
 import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
 import { toCalendarDateString } from '@/lib/dates';
@@ -641,13 +641,13 @@ export default function DriverRoutePage() {
         setPhotoGpsFailedFor(stopId);
         return;
       }
-      const small = await shrinkPhoto(file, { stamp: photoStamp(takenAt, fix) });
       // No landmark photo for this customer yet (or only one this delivery
-      // filled in): send a copy without the date/GPS stamp to become it.
+      // filled in): also make a copy without the date/GPS stamp to become it.
       const sourceId = stop.deliveryOrder?.id ?? stop.id;
       const info = stop.customerInfo;
-      const landmark =
-        info && info.locationPhotos.every((p) => p.fromProofOf === sourceId) ? await shrinkPhoto(file) : undefined;
+      const wantsLandmark = !!info && info.locationPhotos.every((p) => p.fromProofOf === sourceId);
+      const stamp = photoStamp(takenAt, fix);
+      const [small, landmark] = await shrinkPhotoVariants(file, wantsLandmark ? [{ stamp }, {}] : [{ stamp }]);
       if (landmark) landmarkFor.current.set(small, landmark);
       setPhotoDraft((d) => ({ ...d, [stopId]: small }));
       setPhotoFix((f) => ({ ...f, [stopId]: fix }));
