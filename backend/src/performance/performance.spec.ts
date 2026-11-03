@@ -12,6 +12,7 @@ import { VehicleRemindersModule } from '../vehicles/vehicle-reminders.module';
 import { VehicleRemindersService } from '../vehicles/vehicle-reminders.service';
 import { PerformanceModule } from './performance.module';
 import { PerformanceService } from './performance.service';
+import { resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 
 // InvoiceService imports puppeteer (ESM-only) for PDF rendering.
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -28,7 +29,9 @@ describe('Staff performance', () => {
   let otherVehicleId: string;
   let andi: string;
   let budi: string;
-  const today = new Date().toISOString().slice(0, 10);
+  // The report's days are the business's (Jakarta), not UTC's — they
+  // differ between midnight and 07:00 WIB.
+  const today = todayBusinessDate(resolveTimezone(null)).toISOString().slice(0, 10);
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -54,8 +57,8 @@ describe('Staff performance', () => {
       });
     vehicleId = (await car('B 1 AA')).id;
     otherVehicleId = (await car('B 2 BB')).id;
-    andi = (await prisma.employee.create({ data: { organizationId: orgId, name: 'Andi', baseSalary: 0 } })).id;
-    budi = (await prisma.employee.create({ data: { organizationId: orgId, name: 'Budi', baseSalary: 0 } })).id;
+    andi = (await prisma.employee.create({ data: { organizationId: orgId, name: 'Andi', baseSalary: 0, isMechanic: true } })).id;
+    budi = (await prisma.employee.create({ data: { organizationId: orgId, name: 'Budi', baseSalary: 0, isMechanic: true } })).id;
   });
 
   afterAll(async () => {

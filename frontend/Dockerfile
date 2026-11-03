@@ -30,7 +30,12 @@ ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ARG NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID
 ENV NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=$NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID
 
-RUN npm run build
+# One id per build: Next stamps it on every page (<html data-dpl-id>) and
+# reloads on navigation when the server's differs; public/app-version.json
+# lets a page left open on a phone check it (useReloadOnNewVersion).
+RUN export NEXT_DEPLOYMENT_ID=$(date +%Y%m%d%H%M%S) \
+ && printf '{"version":"%s"}' "$NEXT_DEPLOYMENT_ID" > public/app-version.json \
+ && npm run build
 
 
 FROM node:22-alpine

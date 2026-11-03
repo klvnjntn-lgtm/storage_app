@@ -531,6 +531,18 @@ describe('Team routes & customer stops', () => {
     expect(await pinOf(own.id)).toBeCloseTo(1.9);
   });
 
+  it('still finds the stops when the office changes the address and location together', async () => {
+    const customer = await mkCustomer('Moved Shop', false);
+    const stop = await routes.addStop(orgId, (await mkRoute()).id, { customerId: customer.id });
+    await customers.update(orgId, customer.id, {
+      address: 'Jl. Baru 9',
+      latitude: 1.35,
+      longitude: 104.35,
+    });
+    const after = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+    expect(Number(after.destinationLatitude)).toBeCloseTo(1.35);
+  });
+
   it('fills in a landmark photo from the proof photo, only for a customer without one', async () => {
     const route = await mkStartedRoute();
     const customer = await mkCustomer('No Landmark Co');

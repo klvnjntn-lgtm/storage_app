@@ -21,7 +21,7 @@ import CustomerStopPicker, { type StopCustomer } from '@/app/components/delivery
 import { useCustomerAddresses } from '@/app/components/delivery/CustomerAddressPicker';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
-import { formatDMY, formatDMYTime } from '@/lib/dates';
+import { formatDMY, formatDMYTime, parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 
@@ -251,6 +251,16 @@ export default function DeliveryRouteDetailPage() {
           }
         : selectedOrderId && { deliveryOrderId: selectedOrderId };
     if (!payload) return;
+    // A stop added to a day that has passed is usually the wrong route
+    // picked (yesterday's instead of today's).
+    const routeDay = route && parseCalendarDate(route.routeDate);
+    if (
+      routeDay &&
+      toCalendarDateString(routeDay) < toCalendarDateString(new Date()) &&
+      !(await dialog.confirm(t('delivery.routeDetail.confirmPastRoute', { date: formatDMY(routeDay) })))
+    ) {
+      return;
+    }
     setBusy('add-stop');
     setError(null);
     try {

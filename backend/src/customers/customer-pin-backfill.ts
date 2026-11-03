@@ -106,7 +106,9 @@ export async function backfillCustomerPin(
 // stops that copied the old one move with it. A stop with a pin of its
 // own (set on the route) keeps it.
 // For the main address (customerAddressId null), only stops going to that
-// address text — not one-off sites for the same customer.
+// address text — not one-off sites for the same customer. Stops copied the
+// text too, so when the office changes it in the same save, the old text
+// (previous.address) still counts as the main address.
 export async function fillOpenStopPins(
   prisma: PrismaService,
   params: {
@@ -116,7 +118,11 @@ export async function fillOpenStopPins(
     address?: string | null;
     latitude: number;
     longitude: number;
-    previous?: { latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null };
+    previous?: {
+      latitude: Prisma.Decimal | null;
+      longitude: Prisma.Decimal | null;
+      address?: string | null;
+    };
   },
 ): Promise<void> {
   const { previous } = params;
@@ -144,12 +150,12 @@ export async function fillOpenStopPins(
     },
     select: { id: true, address: true },
   });
-  const main = normalizeAddress(params.address);
+  const main = [params.address, previous?.address].map(normalizeAddress).filter(Boolean);
   const ids = stops
     .filter((s) => {
       if (params.customerAddressId) return true;
       const a = normalizeAddress(s.address);
-      return !a || a === main;
+      return !a || main.includes(a);
     })
     .map((s) => s.id);
   if (!ids.length) return;

@@ -195,9 +195,6 @@ async function uploadProofPhoto(
 // reload can scroll back to it (ignored after a couple of minutes, e.g.
 // when the camera was cancelled). daysBack: the stop may be on an earlier
 // day's route, which the reload has to go back to first.
-// The day on screen when the page reloads itself for a new version.
-const RELOAD_DAY_KEY = 'driver.reloadDay';
-
 const RETURN_TO_KEY = 'driver.returnTo';
 const RETURN_TO_MAX_AGE_MS = 2 * 60 * 1000;
 type ReturnTo = { stopId: string; at: number; daysBack?: number };
@@ -512,6 +509,9 @@ function reportDriverEvent(event: DriverEvent) {
   }).catch(() => {});
 }
 
+// The day on screen when the page reloads itself for a new version.
+const RELOAD_DAY_KEY = 'driver.reloadDay';
+
 // How many days back a stop left pending can still be finished from here
 // (the server holds drivers to the same: assertDriverCatchUpWindow).
 const CATCH_UP_DAYS = 7;
@@ -575,6 +575,9 @@ export default function DriverRoutePage() {
   // phone's camera app was opened for when the in-app one can't be used.
   const [cameraFor, setCameraFor] = useState<{ routeId: string; stop: Stop } | null>(null);
   const phoneCameraFor = useRef<{ routeId: string; stop: Stop } | null>(null);
+  // When the camera app was opened, until its photo comes back — a driver
+  // can spend a while in it, longer than returnTo lasts.
+  const phoneCameraOpenedAt = useRef(0);
   const phoneCameraInput = useRef<HTMLInputElement>(null);
   // The current values, for the background retry and for uploads that
   // finish after a retake.
@@ -599,6 +602,7 @@ export default function DriverRoutePage() {
     const busyNow =
       cameraFor ||
       readReturnTo() ||
+      Date.now() - phoneCameraOpenedAt.current < 15 * 60 * 1000 ||
       preparingPhotoFor ||
       uploadingPhotoFor ||
       actionLoading ||
@@ -682,6 +686,7 @@ export default function DriverRoutePage() {
   // from one.
   function openPhoneCamera(routeId: string, stop: Stop) {
     phoneCameraFor.current = { routeId, stop };
+    phoneCameraOpenedAt.current = Date.now();
     rememberReturnTo(stop.id, daysBack);
     phoneCameraInput.current?.click();
   }
@@ -1507,6 +1512,7 @@ export default function DriverRoutePage() {
         onChange={(e) => {
           const file = e.target.files?.[0];
           const target = phoneCameraFor.current;
+          phoneCameraOpenedAt.current = 0;
           if (file && target) onPhotoPicked(target.routeId, target.stop, file);
           e.target.value = '';
         }}

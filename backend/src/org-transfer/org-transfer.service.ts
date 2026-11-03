@@ -77,6 +77,7 @@ const SKIPPED_MODELS = new Set([
   'PartCatalogEntry',
   'PartInterchange',
   'PartWorkshopEvidence',
+  'PartSearchTerm',
 ]);
 
 // Columns left out of an export: what belongs to the source install

@@ -1,9 +1,22 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "fs";
 
 const backendUrl =
   process.env.BACKEND_URL || "http://localhost:3000";
 
 const isDev = process.env.NODE_ENV === "development";
+
+// Set per Docker build (see Dockerfile), and read back from the file it
+// wrote when `next start` loads this config. None in dev or the desktop
+// build — pages then skip the new-version check.
+function deploymentId(): string | undefined {
+  if (process.env.NEXT_DEPLOYMENT_ID) return process.env.NEXT_DEPLOYMENT_ID;
+  try {
+    return JSON.parse(readFileSync("public/app-version.json", "utf8")).version;
+  } catch {
+    return undefined;
+  }
+}
 
 // The desktop app (desktop/) ships this frontend as a self-contained
 // server.js. Image optimization is off there: it needs sharp's native
@@ -53,6 +66,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  deploymentId: isDesktopBuild ? undefined : deploymentId(),
   ...(isDesktopBuild && {
     // Own build folder, so it never clobbers a dev or Docker build in .next.
     distDir: ".next-desktop",
@@ -69,6 +83,14 @@ const nextConfig: NextConfig = {
       {
         source: "/:path((?!api/|uploads/).*)",
         headers: [{ key: "Content-Security-Policy", value: csp }],
+      },
+      // The driver page stays open on phones for days; Chrome must not keep
+      // its own copy of it to bring back after a deploy (old code, the
+      // Enso Denis report). Always fetched fresh — the files it loads are
+      // versioned and still cached.
+      {
+        source: "/driver",
+        headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
       },
     ];
   },
