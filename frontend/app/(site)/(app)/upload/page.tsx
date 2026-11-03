@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -131,6 +132,8 @@ export default function ImportPage() {
     // SKUs whose sheet cost wasn't applied (the product already had stock
     // with a weighted-average cost, which an import doesn't override).
     costIgnoredSkus: string[];
+    // Serial-tracked SKUs whose recorded serials no longer match the stock.
+    serialSkus: string[];
     rejected: RejectedRow[];
     importedBy: string | null;
     // Set for an "add to stock" import — the delivery can then be labelled
@@ -310,6 +313,9 @@ export default function ImportPage() {
         costIgnoredSkus: Array.isArray(data?.accepted)
           ? data.accepted.filter((r: { costIgnored?: boolean }) => r.costIgnored).map((r: { sku: string }) => r.sku)
           : [],
+        serialSkus: Array.isArray(data?.accepted)
+          ? data.accepted.filter((r: { serialsOutOfStep?: boolean }) => r.serialsOutOfStep).map((r: { sku: string }) => r.sku)
+          : [],
         rejected: Array.isArray(data?.rejected) ? data.rejected : [],
         importedBy: profile?.email ?? null, // display label only; the backend records the real user
         deliveryBatchId: data?.mode === 'INCREMENT' ? data?.batchId ?? null : null,
@@ -382,6 +388,18 @@ export default function ImportPage() {
                   skus: importResult.costIgnoredSkus.slice(0, 10).join(', ') +
                     (importResult.costIgnoredSkus.length > 10 ? ', …' : ''),
                 })}
+              </div>
+            )}
+            {importResult.serialSkus.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-sm">
+                {t('upload.uploadPage.serialsOutOfStep', {
+                  count: importResult.serialSkus.length,
+                  skus: importResult.serialSkus.slice(0, 10).join(', ') +
+                    (importResult.serialSkus.length > 10 ? ', …' : ''),
+                })}{' '}
+                <Link href="/inventory/serials" className="font-semibold underline">
+                  {t('upload.uploadPage.openSerials')}
+                </Link>
               </div>
             )}
 

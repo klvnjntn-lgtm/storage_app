@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, FiscalPeriodStatus, JournalEntryStatus, JournalSourceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -184,8 +185,11 @@ export class JournalService {
       }
     }
 
-    const count = await tx.journalEntry.count({ where: { organizationId, fiscalPeriodId: fiscalPeriod.id } });
-    const entryNumber = this.buildEntryNumber(fiscalPeriod.year, fiscalPeriod.month, count + 1);
+    const entryNumber = this.buildEntryNumber(
+      fiscalPeriod.year,
+      fiscalPeriod.month,
+      await this.nextEntrySeq(tx, organizationId, fiscalPeriod.id, fiscalPeriod.year, fiscalPeriod.month),
+    );
 
     const missing = [...new Set(input.lines.filter((l) => !l.branchId && l.locationId).map((l) => l.locationId!))];
     const branchOfLocation = new Map(
@@ -277,10 +281,17 @@ export class JournalService {
       );
     }
 
-    const count = await tx.journalEntry.count({
-      where: { organizationId, fiscalPeriodId: original.fiscalPeriodId },
-    });
-    const entryNumber = this.buildEntryNumber(original.fiscalPeriod.year, original.fiscalPeriod.month, count + 1);
+    const entryNumber = this.buildEntryNumber(
+      original.fiscalPeriod.year,
+      original.fiscalPeriod.month,
+      await this.nextEntrySeq(
+        tx,
+        organizationId,
+        original.fiscalPeriodId,
+        original.fiscalPeriod.year,
+        original.fiscalPeriod.month,
+      ),
+    );
 
     const reversal = await tx.journalEntry.create({
       data: {
@@ -369,15 +380,16 @@ async closePeriod(organizationId: string, year: number, month: number) {
     const year = businessDate.getUTCFullYear();
     const month = businessDate.getUTCMonth() + 1;
 
-    let period = await tx.fiscalPeriod.findUnique({
+    // INSERT … ON CONFLICT, not find-then-create: the first two postings of
+    // a new month both tried to create its period, and one of them failed.
+    await tx.$executeRaw`
+      INSERT INTO "FiscalPeriod" (id, "organizationId", year, month)
+      VALUES (${randomUUID()}, ${organizationId}, ${year}, ${month})
+      ON CONFLICT ("organizationId", year, month) DO NOTHING
+    `;
+    const period = await tx.fiscalPeriod.findUniqueOrThrow({
       where: { organizationId_year_month: { organizationId, year, month } },
     });
-
-    if (!period) {
-      period = await tx.fiscalPeriod.create({
-        data: { organizationId, year, month, status: FiscalPeriodStatus.OPEN },
-      });
-    }
 
     if (period.status !== FiscalPeriodStatus.OPEN) {
       const hint =
@@ -414,6 +426,35 @@ async closePeriod(organizationId: string, year: number, month: number) {
         `Journal entry does not balance: total debits ${totalDebit} vs total credits ${totalCredit}`,
       );
     }
+  }
+
+  // Per-month counter row, bumped with a row-level UPDATE so two sales
+  // posted at the same moment get different numbers. Counting the period's
+  // entries instead handed both the same number and one sale failed with
+  // "please retry". A month's first use seeds the counter from the entries
+  // already numbered by that count.
+  private async nextEntrySeq(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    fiscalPeriodId: string,
+    year: number,
+    month: number,
+  ) {
+    const documentType = `JOURNAL_ENTRY_${String(month).padStart(2, '0')}`;
+    const existing = await tx.documentCounter.findUnique({
+      where: { organizationId_documentType_year: { organizationId, documentType, year } },
+      select: { id: true },
+    });
+    const seed = existing ? 0 : await tx.journalEntry.count({ where: { organizationId, fiscalPeriodId } });
+    // One statement, so two first posts of the month can't both insert.
+    const [counter] = await tx.$queryRaw<{ lastNumber: number }[]>`
+      INSERT INTO "DocumentCounter" (id, "organizationId", "documentType", year, "lastNumber", "updatedAt")
+      VALUES (${randomUUID()}, ${organizationId}, ${documentType}, ${year}, ${seed + 1}, now())
+      ON CONFLICT ("organizationId", "documentType", year)
+      DO UPDATE SET "lastNumber" = "DocumentCounter"."lastNumber" + 1, "updatedAt" = now()
+      RETURNING "lastNumber"
+    `;
+    return counter.lastNumber;
   }
 
   private buildEntryNumber(year: number, month: number, seq: number) {

@@ -20,7 +20,7 @@ import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
 import { CreateSalesQuotationDto, RespondToQuotationDto, UpdateSalesQuotationDto } from './dto/sales-quotation.dto';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { businessDayBounds, endOfBusinessDay, orgToday, resolveTimezone } from '../accounting/business-date';
 import { escapeLike } from '../common/text/escape-like';
 import { lineMatches, memberMatches } from '../common/text/document-search';
 import { resolveBranchId } from '../branches/resolve-branch';
@@ -233,7 +233,7 @@ export class SalesQuotationService {
     await this.validateVehicle(organizationId, dto.vehicleId, dto.customerId, dto.odometer);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
-    const quotationDate = dto.quotationDate ? new Date(dto.quotationDate) : new Date();
+    const quotationDate = dto.quotationDate ? new Date(dto.quotationDate) : await orgToday(this.prisma, organizationId);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -646,7 +646,16 @@ export class SalesQuotationService {
         throw new BadRequestException(`Cannot move quotation from ${quotation.status} to ${to}`);
       }
 
-      const updated = await tx.salesQuotation.update({ where: { id }, data: { status: to } });
+      // Claimed on the status just checked: the customer answering online at
+      // the same moment (respond()) must not be overwritten.
+      const claimed = await tx.salesQuotation.updateMany({
+        where: { id, organizationId, status: quotation.status },
+        data: { status: to },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException('This quotation was just changed — reload to see its current status');
+      }
+      const updated = await tx.salesQuotation.findUniqueOrThrow({ where: { id } });
 
       await this.logActivity(tx, {
         quotationId: id,
@@ -774,7 +783,12 @@ export class SalesQuotationService {
     if (current.version !== dto.version) {
       throw new ConflictException('This quotation was updated — please reload to see the latest version');
     }
-    if (approve && current.validUntil && endOfDay(current.validUntil) < new Date()) {
+    // Good through the end of that day in the business's timezone; the UTC
+    // end of day let a customer approve until 07:00 the next morning.
+    const tz = resolveTimezone(
+      await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } }),
+    );
+    if (approve && current.validUntil && endOfBusinessDay(current.validUntil, tz) < new Date()) {
       throw new BadRequestException('This quotation is no longer valid — ask the workshop for an updated one');
     }
     const name = dto.name.trim();
@@ -848,7 +862,7 @@ export class SalesQuotationService {
           vehicleId: original.vehicleId,
           mechanicId: original.mechanicId,
           format: original.format,
-          quotationDate: new Date(),
+          quotationDate: await orgToday(tx, organizationId),
           termsAndConditions: original.termsAndConditions,
           bankAccountId: original.bankAccountId,
           bankName: original.bankName,
@@ -1390,7 +1404,3 @@ export class SalesQuotationService {
   }
 }
 
-// A DATE column holds midnight UTC; the quotation is good through that day.
-function endOfDay(date: Date) {
-  return new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
-}

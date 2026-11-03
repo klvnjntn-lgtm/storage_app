@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PurchaseOrderStatus } from '@prisma/client';
+import { PurchaseOrderStatus, StockTransferStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PurchaseOrderService } from '../purchase-order/purchase-order.service';
@@ -105,10 +105,20 @@ export class ReorderService {
     if (products.length === 0) return [];
     const ids = products.map((p) => p.id);
 
-    const [stock, ordered, received] = await Promise.all([
+    const [stock, inTransit, ordered, received] = await Promise.all([
       this.prisma.stock.groupBy({
         by: ['productId'],
         where: { organizationId, productId: { in: ids } },
+        _sum: { quantity: true },
+      }),
+      // Goods on a transfer between locations are in no Stock row until
+      // they land, but they're still the business's — not something to buy.
+      this.prisma.stockTransferItem.groupBy({
+        by: ['productId'],
+        where: {
+          productId: { in: ids },
+          transfer: { organizationId, status: StockTransferStatus.IN_TRANSIT },
+        },
         _sum: { quantity: true },
       }),
       this.prisma.purchaseOrderItem.findMany({
@@ -153,6 +163,12 @@ export class ReorderService {
     const onHandBy = new Map(
       stock.map((s) => [s.productId, Number(s._sum.quantity ?? 0)]),
     );
+    for (const t of inTransit) {
+      onHandBy.set(
+        t.productId,
+        (onHandBy.get(t.productId) ?? 0) + Number(t._sum.quantity ?? 0),
+      );
+    }
     const receivedBy = new Map(
       received.map((r) => [
         r.purchaseOrderItemId,

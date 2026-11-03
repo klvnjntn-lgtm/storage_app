@@ -38,6 +38,7 @@ type Expense = {
   paymentMethod: string | null;
   branchId?: string | null;
   branch?: { name: string } | null;
+  payments?: { id: string; amount: string | number; method: string; createdAt: string; note: string | null }[];
 };
 
 type Account = { id: string; code: string; name: string; type: string };
@@ -302,15 +303,41 @@ export default function ExpensesPage() {
 
   // Void, not delete-with-no-trace — this reverses the journal entry
   // ExpensesService.create() posted, then removes the row. Only available
-  // while UNPAID, same restriction the backend enforces: a paid expense
-  // has real cash movement behind it and needs a manual adjusting entry
-  // instead, not a takeback.
+  // while UNPAID, same restriction the backend enforces: a paid expense's
+  // payments are voided first (handleVoidPayment).
   async function handleVoidExpense(exp: Expense) {
     if (!(await dialog.confirm(t('accounting.expenses.voidConfirm', { category: exp.category.name }), { danger: true }))) return;
     setVoidingId(exp.id);
     setError(null);
     try {
       const res = await apiFetch(`/expenses/${exp.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('accounting.expenses.requestFailed', { status: res.status }));
+        return;
+      }
+      await loadExpenses();
+    } catch {
+      setError(t('accounting.expenses.couldNotReachServer'));
+    } finally {
+      setVoidingId(null);
+    }
+  }
+
+  // A payment entered by mistake: its ledger entry is reversed and the
+  // expense owes that amount again.
+  async function handleVoidPayment(exp: Expense, paymentId: string, amount: number) {
+    const reason = await dialog.prompt(t('accounting.expenses.voidPaymentPrompt', { amount: formatIDR(amount) }), {
+      confirmLabel: t('accounting.expenses.voidPayment'),
+    });
+    if (reason === null) return;
+    setVoidingId(paymentId);
+    setError(null);
+    try {
+      const res = await apiFetch(`/expenses/${exp.id}/payments/${paymentId}/void`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() || undefined }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('accounting.expenses.requestFailed', { status: res.status }));
@@ -761,6 +788,30 @@ export default function ExpensesPage() {
                         </div>
                       </div>
                     </div>
+
+                    {!!exp.payments?.length && (
+                      <ul className="px-3 pb-2 flex flex-col gap-1 border-t border-gray-100 pt-2">
+                        {exp.payments.map((p) => (
+                          <li key={p.id} className="flex items-center justify-between gap-3 text-[11px] text-gray-600">
+                            <span className="min-w-0 truncate">
+                              {t('accounting.expenses.paymentLine', {
+                                amount: formatIDR(Number(p.amount)),
+                                date: new Date(p.createdAt).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
+                              })}
+                              {' · '}
+                              {p.method}
+                            </span>
+                            <button
+                              onClick={() => handleVoidPayment(exp, p.id, Number(p.amount))}
+                              disabled={voidingId === p.id}
+                              className="shrink-0 font-semibold text-gray-400 hover:text-red-600 disabled:opacity-50"
+                            >
+                              {voidingId === p.id ? '...' : t('accounting.expenses.voidPayment')}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
                     {isEditingExpense && (
                       <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 flex flex-col gap-2.5">

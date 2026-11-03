@@ -10,7 +10,7 @@ import { ApprovalDocumentType, Prisma, PurchaseOrderStatus, PurchaseOrderActivit
 import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, NewProductDto } from './dto/purchase-order.dto';
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
-import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
+import { businessDayBounds, orgToday, resolveTimezone } from '../accounting/business-date';
 import { escapeLike } from '../common/text/escape-like';
 import { lineMatches } from '../common/text/document-search';
 import { resolveBranchId } from '../branches/resolve-branch';
@@ -229,7 +229,7 @@ export class PurchaseOrderService {
           userId,
           locationId: dto.locationId,
           branchId: await resolveBranchId(tx, organizationId, { branchId: dto.branchId, locationId: dto.locationId }),
-          orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
+          orderDate: dto.orderDate ? new Date(dto.orderDate) : await orgToday(tx, organizationId),
           supplierId: dto.supplierId,
           status: PurchaseOrderStatus.DRAFT,
           subtotal,

@@ -47,7 +47,12 @@ export class ExpensesService {
     const [data, total] = await this.prisma.$transaction([
       this.prisma.expense.findMany({
         where,
-        include: { category: true, location: { select: { name: true } }, branch: { select: { name: true } } },
+        include: {
+          category: true,
+          location: { select: { name: true } },
+          branch: { select: { name: true } },
+          payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } },
+        },
         orderBy: { expenseDate: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -291,7 +296,7 @@ async update(
               // of the latest installment, so it stays null until then.
               paidAt: newStatus === ExpenseStatus.PAID ? (dto.paidAt ? new Date(dto.paidAt) : new Date()) : null,
             },
-            include: { category: true, payments: { orderBy: { createdAt: 'desc' } } },
+            include: { category: true, payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } } },
           });
 
           // Cash/Bank (debit... credit) + Expense Payable, in the SAME
@@ -323,23 +328,72 @@ async update(
   // expense should be corrected via a manual adjusting entry, not deleted,
   // since cash has genuinely left by that point.
   async voidUnpaid(organizationId: string, id: string, userId?: string, reason?: string) {
-    const expense = await this.get(organizationId, id);
-    if (expense.status !== ExpenseStatus.UNPAID) {
-      throw new BadRequestException('Only an UNPAID expense can be voided — a paid one needs a manual adjusting entry instead');
-    }
+    await this.get(organizationId, id);
 
     return this.prisma.$transaction(async (tx) => {
-      const entry = await this.journal.findPostedBySource(organizationId, JournalSourceType.EXPENSE, expense.id, tx);
+      // Locked and re-read: a payment recorded at the same moment used to
+      // slip in between the check and the delete.
+      await tx.$queryRaw`SELECT id FROM "Expense" WHERE id = ${id} FOR UPDATE`;
+      const expense = await tx.expense.findUniqueOrThrow({ where: { id }, select: { status: true } });
+      if (expense.status !== ExpenseStatus.UNPAID) {
+        throw new BadRequestException('Only an UNPAID expense can be voided — void its payments first');
+      }
+      const entry = await this.journal.findPostedBySource(organizationId, JournalSourceType.EXPENSE, id, tx);
       if (entry) {
         await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
       }
+      // Only voided payments can be left (it's UNPAID); their entries are
+      // already reversed.
+      await tx.expensePayment.deleteMany({ where: { expenseId: id, voidedAt: { not: null } } });
       return tx.expense.delete({ where: { id } });
     });
   }
+
+  // Reverses one payment entered by mistake: its journal entry is voided
+  // and the expense goes back to owing that amount.
+  async voidPayment(organizationId: string, expenseId: string, paymentId: string, userId?: string, reason?: string) {
+    try {
+      return await runSerializable(this.prisma, async (tx) => {
+        const payment = await tx.expensePayment.findFirst({
+          where: { id: paymentId, expenseId, voidedAt: null, expense: { organizationId } },
+          select: { id: true, amount: true },
+        });
+        if (!payment) throw new NotFoundException('Payment not found');
+        const expense = await tx.expense.findUniqueOrThrow({
+          where: { id: expenseId },
+          select: { amount: true, amountPaid: true },
+        });
+
+        const entry = await this.journal.findPostedBySource(organizationId, JournalSourceType.EXPENSE, payment.id, tx);
+        if (entry) await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
+
+        await tx.expensePayment.update({
+          where: { id: payment.id },
+          data: { voidedAt: new Date(), voidedById: userId ?? null, voidReason: reason?.trim() || null },
+        });
+        const amountPaid = Math.max(0, round2(Number(expense.amountPaid) - Number(payment.amount)));
+        const status = deriveExpenseStatus(amountPaid, Number(expense.amount));
+        const updated = await tx.expense.update({
+          where: { id: expenseId },
+          data: { amountPaid, status, ...(status !== ExpenseStatus.PAID && { paidAt: null }) },
+          include: { category: true, payments: { where: { voidedAt: null }, orderBy: { createdAt: 'desc' } } },
+        });
+        return {
+          ...updated,
+          amount: Number(updated.amount),
+          amountPaid: Number(updated.amountPaid),
+          payments: updated.payments.map((p) => ({ ...p, amount: Number(p.amount) })),
+        };
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+        throw new ConflictException('Void conflicted with a concurrent update, please retry');
+      }
+      throw e;
+    }
+  }
 }
 
-// An expense's (or asset's) branch: the one chosen, else its location's,
-// else none — overhead that belongs to no one branch.
 export async function expenseBranchId(
   tx: Prisma.TransactionClient,
   organizationId: string,

@@ -122,6 +122,18 @@ export class ExpensesController {
     return this.expensesService.recordPayment(organizationId, id, dto, req.user.sub);
   }
 
+  // A payment entered by mistake: reversed, and the expense owes it again.
+  @Post(':id/payments/:paymentId/void')
+  voidPayment(
+    @CurrentOrg() organizationId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId') paymentId: string,
+    @Req() req,
+    @Body('reason') reason?: string,
+  ) {
+    return this.expensesService.voidPayment(organizationId, id, paymentId, req.user.sub, reason);
+  }
+
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Delete(':id')

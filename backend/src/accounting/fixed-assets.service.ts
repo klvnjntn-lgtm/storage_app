@@ -20,18 +20,27 @@ function round2(n: number) {
 
 // Whole calendar months elapsed from `from` up to `to`, both UTC-midnight
 // date-only values. Jan 15 -> Feb 15 is 1 month; Jan 15 -> Feb 10 is 0 (not
-// a full month yet). This is the standard "day-of-month" convention for
-// month-based straight-line depreciation — it doesn't special-case month
-// lengths (Jan 31 -> Feb 28 behaves like any other day-of-month shortfall).
+// a full month yet). A day past the end of a shorter month counts from its
+// last day: Jan 31 -> Feb 28 is 1 month.
 function wholeMonthsBetween(from: Date, to: Date): number {
   if (to.getTime() <= from.getTime()) return 0;
   let months = (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth());
-  if (to.getUTCDate() < from.getUTCDate()) months -= 1;
+  const anchor = Math.min(from.getUTCDate(), daysInMonth(to.getUTCFullYear(), to.getUTCMonth()));
+  if (to.getUTCDate() < anchor) months -= 1;
   return Math.max(months, 0);
 }
 
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+// Clamped to the target month's last day: Jan 31 + 1 month is Feb 28, not
+// Mar 3 (which shifted every later month of the schedule).
 function addMonths(d: Date, months: number): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, d.getUTCDate()));
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + months;
+  const day = Math.min(d.getUTCDate(), daysInMonth(year, month));
+  return new Date(Date.UTC(year, month, day));
 }
 
 // Converts Decimal fields to number for stable JSON, same reason
@@ -253,15 +262,20 @@ export class FixedAssetsService {
       const remainingDepreciable = round2(depreciableBase - alreadyDepreciated);
       if (remainingDepreciable <= 0) continue; // fully depreciated already
 
-      const from = asset.lastDepreciatedThrough ?? asset.acquisitionDate;
-      const monthsElapsed = wholeMonthsBetween(from, throughDate);
+      // Counted from the acquisition date, so the schedule keeps its day of
+      // the month (a lastDepreciatedThrough that drifted to the 3rd under
+      // the old month arithmetic still counts as the months it covered).
+      const monthsDone = asset.lastDepreciatedThrough
+        ? wholeMonthsBetween(asset.acquisitionDate, asset.lastDepreciatedThrough)
+        : 0;
+      const monthsElapsed = wholeMonthsBetween(asset.acquisitionDate, throughDate) - monthsDone;
       if (monthsElapsed <= 0) continue;
 
       const monthlyAmount = depreciableBase / asset.usefulLifeMonths;
       const amount = Math.min(round2(monthlyAmount * monthsElapsed), remainingDepreciable);
       if (amount <= 0) continue;
 
-      const newThrough = addMonths(from, monthsElapsed);
+      const newThrough = addMonths(asset.acquisitionDate, monthsDone + monthsElapsed);
 
       await this.prisma.$transaction(async (tx) => {
         const claimed = await tx.fixedAsset.updateMany({

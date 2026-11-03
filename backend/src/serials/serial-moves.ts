@@ -117,39 +117,34 @@ export async function takeSerials(
   },
 ) {
   if (p.serials.length === 0) return;
-  const moved = await tx.productSerial.updateMany({
-    where: {
-      organizationId: p.organizationId,
-      productId: p.productId,
-      serialNumber: { in: p.serials },
-      status: SerialStatus.IN_STOCK,
-      locationId: p.locationId,
-    },
-    data: {
-      status: p.to,
-      ...(p.to === SerialStatus.SOLD && { soldAt: new Date() }),
-      ...(p.to === SerialStatus.IN_TRANSIT && { locationId: null }),
-      ...p.refs,
-    },
-  });
-  if (moved.count !== p.serials.length) {
-    const found = await tx.productSerial.findMany({
-      where: { productId: p.productId, serialNumber: { in: p.serials } },
-      select: { serialNumber: true, status: true, locationId: true },
-    });
-    const ok = new Set(
-      found
-        .filter(
-          (f) =>
-            f.status === p.to ||
-            (f.status === SerialStatus.IN_STOCK &&
-              f.locationId === p.locationId),
-        )
-        .map((f) => f.serialNumber),
-    );
-    const bad = p.serials.filter((s) => !ok.has(s));
+  const where = {
+    organizationId: p.organizationId,
+    productId: p.productId,
+    serialNumber: { in: p.serials },
+    status: SerialStatus.IN_STOCK,
+    locationId: p.locationId,
+  };
+  // Checked before the update so the error can name the units at fault:
+  // afterwards, one this call took and one another document took earlier
+  // look the same.
+  const here = await tx.productSerial.findMany({ where, select: { serialNumber: true } });
+  const bad = p.serials.filter((s) => !here.some((h) => h.serialNumber === s));
+  const moved = bad.length
+    ? null
+    : await tx.productSerial.updateMany({
+        where,
+        data: {
+          status: p.to,
+          ...(p.to === SerialStatus.SOLD && { soldAt: new Date() }),
+          ...(p.to === SerialStatus.IN_TRANSIT && { locationId: null }),
+          ...p.refs,
+        },
+      });
+  // A count short of the list means another document took a unit between
+  // the check and the update.
+  if (!moved || moved.count !== p.serials.length) {
     throw new BadRequestException(
-      `Not in stock at this location: ${bad.join(', ')}`,
+      `Not in stock at this location: ${(bad.length ? bad : p.serials).join(', ')}`,
     );
   }
 }
@@ -258,29 +253,23 @@ export async function relocateSerials(
   },
 ) {
   if (p.serials.length === 0) return;
-  const moved = await tx.productSerial.updateMany({
-    where: {
-      organizationId: p.organizationId,
-      productId: p.productId,
-      serialNumber: { in: p.serials },
-      status: SerialStatus.IN_STOCK,
-      locationId: p.fromLocationId,
-    },
-    data: { locationId: p.toLocationId },
-  });
-  if (moved.count !== p.serials.length) {
-    const found = await tx.productSerial.findMany({
-      where: {
-        productId: p.productId,
-        serialNumber: { in: p.serials },
-        status: SerialStatus.IN_STOCK,
-        locationId: p.toLocationId,
-      },
-      select: { serialNumber: true },
-    });
-    const bad = p.serials.filter((s) => !found.some((f) => f.serialNumber === s));
+  const where = {
+    organizationId: p.organizationId,
+    productId: p.productId,
+    serialNumber: { in: p.serials },
+    status: SerialStatus.IN_STOCK,
+    locationId: p.fromLocationId,
+  };
+  // Checked before the move: afterwards, a unit that was already at the
+  // destination can't be told apart from one this call moved there.
+  const here = await tx.productSerial.findMany({ where, select: { serialNumber: true } });
+  const bad = p.serials.filter((s) => !here.some((h) => h.serialNumber === s));
+  const moved = bad.length
+    ? null
+    : await tx.productSerial.updateMany({ where, data: { locationId: p.toLocationId } });
+  if (!moved || moved.count !== p.serials.length) {
     throw new BadRequestException(
-      `Not in stock at this location: ${bad.join(', ')}`,
+      `Not in stock at this location: ${(bad.length ? bad : p.serials).join(', ')}`,
     );
   }
 }

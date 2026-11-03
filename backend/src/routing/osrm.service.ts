@@ -53,6 +53,16 @@ const OSRM_TIMEOUT_MS = 15_000;
 // sea or in another country to the nearest road in the extract.
 const MAX_SNAP_METERS = 1000;
 
+// OSRM's matrix starts/ends where a pin snaps onto the road, so the gap
+// between that road and the pin counts as nothing — a pin deep inside an
+// estate whose lanes aren't in OSM looks as close as one at the kerb. Up
+// to ON_ROAD_METERS is kerbside parking and ignored; the rest is unmapped
+// road, estimated as driven slowly and not in a straight line, added to
+// every leg into and out of that pin.
+const ON_ROAD_METERS = 50;
+const OFF_ROAD_SPEED_MPS = 15 / 3.6;
+const OFF_ROAD_DETOUR = 1.3;
+
 // Indices (into the points passed to table()) that have no road route to
 // or from the others, or sit too far from any road.
 export class UnreachablePointsError extends Error {
@@ -164,8 +174,19 @@ export class OsrmService {
         }
       }),
     );
-    const round = (m: (number | null)[][]) => m.map((row) => row.map((v) => Math.round(v ?? 0)));
-    const matrix = { durations: round(body.durations), distances: round(body.distances) };
+    const offRoadMeters = points.map(
+      (_, i) => Math.max(0, (body.sources?.[i]?.distance ?? 0) - ON_ROAD_METERS) * OFF_ROAD_DETOUR,
+    );
+    const finish = (m: (number | null)[][], perMeter: number) =>
+      m.map((row, i) =>
+        row.map((v, j) =>
+          i === j ? 0 : Math.round((v ?? 0) + (offRoadMeters[i] + offRoadMeters[j]) * perMeter),
+        ),
+      );
+    const matrix = {
+      durations: finish(body.durations, 1 / OFF_ROAD_SPEED_MPS),
+      distances: finish(body.distances, 1),
+    };
     if (unreachable.size > 0) {
       throw new UnreachablePointsError([...unreachable].sort((a, b) => a - b));
     }

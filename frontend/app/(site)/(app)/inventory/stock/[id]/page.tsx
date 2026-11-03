@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -105,7 +105,8 @@ const eventColor = (type: string) => {
   // On hand at the chosen location, and the signed change /stock/adjust
   // takes: "set to" is the counted number minus what's there now.
   const qtyHere = stock.find((s) => s.location.id === locationId)?.quantity ?? 0;
-  const typedQty = adjustQty.trim() === '' ? NaN : Number(adjustQty.replace(',', '.'));
+  const parseQty = (v: string) => (v.trim() === '' ? NaN : Number(v.replace(',', '.')));
+  const typedQty = parseQty(adjustQty);
   const qtyDelta = !Number.isFinite(typedQty) || typedQty < 0
     ? 0
     : Math.round((adjustMode === 'add' ? typedQty : adjustMode === 'remove' ? -typedQty : typedQty - qtyHere) * 100) / 100;
@@ -185,14 +186,16 @@ const eventColor = (type: string) => {
     }
   }
 
-  // --- Event history pagination (client-side — the events endpoint returns
-  // the full list in one shot, so we slice it here rather than round-trip
-  // to the server for each page). ---
+  // --- Event history pagination (server-side — a product that sells every
+  // day has thousands of movements, so only the page on screen is fetched).
   // Seeded from the URL so pressing the browser's Back button from a
   // session opened out of the event history restores the same page.
   const [eventsPage, setEventsPage] = useState(() => getInitialNumberParam('eventsPage', 1));
   const [eventsPageSize, setEventsPageSize] = useState(() => getInitialNumberParam('eventsPageSize', 10));
-  const eventsTotalPages = Math.max(1, Math.ceil(events.length / eventsPageSize));
+  const [eventsTotal, setEventsTotal] = useState(0);
+  // Bumped after an adjustment so the history refetches.
+  const [eventsReload, setEventsReload] = useState(0);
+  const eventsTotalPages = Math.max(1, Math.ceil(eventsTotal / eventsPageSize));
 
   useSyncQueryParams({
     eventsPage: eventsPage !== 1 ? eventsPage : null,
@@ -200,13 +203,26 @@ const eventColor = (type: string) => {
   });
 
   useEffect(() => {
-    if (eventsPage > eventsTotalPages) setEventsPage(eventsTotalPages);
-  }, [eventsPage, eventsTotalPages]);
+    if (eventsTotal > 0 && eventsPage > eventsTotalPages) setEventsPage(eventsTotalPages);
+  }, [eventsPage, eventsTotalPages, eventsTotal]);
 
-  const paginatedEvents = useMemo(
-    () => events.slice((eventsPage - 1) * eventsPageSize, eventsPage * eventsPageSize),
-    [events, eventsPage, eventsPageSize],
-  );
+  useEffect(() => {
+    if (!id) return;
+    let stale = false;
+    apiFetch(`/products/${id}/events?page=${eventsPage}&pageSize=${eventsPageSize}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (stale || !body) return;
+        setEvents(body.data ?? []);
+        setEventsTotal(body.total ?? 0);
+      })
+      .catch((err) => console.error(err));
+    return () => {
+      stale = true;
+    };
+  }, [id, eventsPage, eventsPageSize, eventsReload]);
+
+  const paginatedEvents = events;
 
   // --- Module gating for the location picker ---
   // Orgs without WAREHOUSE_OPS only ever have one location, "CENTRE" — so
@@ -255,15 +271,13 @@ const eventColor = (type: string) => {
 
     const load = async () => {
       try {
-        const [productRes, stockRes, eventsRes] = await Promise.all([
+        const [productRes, stockRes] = await Promise.all([
           apiFetch(`/products/${id}`),
           apiFetch(`/stock/${id}`),
-          apiFetch(`/products/${id}/events`),
         ]);
 
         setProduct(await productRes.json());
         setStock(await stockRes.json());
-        setEvents(await eventsRes.json());
       } catch (err) {
         console.error(err);
       }
@@ -452,7 +466,7 @@ const eventColor = (type: string) => {
               <div className="flex items-stretch">
                 <button
                   type="button"
-                  onClick={() => setAdjustQty((q) => String(Math.max(0, (Number(q) || 0) - 1)))}
+                  onClick={() => setAdjustQty((q) => String(Math.max(0, Math.round(((parseQty(q) || 0) - 1) * 100) / 100)))}
                   aria-label={t('inventory.stockDetail.decrease')}
                   className="w-11 h-11 flex items-center justify-center rounded-l-md border-2 border-r-0 border-gray-300 bg-gray-50 hover:bg-gray-100 cursor-pointer"
                 >
@@ -468,7 +482,7 @@ const eventColor = (type: string) => {
                 />
                 <button
                   type="button"
-                  onClick={() => setAdjustQty((q) => String((Number(q) || 0) + 1))}
+                  onClick={() => setAdjustQty((q) => String(Math.round(((parseQty(q) || 0) + 1) * 100) / 100))}
                   aria-label={t('inventory.stockDetail.increase')}
                   className="w-11 h-11 flex items-center justify-center rounded-r-md border-2 border-l-0 border-gray-300 bg-gray-50 hover:bg-gray-100 cursor-pointer"
                 >
@@ -488,7 +502,7 @@ const eventColor = (type: string) => {
                     qtyHere + qtyDelta < 0 ? 'text-red-700' : qtyDelta === 0 ? 'text-gray-900' : 'text-blue-700'
                   }`}
                 >
-                  {qtyHere + qtyDelta}
+                  {Math.round((qtyHere + qtyDelta) * 100) / 100}
                 </span>
                 {qtyDelta !== 0 && (
                   <span className="text-xs text-gray-500 tabular-nums">({qtyDelta > 0 ? `+${qtyDelta}` : qtyDelta})</span>
@@ -539,6 +553,9 @@ const eventColor = (type: string) => {
                     productId: product.id,
                     locationId,
                     qtyDelta,
+                    // A count is applied against what's on the shelf when it's
+                    // saved, so a sale made while counting isn't undone.
+                    ...(adjustMode === 'set' && { countedQty: typedQty }),
                     reason: reason.trim(),
                   }),
                 });
@@ -549,17 +566,20 @@ const eventColor = (type: string) => {
                 }
                 setAdjustQty('');
                 setReason('');
+                if (data?.serialsInStock != null) {
+                  await dialog.alert(
+                    t('inventory.stockDetail.serialsOutOfStep', {
+                      onHand: data.newQuantity,
+                      serials: data.serialsInStock,
+                    }),
+                  );
+                }
                 // locationId stays: non-warehouse orgs depend on it, and a
                 // warehouse admin can change it for the next one.
-                const [stockRes, eventsRes] = await Promise.all([
-                  apiFetch(`/stock/${product.id}`),
-                  apiFetch(`/products/${product.id}/events`),
-                ]);
+                const stockRes = await apiFetch(`/stock/${product.id}`);
                 if (stockRes.ok) setStock(await stockRes.json());
-                if (eventsRes.ok) {
-                  setEvents(await eventsRes.json());
-                  setEventsPage(1);
-                }
+                setEventsPage(1);
+                setEventsReload((n) => n + 1);
               } finally {
                 setAdjusting(false);
               }
@@ -671,12 +691,12 @@ const eventColor = (type: string) => {
           </div>
 
           {/* Pagination */}
-          {events.length > 0 && (
+          {eventsTotal > 0 && (
             <div className="mt-3">
               <Pagination
                 page={eventsPage}
                 pageSize={eventsPageSize}
-                totalItems={events.length}
+                totalItems={eventsTotal}
                 onPageChange={setEventsPage}
                 onPageSizeChange={(size) => {
                   setEventsPageSize(size);

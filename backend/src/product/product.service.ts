@@ -220,12 +220,27 @@ export class ProductService {
     }));
   }
 
-  async getEvents(organizationId: string, productId: string) {
+  // Newest first, a page at a time — a product that sells every day has
+  // thousands of movements. Without `page`, the latest 500 as a plain array.
+  async getEvents(
+    organizationId: string,
+    productId: string,
+    paging?: { page?: number; pageSize?: number },
+  ) {
     await this.assertProductOwnership(organizationId, productId);
 
-    const events = await this.prisma.event.findMany({
-      where: { productId, organizationId },
-      orderBy: { createdAt: 'desc' },
+    const where = { productId, organizationId };
+    const paged = paging?.page != null;
+    const page = paged && paging!.page! > 0 ? Math.floor(paging!.page!) : 1;
+    const pageSize = paged
+      ? Math.min(Math.max(Math.floor(paging?.pageSize ?? 10), 1), 200)
+      : 500;
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
       include: {
         product: { select: { name: true, sku: true } },
         fromLocation: { select: { name: true } },
@@ -233,9 +248,11 @@ export class ProductService {
         session: { select: { id: true, type: true, status: true } },
         user: { select: { email: true } },
       },
-    });
+      }),
+      paged ? this.prisma.event.count({ where }) : Promise.resolve(0),
+    ]);
 
-    return events.map((e) => ({
+    const rows = events.map((e) => ({
       id: e.id,
       type: e.type,
       quantity: Number(e.quantity), // Decimal serializes to a string otherwise
@@ -256,6 +273,7 @@ export class ProductService {
       // who issued the invoice on an edit made by someone else.
       confirmedOverrideByUserId: (e.metadata as any)?.confirmedOverrideByUserId ?? null,
     }));
+    return paged ? { data: rows, total, page, pageSize } : rows;
   }
 
   private validateLengths(row: {

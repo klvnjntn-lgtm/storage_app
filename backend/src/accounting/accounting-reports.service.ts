@@ -6,6 +6,7 @@ import {
   InvoiceStatus,
   JournalEntryStatus,
   JournalSourceType,
+  PaymentKind,
   PaymentStatus,
   Prisma,
   PurchaseOrderStatus,
@@ -491,14 +492,35 @@ async getARAging(
 ): Promise<ARAgingReport> {
   const { page, pageSize } = this.normalizePaging(opts, 50, 200);
 
+  // Payments made after asOf hadn't happened yet on that date: an invoice
+  // paid since then was still owed, so it's included and its balance is
+  // what was paid up to asOf. (Returns still count at today's amount.)
   const invoices = await this.prisma.invoice.findMany({
     where: {
       organizationId,
       status: InvoiceStatus.ISSUED,
-      paymentStatus: { not: PaymentStatus.PAID },
-      OR: [{ issuedAt: { lte: asOf } }, { issuedAt: null, invoiceDate: { lte: asOf } }],
+      AND: [
+        { OR: [{ issuedAt: { lte: asOf } }, { issuedAt: null, invoiceDate: { lte: asOf } }] },
+        {
+          OR: [
+            { paymentStatus: { not: PaymentStatus.PAID } },
+            { payments: { some: { createdAt: { gt: asOf } } } },
+          ],
+        },
+      ],
     },
     select: {
+      // Only what changed after asOf: rows made since (still live), and rows
+      // made by then but voided since.
+      payments: {
+        where: {
+          OR: [
+            { createdAt: { gt: asOf }, voidedAt: null },
+            { createdAt: { lte: asOf }, voidedAt: { gt: asOf } },
+          ],
+        },
+        select: { kind: true, amount: true, createdAt: true },
+      },
       id: true,
       invoiceNumber: true,
       customerId: true,
@@ -510,12 +532,21 @@ async getARAging(
       total: true,
       amountPaid: true,
       creditedAmount: true,
+      paymentStatus: true,
       customer: { select: { name: true } },
     },
   });
 
-  const allLines: ARAgingLine[] = invoices.map((inv) => {
-    const amountPaid = Number(inv.amountPaid);
+  // Still owed now (as before), or owed on asOf and paid since.
+  const owed = invoices
+    .map((inv) => ({ ...inv, paidThen: this.paidAsOf(inv.amountPaid, inv.payments, asOf) }))
+    .filter(
+      (inv) =>
+        inv.paymentStatus !== PaymentStatus.PAID ||
+        inv.paidThen < Number(inv.total) - Number(inv.creditedAmount) - 0.005,
+    );
+  const allLines: ARAgingLine[] = owed.map((inv) => {
+    const amountPaid = inv.paidThen;
     // FIX — subtract creditedAmount (postSalesReturn's AR reversal), or a
     // returned invoice keeps aging on units the customer no longer owes
     // for and this report drifts from the ledger's actual AR balance.
@@ -968,6 +999,25 @@ async getARAging(
 
   private buildPagination(page: number, pageSize: number, total: number): Pagination {
     return { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  // What had been paid by asOf: today's amountPaid with later changes
+  // undone. Starting from amountPaid (not summing payment rows) keeps
+  // imported invoices right, whose paid amount has no payment rows behind
+  // it. Credit moved between invoices counts like a payment in or out.
+  private paidAsOf(
+    amountPaid: Prisma.Decimal,
+    changes: { kind: PaymentKind; amount: Prisma.Decimal; createdAt: Date }[],
+    asOf: Date,
+  ) {
+    let paid = Number(amountPaid);
+    for (const p of changes) {
+      const signed = (p.kind === PaymentKind.PAYMENT || p.kind === PaymentKind.CREDIT_IN ? 1 : -1) * Number(p.amount);
+      // Made after asOf: take it back out. Voided after asOf: it still
+      // counted then, so put it back.
+      paid += p.createdAt > asOf ? -signed : signed;
+    }
+    return this.round2(paid);
   }
 
   private round2(n: number) {

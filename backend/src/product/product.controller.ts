@@ -166,7 +166,15 @@ update(
   }
 
   @Get(':id/events')
-  getEvents(@CurrentOrg() organizationId: string, @Param('id') id: string) {
-    return this.productService.getEvents(organizationId, id);
+  getEvents(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.productService.getEvents(organizationId, id, {
+      page: page ? Number(page) || 1 : undefined,
+      pageSize: pageSize ? Number(pageSize) || undefined : undefined,
+    });
   }
 }

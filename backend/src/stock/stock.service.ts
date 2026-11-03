@@ -165,7 +165,10 @@ export class StockService {
     if (qty <= 0) throw new BadRequestException('Invalid qty');
 
     const run = async (client: Prisma.TransactionClient) => {
-      await this.assertProductActive(orgId, productId, client);
+      // Stock coming back in (a voided sale, a customer return, a receipt
+      // on an order placed earlier, a transfer landing) must work for an
+      // archived product too — archiving stops it being sold, not counted.
+      await this.assertProductOwnership(orgId, productId, client);
       await this.assertLocationOwnership(orgId, locationId, client);
 
       const updated = await client.stock.upsert({
@@ -219,7 +222,13 @@ export class StockService {
     if (qty <= 0) throw new BadRequestException('Invalid qty');
 
     const run = async (client: Prisma.TransactionClient) => {
-      await this.assertProductActive(orgId, productId, client);
+      // Sending an archived product back to its supplier is how its
+      // leftover stock gets cleared, so only that movement skips the check.
+      if (context.type === EventType.PURCHASE_RETURN) {
+        await this.assertProductOwnership(orgId, productId, client);
+      } else {
+        await this.assertProductActive(orgId, productId, client);
+      }
       await this.assertLocationOwnership(orgId, locationId, client);
 
       const available = await this.lockStockRow(client, orgId, productId, locationId);
@@ -370,13 +379,21 @@ export class StockService {
   // Valued at Product.costPrice; a product with no costPrice moves stock
   // but posts nothing (same skip policy as postCogs).
   async adjust(orgId: string, userId: string, data: AdjustStockDto) {
-    const { productId, locationId, qtyDelta, reason } = data;
+    const { productId, locationId, reason, countedQty } = data;
+    const counting = countedQty != null;
 
     if (
-      qtyDelta === undefined ||
-      qtyDelta === null ||
-      Number.isNaN(qtyDelta) ||
-      qtyDelta === 0
+      counting &&
+      (typeof countedQty !== 'number' || !Number.isFinite(countedQty) || countedQty < 0)
+    ) {
+      throw new BadRequestException('Invalid quantity');
+    }
+    if (
+      !counting &&
+      (data.qtyDelta === undefined ||
+        data.qtyDelta === null ||
+        Number.isNaN(data.qtyDelta) ||
+        data.qtyDelta === 0)
     ) {
       throw new BadRequestException('Invalid quantity');
     }
@@ -389,11 +406,22 @@ export class StockService {
       await this.assertProductActive(orgId, productId, tx);
       await this.assertLocationOwnership(orgId, locationId, tx);
 
-      if (qtyDelta < 0) {
-        const available = await this.lockStockRow(tx, orgId, productId, locationId);
-        if (available + qtyDelta < 0) {
-          throw new BadRequestException('Adjustment would result in negative stock');
-        }
+      // Locked whenever the result depends on what's there now: a count, or
+      // a removal that mustn't take the shelf below zero.
+      const current =
+        counting || data.qtyDelta < 0
+          ? await this.lockStockRow(tx, orgId, productId, locationId)
+          : null;
+      const qtyDelta = counting
+        ? Math.round((countedQty - current!) * 100) / 100
+        : data.qtyDelta;
+
+      if (qtyDelta === 0) {
+        // The count matches the shelf — nothing to record.
+        return { success: true, productId, locationId, qtyDelta: 0, newQuantity: current! };
+      }
+      if (current != null && current + qtyDelta < 0) {
+        throw new BadRequestException('Adjustment would result in negative stock');
       }
 
       const stock = await tx.stock.upsert({
@@ -422,7 +450,7 @@ export class StockService {
       // NEW — ledger posting.
       const product = await tx.product.findFirst({
         where: { id: productId, organizationId: orgId },
-        select: { costPrice: true },
+        select: { costPrice: true, trackSerials: true },
       });
       await this.postingRules.postStockAdjustment(
         orgId,
@@ -438,14 +466,35 @@ export class StockService {
         tx,
       );
 
+      const newQuantity = Number(stock.quantity); // Decimal serializes to a string otherwise
       return {
         success: true,
         productId,
         locationId,
         qtyDelta,
-        newQuantity: Number(stock.quantity), // Decimal serializes to a string otherwise
+        newQuantity,
+        // An adjustment moves the count, not the serial numbers — when the
+        // two now disagree, the page asks the admin to fix the serials.
+        serialsInStock: product?.trackSerials
+          ? await this.serialsOutOfStep(tx, orgId, productId, locationId, newQuantity)
+          : null,
       };
     });
+  }
+
+  // How many serials are recorded in stock here, when that isn't the
+  // quantity on hand; null when they agree.
+  private async serialsOutOfStep(
+    client: Prisma.TransactionClient,
+    orgId: string,
+    productId: string,
+    locationId: string,
+    onHand: number,
+  ) {
+    const inStock = await client.productSerial.count({
+      where: { organizationId: orgId, productId, locationId, status: 'IN_STOCK' },
+    });
+    return inStock === onHand ? null : inStock;
   }
 
   // -----------------------------
@@ -527,11 +576,28 @@ export class StockService {
           // file's location column says (those orgs have no other location).
           const locationId = `${orgId}_${slugify(row.location)}`;
 
+          // Matched by name first: a location made on the Locations page has
+          // an id built differently ("Rak A-1" → rak_a-1, not rak_a_1), and
+          // an id lookup alone created a second "Rak A-1" beside it.
           let location = warehouseOps
-            ? await tx.location.findFirst({
+            ? ((await tx.location.findFirst({
+                where: {
+                  organizationId: orgId,                              // 🔒
+                  name: { equals: row.location, mode: 'insensitive' },
+                  archivedAt: null,
+                },
+                orderBy: { name: 'asc' },
+              })) ??
+              (await tx.location.findFirst({
                 where: { id: locationId, organizationId: orgId },    // 🔒
-              })
+              })))
             : await findOrCreateCentre(tx, orgId);
+
+          if (location?.archivedAt) {
+            throw new BadRequestException(
+              `Location "${location.name}" is archived — restore it before importing stock into it`,
+            );
+          }
 
           if (!location) {
             // A new location here counts against the plan like one made
@@ -618,7 +684,11 @@ export class StockService {
             tx,
           );
 
-          return { product, location, costApplied };
+          const serialsInStock = product.trackSerials
+            ? await this.serialsOutOfStep(tx, orgId, product.id, location.id, afterQty)
+            : null;
+
+          return { product, location, costApplied, serialsInStock };
         });
 
         accepted.push({
@@ -629,6 +699,8 @@ export class StockService {
           // The row had a cost, but the product already has stock with a
           // weighted-average cost, which an import doesn't override.
           costIgnored: row.costPrice != null && !result.costApplied,
+          // Serial-tracked, and the serials recorded here no longer match.
+          serialsOutOfStep: result.serialsInStock != null,
         });
       } catch (err) {
         console.error('Stock import row failed:', row, err);
@@ -775,8 +847,12 @@ export class StockService {
   // -----------------------------
   // PRIVATE HELPERS
   // -----------------------------
-  private async assertProductOwnership(orgId: string, productId: string) {
-    const product = await this.prisma.product.findFirst({
+  private async assertProductOwnership(
+    orgId: string,
+    productId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const product = await client.product.findFirst({
       where: { id: productId, organizationId: orgId },
       select: { id: true },
     });

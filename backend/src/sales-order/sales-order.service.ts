@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
+import { orgToday } from '../accounting/business-date';
 import { LineItemPricingService } from '../shared/documents/line-item-pricing.service';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PrintTokenService } from '../common/print/print-token.service';
@@ -158,7 +159,7 @@ export class SalesOrderService {
     await this.tenantOwnership.validate(organizationId, dto);
     const { items: lines, subtotal, discountAmount, taxAmount, taxLines } =
       await this.pricing.priceLines(organizationId, dto.items, undefined, { customerId: dto.customerId, userId });
-    const orderDate = dto.orderDate ? new Date(dto.orderDate) : new Date(); // NEW
+    const orderDate = dto.orderDate ? new Date(dto.orderDate) : await orgToday(this.prisma, organizationId);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -286,7 +287,7 @@ await this.logActivity(tx, {
             locationId: quotation.locationId,
             customerId: quotation.customerId,
             customerPoNumber: quotation.customerPoNumber ?? null, // NEW
-            orderDate: new Date(), // NEW
+            orderDate: await orgToday(tx, organizationId),
 
             customerName: quotation.customerName,
             // Workshops: the quoted car carries on to the order, and from it to the invoice.

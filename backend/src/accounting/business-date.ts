@@ -67,6 +67,17 @@ export function todayBusinessDate(tz: string): Date {
   return toBusinessDate(new Date(), tz);
 }
 
+// The org's business date today — the default for a document date left
+// blank. new Date() there stored the UTC date, which in Indonesia is still
+// yesterday until 07:00.
+export async function orgToday(
+  client: { organization: { findUnique(args: { where: { id: string }; select: { timezone: true } }): Promise<{ timezone: string | null } | null> } },
+  organizationId: string,
+): Promise<Date> {
+  const org = await client.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+  return todayBusinessDate(resolveTimezone(org));
+}
+
 // Strict 'YYYY-MM-DD' -> Date at 00:00 UTC. Rejects anything else, including
 // impossible dates like 2026-02-31, with a 400 naming the offending param.
 // Timezone-independent: an explicit calendar date is unambiguous.

@@ -2505,6 +2505,11 @@ model ExpensePayment {
   recordedById  String?
   createdAt     DateTime      @default(now())
   bankAccountId String?
+  // A payment entered by mistake is voided (its journal entry reversed),
+  // not deleted, so the history stays complete; reads filter voidedAt: null.
+  voidedAt      DateTime?
+  voidedById    String?
+  voidReason    String?
 
   expense     Expense                  @relation(fields: [expenseId], references: [id])
   recordedBy  User?                    @relation(fields: [recordedById], references: [id])

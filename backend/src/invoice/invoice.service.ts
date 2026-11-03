@@ -33,7 +33,7 @@ import { EditIssuedInvoiceDto } from './dto/edit-invoice.dto';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
-import { businessDayBounds, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
+import { businessDayBounds, orgToday, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 import { deriveStatus } from '../payments/payment-status.util';
 import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
 import { PlanLimitsService } from '../billing/plan-limits.service';
@@ -236,7 +236,9 @@ constructor(
         userId,
         forcedUnitPriceByIndex,
       });
-    const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
+    // Left empty unless the cashier picked one: issue() dates it then, so a
+    // cart started one day and issued the next isn't dated the day before.
+    const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : null;
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -693,7 +695,7 @@ async issue(
       await this.recomputeFulfillmentStatus(organizationId, invoice.id, tx);
 
       const invoiceNumber = await this.nextInvoiceNumber(tx, organizationId);
-      const invoiceDate = invoice.invoiceDate ?? new Date();
+      const invoiceDate = invoice.invoiceDate ?? (await orgToday(tx, organizationId));
 
       // FIX — snapshot vehicle/customer/product identity onto the invoice
       // now, at the moment it becomes a permanent printed document. Later
@@ -747,7 +749,9 @@ async issue(
           organizationId,
           {
             sourceId: `${invoice.id}:cogs:issue`,
-            date: new Date(),
+            // Same date as the revenue: a backdated invoice booked its sales
+            // in one month and their cost in the next.
+            date: invoiceDate,
             memo: `COGS for invoice ${invoiceNumber}`,
             lines: costedLines,
             branchId: invoice.branchId,
@@ -2011,7 +2015,8 @@ async editIssuedInvoice(
             organizationId,
             {
               sourceId: cogsSourceId,
-              date: new Date(),
+              // Dated like the revenue reposted above (see issue()).
+              date: result.invoiceDate ?? result.issuedAt ?? new Date(),
               memo: `COGS for invoice ${invoice.invoiceNumber ?? invoice.id} (edited)`,
               lines: costedLines,
               branchId: invoice.branchId,
@@ -2513,7 +2518,7 @@ async createDraftFromQuotation(
             bankName: quotation.bankName,
             bankAccountNumber: quotation.bankAccountNumber,
             bankAccountName: quotation.bankAccountName,
-            invoiceDate: new Date(),
+            invoiceDate: null, // dated when issued (see createDraft)
             status: 'DRAFT',
             subtotal,
             discount: discountAmount,
@@ -2655,7 +2660,7 @@ async createDraftFromQuotation(
             bankName: bank.bankName,
             bankAccountNumber: bank.bankAccountNumber,
             bankAccountName: bank.bankAccountName,
-            invoiceDate: new Date(),
+            invoiceDate: null, // dated when issued (see createDraft)
             status: 'DRAFT',
             subtotal,
             discount: discountAmount,
