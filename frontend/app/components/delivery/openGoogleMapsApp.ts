@@ -15,14 +15,18 @@ function iosAppUrl(webUrl: string): string {
 // Other iOS browsers identify themselves in the user agent.
 const IOS_OTHER_BROWSER = /CriOS|FxiOS|OPiOS|OPT\/|EdgiOS|YaBrowser|DuckDuckGo|Brave/i;
 
+export function isIos(): boolean {
+  const ua = navigator.userAgent;
+  // iPadOS Safari reports itself as a Mac, so touch support tells them apart.
+  return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+}
+
 // Whether a plain https Maps link would land on Google's web page instead of
 // the app: Android, and iOS browsers other than Safari.
 export function needsMapsAppLink(): boolean {
   const ua = navigator.userAgent;
   if (/Android/i.test(ua)) return true;
-  // iPadOS Safari reports itself as a Mac, so touch support tells them apart.
-  const isIos = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-  return isIos && IOS_OTHER_BROWSER.test(ua);
+  return isIos() && IOS_OTHER_BROWSER.test(ua);
 }
 
 // A plain https Maps link is left to the browser, which can load Google's web

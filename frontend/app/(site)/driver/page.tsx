@@ -36,7 +36,7 @@ import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driv
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
-import { needsMapsAppLink, openGoogleMapsApp } from '@/app/components/delivery/openGoogleMapsApp';
+import { isIos, needsMapsAppLink, openGoogleMapsApp } from '@/app/components/delivery/openGoogleMapsApp';
 import { matchStops } from '@/lib/matchStops';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -101,11 +101,12 @@ function googleMapsUrl(stop: Stop): string {
 }
 
 // Reads the destination aloud and hands off to Google Maps. speak() has to run
-// inside the tap (iOS only allows speech from a user gesture). Where an app
-// link is needed the hand-off must run inside the tap too, so it can't wait and
-// a long name may get cut off when Maps comes to the front. Elsewhere it waits
-// for the speech, capped so a missing voice or a muted engine never strands the
-// driver. Same tab: a window.open() after the wait would be popup-blocked.
+// inside the tap (iOS only allows speech from a user gesture). On phones the
+// hand-off must run inside the tap too, or the Maps app may not open, so it
+// can't wait and a long name may get cut off when Maps comes to the front.
+// Elsewhere it waits for the speech, capped so a missing voice or a muted engine
+// never strands the driver. Same tab: a window.open() after the wait would be
+// popup-blocked.
 function announceThenNavigate(text: string, lang: string, url: string) {
   let done = false;
   const go = () => {
@@ -113,18 +114,18 @@ function announceThenNavigate(text: string, lang: string, url: string) {
     done = true;
     window.location.href = url;
   };
-  const appLink = needsMapsAppLink();
+  const handOffInTap = needsMapsAppLink() || isIos();
   if ('speechSynthesis' in window) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
     utterance.rate = 0.95;
-    if (!appLink) {
+    if (!handOffInTap) {
       utterance.onend = go;
       utterance.onerror = go;
     }
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
-    if (!appLink) {
+    if (!handOffInTap) {
       setTimeout(go, 6000);
       return;
     }
