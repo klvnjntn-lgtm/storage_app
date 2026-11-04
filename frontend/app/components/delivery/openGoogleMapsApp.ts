@@ -47,6 +47,14 @@ export function openGoogleMapsApp(webUrl: string): boolean {
     return true;
   }
 
+  // A timer would load Google's web page over the driver's in these browsers:
+  // they can still show this page behind their "open in app" question or on the
+  // way back from Maps. Callers offer the web link instead.
+  if (needsMapsWebLink()) {
+    window.location.href = iosAppUrl(webUrl);
+    return true;
+  }
+
   // iOS has no built-in fallback for an app link, so if this page is still in
   // front after a moment the app didn't open.
   const timer = setTimeout(() => {
@@ -63,4 +71,10 @@ export function openGoogleMapsApp(webUrl: string): boolean {
   document.addEventListener('visibilitychange', onHidden);
   window.location.href = iosAppUrl(webUrl);
   return true;
+}
+
+// Firefox and Opera on iOS: the tap may have asked for an app that isn't there,
+// with no timer to catch it, so the caller should offer the web link.
+export function needsMapsWebLink(): boolean {
+  return isIos() && /FxiOS|OPiOS|OPT\//i.test(navigator.userAgent);
 }

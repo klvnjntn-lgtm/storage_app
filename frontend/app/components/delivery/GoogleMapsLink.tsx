@@ -1,8 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { MapPinned } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { openGoogleMapsApp } from './openGoogleMapsApp';
+import { needsMapsWebLink, openGoogleMapsApp } from './openGoogleMapsApp';
 
 type Coord = number | string | null | undefined;
 
@@ -26,21 +27,36 @@ export default function GoogleMapsLink({
   className?: string;
 }) {
   const { t } = useLanguage();
+  const [showWebLink, setShowWebLink] = useState(false);
   const href = googleMapsUrl(lat, lng);
   if (!href) return null;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (openGoogleMapsApp(href)) e.preventDefault();
-      }}
-      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm px-3 py-1.5 hover:bg-blue-700 ${className}`}
-    >
-      <MapPinned size={14} />
-      {t('delivery.coordinates.openInMaps')}
-    </a>
+    <>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (needsMapsWebLink()) setShowWebLink(true);
+          if (openGoogleMapsApp(href)) e.preventDefault();
+        }}
+        className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm px-3 py-1.5 hover:bg-blue-700 ${className}`}
+      >
+        <MapPinned size={14} />
+        {t('delivery.coordinates.openInMaps')}
+      </a>
+      {showWebLink && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="ml-2 text-xs text-blue-700 underline"
+        >
+          {t('delivery.driver.mapsDidNotOpen')}
+        </a>
+      )}
+    </>
   );
 }

@@ -36,7 +36,7 @@ import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driv
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
-import { isIos, needsMapsAppLink, openGoogleMapsApp } from '@/app/components/delivery/openGoogleMapsApp';
+import { isIos, needsMapsAppLink, needsMapsWebLink, openGoogleMapsApp } from '@/app/components/delivery/openGoogleMapsApp';
 import { matchStops } from '@/lib/matchStops';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
@@ -675,6 +675,8 @@ export default function DriverRoutePage() {
     if (message) reportDriverEvent({ kind: 'stop-error', stopId, message });
   }
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  // Stop whose Navigate tap may not have opened Maps (see needsMapsWebLink).
+  const [mapsWebLinkFor, setMapsWebLinkFor] = useState<string | null>(null);
   const [receivedByDraft, setReceivedByDraft] = useState<Record<string, string>>({});
   const [failureDraft, setFailureDraft] = useState<Record<string, string>>({});
   const [failingStopId, setFailingStopId] = useState<string | null>(null);
@@ -1438,15 +1440,16 @@ export default function DriverRoutePage() {
                       {mapsUrl && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            if (needsMapsWebLink()) setMapsWebLinkFor(stop.id);
                             announceThenNavigate(
                               t('delivery.driver.startingRoute', {
                                 name: stop.customerName ?? stop.address ?? stop.label,
                               }),
                               language === 'id' ? 'id-ID' : 'en-US',
                               mapsUrl,
-                            )
-                          }
+                            );
+                          }}
                           className="flex-1 h-14 flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white text-lg font-semibold shadow-sm active:bg-blue-700"
                         >
                           <Navigation size={22} />
@@ -1466,6 +1469,12 @@ export default function DriverRoutePage() {
                         </a>
                       )}
                     </div>
+                  )}
+
+                  {mapsUrl && mapsWebLinkFor === stop.id && (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="block text-center text-base text-blue-700 underline">
+                      {t('delivery.driver.mapsDidNotOpen')}
+                    </a>
                   )}
 
                   {awaitingDispatch && (
