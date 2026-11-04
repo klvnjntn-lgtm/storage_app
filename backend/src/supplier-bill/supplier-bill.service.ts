@@ -44,28 +44,40 @@ export class SupplierBillService {
     organizationId: string,
     opts: { supplierId?: string; status?: MatchStatus } = {},
   ) {
+    // The match status is worked out per PO, not stored, so a status filter
+    // pages through older bills until it has a full page — filtering only
+    // the newest 500 hid older matches.
+    const PAGE = 500;
+    const out: Awaited<ReturnType<typeof this.billPage>> = [];
+    for (let skip = 0; out.length < PAGE; skip += PAGE) {
+      const rows = await this.billPage(organizationId, opts.supplierId, skip, PAGE);
+      out.push(...(opts.status ? rows.filter((r) => r.match.status === opts.status) : rows));
+      if (rows.length < PAGE || !opts.status) break;
+    }
+    return out.slice(0, PAGE);
+  }
+
+  private async billPage(organizationId: string, supplierId: string | undefined, skip: number, take: number) {
     const bills = await this.prisma.supplierBill.findMany({
       where: {
         organizationId,
         voidedAt: null,
-        ...(opts.supplierId && { supplierId: opts.supplierId }),
+        ...(supplierId && { supplierId }),
       },
       include: {
         purchaseOrder: { select: { id: true, poNumber: true, total: true } },
         supplier: { select: { id: true, name: true } },
       },
-      orderBy: [{ billDate: 'desc' }, { createdAt: 'desc' }],
-      take: 500,
+      orderBy: [{ billDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      skip,
+      take,
     });
     const poIds = [...new Set(bills.map((b) => b.purchaseOrderId))];
     const matches = await this.matchMany(organizationId, poIds);
-    const rows = bills.map((b) => ({
+    return bills.map((b) => ({
       ...b,
       match: matches.get(b.purchaseOrderId)!,
     }));
-    return opts.status
-      ? rows.filter((r) => r.match.status === opts.status)
-      : rows;
   }
 
   async create(

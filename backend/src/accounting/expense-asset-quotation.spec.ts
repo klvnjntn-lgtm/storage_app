@@ -12,6 +12,10 @@ import { FixedAssetsModule } from './fixed-assets.module';
 import { FixedAssetsService } from './fixed-assets.service';
 import { SalesQuotationModule } from '../sales-quotation/sales-quotation.module';
 import { SalesQuotationService } from '../sales-quotation/sales-quotation.service';
+import { SupplierPaymentsModule } from './supplier-payments.module';
+import { SupplierPaymentsService } from './supplier-payments.service';
+import { SupplierBillModule } from '../supplier-bill/supplier-bill.module';
+import { SupplierBillService } from '../supplier-bill/supplier-bill.service';
 
 // Quotation PDFs need puppeteer (ESM-only), which these tests never use.
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -23,18 +27,30 @@ describe('Expenses, fixed assets and quotations (database)', () => {
   let expenses: ExpensesService;
   let assets: FixedAssetsService;
   let quotations: SalesQuotationService;
+  let supplierPayments: SupplierPaymentsService;
+  let bills: SupplierBillService;
 
   let orgId: string;
   let userId: string;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
-      imports: [PrismaModule, AccountingModule, ExpensesModule, FixedAssetsModule, SalesQuotationModule],
+      imports: [
+        PrismaModule,
+        AccountingModule,
+        ExpensesModule,
+        FixedAssetsModule,
+        SalesQuotationModule,
+        SupplierPaymentsModule,
+        SupplierBillModule,
+      ],
     }).compile();
     prisma = module.get(PrismaService);
     expenses = module.get(ExpensesService);
     assets = module.get(FixedAssetsService);
     quotations = module.get(SalesQuotationService);
+    supplierPayments = module.get(SupplierPaymentsService);
+    bills = module.get(SupplierBillService);
 
     orgId = (await prisma.organization.create({ data: { name: `Misc ${randomUUID()}` } })).id;
     await module.get(ChartOfAccountsSeedService).seedDefaults(orgId);
@@ -123,5 +139,57 @@ describe('Expenses, fixed assets and quotations (database)', () => {
     const final = await prisma.salesQuotation.findUniqueOrThrow({ where: { id: q.id } });
     const winner = (results.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ status: string }>).value;
     expect(final.status).toBe(winner.status);
+  });
+
+  const newPo = async () => {
+    const supplier = await prisma.supplier.create({ data: { organizationId: orgId, name: `Sup ${randomUUID().slice(0, 6)}` } });
+    const po = await prisma.purchaseOrder.create({
+      data: { organizationId: orgId, supplierId: supplier.id, status: 'SENT', subtotal: 1_000, total: 1_000 } as any,
+    });
+    return { po, supplier };
+  };
+
+  it('voids a supplier payment without deleting it, once', async () => {
+    const { po, supplier } = await newPo();
+    // Imported bill: what's owed on a PO with no goods receipts.
+    await prisma.supplierBill.create({
+      data: { organizationId: orgId, purchaseOrderId: po.id, supplierId: supplier.id, billNumber: 'B1', billDate: day('2026-11-01'), amount: 1_000, externalId: `t-${randomUUID()}` },
+    });
+    const payment = await supplierPayments.create(orgId, userId, { purchaseOrderId: po.id, amount: 400, method: PaymentMethod.CASH } as any);
+    expect(await supplierPayments.getOutstanding(orgId, po.id)).toBe(600);
+
+    const voided = await supplierPayments.void(orgId, payment.id, userId, 'Wrong PO');
+    expect(voided.voidedAt).not.toBeNull();
+    expect(voided.voidReason).toBe('Wrong PO');
+    expect(await supplierPayments.getOutstanding(orgId, po.id)).toBe(1_000);
+    expect(await supplierPayments.list(orgId, po.id)).toHaveLength(0);
+    const entry = await prisma.journalEntry.findFirst({
+      where: { organizationId: orgId, sourceType: JournalSourceType.SUPPLIER_PAYMENT, sourceId: payment.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(entry?.status).toBe(JournalEntryStatus.VOID);
+
+    await expect(supplierPayments.void(orgId, payment.id, userId)).rejects.toThrow('Supplier payment not found');
+  });
+
+  it('finds a bill matching a status filter beyond the newest 500 bills', async () => {
+    const { po: overBilled, supplier } = await newPo();
+    await prisma.supplierBill.createMany({
+      data: Array.from({ length: 500 }, (_, i) => ({
+        organizationId: orgId,
+        purchaseOrderId: overBilled.id,
+        supplierId: supplier.id,
+        billNumber: `N-${i}`,
+        billDate: day('2026-10-01'),
+        amount: 10,
+      })),
+    });
+    const { po: matched } = await newPo();
+    const old = await prisma.supplierBill.create({
+      data: { organizationId: orgId, purchaseOrderId: matched.id, billNumber: 'OLD', billDate: day('2020-01-01'), amount: 1_000, externalId: `t-${randomUUID()}` },
+    });
+
+    const rows = await bills.list(orgId, { status: 'MATCHED' });
+    expect(rows.some((r) => r.id === old.id)).toBe(true);
   });
 });

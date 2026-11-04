@@ -540,4 +540,22 @@ describe('Workshop work orders', () => {
       await prisma.organization.update({ where: { id: orgId }, data: { workOrdersEnabled: true } });
     }
   });
+
+  it('flags a job left untouched for 30+ days while it still holds parts', async () => {
+    const stale = await newJob(90_000);
+    const labourOnly = await workOrders.create(orgId, userId, {
+      vehicleId,
+      items: [{ description: 'Labour: inspection', quantity: 1, unitPrice: 30_000 }],
+    } as any);
+    await prisma.$executeRaw`UPDATE "WorkOrder" SET "updatedAt" = now() - interval '40 days' WHERE id IN (${stale.id}, ${labourOnly.id})`;
+
+    const rows = await workOrders.list(orgId, {});
+    expect(rows.find((r) => r.id === stale.id)?.idleDays).toBeGreaterThanOrEqual(40);
+    expect(rows.find((r) => r.id === labourOnly.id)?.idleDays).toBeNull();
+
+    // Cancelled, it holds nothing, so it isn't flagged.
+    await workOrders.setStatus(orgId, stale.id, WorkOrderStatus.CANCELLED);
+    await prisma.$executeRaw`UPDATE "WorkOrder" SET "updatedAt" = now() - interval '40 days' WHERE id = ${stale.id}`;
+    expect((await workOrders.list(orgId, {})).find((r) => r.id === stale.id)?.idleDays).toBeNull();
+  });
 });

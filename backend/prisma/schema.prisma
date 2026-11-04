@@ -546,6 +546,11 @@ model SupplierPayment {
   // Accurate source row, set by the GDB import: "APINVCHQ:<INVCHQID>" for a
   // supplier payment, "APINV:<APINVOICEID>" for money paid at purchase.
   externalId      String?
+  // Voided (journal entry reversed), kept for the history like invoice and
+  // expense payments; reads filter voidedAt: null.
+  voidedAt        DateTime?
+  voidedById      String?
+  voidReason      String?
 
   @@unique([organizationId, externalId])
   @@index([purchaseOrderId])
@@ -1378,6 +1383,9 @@ model Route {
   // DeliveryRoutesService.recordHistory); each such history event stores
   // the version it produced plus a snapshot of the stop order.
   version            Int       @default(1)
+  // The stop order from before this route was first optimized, kept until the
+  // office goes back to it. See DeliveryRoutesService.restoreOriginalOrder.
+  originalOrder      Json?
 
   organization  Organization        @relation(fields: [organizationId], references: [id])
   team          Team                @relation(fields: [teamId], references: [id])
@@ -1424,17 +1432,18 @@ model RouteStop {
   travelSecondsFromPrevious Int?
 
   // ── Customer stop ──
-  // Name/address/pin are snapshotted from the Customer when the stop is
-  // added. The pin may be corrected on the stop while the route is open;
-  // that never writes back to the Customer, so the change lasts only for
-  // this route.
+  // Name/address/pin are copied from the Customer when the stop is added, and
+  // follow later edits of the Customer until the stop is finished (see
+  // customer-stop-sync.ts). The pin may be corrected on the stop while the route
+  // is open; that never writes back to the Customer, and lasts until the route
+  // ends or the Customer's own location changes.
   customerId           String?
   customerName         String?
   address              String?
   // Which of the customer's saved addresses the stop goes to (null = the
   // customer's main address). addressLabel is that address's name ("Gudang
-  // Timur"), snapshotted like the rest so the driver still sees it if the
-  // saved address is renamed or deleted later.
+  // Timur"), copied like the rest so the driver still sees it if the saved
+  // address is deleted later.
   customerAddressId    String?
   addressLabel         String?
   destinationLatitude  Decimal?         @db.Decimal(9, 6)

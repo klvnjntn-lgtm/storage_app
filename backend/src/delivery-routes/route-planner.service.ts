@@ -552,7 +552,8 @@ export class RoutePlannerService {
         }
         await tx.route.update({
           where: { id: routeId },
-          data: { plannedDepartureAt: p.departAt },
+          // The stops are rebuilt, so any list from before an optimize is gone.
+          data: { plannedDepartureAt: p.departAt, originalOrder: Prisma.DbNull },
         });
         // Customer stops left on a reused route go after the planned ones
         // (moved out of the way first — @@unique([routeId, sequence])).

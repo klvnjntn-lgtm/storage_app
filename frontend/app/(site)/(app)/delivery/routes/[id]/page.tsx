@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, RotateCcw, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -101,6 +101,8 @@ type RouteDetail = {
   startPoint: { latitude: number; longitude: number } | null;
   // Prisma DateTime fields serialize as strings over JSON.
   plannedDepartureAt: string | null;
+  // Set once optimized, until the office goes back to the earlier order.
+  originalOrder: unknown | null;
 };
 
 type AvailableOrder = { id: string; doNumber: string | null; customerName: string | null };
@@ -178,6 +180,7 @@ export default function DeliveryRouteDetailPage() {
 
   const [departureTime, setDepartureTime] = useState('');
   const [optimizing, setOptimizing] = useState(false);
+  const [restoringOrder, setRestoringOrder] = useState(false);
   // Stops the last optimize couldn't fit (kept at the end of the route).
   const [unscheduled, setUnscheduled] = useState<{ stopId: string; label: string; reason: UnscheduledReason }[]>([]);
   // Stop shown on the route map (from clicking its card); nonce re-triggers
@@ -459,6 +462,26 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
+  async function handleRestoreOrder() {
+    if (!(await dialog.confirm(t('delivery.routeDetail.confirmRestoreOrder')))) return;
+    setRestoringOrder(true);
+    setError(null);
+    setUnscheduled([]);
+    try {
+      const res = await apiFetch(`/delivery-routes/${id}/restore-order`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        return;
+      }
+      await load();
+    } catch {
+      setError(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      setRestoringOrder(false);
+    }
+  }
+
   function openEditDetails(stop: Stop) {
     setEditingStop(stop);
     setEditPriority(stop.priority);
@@ -661,6 +684,16 @@ export default function DeliveryRouteDetailPage() {
               >
                 <Navigation size={14} />
                 {optimizing ? t('delivery.routeDetail.optimizing') : t('delivery.routeDetail.optimizeRoute')}
+              </button>
+            )}
+            {SHOW_OPTIMIZE && routeOpen && route.originalOrder != null && (
+              <button
+                disabled={optimizing || restoringOrder}
+                onClick={handleRestoreOrder}
+                className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <RotateCcw size={14} />
+                {restoringOrder ? t('delivery.routeDetail.restoringOrder') : t('delivery.routeDetail.restoreOrder')}
               </button>
             )}
           </div>

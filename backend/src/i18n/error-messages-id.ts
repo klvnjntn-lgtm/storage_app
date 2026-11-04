@@ -745,4 +745,6 @@ export const ERROR_MESSAGES_ID: ReadonlyArray<readonly [string, string]> = [
   ["{}: price cannot be negative", "{}: harga tidak boleh negatif"],
   ["{}: {} unit(s) need {} serial number(s), got {}", "{}: {} unit membutuhkan {} nomor seri, diterima {}"],
   ["{}{} is already a pending stop on this route", "{}{} sudah menjadi tujuan yang menunggu di rute ini"],
+  ["Two stops cannot share the same position", "Dua tujuan tidak boleh berada di urutan yang sama"],
+  ["This route has no earlier order to go back to", "Rute ini tidak punya urutan sebelumnya untuk dikembalikan"],
 ];

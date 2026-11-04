@@ -179,7 +179,9 @@ export class CashStatementService {
         },
         orderBy: [
           { journalEntry: { entryDate: 'asc' } },
-          { journalEntry: { entryNumber: 'asc' } },
+          // Not entryNumber: as text, JE-…-10000 sorts before JE-…-9999.
+          { journalEntry: { createdAt: 'asc' } },
+          { journalEntry: { entryNumber: 'asc' } }, // same transaction, same createdAt
           { id: 'asc' },
         ],
         select: {

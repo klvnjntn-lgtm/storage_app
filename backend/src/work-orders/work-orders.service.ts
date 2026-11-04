@@ -69,9 +69,20 @@ const DETAIL_INCLUDE = {
 
 type WorkOrderDetail = Prisma.WorkOrderGetPayload<{ include: typeof DETAIL_INCLUDE }>;
 
+// A job untouched this long while still holding its parts is flagged, so
+// an abandoned card doesn't keep parts off the POS unnoticed.
+const IDLE_FLAG_DAYS = 30;
+
 function withInvoiced(wo: WorkOrderDetail) {
   const live = wo.invoices.find((inv) => inv.status !== InvoiceStatus.VOID);
-  return { ...wo, invoicedId: live?.id ?? null };
+  // Its parts stay held until it's cancelled or invoiced (work-order-holds.ts).
+  const holdsParts =
+    wo.status !== WorkOrderStatus.CANCELLED &&
+    wo.status !== WorkOrderStatus.ESTIMATE &&
+    !wo.invoices.some((inv) => inv.status === InvoiceStatus.ISSUED) &&
+    wo.items.some((i) => i.productId && i.locationId);
+  const idle = Math.floor((Date.now() - wo.updatedAt.getTime()) / 86_400_000);
+  return { ...wo, invoicedId: live?.id ?? null, idleDays: holdsParts && idle >= IDLE_FLAG_DAYS ? idle : null };
 }
 
 // What the workshop board shows: jobs being worked on first, then waiting for parts, then queued.

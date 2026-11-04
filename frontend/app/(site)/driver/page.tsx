@@ -21,6 +21,8 @@ import {
   ChevronRight,
   ChevronDown,
   User,
+  Search,
+  X,
 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
 import { CSRF_HEADERS } from '@/lib/session';
@@ -34,6 +36,8 @@ import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driv
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
+import { needsMapsAppLink, openGoogleMapsApp } from '@/app/components/delivery/openGoogleMapsApp';
+import { matchStops } from '@/lib/matchStops';
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -48,6 +52,7 @@ type Stop = {
   kind: 'DELIVERY_ORDER' | 'CUSTOMER';
   label: string;
   customerName: string | null;
+  doNumber: string | null;
   address: string | null;
   // Saved-address name for a customer stop ("Gudang Timur"); null = main address.
   addressLabel: string | null;
@@ -95,12 +100,12 @@ function googleMapsUrl(stop: Stop): string {
   return '';
 }
 
-// Reads the destination aloud, then hands off to Google Maps. speak() has
-// to run inside the tap itself (iOS only allows speech from a user
-// gesture); the hand-off waits for it to finish, capped so a missing voice
-// or a muted engine never strands the driver. Same tab rather than a new
-// one: a window.open() after the wait would be popup-blocked, and on a
-// phone the link opens the Maps app anyway.
+// Reads the destination aloud and hands off to Google Maps. speak() has to run
+// inside the tap (iOS only allows speech from a user gesture). Where an app
+// link is needed the hand-off must run inside the tap too, so it can't wait and
+// a long name may get cut off when Maps comes to the front. Elsewhere it waits
+// for the speech, capped so a missing voice or a muted engine never strands the
+// driver. Same tab: a window.open() after the wait would be popup-blocked.
 function announceThenNavigate(text: string, lang: string, url: string) {
   let done = false;
   const go = () => {
@@ -108,18 +113,23 @@ function announceThenNavigate(text: string, lang: string, url: string) {
     done = true;
     window.location.href = url;
   };
-  if (!('speechSynthesis' in window)) {
-    go();
-    return;
+  const appLink = needsMapsAppLink();
+  if ('speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    utterance.rate = 0.95;
+    if (!appLink) {
+      utterance.onend = go;
+      utterance.onerror = go;
+    }
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    if (!appLink) {
+      setTimeout(go, 6000);
+      return;
+    }
   }
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = 0.95;
-  utterance.onend = go;
-  utterance.onerror = go;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
-  setTimeout(go, 6000);
+  if (!openGoogleMapsApp(url)) go();
 }
 
 type RouteWithStops = {
@@ -349,6 +359,98 @@ function StopMarker({ stop, current }: { stop: Stop; current: boolean }) {
   );
 }
 
+// Marks the stop the search just jumped to, so the eye lands on it.
+const JUMPED_TO_RING = 'border-2 border-amber-400 ring-4 ring-amber-200';
+const JUMPED_TO_MS = 2500;
+
+// Sits under the driver layout's sticky header (65px tall) and stays in reach
+// on a long route; stop cards' scroll-mt-36 keeps them clear of both. Results
+// push nothing around while the driver scrolls, and picking one closes them.
+function StopSearch({
+  stops,
+  statusLabels,
+  onPick,
+}: {
+  stops: Stop[];
+  statusLabels: Record<StopStatus, string>;
+  onPick: (stopId: string) => void;
+}) {
+  const { t } = useLanguage();
+  const [query, setQuery] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const matches = useMemo(() => matchStops(stops, query), [stops, query]);
+
+  function pick(stopId: string) {
+    setQuery('');
+    input.current?.blur(); // the keyboard would cover the stop
+    onPick(stopId);
+  }
+
+  return (
+    <div className="sticky top-[65px] z-20 space-y-2">
+      <div className="relative">
+        <Search size={20} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          ref={input}
+          type="text"
+          inputMode="search"
+          enterKeyHint="search"
+          autoComplete="off"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setQuery('');
+            if (e.key === 'Enter' && matches.length > 0) pick(matches[0].id);
+          }}
+          placeholder={t('delivery.driver.searchPlaceholder')}
+          aria-label={t('delivery.driver.searchPlaceholder')}
+          className="w-full h-12 rounded-xl border-2 border-blue-200 bg-white pl-11 pr-12 text-base text-ellipsis shadow-sm focus:border-blue-600 focus:outline-none"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              input.current?.focus();
+            }}
+            aria-label={t('delivery.driver.searchClear')}
+            className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500"
+          >
+            <X size={20} />
+          </button>
+        )}
+      </div>
+
+      {query.trim() && (
+        <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-blue-500/15 bg-white shadow-lg divide-y divide-gray-100">
+          {matches.length === 0 && (
+            <p className="px-4 py-3 text-base text-gray-500">{t('delivery.driver.searchNoResults')}</p>
+          )}
+          {matches.map((stop) => (
+            <button
+              key={stop.id}
+              type="button"
+              onClick={() => pick(stop.id)}
+              className="w-full min-h-14 flex items-center gap-3 px-3 py-2 text-left active:bg-blue-50"
+            >
+              <StopMarker stop={stop} current={false} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-base font-semibold truncate">{stop.label}</span>
+                {(stop.addressLabel || stop.address) && (
+                  <span className="block text-sm text-gray-500 truncate">{stop.addressLabel || stop.address}</span>
+                )}
+              </span>
+              {stop.status !== 'PENDING' && (
+                <span className="text-sm font-semibold text-gray-500 shrink-0">{statusLabels[stop.status]}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // The proof photo the driver sent, fetched as a short-lived signed link
 // once the row is opened (see ProofPhoto for the office's version).
 function SentProofPhoto({ linkPath }: { linkPath: string }) {
@@ -388,7 +490,17 @@ function SentProofPhoto({ linkPath }: { linkPath: string }) {
 
 // A finished stop (or any stop on a past day) as one line; tap it to see
 // what was recorded — when, who received it, the GPS and the photo.
-function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Stop; statusLabel: string }) {
+function StopRecord({
+  routeId,
+  stop,
+  statusLabel,
+  jumpedTo,
+}: {
+  routeId: string;
+  stop: Stop;
+  statusLabel: string;
+  jumpedTo: boolean;
+}) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const doneAt = stop.status === 'DELIVERED' ? stop.signedAt : stop.status === 'FAILED' ? stop.failedAt : null;
@@ -399,7 +511,10 @@ function StopRecord({ routeId, stop, statusLabel }: { routeId: string; stop: Sto
     stop.status === 'DELIVERED' ? 'text-green-700' : stop.status === 'FAILED' ? 'text-red-700' : 'text-gray-500';
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white/70">
+    <div
+      id={`stop-${stop.id}`}
+      className={`rounded-xl border bg-white/70 scroll-mt-36 ${jumpedTo ? JUMPED_TO_RING : 'border-gray-200'}`}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -590,6 +705,20 @@ export default function DriverRoutePage() {
   const [daysBack, setDaysBack] = useState(0);
   const isToday = daysBack === 0;
   const canAct = daysBack <= CATCH_UP_DAYS;
+
+  const [jumpedToStop, setJumpedToStop] = useState<string | null>(null);
+  useEffect(() => {
+    if (!jumpedToStop) return;
+    const timer = setTimeout(() => setJumpedToStop(null), JUMPED_TO_MS);
+    return () => clearTimeout(timer);
+  }, [jumpedToStop]);
+
+  function jumpToStop(stopId: string) {
+    setJumpedToStop(stopId);
+    requestAnimationFrame(() =>
+      document.getElementById(`stop-${stopId}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+    );
+  }
 
   useEffect(() => {
     if (error) reportDriverEvent({ kind: 'page-error', message: error });
@@ -1156,6 +1285,9 @@ export default function DriverRoutePage() {
         </button>
       </div>
 
+      {/* Above the banners: results opening low on the screen land under the keyboard. */}
+      {allStops.length > 1 && <StopSearch stops={allStops} statusLabels={statusLabels} onPick={jumpToStop} />}
+
       {error && (
         <div className="flex items-start gap-2 bg-red-50 border-2 border-red-200 text-red-700 text-base font-medium rounded-xl px-4 py-3">
           <AlertTriangle size={20} className="shrink-0 mt-0.5" />
@@ -1209,15 +1341,19 @@ export default function DriverRoutePage() {
             // Finished stops collapse to one line so the remaining work
             // stands out; a day too far back shows every stop that way.
             if (stop.status !== 'PENDING' || !canAct) {
-              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} />;
+              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} jumpedTo={jumpedToStop === stop.id} />;
             }
 
             return (
               <div
                 key={stop.id}
                 id={`stop-${stop.id}`}
-                className={`rounded-2xl bg-white shadow-sm overflow-hidden scroll-mt-4 ${
-                  isCurrent ? 'border-2 border-blue-600 ring-4 ring-blue-100' : 'border border-blue-500/15'
+                className={`rounded-2xl bg-white shadow-sm overflow-hidden scroll-mt-36 ${
+                  jumpedToStop === stop.id
+                    ? JUMPED_TO_RING
+                    : isCurrent
+                      ? 'border-2 border-blue-600 ring-4 ring-blue-100'
+                      : 'border border-blue-500/15'
                 }`}
               >
                 {isCurrent && (

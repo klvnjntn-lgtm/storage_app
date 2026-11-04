@@ -1,6 +1,6 @@
 // src/customers/customer-pin-backfill.ts
 import { BadRequestException } from '@nestjs/common';
-import { PinSource, Prisma, RouteStatus } from '@prisma/client';
+import { DeliveryOrderStatus, PinSource, Prisma, RouteStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 // A GPS pin vaguer than this still gets saved, but the office sees it
@@ -8,7 +8,13 @@ import { PrismaService } from '../prisma/prisma.service';
 // street. Matches WEAK_PIN_ACCURACY_M on the frontend.
 export const WEAK_PIN_ACCURACY_METERS = 50;
 
-function normalizeAddress(address: string | null | undefined): string | null {
+// A delivery order still to be delivered, so still free to follow the customer.
+export const openDeliveryOrderWhere = {
+  signedAt: null,
+  status: { in: [DeliveryOrderStatus.PACKED, DeliveryOrderStatus.SHIPPED] },
+} satisfies Prisma.DeliveryOrderWhereInput;
+
+export function normalizeAddress(address: string | null | undefined): string | null {
   const s = address?.trim().replace(/\s+/g, ' ').toLowerCase();
   return s || null;
 }
@@ -47,7 +53,7 @@ export async function backfillCustomerPin(
 
   const customer = await prisma.customer.findFirst({
     where: { id: customerId, organizationId },
-    select: { address: true },
+    select: { address: true, latitude: true, longitude: true },
   });
   if (!customer) return;
 
@@ -66,11 +72,22 @@ export async function backfillCustomerPin(
   } satisfies Prisma.CustomerWhereInput & Prisma.CustomerAddressWhereInput;
   const fill = { organizationId, customerId, latitude, longitude };
   if (params.customerAddressId) {
+    const previous = await prisma.customerAddress.findFirst({
+      where: { id: params.customerAddressId, organizationId, customerId },
+      select: { address: true, latitude: true, longitude: true },
+    });
     const { count } = await prisma.customerAddress.updateMany({
       where: { id: params.customerAddressId, organizationId, customerId, ...replaceable },
       data: pin,
     });
-    if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: params.customerAddressId });
+    if (count) {
+      await fillOpenStopPins(prisma, {
+        ...fill,
+        customerAddressId: params.customerAddressId,
+        address: previous?.address,
+        previous: previous ?? undefined,
+      });
+    }
     return;
   }
 
@@ -81,13 +98,20 @@ export async function backfillCustomerPin(
       where: { id: customerId, organizationId, ...replaceable },
       data: pin,
     });
-    if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: null, address: customer.address });
+    if (count) {
+      await fillOpenStopPins(prisma, {
+        ...fill,
+        customerAddressId: null,
+        address: customer.address,
+        previous: customer,
+      });
+    }
     return;
   }
 
   const saved = await prisma.customerAddress.findMany({
     where: { organizationId, customerId },
-    select: { id: true, address: true },
+    select: { id: true, address: true, latitude: true, longitude: true },
   });
   const match = saved.find((a) => normalizeAddress(a.address) === target);
   if (!match) return;
@@ -95,16 +119,22 @@ export async function backfillCustomerPin(
     where: { id: match.id, ...replaceable },
     data: pin,
   });
-  if (count) await fillOpenStopPins(prisma, { ...fill, customerAddressId: match.id });
+  if (count) {
+    await fillOpenStopPins(prisma, {
+      ...fill,
+      customerAddressId: match.id,
+      address: match.address,
+      previous: match,
+    });
+  }
 }
 
-// Stops copy the customer's pin when they're added, so stops already
-// planned on routes still to be driven (the rest of the week's schedule)
-// were added with no pin. Give the ones still without one the new pin,
-// so the next driver there can navigate — whether the pin came from a
-// driver's fix or the office. When the office corrects a pin (previous),
-// stops that copied the old one move with it. A stop with a pin of its
-// own (set on the route) keeps it.
+// For a pin that changed on its own (a driver's fix, a photo's location), as
+// opposed to an office edit (customer-stop-sync.ts). Stops and delivery orders
+// still to be delivered copied the customer's pin when they were made, so they
+// take the new one if they have none or still hold the one it replaced
+// (previous). One with a different pin, set by hand, keeps it: nobody chose to
+// override that.
 // For the main address (customerAddressId null), only stops going to that
 // address text — not one-off sites for the same customer. Stops copied the
 // text too, so when the office changes it in the same save, the old text
@@ -158,11 +188,39 @@ export async function fillOpenStopPins(
       return !a || main.includes(a);
     })
     .map((s) => s.id);
-  if (!ids.length) return;
-  await prisma.routeStop.updateMany({
-    where: { id: { in: ids }, ...replaceable },
-    data: { destinationLatitude: params.latitude, destinationLongitude: params.longitude },
+  const pin = { destinationLatitude: params.latitude, destinationLongitude: params.longitude };
+  if (ids.length) {
+    await prisma.routeStop.updateMany({ where: { id: { in: ids }, ...replaceable }, data: pin });
+  }
+
+  // Delivery orders don't record which address they chose, only its text.
+  const replaceableOrder: Prisma.DeliveryOrderWhereInput =
+    previous?.latitude != null && previous.longitude != null
+      ? {
+          OR: [
+            { destinationLatitude: null },
+            { destinationLatitude: previous.latitude, destinationLongitude: previous.longitude },
+          ],
+        }
+      : { destinationLatitude: null };
+  const orders = await prisma.deliveryOrder.findMany({
+    where: {
+      organizationId: params.organizationId,
+      customerId: params.customerId,
+      ...openDeliveryOrderWhere,
+      ...replaceableOrder,
+    },
+    select: { id: true, deliveryAddress: true },
   });
+  const orderIds = orders
+    .filter((o) => {
+      const a = normalizeAddress(o.deliveryAddress);
+      return params.customerAddressId ? a != null && main.includes(a) : !a || main.includes(a);
+    })
+    .map((o) => o.id);
+  if (orderIds.length) {
+    await prisma.deliveryOrder.updateMany({ where: { id: { in: orderIds }, ...replaceableOrder }, data: pin });
+  }
 }
 
 // Pin fields for a location the office sets by hand (customer form, map

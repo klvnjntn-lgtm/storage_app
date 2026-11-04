@@ -18,7 +18,7 @@ export class SupplierPaymentsService {
 
   async list(organizationId: string, purchaseOrderId?: string) {
     return this.prisma.supplierPayment.findMany({
-      where: { organizationId, ...(purchaseOrderId && { purchaseOrderId }) },
+      where: { organizationId, voidedAt: null, ...(purchaseOrderId && { purchaseOrderId }) },
       include: { purchaseOrder: { select: { poNumber: true, supplier: { select: { name: true } } } } },
       orderBy: { paidAt: 'desc' },
     });
@@ -90,7 +90,7 @@ export class SupplierPaymentsService {
     const totalReturned = Number(returns._sum.total ?? 0);
 
     const priorPayments = await tx.supplierPayment.aggregate({
-      where: { organizationId, purchaseOrderId },
+      where: { organizationId, purchaseOrderId, voidedAt: null },
       _sum: { amount: true },
     });
     const totalPaid = Number(priorPayments._sum.amount ?? 0);
@@ -172,9 +172,6 @@ export class SupplierPaymentsService {
   // "void this document" elsewhere, and just as irreversible once called.
   async void(organizationId: string, id: string, userId?: string, reason?: string) {
     const payment = await this.get(organizationId, id);
-    // Imported from Accurate (no journal entry behind it). Deleting it here
-    // wouldn't stick — the next GDB re-import adds it back — so the fix
-    // belongs in Accurate.
     if (payment.externalId) {
       throw new BadRequestException(
         'This payment was imported from Accurate. Correct it in Accurate, then re-import the GDB file.',
@@ -182,6 +179,13 @@ export class SupplierPaymentsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Claimed first, so a second void of the same payment stops here
+      // instead of failing halfway. Kept, not deleted, so the history stays.
+      const claimed = await tx.supplierPayment.updateMany({
+        where: { id, organizationId, voidedAt: null },
+        data: { voidedAt: new Date(), voidedById: userId ?? null, voidReason: reason?.trim() || null },
+      });
+      if (claimed.count === 0) throw new NotFoundException('Supplier payment not found');
       const entry = await this.journal.findPostedBySource(
         organizationId,
         JournalSourceType.SUPPLIER_PAYMENT,
@@ -191,7 +195,7 @@ export class SupplierPaymentsService {
       if (entry) {
         await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
       }
-      return tx.supplierPayment.delete({ where: { id } });
+      return tx.supplierPayment.findUniqueOrThrow({ where: { id } });
     });
   }
 }

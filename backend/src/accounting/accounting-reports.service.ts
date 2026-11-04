@@ -322,7 +322,9 @@ export class AccountingReportsService {
     // Stable ordering: date, then entry number (assigned in post order), then line id.
     const orderBy: Prisma.JournalEntryLineOrderByWithRelationInput[] = [
       { journalEntry: { entryDate: 'asc' } },
-      { journalEntry: { entryNumber: 'asc' } },
+      // Not entryNumber: as text, JE-…-10000 sorts before JE-…-9999.
+      { journalEntry: { createdAt: 'asc' } },
+      { journalEntry: { entryNumber: 'asc' } }, // same transaction, same createdAt
       { id: 'asc' },
     ];
 
@@ -772,7 +774,8 @@ async getARAging(
     // 2) Supplier payments as of `asOf`, grouped per PO.
     const paidRows = await this.prisma.supplierPayment.groupBy({
       by: ['purchaseOrderId'],
-      where: { organizationId, paidAt: { lte: asOf } },
+      // Voided after asOf still counted on that date.
+      where: { organizationId, paidAt: { lte: asOf }, OR: [{ voidedAt: null }, { voidedAt: { gt: asOf } }] },
       _sum: { amount: true },
     });
     const paidByPo = new Map<string, number>(

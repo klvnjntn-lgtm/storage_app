@@ -93,7 +93,8 @@ export class JournalService {
     const [data, total] = await this.prisma.$transaction([
       this.prisma.journalEntry.findMany({
         where,
-        orderBy: [{ entryDate: 'desc' }, { entryNumber: 'desc' }],
+        // Not entryNumber: as text, JE-…-10000 sorts before JE-…-9999.
+        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }, { entryNumber: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {

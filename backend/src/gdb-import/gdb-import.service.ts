@@ -2601,7 +2601,7 @@ private async importStock(
           total: true,
           supplierBills: { where: { externalId: { not: null } }, select: { id: true } },
           _count: { select: { goodsReceipts: true, purchaseReturns: true } },
-          supplierPayments: { where: { externalId: null }, select: { id: true } },
+          supplierPayments: { where: { externalId: null, voidedAt: null }, select: { id: true } },
         },
       });
       for (const r of rows) {

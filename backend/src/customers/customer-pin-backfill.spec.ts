@@ -5,17 +5,23 @@ function makePrisma(
   customer: { address: string | null } | null,
   saved: { id: string; address: string | null }[] = [],
   openStops: { id: string; address: string | null }[] = [],
+  openOrders: { id: string; deliveryAddress: string | null }[] = [],
 ) {
   return {
     routeStop: {
       findMany: jest.fn().mockResolvedValue(openStops),
       updateMany: jest.fn().mockResolvedValue({ count: openStops.length }),
     },
+    deliveryOrder: {
+      findMany: jest.fn().mockResolvedValue(openOrders),
+      updateMany: jest.fn().mockResolvedValue({ count: openOrders.length }),
+    },
     customer: {
       findFirst: jest.fn().mockResolvedValue(customer),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     customerAddress: {
+      findFirst: jest.fn().mockResolvedValue(saved[0] ?? null),
       findMany: jest.fn().mockResolvedValue(saved),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
@@ -109,6 +115,32 @@ describe('backfillCustomerPin', () => {
     );
     expect(prisma.routeStop.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['s1', 's3'] }, destinationLatitude: null },
+      data: { destinationLatitude: -6.2, destinationLongitude: 106.8 },
+    });
+  });
+
+  it('gives the new pin to delivery orders still to go to that address, not one-off ones', async () => {
+    const prisma = makePrisma({ address: base.deliveryAddress }, [], [], [
+      { id: 'd1', deliveryAddress: 'komplek xyz blok b no. 6' },
+      { id: 'd2', deliveryAddress: 'Proyek Lain' },
+    ]);
+    await backfillCustomerPin(prisma, base);
+    expect(prisma.deliveryOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['d1'] }, destinationLatitude: null },
+      data: { destinationLatitude: -6.2, destinationLongitude: 106.8 },
+    });
+  });
+
+  it('moves stops that still hold the pin a better fix replaced', async () => {
+    const prisma = makePrisma({ address: base.deliveryAddress, latitude: -6.1, longitude: 106.7 } as never, [], [
+      { id: 's1', address: base.deliveryAddress },
+    ]);
+    await backfillCustomerPin(prisma, base);
+    expect(prisma.routeStop.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['s1'] },
+        OR: [{ destinationLatitude: null }, { destinationLatitude: -6.1, destinationLongitude: 106.7 }],
+      },
       data: { destinationLatitude: -6.2, destinationLongitude: 106.8 },
     });
   });

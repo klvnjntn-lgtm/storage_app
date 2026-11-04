@@ -3,7 +3,9 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerLocationService } from './customer-location.service';
-import { fillOpenStopPins, manualPinData } from './customer-pin-backfill';
+import { manualPinData } from './customer-pin-backfill';
+import { syncCustomerToOpenStops } from './customer-stop-sync';
+import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ImportCustomerRowDto } from './dto/import-customers.dto';
@@ -42,6 +44,7 @@ export class CustomersService {
   constructor(
     private prisma: PrismaService,
     private locations: CustomerLocationService,
+    private routes: DeliveryRoutesService,
   ) {}
 
   // Without `page` this keeps the original plain-array response (the public
@@ -255,21 +258,22 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
 async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
   const before = await this.get(organizationId, id);
   await this.assertPriceLevel(organizationId, dto.priceLevelId);
-  const customer = await this.prisma.customer.update({
-    where: { id, organizationId },
-    data: { ...dto, ...manualPinData(dto.latitude, dto.longitude) },
-  });
-  if (dto.latitude != null && dto.longitude != null) {
-    await fillOpenStopPins(this.prisma, {
+  const { customer, movedRouteIds } = await this.prisma.$transaction(async (tx) => {
+    const customer = await tx.customer.update({
+      where: { id, organizationId },
+      data: { ...dto, ...manualPinData(dto.latitude, dto.longitude) },
+    });
+    const movedRouteIds = await syncCustomerToOpenStops(tx, {
       organizationId,
       customerId: id,
       customerAddressId: null,
-      address: customer.address,
-      latitude: dto.latitude,
-      longitude: dto.longitude,
-      previous: before,
+      before,
+      after: customer,
+      identity: { before, after: customer },
     });
-  }
+    return { customer, movedRouteIds };
+  });
+  await this.routes.afterCustomerSynced(organizationId, movedRouteIds);
   return customer;
 }
 
@@ -344,24 +348,25 @@ async remove(organizationId: string, id: string) {
     dto: UpdateCustomerAddressDto,
   ) {
     const before = await this.getAddress(organizationId, customerId, addressId);
-    const saved = await this.prisma.customerAddress.update({
-      where: { id: addressId },
-      data: {
-        label: dto.label?.trim(),
-        address: dto.address !== undefined ? dto.address.trim() || null : undefined,
-        ...manualPinData(dto.latitude, dto.longitude),
-      },
-    });
-    if (dto.latitude != null && dto.longitude != null) {
-      await fillOpenStopPins(this.prisma, {
+    const { saved, movedRouteIds } = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.customerAddress.update({
+        where: { id: addressId },
+        data: {
+          label: dto.label?.trim(),
+          address: dto.address !== undefined ? dto.address.trim() || null : undefined,
+          ...manualPinData(dto.latitude, dto.longitude),
+        },
+      });
+      const movedRouteIds = await syncCustomerToOpenStops(tx, {
         organizationId,
         customerId,
         customerAddressId: addressId,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        previous: before,
+        before,
+        after: saved,
       });
-    }
+      return { saved, movedRouteIds };
+    });
+    await this.routes.afterCustomerSynced(organizationId, movedRouteIds);
     return saved;
   }
 

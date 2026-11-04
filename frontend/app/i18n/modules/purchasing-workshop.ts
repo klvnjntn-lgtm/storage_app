@@ -527,6 +527,8 @@ export const purchasingWorkshop = {
         viewListing: 'Open an example listing',
       },
       workOrders: {
+        idleHolding: 'Idle {days} days — its parts are still held',
+        idleHoldingHint: 'Parts on an open job stay reserved until it is invoiced or cancelled.',
         fromQuotations: 'From quotation',
         addition: 'additional',
         quoteFirst: 'Quote it first',
@@ -1286,6 +1288,8 @@ export const purchasingWorkshop = {
         viewListing: 'Buka contoh listing',
       },
       workOrders: {
+        idleHolding: 'Diam {days} hari — part-nya masih ditahan',
+        idleHoldingHint: 'Part pada pekerjaan yang masih terbuka tetap ditahan sampai ditagih atau dibatalkan.',
         fromQuotations: 'Dari penawaran',
         addition: 'tambahan',
         quoteFirst: 'Buat penawaran dulu',

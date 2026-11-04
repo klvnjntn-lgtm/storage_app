@@ -2,6 +2,7 @@
 
 import { MapPinned } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { openGoogleMapsApp } from './openGoogleMapsApp';
 
 type Coord = number | string | null | undefined;
 
@@ -32,7 +33,10 @@ export default function GoogleMapsLink({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (openGoogleMapsApp(href)) e.preventDefault();
+      }}
       className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-sm px-3 py-1.5 hover:bg-blue-700 ${className}`}
     >
       <MapPinned size={14} />

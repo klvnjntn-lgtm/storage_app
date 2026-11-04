@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -234,6 +235,44 @@ export function stopTarget(stop: TargetSource): StopTarget {
   };
 }
 
+// In SQL, what stopStatus() calls PENDING.
+export const pendingStopWhere = {
+  supersededAt: null,
+  signedAt: null,
+  failedAt: null,
+  OR: [
+    { deliveryOrderId: null },
+    {
+      deliveryOrder: {
+        signedAt: null,
+        status: { in: [DeliveryOrderStatus.PACKED, DeliveryOrderStatus.SHIPPED] },
+      },
+    },
+  ],
+} satisfies Prisma.RouteStopWhereInput;
+
+const optimizerJob = (stop: TargetSource) => {
+  const t = stopTarget(stop);
+  return {
+    key: stop.id,
+    location:
+      t.destinationLatitude != null && t.destinationLongitude != null
+        ? { lat: Number(t.destinationLatitude), lng: Number(t.destinationLongitude) }
+        : null,
+    priority: t.priority,
+    windowStart: t.deliveryWindowStart,
+    windowEnd: t.deliveryWindowEnd,
+  };
+};
+
+// What restoreOriginalOrder() goes back to.
+type OriginalOrder = {
+  stopIds: string[];
+  // Whether the route had ETAs yet: optimizing a hand-built route gave it some.
+  hadEtas: boolean;
+  plannedDepartureAt: string | null;
+};
+
 const stopLabel = (stop: TargetSource) => {
   const t = stopTarget(stop);
   return t.customerName ?? t.doNumber ?? stop.deliveryOrder?.id ?? stop.id;
@@ -241,6 +280,8 @@ const stopLabel = (stop: TargetSource) => {
 
 @Injectable()
 export class DeliveryRoutesService {
+  private readonly logger = new Logger(DeliveryRoutesService.name);
+
   constructor(
     private prisma: PrismaService,
     private optimizer: RouteOptimizerService,
@@ -822,6 +863,10 @@ export class DeliveryRoutesService {
   // (window already missed, driver's hours full) stays on the route,
   // appended after the optimized ones, and is returned in `unscheduled`
   // so the dispatcher can see it.
+  //
+  // Once a stop is resolved the driver is out on the road, so the new order
+  // starts from where they last were (see whereabouts) and from now, never
+  // from the depot at a departure time that's already passed.
   async optimize(
     organizationId: string,
     routeId: string,
@@ -831,13 +876,11 @@ export class DeliveryRoutesService {
     const route = await this.prisma.route.findFirst({
       where: { id: routeId, organizationId },
       include: {
-        stops: {
-          include: { deliveryOrder: true },
-          orderBy: { sequence: 'asc' },
-        },
+        stops: { select: stopSelect, orderBy: { sequence: 'asc' } },
       },
     });
     if (!route) throw new NotFoundException('Route not found');
+    this.assertRouteOpen(route);
     const start = await this.getStartPoint(organizationId);
     if (!start) {
       throw new BadRequestException('Set the start point before optimizing');
@@ -860,9 +903,15 @@ export class DeliveryRoutesService {
       return { ...(await this.getRoute(organizationId, routeId)), unscheduled: [] };
     }
 
-    const requestedDeparture = dto.departureAt
+    const now = new Date();
+    const anyResolved = pendingStops.length < route.stops.length;
+    const underway = anyResolved || route.status === RouteStatus.ACTIVE;
+    const asked = dto.departureAt
       ? new Date(dto.departureAt)
-      : (route.plannedDepartureAt ?? new Date());
+      : (route.plannedDepartureAt ?? now);
+    // The route page sends its departure field, filled in with the old plan,
+    // so a time already gone has to be caught here.
+    const requestedDeparture = underway && asked < now ? now : asked;
     const availability = (
       await this.teamAvailability(
         organizationId,
@@ -879,24 +928,25 @@ export class DeliveryRoutesService {
       availableUntil: availability.offDuty ? null : availability.availableUntil,
     };
 
-    const { routes, unassigned } = await this.optimizer.optimize({
-      depot: { lat: start.latitude, lng: start.longitude },
-      vehicles: [vehicle],
-      jobs: pendingStops.map((s) => {
-        const t = stopTarget(s);
-        return {
-          key: s.id,
-          location: {
-            lat: Number(t.destinationLatitude),
-            lng: Number(t.destinationLongitude),
-          },
-          priority: t.priority,
-          windowStart: t.deliveryWindowStart,
-          windowEnd: t.deliveryWindowEnd,
-        };
-      }),
-      keepUnassigned: true,
-    });
+    const jobs = pendingStops.map(optimizerJob);
+    const solveFrom = (from: { latitude: number; longitude: number }) =>
+      this.optimizer.optimize({
+        depot: { lat: from.latitude, lng: from.longitude },
+        vehicles: [vehicle],
+        jobs,
+        keepUnassigned: true,
+      });
+    const position = this.whereabouts(route, start).position!;
+    let { routes, unassigned } = await solveFrom(position);
+    // No road out of the driver's last spot makes every stop look unreachable,
+    // which says nothing about the stops: order them from the depot instead.
+    if (
+      position.source === 'LAST_STOP' &&
+      unassigned.length === jobs.length &&
+      unassigned.every((u) => u.reason === 'UNREACHABLE')
+    ) {
+      ({ routes, unassigned } = await solveFrom(start));
+    }
     const ordered = routes.get(route.teamId)!;
 
     const highestResolvedSequence = route.stops
@@ -932,7 +982,21 @@ export class DeliveryRoutesService {
       ...finalUpdates,
       this.prisma.route.update({
         where: { id: routeId },
-        data: { plannedDepartureAt: vehicle.availableFrom },
+        data: {
+          // Once a stop is done the departure is history; monitoring still reads it.
+          ...(anyResolved ? {} : { plannedDepartureAt: vehicle.availableFrom }),
+          // Only the first time: a second optimize still goes back to the list
+          // the office started from.
+          ...(route.originalOrder == null
+            ? {
+                originalOrder: {
+                  stopIds: route.stops.map((s) => s.id),
+                  hadEtas: pendingStops.some((s) => s.plannedEta),
+                  plannedDepartureAt: route.plannedDepartureAt?.toISOString() ?? null,
+                } satisfies OriginalOrder,
+              }
+            : {}),
+        },
       }),
     ]);
     await this.recordHistory(routeId, RouteHistoryEventType.OPTIMIZED, userId, {
@@ -968,13 +1032,116 @@ export class DeliveryRoutesService {
     return { ...(await this.getRoute(organizationId, routeId)), unscheduled };
   }
 
-  // Called after a delivery resolves (delivered/failed) — walks the
-  // remaining PENDING stops on the same route, re-summing their *cached*
-  // travelSecondsFromPrevious from the actual resolution time. Pure
-  // arithmetic, no OSRM call: an actual completion time is exactly the
-  // kind of "known" data point the spec says ETA should recompute from,
-  // and re-hitting OSRM per delivery would be a live-tracking-shaped
-  // dependency this module deliberately avoids.
+  // Undoes optimize(): every stop back where it was before the first one,
+  // finished stops included, so the numbers read as the office's list again.
+  // Stops added since go at the end, in their current order.
+  async restoreOriginalOrder(organizationId: string, routeId: string, userId?: string) {
+    const route = await this.prisma.route.findFirst({
+      where: { id: routeId, organizationId },
+      include: { stops: { select: stopSelect, orderBy: { sequence: 'asc' } } },
+    });
+    if (!route) throw new NotFoundException('Route not found');
+    this.assertRouteOpen(route);
+    const original = route.originalOrder as OriginalOrder | null;
+    if (!original) {
+      throw new BadRequestException('This route has no earlier order to go back to');
+    }
+
+    const positions = new Map(original.stopIds.map((id, i) => [id, i]));
+    const position = (id: string) => positions.get(id) ?? Number.MAX_SAFE_INTEGER;
+    const ordered = [...route.stops].sort((a, b) => position(a.id) - position(b.id) || a.sequence - b.sequence);
+    const pending = ordered.filter((s) => this.stopStatus(s) === 'PENDING');
+    const anyResolved = pending.length < ordered.length;
+
+    await this.prisma.$transaction([
+      // Two-phase, same reasoning as reorderStops().
+      ...ordered.map((s, i) =>
+        this.prisma.routeStop.update({ where: { id: s.id }, data: { sequence: -(i + 1) } }),
+      ),
+      ...ordered.map((s, i) =>
+        this.prisma.routeStop.update({ where: { id: s.id }, data: { sequence: i + 1 } }),
+      ),
+      ...(original.hadEtas
+        ? []
+        : [
+            this.prisma.routeStop.updateMany({
+              where: { id: { in: pending.map((s) => s.id) } },
+              data: {
+                plannedEta: null,
+                travelSecondsFromPrevious: null,
+                travelMetersFromPrevious: null,
+                atRiskNotifiedAt: null,
+                lateNotifiedAt: null,
+              },
+            }),
+          ]),
+      this.prisma.route.update({
+        where: { id: routeId },
+        data: {
+          originalOrder: Prisma.DbNull,
+          ...(anyResolved
+            ? {}
+            : {
+                plannedDepartureAt: original.plannedDepartureAt
+                  ? new Date(original.plannedDepartureAt)
+                  : null,
+              }),
+        },
+      }),
+    ]);
+    await this.recordHistory(routeId, RouteHistoryEventType.STOPS_REORDERED, userId, {
+      restoredOriginalOrder: true,
+    });
+    if (route.status === RouteStatus.ACTIVE) {
+      await this.notifyTeam(
+        organizationId,
+        route.teamId,
+        'ROUTE_STOPS_CHANGED',
+        'Your route order was changed',
+        routeId,
+      );
+    }
+    if (original.hadEtas) await this.refreshEtas(routeId);
+    return this.getRoute(organizationId, routeId);
+  }
+
+  // After a customer's edit moved stops on these routes (customer-stop-sync.ts):
+  // same follow-up as correcting a stop's pin. The edit has already saved, so
+  // this never fails it.
+  async afterCustomerSynced(organizationId: string, routeIds: string[]) {
+    for (const routeId of routeIds) {
+      try {
+        const route = await this.prisma.route.findUniqueOrThrow({
+          where: { id: routeId },
+          select: { teamId: true, status: true },
+        });
+        await this.recordHistory(routeId, RouteHistoryEventType.START_SET, undefined, {
+          stopDestination: true,
+          customerSync: true,
+        });
+        if (route.status === RouteStatus.ACTIVE) {
+          await this.notifyTeam(
+            organizationId,
+            route.teamId,
+            'ROUTE_STOPS_CHANGED',
+            "A customer's address on your route was updated",
+            routeId,
+          );
+        }
+        await this.refreshEtas(routeId);
+      } catch (err) {
+        this.logger.warn(`Could not follow up a customer edit on route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  // Called after a delivery resolves (delivered/failed). In plan order this
+  // is pure arithmetic over the cached legs, no OSRM call: an actual
+  // completion time is exactly the kind of "known" data point the spec says
+  // ETA should recompute from, and re-hitting OSRM per delivery would be a
+  // live-tracking-shaped dependency this module deliberately avoids. Only a
+  // driver working out of order needs new legs, since stops they skipped
+  // aren't where the cached legs assume.
   async recalculateEtasAfterResolution(
     deliveryOrderId: string,
     resolvedAt: Date,
@@ -991,26 +1158,110 @@ export class DeliveryRoutesService {
     resolvedStop: { routeId: string; sequence: number },
     resolvedAt: Date,
   ) {
-    const remaining = await this.prisma.routeStop.findMany({
-      where: {
-        routeId: resolvedStop.routeId,
-        sequence: { gt: resolvedStop.sequence },
-      },
-      include: { deliveryOrder: { select: { status: true, signedAt: true } } },
+    const stops = await this.prisma.routeStop.findMany({
+      where: { routeId: resolvedStop.routeId },
+      select: stopSelect,
       orderBy: { sequence: 'asc' },
     });
+    const pending = stops.filter((s) => this.stopStatus(s) === 'PENDING');
+    if (!pending.some((s) => s.plannedEta)) return; // never planned — no ETAs to keep up
+    if (pending[0].sequence < resolvedStop.sequence) {
+      await this.refreshEtas(resolvedStop.routeId, resolvedAt);
+      return;
+    }
+    await this.walkCachedLegs(pending, resolvedAt);
+  }
 
-    let cumulativeMs = resolvedAt.getTime();
-    for (const stop of remaining) {
-      if (this.stopStatus(stop) !== 'PENDING') continue;
-      if (stop.travelSecondsFromPrevious == null) break; // never optimized — nothing to walk forward from
-      cumulativeMs += stop.travelSecondsFromPrevious * 1000;
+  // ETAs from the cached legs, starting at `from`. A stop with no leg (no pin)
+  // is passed over, keeping the stops after it up to date.
+  private async walkCachedLegs(pending: StopRow[], from: Date) {
+    let t = from.getTime();
+    for (const stop of pending) {
+      if (stop.travelSecondsFromPrevious == null) continue;
+      const { deliveryWindowStart, deliveryWindowEnd } = stopTarget(stop);
+      t += stop.travelSecondsFromPrevious * 1000;
+      if (deliveryWindowStart && deliveryWindowStart.getTime() > t) t = deliveryWindowStart.getTime();
+      const plannedEta = new Date(t);
       await this.prisma.routeStop.update({
         where: { id: stop.id },
-        data: { plannedEta: new Date(cumulativeMs), atRiskNotifiedAt: null, lateNotifiedAt: null },
+        data: { plannedEta, ...this.rearmedAlerts(plannedEta, deliveryWindowEnd) },
       });
-      cumulativeMs += STOP_DWELL_SECONDS * 1000;
+      t += STOP_DWELL_SECONDS * 1000;
     }
+  }
+
+  // New legs and ETAs for the pending stops in their current order, after a
+  // change that leaves the cached ones describing a different trip. A route
+  // with no ETAs (built by hand) stays that way. Falls back to the cached legs
+  // if OSRM can't answer. Best-effort: never fails the change that caused it.
+  private async refreshEtas(routeId: string, at = new Date()) {
+    try {
+      const route = await this.prisma.route.findUnique({
+        where: { id: routeId },
+        select: {
+          organizationId: true,
+          status: true,
+          plannedDepartureAt: true,
+          stops: { select: stopSelect, orderBy: { sequence: 'asc' } },
+        },
+      });
+      if (!route || route.status === RouteStatus.COMPLETED || route.status === RouteStatus.CANCELLED) return;
+      const pending = route.stops.filter((s) => this.stopStatus(s) === 'PENDING');
+      if (!pending.some((s) => s.plannedEta)) return;
+
+      const underway = pending.length < route.stops.length;
+      const departAt = underway
+        ? at
+        : new Date(Math.max(at.getTime(), route.plannedDepartureAt?.getTime() ?? 0));
+
+      const start = await this.getStartPoint(route.organizationId);
+      try {
+        const position = this.whereabouts(route, start)?.position;
+        if (!position) throw new Error('Route has no start point');
+        const jobs = pending
+          .map(optimizerJob)
+          .filter((j): j is typeof j & { location: { lat: number; lng: number } } => j.location != null);
+        const scheduled = new Map(
+          (
+            await this.optimizer.scheduleFixedOrder(
+              { lat: position.latitude, lng: position.longitude },
+              departAt,
+              jobs,
+            )
+          ).map((s) => [s.key, s]),
+        );
+        await this.prisma.$transaction(
+          pending.map((stop) => {
+            const next = scheduled.get(stop.id);
+            const plannedEta = next?.eta ?? null;
+            return this.prisma.routeStop.update({
+              where: { id: stop.id },
+              data: {
+                plannedEta,
+                travelSecondsFromPrevious: next?.leg?.durationSeconds ?? null,
+                travelMetersFromPrevious: next?.leg?.distanceMeters ?? null,
+                ...this.rearmedAlerts(plannedEta, stopTarget(stop).deliveryWindowEnd),
+              },
+            });
+          }),
+        );
+      } catch (err) {
+        this.logger.warn(`Using cached legs for route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
+        await this.walkCachedLegs(pending, departAt);
+      }
+    } catch (err) {
+      this.logger.warn(`Could not refresh ETAs for route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Which late/at-risk alerts a new ETA re-arms. One still true stays
+  // sent, so a missed window doesn't alert again after every later stop.
+  private rearmedAlerts(plannedEta: Date | null, deliveryWindowEnd: Date | null) {
+    const l = this.lateness('PENDING', plannedEta, deliveryWindowEnd);
+    return {
+      lateNotifiedAt: l === 'LATE' ? undefined : null,
+      atRiskNotifiedAt: l ? undefined : null,
+    };
   }
 
   async addStop(
@@ -1038,11 +1289,16 @@ export class DeliveryRoutesService {
 
       if (dto.sequence != null) {
         // Shift existing stops at/after the target sequence to make room,
-        // same "insert with resequence" shape as ReorderRouteStopsDto.
-        await tx.routeStop.updateMany({
+        // last first: @@unique([routeId, sequence]) is checked row by row,
+        // so one updateMany increment collides with the stop ahead of it.
+        const after = await tx.routeStop.findMany({
           where: { routeId, sequence: { gte: dto.sequence } },
-          data: { sequence: { increment: 1 } },
+          select: { id: true, sequence: true },
+          orderBy: { sequence: 'desc' },
         });
+        for (const s of after) {
+          await tx.routeStop.update({ where: { id: s.id }, data: { sequence: s.sequence + 1 } });
+        }
       }
 
       return tx.routeStop.create({ data: { routeId, sequence, ...target } });
@@ -1065,6 +1321,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
     return stop;
   }
 
@@ -1248,6 +1505,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
     return this.getRoute(organizationId, routeId);
   }
 
@@ -1306,6 +1564,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
     return this.getRoute(organizationId, routeId);
   }
 
@@ -1539,6 +1798,7 @@ export class DeliveryRoutesService {
         lateNotifiedAt: null,
       },
     });
+    await this.refreshEtas(routeId); // a stop waits for its window to open
     return this.getRoute(organizationId, routeId);
   }
 
@@ -1646,6 +1906,7 @@ export class DeliveryRoutesService {
         target.id,
       );
     }
+    await this.refreshEtas(target.id);
     return created;
   }
 
@@ -1674,6 +1935,7 @@ export class DeliveryRoutesService {
       include: { stops: { select: { id: true } } },
     });
     if (!route) throw new NotFoundException('Route not found');
+    this.assertRouteOpen(route);
 
     const routeStopIds = new Set(route.stops.map((s) => s.id));
     const givenIds = new Set(dto.stops.map((s) => s.stopId));
@@ -1684,6 +1946,9 @@ export class DeliveryRoutesService {
       throw new BadRequestException(
         'The reorder list must include every stop on this route exactly once',
       );
+    }
+    if (new Set(dto.stops.map((s) => s.sequence)).size !== dto.stops.length) {
+      throw new BadRequestException('Two stops cannot share the same position');
     }
 
     // Two-phase update avoids transiently colliding with the
@@ -1716,6 +1981,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
 
     return this.getRoute(organizationId, routeId);
   }
@@ -1759,6 +2025,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
   }
 
   // Follow-up for a stop deleted from outside this service (e.g.
@@ -1791,6 +2058,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    await this.refreshEtas(routeId);
   }
 
   // Follow-up for DeliveryOrderService.rescheduleDelivery(): the failed
@@ -1822,6 +2090,7 @@ export class DeliveryRoutesService {
         routeId,
       );
     }
+    if (toRouteId) await this.refreshEtas(toRouteId);
   }
 
   // ─── Late / at-risk alerts ──────────────────────────────────────────
@@ -1835,9 +2104,20 @@ export class DeliveryRoutesService {
   async notifyLateStops() {
     const since = new Date(Date.now() - 36 * 60 * 60 * 1000);
     const candidates = await this.prisma.routeStop.findMany({
+      // Only what can still alert: the cap below is across every business, and
+      // finished stops never clear these flags, so they'd crowd out late ones.
       where: {
-        OR: [{ atRiskNotifiedAt: null }, { lateNotifiedAt: null }],
-        supersededAt: null,
+        AND: [
+          pendingStopWhere,
+          { OR: [{ atRiskNotifiedAt: null }, { lateNotifiedAt: null }] },
+          {
+            OR: [
+              { plannedEta: { not: null } },
+              { deliveryWindowEnd: { not: null } },
+              { deliveryOrder: { deliveryWindowEnd: { not: null } } },
+            ],
+          },
+        ],
         route: {
           status: { in: [RouteStatus.PLANNED, RouteStatus.ACTIVE] },
           routeDate: { gte: since },
@@ -2011,7 +2291,10 @@ export class DeliveryRoutesService {
   ) {
     const stops = route.stops.map((stop) => this.presentStop(stop));
     const resolved = stops
-      .map((stop) => ({ stop, at: stop.signedAt ?? stop.failedAt }))
+      // A retried delivery is PENDING but still carries its earlier failure.
+      .filter((stop) => stop.status !== 'PENDING')
+      // By outcome: a stop superseded by a retry still sees the DO's later signedAt.
+      .map((stop) => ({ stop, at: stop.status === 'DELIVERED' ? stop.signedAt : stop.failedAt }))
       .filter((r): r is { stop: (typeof stops)[number]; at: Date } => r.at != null)
       .sort((a, b) => b.at.getTime() - a.at.getTime());
     const last = resolved[0];
@@ -2048,7 +2331,7 @@ export class DeliveryRoutesService {
       plannedDepartureAt: route.plannedDepartureAt,
       // Best guess at the driver's position right now.
       position:
-        lastStop?.latitude != null
+        lastStop?.latitude != null && lastStop.longitude != null
           ? { latitude: lastStop.latitude, longitude: lastStop.longitude, source: 'LAST_STOP' as const }
           : start
             ? { latitude: start.latitude, longitude: start.longitude, source: 'DEPOT' as const }

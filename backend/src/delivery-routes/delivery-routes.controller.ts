@@ -287,6 +287,17 @@ export class DeliveryRoutesController {
     );
   }
 
+  @Post(':id/restore-order')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  restoreOrder(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Req() req,
+  ) {
+    return this.deliveryRoutesService.restoreOriginalOrder(organizationId, routeId, req.user.sub);
+  }
+
   @Post(':id/optimize')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'USER')

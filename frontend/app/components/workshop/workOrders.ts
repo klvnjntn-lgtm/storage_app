@@ -34,6 +34,8 @@ export type WorkOrder = {
   id: string;
   number: string;
   status: WorkOrderStatus;
+  // Days untouched while still holding parts, once that's 30+; else null.
+  idleDays?: number | null;
   customerId: string;
   vehicleId: string;
   mechanicId: string | null;

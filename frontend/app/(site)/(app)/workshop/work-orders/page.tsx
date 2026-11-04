@@ -5,7 +5,7 @@ import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ClipboardList, Plus, Search, Car, User } from 'lucide-react';
+import { ClipboardList, Plus, Search, Car, User, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
@@ -156,6 +156,15 @@ export default function WorkOrdersPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-md border font-medium ${statusStyle(w.status)}`}>
                     {t(`workshop.workOrders.status.${w.status}`)}
                   </span>
+                  {w.idleDays != null && (
+                    <span
+                      title={t('workshop.workOrders.idleHoldingHint')}
+                      className="text-xs px-2 py-0.5 rounded-md border font-medium border-amber-300 bg-amber-50 text-amber-800 inline-flex items-center gap-1"
+                    >
+                      <Clock size={11} aria-hidden="true" />
+                      {t('workshop.workOrders.idleHolding', { days: w.idleDays })}
+                    </span>
+                  )}
                 </div>
                 <p className="font-semibold mt-1 flex items-center gap-1.5 truncate">
                   <Car size={14} className="text-blue-600/60 shrink-0" />
