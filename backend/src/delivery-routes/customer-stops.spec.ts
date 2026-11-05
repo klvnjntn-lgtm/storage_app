@@ -18,6 +18,7 @@ import { StorageModule } from '../storage/storage.module';
 import { DeliveryRoutesModule } from './delivery-routes.module';
 import { DeliveryRoutesService, pendingStopWhere } from './delivery-routes.service';
 import { STOP_DWELL_SECONDS } from './route-optimizer.service';
+import { resolveTimezone, wallTimeOnBusinessDay } from '../accounting/business-date';
 import type { RouteOptimizerService, UnscheduledReason } from './route-optimizer.service';
 import { StopProofService } from './stop-proof.service';
 
@@ -576,6 +577,52 @@ describe('Team routes & customer stops', () => {
       const depot = (await routes.getStartPoint(orgId))!;
       expect(input.depot).toEqual({ lat: depot.latitude, lng: depot.longitude });
       expect(input.vehicles[0].availableFrom).toEqual(planned);
+    });
+
+    it('starts a future route with no departure at 08:00 on its own date, not now', async () => {
+      const { route } = await mkOptimizable();
+      const date = '2032-03-01';
+      await prisma.route.update({
+        where: { id: route.id },
+        data: { plannedDepartureAt: null, routeDate: new Date(`${date}T00:00:00.000Z`) },
+      });
+      const spy = spyOptimizer();
+
+      await routes.optimize(orgId, route.id, {});
+
+      const org = await prisma.organization.findUniqueOrThrow({ where: { id: orgId } });
+      const start = wallTimeOnBusinessDay(new Date(`${date}T00:00:00.000Z`), '08:00', resolveTimezone(org));
+      expect(spy.mock.calls[0][0].vehicles[0].availableFrom).toEqual(start);
+      const saved = await prisma.route.findUniqueOrThrow({ where: { id: route.id } });
+      expect(saved.plannedDepartureAt).toEqual(start);
+    });
+
+    it('starts a past-dated route with no departure from now', async () => {
+      const { route } = await mkOptimizable();
+      await prisma.route.update({ where: { id: route.id }, data: { plannedDepartureAt: null } });
+      const spy = spyOptimizer();
+      const before = Date.now();
+
+      await routes.optimize(orgId, route.id, {});
+
+      expect(spy.mock.calls[0][0].vehicles[0].availableFrom.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('starts a route underway with no departure from now, even on a future date', async () => {
+      const { route, stops } = await mkOptimizable();
+      await resolve(stops[0].id, 10, 1.3);
+      await prisma.route.update({
+        where: { id: route.id },
+        data: { plannedDepartureAt: null, routeDate: new Date('2032-03-02T00:00:00.000Z') },
+      });
+      const spy = spyOptimizer();
+      const before = Date.now();
+
+      await routes.optimize(orgId, route.id, {});
+
+      const from = spy.mock.calls[0][0].vehicles[0].availableFrom.getTime();
+      expect(from).toBeGreaterThanOrEqual(before);
+      expect(from).toBeLessThanOrEqual(Date.now());
     });
 
     it("falls back to the depot when no road leaves the driver's last spot", async () => {

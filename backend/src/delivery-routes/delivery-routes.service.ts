@@ -915,12 +915,12 @@ export class DeliveryRoutesService {
     const now = new Date();
     const anyResolved = pendingStops.length < route.stops.length;
     const underway = anyResolved || route.status === RouteStatus.ACTIVE;
-    const asked = dto.departureAt
-      ? new Date(dto.departureAt)
-      : (route.plannedDepartureAt ?? now);
+    const asked = dto.departureAt ? new Date(dto.departureAt) : route.plannedDepartureAt;
     // The route page sends its departure field, filled in with the old plan,
-    // so a time already gone has to be caught here.
-    const requestedDeparture = underway && asked < now ? now : asked;
+    // so a time already gone has to be caught here. Not started and nothing
+    // asked: left to the route's own day (see driverAvailability), so a future
+    // route doesn't get ETAs for today, which the late-stop alerts would act on.
+    const requestedDeparture = underway ? (asked && asked > now ? asked : now) : (asked ?? undefined);
     const availability = (
       await this.teamAvailability(
         organizationId,
