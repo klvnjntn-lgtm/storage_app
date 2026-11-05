@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { START_ICON_HEIGHT, START_ICON_HTML, START_ICON_WIDTH } from './startPointIcon';
 
 export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -31,6 +32,13 @@ export type MapDriver = {
   detail?: string | null;
   // Grey when we only know the depot, not a stop they've reached.
   muted?: boolean;
+};
+
+// Where the business's routes leave from.
+export type MapStartPoint = {
+  latitude: number;
+  longitude: number;
+  label: string;
 };
 
 // Jakarta — matches Organization.timezone's own "Asia/Jakarta" default,
@@ -61,6 +69,14 @@ const pickedIcon = L.divIcon({
   html: `<div style="background:#2563eb;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 0 1px rgba(0,0,0,0.3)"></div>`,
   iconSize: [18, 18],
   iconAnchor: [9, 9],
+});
+
+const startIcon = L.divIcon({
+  className: '',
+  html: START_ICON_HTML,
+  iconSize: [START_ICON_WIDTH, START_ICON_HEIGHT],
+  iconAnchor: [START_ICON_WIDTH / 2, START_ICON_HEIGHT],
+  popupAnchor: [0, -START_ICON_HEIGHT],
 });
 
 function driverIcon(badge: string, muted: boolean) {
@@ -135,6 +151,7 @@ function ClickToPick({ onPick }: { onPick: (lat: number, lng: number) => void })
 export default function DeliveryMapInner({
   stops,
   drivers = [],
+  startPoint = null,
   height = 320,
   pickMode = false,
   pickedPosition = null,
@@ -143,6 +160,7 @@ export default function DeliveryMapInner({
 }: {
   stops: MapStop[];
   drivers?: MapDriver[];
+  startPoint?: MapStartPoint | null;
   height?: number;
   pickMode?: boolean;
   pickedPosition?: { lat: number; lng: number } | null;
@@ -153,6 +171,7 @@ export default function DeliveryMapInner({
   const positions: [number, number][] = [
     ...stops.map((s): [number, number] => [s.latitude, s.longitude]),
     ...drivers.map((d): [number, number] => [d.latitude, d.longitude]),
+    ...(startPoint ? [[startPoint.latitude, startPoint.longitude] as [number, number]] : []),
   ];
   const center = positions[0] ?? FALLBACK_CENTER;
 
@@ -185,6 +204,13 @@ export default function DeliveryMapInner({
             </Popup>
           </Marker>
         ))}
+        {startPoint && (
+          <Marker position={[startPoint.latitude, startPoint.longitude]} icon={startIcon} zIndexOffset={500}>
+            <Popup>
+              <div className="text-sm font-semibold">{startPoint.label}</div>
+            </Popup>
+          </Marker>
+        )}
         {drivers.map((driver) => (
           <Marker
             key={`driver-${driver.id}`}

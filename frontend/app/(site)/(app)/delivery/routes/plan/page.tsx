@@ -399,7 +399,13 @@ function RoutePlanInner() {
               <p className="text-xs text-gray-500">{t('delivery.plan.etaNote')}</p>
             </div>
 
-            {previewMapStops.length > 0 && <DeliveryMap stops={previewMapStops} height={320} />}
+            {previewMapStops.length > 0 && (
+              <DeliveryMap
+                stops={previewMapStops}
+                height={320}
+                startPoint={{ ...preview.depot, label: t('delivery.routeDetail.startPointLabel') }}
+              />
+            )}
 
             {preview.routes.map((r) => (
               <div key={r.team.id} className={sectionClass}>

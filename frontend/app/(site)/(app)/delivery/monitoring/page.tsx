@@ -97,6 +97,7 @@ export default function DeliveryMonitoringPage() {
   const [summary, setSummary] = useState<Summary>({ total: 0, delivered: 0, pending: 0, failed: 0, atRisk: 0, late: 0 });
   const [byTeam, setByTeam] = useState<TeamProgress[]>([]);
   const [mapStops, setMapStops] = useState<MonitoringMapStop[]>([]);
+  const [startPoint, setStartPoint] = useState<{ latitude: number; longitude: number } | null>(null);
   // '' = all teams. Narrows the map only; the stats and team list stay org-wide.
   const [mapTeamId, setMapTeamId] = useState(() => getInitialParam<string>('team', ''));
   const [loading, setLoading] = useState(false);
@@ -153,6 +154,16 @@ export default function DeliveryMonitoringPage() {
       }
     }
   }
+
+  // Doesn't change with the date, so it stays out of the refresh. Only decorates
+  // the map, so a failure just leaves the icon off.
+  useEffect(() => {
+    if (!authorized) return;
+    apiFetch('/delivery-routes/start-point')
+      .then((res) => (res.ok ? res.json().catch(() => null) : null))
+      .then(setStartPoint)
+      .catch(() => {});
+  }, [authorized]);
 
   useEffect(() => {
     if (authorized) load();
@@ -306,7 +317,11 @@ export default function DeliveryMonitoringPage() {
                 className="w-full sm:w-72"
               />
             </div>
-            <DeliveryMap stops={visibleMapStops} drivers={mapDrivers} />
+            <DeliveryMap
+              stops={visibleMapStops}
+              drivers={mapDrivers}
+              startPoint={startPoint && { ...startPoint, label: t('delivery.routeDetail.startPointLabel') }}
+            />
             <p className="text-xs text-gray-500">{t('delivery.monitoring.positionHint')}</p>
           </div>
         )}

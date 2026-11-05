@@ -802,7 +802,11 @@ export default function DeliveryRouteDetailPage() {
 
         {mapStops.length > 0 && (
           <div data-tour="dlv-route-map" ref={mapBoxRef} className="scroll-mt-28">
-            <DeliveryMap stops={mapStops} focus={mapFocus} />
+            <DeliveryMap
+              stops={mapStops}
+              focus={mapFocus}
+              startPoint={route.startPoint && { ...route.startPoint, label: t('delivery.routeDetail.startPointLabel') }}
+            />
           </div>
         )}
 

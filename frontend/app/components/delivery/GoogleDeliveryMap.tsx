@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { AdvancedMarker, APIProvider, InfoWindow, Map, useMap } from '@vis.gl/react-google-maps';
-import type { MapDriver, MapStop, StopStatus } from './DeliveryMapInner';
+import type { MapDriver, MapStartPoint, MapStop, StopStatus } from './DeliveryMapInner';
+import { START_ICON_HEIGHT, START_ICON_HTML } from './startPointIcon';
 
 // Google Maps version of DeliveryMapInner — same props, so pages don't
 // know which one they get (DeliveryMap picks). Used whenever
@@ -26,7 +27,7 @@ const STATUS_COLOR: Record<StopStatus, string> = {
   FAILED: '#dc2626',
 };
 
-type Popup = { key: string; lat: number; lng: number; label: string; detail?: string | null };
+type Popup = { key: string; lat: number; lng: number; label: string; detail?: string | null; offsetY?: number };
 
 function FitBounds({ positions }: { positions: google.maps.LatLngLiteral[] }) {
   const map = useMap();
@@ -83,6 +84,7 @@ const dotStyle = (color: string, size: number, border: number) => ({
 export default function GoogleDeliveryMap({
   stops,
   drivers = [],
+  startPoint = null,
   height = 320,
   pickMode = false,
   pickedPosition = null,
@@ -91,6 +93,7 @@ export default function GoogleDeliveryMap({
 }: {
   stops: MapStop[];
   drivers?: MapDriver[];
+  startPoint?: MapStartPoint | null;
   height?: number;
   pickMode?: boolean;
   pickedPosition?: { lat: number; lng: number } | null;
@@ -101,6 +104,7 @@ export default function GoogleDeliveryMap({
   const positions = [
     ...stops.map((s) => ({ lat: s.latitude, lng: s.longitude })),
     ...drivers.map((d) => ({ lat: d.latitude, lng: d.longitude })),
+    ...(startPoint ? [{ lat: startPoint.latitude, lng: startPoint.longitude }] : []),
     ...(pickedPosition ? [pickedPosition] : []),
   ];
 
@@ -137,6 +141,26 @@ export default function GoogleDeliveryMap({
               <div style={dotStyle(stop.color ?? STATUS_COLOR[stop.status], 16, 2)} />
             </AdvancedMarker>
           ))}
+          {startPoint && (
+            <AdvancedMarker
+              position={{ lat: startPoint.latitude, lng: startPoint.longitude }}
+              anchorLeft="-50%"
+              anchorTop="-100%"
+              zIndex={500}
+              onClick={() =>
+                setPopup({
+                  key: 'start-point',
+                  lat: startPoint.latitude,
+                  lng: startPoint.longitude,
+                  label: startPoint.label,
+                  offsetY: -START_ICON_HEIGHT,
+                })
+              }
+            >
+              {/* A fixed string from startPointIcon.ts, no outside data. */}
+              <div dangerouslySetInnerHTML={{ __html: START_ICON_HTML }} />
+            </AdvancedMarker>
+          )}
           {drivers.map((driver) => (
             <AdvancedMarker
               key={`driver-${driver.id}`}
@@ -182,7 +206,7 @@ export default function GoogleDeliveryMap({
           {popup && (
             <InfoWindow
               position={{ lat: popup.lat, lng: popup.lng }}
-              pixelOffset={[0, -12]}
+              pixelOffset={[0, popup.offsetY ?? -12]}
               headerDisabled
               onCloseClick={() => setPopup(null)}
             >
