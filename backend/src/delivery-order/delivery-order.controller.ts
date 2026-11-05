@@ -220,13 +220,17 @@ export class DeliveryOrderController {
   updateDetails(
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
+    @Req() req,
     @Body() dto: UpdateDeliveryOrderDetailsDto,
   ) {
+    // undefined = leave as it is, null = clear it.
+    const windowEdge = (value: string | null | undefined) =>
+      value == null ? value : new Date(value);
     return this.deliveryOrderService.updateDetails(organizationId, id, {
       priority: dto.priority,
-      deliveryWindowStart: dto.deliveryWindowStart ? new Date(dto.deliveryWindowStart) : undefined,
-      deliveryWindowEnd: dto.deliveryWindowEnd ? new Date(dto.deliveryWindowEnd) : undefined,
-    });
+      deliveryWindowStart: windowEdge(dto.deliveryWindowStart),
+      deliveryWindowEnd: windowEdge(dto.deliveryWindowEnd),
+    }, req.user.sub);
   }
 
   @Post(':id/reschedule')

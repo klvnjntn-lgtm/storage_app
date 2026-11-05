@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { display } from '@/lib/fonts';
-import { BarChart3, RefreshCw, AlertTriangle, MapPin, Navigation } from 'lucide-react';
+import { BarChart3, RefreshCw, AlertTriangle, MapPin, Navigation, CheckCircle2, XCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap, { type MapDriver, type MapStop } from '@/app/components/delivery/DeliveryMap';
@@ -30,7 +30,16 @@ type Whereabouts = {
   plannedDepartureAt: string | null;
   position: { latitude: number; longitude: number; source: 'LAST_STOP' | 'DEPOT' } | null;
 };
-type TeamProgress = Summary & Whereabouts & { routeId: string; team: PickerTeam };
+// Finished stops in the order they were done; sequence stays the route's number.
+type TimelineEntry = {
+  stopId: string;
+  sequence: number;
+  label: string;
+  status: 'DELIVERED' | 'FAILED';
+  at: string;
+  durationSeconds: number | null;
+};
+type TeamProgress = Summary & Whereabouts & { routeId: string; team: PickerTeam; timeline: TimelineEntry[] };
 // Prisma Decimal fields serialize as strings over JSON, not numbers.
 type MapStopRaw = {
   id: string;
@@ -94,13 +103,17 @@ export default function DeliveryMonitoringPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const inFlight = useRef(false);
+  const latestRequest = useRef(0);
   const isToday = date === todayIso();
   useSyncQueryParams({ date: isToday ? null : date, team: mapTeamId });
 
-  // silent: background refresh — no loading state, keeps the last good
-  // data on screen if a poll fails.
+  // silent: background refresh — no loading state, keeps the last good data on
+  // screen if a poll fails, and skipped while something's already loading. A
+  // visible load always runs (a new date mustn't wait), and only the newest
+  // request's answer is used, so a slow poll can't show another day's numbers.
   async function load(silent = false) {
-    if (inFlight.current) return;
+    if (silent && inFlight.current) return;
+    const request = ++latestRequest.current;
     inFlight.current = true;
     if (!silent) {
       setLoading(true);
@@ -114,22 +127,30 @@ export default function DeliveryMonitoringPage() {
       ]);
       if (!summaryRes.ok || !teamsRes.ok) {
         const body = await (summaryRes.ok ? teamsRes : summaryRes).json().catch(() => null);
+        if (request !== latestRequest.current) return;
         setError(body?.message ?? t('delivery.monitoring.requestFailed', { status: summaryRes.status }));
         return;
       }
-      setSummary(await summaryRes.json());
-      setByTeam(await teamsRes.json());
-      if (mapRes.ok) {
-        const raw: MapStopRaw[] = await mapRes.json();
-        setMapStops(raw.map((s) => ({ ...s, latitude: Number(s.latitude), longitude: Number(s.longitude) })));
+      const [summaryData, teamsData, mapData]: [Summary, TeamProgress[], MapStopRaw[] | null] = await Promise.all([
+        summaryRes.json(),
+        teamsRes.json(),
+        mapRes.ok ? mapRes.json() : null,
+      ]);
+      if (request !== latestRequest.current) return;
+      setSummary(summaryData);
+      setByTeam(teamsData);
+      if (mapData) {
+        setMapStops(mapData.map((s) => ({ ...s, latitude: Number(s.latitude), longitude: Number(s.longitude) })));
       }
       setUpdatedAt(new Date());
       setError(null);
     } catch {
-      if (!silent) setError(t('delivery.monitoring.couldNotReachServer'));
+      if (!silent && request === latestRequest.current) setError(t('delivery.monitoring.couldNotReachServer'));
     } finally {
-      inFlight.current = false;
-      setLoading(false);
+      if (request === latestRequest.current) {
+        inFlight.current = false;
+        setLoading(false);
+      }
     }
   }
 
@@ -292,56 +313,64 @@ export default function DeliveryMonitoringPage() {
 
         <div data-tour="dlv-mon-teams" className="space-y-2">
           <h2 className="text-sm font-semibold">{t('delivery.monitoring.byTeam')}</h2>
+          {byTeam.some((d) => d.timeline.length > 0) && (
+            <p className="text-[11px] text-gray-500">{t('delivery.monitoring.timelineHint')}</p>
+          )}
           {!loading && byTeam.length === 0 && (
             <p className="text-sm text-gray-500">{t('delivery.monitoring.noTeams')}</p>
           )}
           {byTeam.map((d) => {
             const done = d.delivered + d.failed;
             return (
-              <Link
+              <div
                 key={d.routeId}
-                href={`/delivery/routes/${d.routeId}`}
-                className="block bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors"
+                className="bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium truncate min-w-0">{teamLabel(d.team, t('delivery.teams.noDriver'))}</span>
-                  <span className="text-xs text-gray-600 shrink-0 flex items-center gap-2">
-                    {d.late > 0 && (
-                      <span className="inline-flex items-center gap-0.5 text-red-600 font-semibold">
-                        <AlertTriangle size={11} />
-                        {d.late} {t('delivery.monitoring.late').toLowerCase()}
+                <Link
+                  href={`/delivery/routes/${d.routeId}`}
+                  className="block p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium truncate min-w-0">{teamLabel(d.team, t('delivery.teams.noDriver'))}</span>
+                    <span className="text-xs text-gray-600 shrink-0 flex items-center gap-2">
+                      {d.late > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-red-600 font-semibold">
+                          <AlertTriangle size={11} />
+                          {d.late} {t('delivery.monitoring.late').toLowerCase()}
+                        </span>
+                      )}
+                      {d.atRisk > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-amber-600 font-semibold">
+                          <AlertTriangle size={11} />
+                          {d.atRisk} {t('delivery.monitoring.atRisk').toLowerCase()}
+                        </span>
+                      )}
+                      {d.failed > 0 && (
+                        <span className="text-red-600 font-semibold">
+                          {d.failed} {t('delivery.monitoring.failed').toLowerCase()}
+                        </span>
+                      )}
+                      <span>
+                        <span className="text-green-600 font-semibold">{d.delivered}</span>/{d.total}
                       </span>
-                    )}
-                    {d.atRisk > 0 && (
-                      <span className="inline-flex items-center gap-0.5 text-amber-600 font-semibold">
-                        <AlertTriangle size={11} />
-                        {d.atRisk} {t('delivery.monitoring.atRisk').toLowerCase()}
-                      </span>
-                    )}
-                    {d.failed > 0 && (
-                      <span className="text-red-600 font-semibold">
-                        {d.failed} {t('delivery.monitoring.failed').toLowerCase()}
-                      </span>
-                    )}
-                    <span>
-                      <span className="text-green-600 font-semibold">{d.delivered}</span>/{d.total}
                     </span>
-                  </span>
-                </div>
-                {d.total > 0 && (
-                  <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden flex" aria-hidden="true">
-                    <div className="bg-green-500" style={{ width: `${(d.delivered / d.total) * 100}%` }} />
-                    <div className="bg-red-400" style={{ width: `${(d.failed / d.total) * 100}%` }} />
-                    {done < d.total && d.late > 0 && (
-                      <div className="bg-red-600" style={{ width: `${(d.late / d.total) * 100}%` }} />
-                    )}
-                    {done < d.total && d.atRisk > 0 && (
-                      <div className="bg-amber-400" style={{ width: `${(d.atRisk / d.total) * 100}%` }} />
-                    )}
                   </div>
-                )}
-                <Whereabouts d={d} isToday={isToday} now={now} />
-              </Link>
+                  {d.total > 0 && (
+                    <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden flex" aria-hidden="true">
+                      <div className="bg-green-500" style={{ width: `${(d.delivered / d.total) * 100}%` }} />
+                      <div className="bg-red-400" style={{ width: `${(d.failed / d.total) * 100}%` }} />
+                      {done < d.total && d.late > 0 && (
+                        <div className="bg-red-600" style={{ width: `${(d.late / d.total) * 100}%` }} />
+                      )}
+                      {done < d.total && d.atRisk > 0 && (
+                        <div className="bg-amber-400" style={{ width: `${(d.atRisk / d.total) * 100}%` }} />
+                      )}
+                    </div>
+                  )}
+                  <Whereabouts d={d} isToday={isToday} now={now} />
+                </Link>
+                <CompletionTimeline timeline={d.timeline} />
+              </div>
             );
           })}
         </div>
@@ -392,6 +421,56 @@ function Whereabouts({ d, isToday, now }: { d: TeamProgress; isToday: boolean; n
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// What each stop took, in the order the driver really did them (which may not
+// be the route's order). The #number is still the stop's number on the route.
+function CompletionTimeline({ timeline }: { timeline: TimelineEntry[] }) {
+  const { t } = useLanguage();
+  if (timeline.length === 0) return null;
+
+  const duration = (seconds: number) => {
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) return t('delivery.monitoring.durationUnderMinute');
+    if (minutes < 60) return t('delivery.monitoring.durationMinutes', { n: minutes });
+    return t('delivery.monitoring.durationHours', { h: Math.floor(minutes / 60), m: minutes % 60 });
+  };
+  // Without the first stop's time a total would come up short, so don't show one.
+  const total =
+    timeline[0].durationSeconds != null
+      ? timeline.reduce((sum, entry) => sum + (entry.durationSeconds ?? 0), 0)
+      : null;
+
+  return (
+    <div className="border-t border-gray-100 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-gray-500">
+        <span className="truncate">{t('delivery.monitoring.completionOrder')}</span>
+        {total != null && (
+          <span className="shrink-0">{t('delivery.monitoring.totalTime', { time: duration(total) })}</span>
+        )}
+      </div>
+      <ol className="mt-1 max-h-56 overflow-y-auto divide-y divide-gray-100">
+        {timeline.map((entry) => {
+          const Icon = entry.status === 'FAILED' ? XCircle : CheckCircle2;
+          return (
+            <li key={entry.stopId} className="flex items-center gap-2 py-1 text-xs">
+              <span className="w-7 shrink-0 font-medium text-gray-400">#{entry.sequence}</span>
+              <Icon
+                size={12}
+                className={`shrink-0 ${entry.status === 'FAILED' ? 'text-red-500' : 'text-green-600'}`}
+                aria-label={t(`delivery.routeDetail.statusLabel.${entry.status}`)}
+              />
+              <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+              <span className="shrink-0 tabular-nums text-gray-500">{clock(entry.at)}</span>
+              <span className="w-24 shrink-0 text-right font-semibold tabular-nums text-gray-800">
+                {entry.durationSeconds != null ? duration(entry.durationSeconds) : '—'}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

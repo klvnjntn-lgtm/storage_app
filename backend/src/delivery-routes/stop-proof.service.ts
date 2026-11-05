@@ -114,6 +114,43 @@ export class StopProofService {
     return { hasPhoto: true };
   }
 
+  // See DeliveryRoutesService.resetStopResult. The files go after it commits,
+  // including a landmark the customer got from this proof, since the photo may
+  // be the very mistake being undone. A file that won't delete only logs.
+  async resetStop(
+    organizationId: string,
+    routeId: string,
+    stopId: string,
+    requester: Requester,
+  ) {
+    const { photoKeys, landmarkSource } = await this.routes.resetStopResult(
+      organizationId,
+      routeId,
+      stopId,
+      requester,
+    );
+    try {
+      const landmarks = await this.prisma.customerLocationPhoto.findMany({
+        where: { organizationId, fromProofOf: landmarkSource },
+        select: { id: true, storageKey: true },
+      });
+      await this.prisma.customerLocationPhoto.deleteMany({
+        where: { id: { in: landmarks.map((l) => l.id) } },
+      });
+      photoKeys.push(...landmarks.map((l) => l.storageKey));
+    } catch (err) {
+      this.logger.warn(`Could not remove landmark from reset stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    for (const key of photoKeys) {
+      await this.storage
+        .delete(key)
+        .catch((err: unknown) =>
+          this.logger.warn(`Could not delete photo ${key} of reset stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+    }
+    return this.routes.getRoute(organizationId, routeId, requester);
+  }
+
   // The receiver name as the driver types it, so the office sees it even
   // if Done is never tapped. Only while the stop is open.
   async saveDraft(

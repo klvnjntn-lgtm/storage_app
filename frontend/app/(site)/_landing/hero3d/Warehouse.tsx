@@ -15,9 +15,8 @@ import {
   RACK_DEPTH,
   RACK_H,
   ROWS,
-  SLOT_A03,
-  SLOT_B11,
   SLOT_LOW,
+  SLOT_PICK,
   rowXZ,
   slotLabel,
   type Row,
@@ -29,7 +28,11 @@ import {
    Repeated parts are instanced so the whole set is a handful of draw
    calls. Stock layout is seeded, so every visit sees the same racks. */
 
-const PLATFORM = { w: 10.8, d: 7 };
+export const PLATFORM = { x0: -5.6, x1: 6.6, z0: -3.6, z1: 5.3 };
+const P_W = PLATFORM.x1 - PLATFORM.x0;
+const P_D = PLATFORM.z1 - PLATFORM.z0;
+const P_CX = (PLATFORM.x0 + PLATFORM.x1) / 2;
+const P_CZ = (PLATFORM.z0 + PLATFORM.z1) / 2;
 const CRATE_COLORS = ['#b98a55', '#a87b4a', '#c79a63', '#2563eb', '#475569', '#1d4ed8'];
 
 function seeded(i: number) {
@@ -40,13 +43,15 @@ function seeded(i: number) {
 type V3 = [number, number, number];
 type Box = { p: V3; s: V3; c?: string };
 
+// A mixed catalogue on purpose: the shelves read as "any business with
+// stock", not one industry.
 const PARTS = [
-  ['BRK', 'brakePads'],
+  ['WTR', 'waterGallon'],
   ['FLT', 'oilFilter'],
-  ['BLT', 'timingBelt'],
-  ['SPK', 'sparkPlug'],
-  ['BRG', 'wheelBearing'],
-  ['CLT', 'clutchKit'],
+  ['BEV', 'beverageCase'],
+  ['BRK', 'brakePads'],
+  ['PKG', 'packaging'],
+  ['LUB', 'engineOil'],
 ] as const;
 export type PartKey = (typeof PARTS)[number][1];
 
@@ -59,7 +64,7 @@ function rackParts() {
   const beams: Box[] = [];
   const decks: Box[] = [];
   const crates: Crate[] = [];
-  const reserved = [SLOT_A03, SLOT_B11];
+  const reserved = [SLOT_PICK];
   let n = 0;
 
   for (const [id, row] of Object.entries(ROWS) as [RowId, Row][]) {
@@ -293,25 +298,24 @@ function Warehouse({
 }) {
   const { uprights, beams, decks, crates } = useMemo(() => rackParts(), []);
   const edge = useMemo(() => {
-    const hw = PLATFORM.w / 2 - 0.08;
-    const hd = PLATFORM.d / 2 - 0.08;
+    const [a, b, c, d] = [PLATFORM.x0 + 0.08, PLATFORM.x1 - 0.08, PLATFORM.z0 + 0.08, PLATFORM.z1 - 0.08];
     return [
-      [-hw, 0.006, -hd],
-      [hw, 0.006, -hd],
-      [hw, 0.006, hd],
-      [-hw, 0.006, hd],
-      [-hw, 0.006, -hd],
+      [a, 0.006, c],
+      [b, 0.006, c],
+      [b, 0.006, d],
+      [a, 0.006, d],
+      [a, 0.006, c],
     ] as [number, number, number][];
   }, []);
 
   return (
     <group>
-      <RoundedBox args={[PLATFORM.w, 0.32, PLATFORM.d]} radius={0.12} smoothness={3} position={[0, -0.16, 0]} receiveShadow>
+      <RoundedBox args={[P_W, 0.32, P_D]} radius={0.12} smoothness={3} position={[P_CX, -0.16, P_CZ]} receiveShadow>
         <meshStandardMaterial color="#0b1324" metalness={0.3} roughness={0.75} />
       </RoundedBox>
       <Grid
-        position={[0, 0.003, 0]}
-        args={[PLATFORM.w - 0.2, PLATFORM.d - 0.2]}
+        position={[P_CX, 0.003, P_CZ]}
+        args={[P_W - 0.2, P_D - 0.2]}
         cellSize={0.5}
         cellThickness={0.6}
         cellColor="#1b2b4a"

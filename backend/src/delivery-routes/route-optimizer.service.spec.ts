@@ -74,16 +74,131 @@ describe('RouteOptimizerService.optimize', () => {
     expect(problem.jobs[1].timeWindow).toEqual([3600, 7 * 24 * 3600]);
   });
 
-  it('sends HIGH as VROOM priority 100 and NORMAL as 0', async () => {
+  it('solves HIGH stops on their own, then normal stops from the last HIGH stop', async () => {
     const { service, vroom } = makeService({
-      solve: async () => ({ routes: [], unassignedJobIds: [1, 2] }),
+      solve: async ({ jobs }) => ({
+        routes: [{ vehicleId: 1, jobIds: jobs.map((j) => j.id) }],
+        unassignedJobIds: [],
+      }),
+    });
+
+    const { routes } = await service.optimize({
+      depot,
+      vehicles: [{ key: 'd1', availableFrom: T0, availableUntil: null }],
+      jobs: [
+        job('n1', 1),
+        job('h1', 5, { priority: DeliveryPriority.HIGH }),
+        job('n2', 2),
+        job('h2', 3, { priority: DeliveryPriority.HIGH }),
+      ],
+    });
+
+    const [highCall, normalCall] = vroom.solve.mock.calls.map(([problem]) => problem);
+    expect(vroom.solve).toHaveBeenCalledTimes(2);
+    expect(highCall.jobs.map((j) => j.id)).toEqual([2, 4]);
+    expect(highCall.vehicles[0].startIndex).toBe(0);
+    expect(normalCall.jobs.map((j) => j.id)).toEqual([1, 3]);
+
+    // h1 at 500s, h2 200s after its dwell; the driver is free after h2's dwell.
+    const h2Eta = 500 + STOP_DWELL_SECONDS + 200;
+    const free = h2Eta + STOP_DWELL_SECONDS;
+    expect(normalCall.vehicles[0].startIndex).toBe(4);
+    expect(normalCall.vehicles[0].timeWindow?.[0]).toBe(free);
+
+    const stops = routes.get('d1')!;
+    expect(stops.map((s) => s.key)).toEqual(['h1', 'h2', 'n1', 'n2']);
+    expect(stops[1].eta).toEqual(at(h2Eta));
+    // n1 is reached from h2 (lat 3 → 1), not from the depot.
+    expect(stops[2].leg).toEqual({ durationSeconds: 200, distanceMeters: 2000 });
+    expect(stops[2].eta).toEqual(at(free + 200));
+  });
+
+  it('starts normal stops from the depot for a driver who got no HIGH stops', async () => {
+    const { service, vroom } = makeService({
+      solve: async ({ jobs }) => ({
+        routes: [{ vehicleId: 1, jobIds: jobs.map((j) => j.id) }],
+        unassignedJobIds: [],
+      }),
+    });
+
+    await service.optimize({
+      depot,
+      vehicles: [
+        { key: 'd1', availableFrom: T0, availableUntil: null },
+        { key: 'd2', availableFrom: T0, availableUntil: null },
+      ],
+      jobs: [job('h', 2, { priority: DeliveryPriority.HIGH }), job('n', 1)],
+    });
+
+    const normalCall = vroom.solve.mock.calls[1][0];
+    expect(normalCall.vehicles.map((v) => v.startIndex)).toEqual([1, 0]);
+    expect(normalCall.vehicles[1].timeWindow?.[0]).toBe(0);
+  });
+
+  it('asks VROOM once when every stop has the same priority', async () => {
+    const { service, vroom } = makeService({
+      solve: async ({ jobs }) => ({
+        routes: [{ vehicleId: 1, jobIds: jobs.map((j) => j.id) }],
+        unassignedJobIds: [],
+      }),
     });
     await service.optimize({
       depot,
       vehicles: [{ key: 'd1', availableFrom: T0, availableUntil: null }],
-      jobs: [job('a', 1, { priority: DeliveryPriority.HIGH }), job('b', 2)],
+      jobs: [
+        job('a', 1, { priority: DeliveryPriority.HIGH }),
+        job('b', 2, { priority: DeliveryPriority.HIGH }),
+      ],
     });
-    expect(vroom.solve.mock.calls[0][0].jobs.map((j) => j.priority)).toEqual([100, 0]);
+    expect(vroom.solve).toHaveBeenCalledTimes(1);
+  });
+
+  it('keepUnassigned keeps a HIGH stop that did not fit ahead of the normal stops', async () => {
+    const { service } = makeService({
+      solve: async ({ jobs }) =>
+        jobs.some((j) => j.id === 3)
+          ? { routes: [{ vehicleId: 1, jobIds: [3] }], unassignedJobIds: [1] }
+          : { routes: [{ vehicleId: 1, jobIds: [2] }], unassignedJobIds: [] },
+      unreachableLats: [9],
+    });
+
+    const { routes, unassigned } = await service.optimize({
+      depot,
+      vehicles: [{ key: 'd1', availableFrom: T0, availableUntil: at(3600) }],
+      jobs: [
+        job('late', 4, { priority: DeliveryPriority.HIGH }),
+        job('normal', 1),
+        job('fits', 2, { priority: DeliveryPriority.HIGH }),
+        job('island', 9, { priority: DeliveryPriority.HIGH }),
+      ],
+      keepUnassigned: true,
+    });
+
+    const stops = routes.get('d1')!;
+    expect(stops.map((s) => s.key)).toEqual(['fits', 'late', 'island', 'normal']);
+    expect(stops[2]).toEqual({ key: 'island', eta: null, leg: null });
+    // normal continues from late (lat 4 → 1), skipping the unreachable stop.
+    expect(stops[3].leg).toEqual({ durationSeconds: 300, distanceMeters: 3000 });
+    expect(unassigned.map((u) => u.key).sort()).toEqual(['island', 'late']);
+  });
+
+  it('explains a normal stop missed because the HIGH stops took the time', async () => {
+    const { service } = makeService({
+      solve: async ({ jobs }) =>
+        jobs[0].id === 1
+          ? { routes: [{ vehicleId: 1, jobIds: [1] }], unassignedJobIds: [] }
+          : { routes: [], unassignedJobIds: [2] },
+    });
+    const { unassigned } = await service.optimize({
+      depot,
+      vehicles: [{ key: 'd1', availableFrom: T0, availableUntil: null }],
+      jobs: [
+        job('h', 5, { priority: DeliveryPriority.HIGH }),
+        // Reachable from the depot in time, but not once h is done.
+        job('n', 1, { windowEnd: at(400) }),
+      ],
+    });
+    expect(unassigned).toEqual([{ key: 'n', reason: 'OUTSIDE_WINDOW' }]);
   });
 
   it('reports missing pins, unreachable pins and past windows without sending them to VROOM', async () => {
@@ -112,6 +227,22 @@ describe('RouteOptimizerService.optimize', () => {
       ]),
     );
     expect(vroom.solve.mock.calls[0][0].jobs).toHaveLength(1);
+  });
+
+  it('calls it the driver\'s time, not the window, when a job was reachable before the run', async () => {
+    const { service } = makeService({
+      solve: async () => ({ routes: [{ vehicleId: 1, jobIds: [1] }], unassignedJobIds: [2] }),
+    });
+    const { unassigned } = await service.optimize({
+      depot,
+      vehicles: [{ key: 'd1', availableFrom: T0, availableUntil: null }],
+      jobs: [
+        job('far', 8),
+        // Reachable straight from the depot, not once 'far' is done.
+        job('near', 2, { windowEnd: at(300) }),
+      ],
+    });
+    expect(unassigned).toEqual([{ key: 'near', reason: 'NO_TIME' }]);
   });
 
   it('explains VROOM-unassigned jobs: window unreachable vs. hours full', async () => {

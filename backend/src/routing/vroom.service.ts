@@ -23,9 +23,6 @@ export type VroomJob = {
   id: number;
   locationIndex: number;
   serviceSeconds: number;
-  // 0–100. When not every delivery fits, VROOM keeps higher-priority jobs
-  // first. It does NOT force them earlier in the visiting order.
-  priority: number;
   timeWindow?: [number, number];
 };
 
@@ -68,7 +65,6 @@ export class VroomService {
         id: j.id,
         location_index: j.locationIndex,
         service: j.serviceSeconds,
-        priority: j.priority,
         ...(j.timeWindow ? { time_windows: [j.timeWindow] } : {}),
       })),
       matrices: { car: input.matrix },

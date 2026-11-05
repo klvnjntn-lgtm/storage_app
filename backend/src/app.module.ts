@@ -45,6 +45,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { PerformanceModule } from './performance/performance.module';
 import { TaxExportModule } from './tax-export/tax-export.module';
+import { TaxReportModule } from './tax-report/tax-report.module';
 import { PartCatalogModule } from './part-catalog/part-catalog.module';
 import { VehicleRemindersModule } from './vehicles/vehicle-reminders.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
@@ -129,6 +130,7 @@ import { SerialsModule } from './serials/serials.module';
     WorkOrdersModule,
     PerformanceModule,
     TaxExportModule,
+    TaxReportModule,
     PartCatalogModule,
     CustomersModule,
     VehicleRemindersModule,

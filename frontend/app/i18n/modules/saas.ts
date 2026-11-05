@@ -48,7 +48,7 @@ export const saas = {
         WAREHOUSE_OPS: 'Stock, receiving, picking, packing and stock sessions.',
         WORKSHOP_RMS: 'Vehicles, service history and service reminders.',
         DELIVERY_DMS: 'Delivery routes, drivers and proof of delivery.',
-        ACCOUNTING: 'Books, expenses, payroll, fixed assets, financial reports and e-Faktur export.',
+        ACCOUNTING: 'Books, expenses, payroll, fixed assets, financial reports and a monthly tax report for your tax admin.',
       },
       plan: {
         custom: 'Custom',
@@ -485,7 +485,7 @@ export const saas = {
         WAREHOUSE_OPS: 'Stok, penerimaan, picking, packing, dan sesi stok.',
         WORKSHOP_RMS: 'Kendaraan, riwayat servis, dan pengingat servis.',
         DELIVERY_DMS: 'Rute pengiriman, sopir, dan bukti pengiriman.',
-        ACCOUNTING: 'Pembukuan, biaya, penggajian, aset tetap, laporan keuangan, dan ekspor e-Faktur.',
+        ACCOUNTING: 'Pembukuan, biaya, penggajian, aset tetap, laporan keuangan, dan laporan pajak bulanan untuk admin pajak.',
       },
       plan: {
         custom: 'Khusus',

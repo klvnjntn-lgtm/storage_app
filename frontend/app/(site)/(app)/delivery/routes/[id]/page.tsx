@@ -24,9 +24,17 @@ import DateTimePicker from '@/app/components/shared/DateTimePicker';
 import { formatDMY, formatDMYTime, parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
+import { SortableStopCard, SortableStops, shakeCard } from '@/app/components/delivery/SortableStops';
 
-// Optimize button is hidden for now; set to true to show it again.
-const SHOW_OPTIMIZE = false;
+// Shows the Optimize button and its "back to original order" button.
+const SHOW_OPTIMIZE = true;
+
+// Drag-to-reorder is hidden for now and the up/down buttons do the job; set to
+// true to bring it back (it replaces the buttons).
+const ENABLE_DRAG_REORDER = false;
+
+// How long a refused move's reason stays on the card.
+const REFUSED_MESSAGE_MS = 4000;
 
 type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -85,6 +93,8 @@ type HistoryEvent = {
   metadata: {
     version?: number;
     stops?: { sequence: number; label: string | null; superseded: boolean }[];
+    // On STOP_RESET: which stop.
+    label?: string;
   } | null;
 };
 
@@ -94,6 +104,8 @@ type RouteDetail = {
   name: string | null;
   routeDate: string;
   status: string;
+  // Bumped on every change to the stop list; a reorder says which it was built from.
+  version: number;
   team: PickerTeam;
   stops: Stop[];
   currentStop: Stop | null;
@@ -118,6 +130,19 @@ function toLocalInputValue(iso: string | null): string {
 function formatEta(iso: string | null): string {
   if (!iso) return '';
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Normal/HIGH pairs the wrong way round among stops still to do; finished stops
+// don't count. A move may not raise this (same rule as reorderStops on the server).
+function priorityInversions(stops: Stop[]) {
+  let normalsSeen = 0;
+  let inversions = 0;
+  for (const stop of stops) {
+    if (stop.status !== 'PENDING') continue;
+    if (stop.priority === 'HIGH') inversions += normalsSeen;
+    else normalsSeen++;
+  }
+  return inversions;
 }
 
 function statusBadge(status: StopStatus, label: string) {
@@ -209,9 +234,12 @@ export default function DeliveryRouteDetailPage() {
 
   const [rescheduleStop, setRescheduleStop] = useState<Stop | null>(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  // silent: swap the data in without the page's loading screen.
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await apiFetch(`/delivery-routes/${id}`);
       if (!res.ok) {
@@ -283,7 +311,7 @@ export default function DeliveryRouteDetailPage() {
       setNewStopPriority('NORMAL');
       setNewStopWindowStart('');
       setNewStopWindowEnd('');
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -291,33 +319,154 @@ export default function DeliveryRouteDetailPage() {
     }
   }
 
-  async function handleMove(stop: Stop, direction: -1 | 1) {
-    if (!route) return;
-    const idx = route.stops.findIndex((s) => s.id === stop.id);
-    const swapWith = route.stops[idx + direction];
-    if (!swapWith) return;
+  // The new order shows at once and saves behind it. Saves run one at a time, and
+  // moves made during one collapse into one more save of the latest order.
+  const queuedOrder = useRef<Stop[] | null>(null);
+  const savingOrder = useRef(false);
+  // The route as the server last had it: what the next save is built on, and
+  // what the screen goes back to if a save fails.
+  const savedRoute = useRef<RouteDetail | null>(null);
+  const [orderSave, setOrderSave] = useState<'idle' | 'saving' | 'saved'>('idle');
+  // Shown beside the stop list: the banner up top may be scrolled out of view.
+  const [listError, setListError] = useState<string | null>(null);
+  const orderSaving = orderSave === 'saving';
+  const savedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [refusedStopId, setRefusedStopId] = useState<string | null>(null);
+  const refusedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-    setBusy(stop.id);
-    setError(null);
+  useEffect(
+    () => () => {
+      clearTimeout(savedTimer.current);
+      clearTimeout(refusedTimer.current);
+    },
+    [],
+  );
+
+  // Closing the tab would drop a move that hasn't reached the server.
+  useEffect(() => {
+    if (!orderSaving) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [orderSaving]);
+
+  // ids: the pending stops in their new order. Finished stops keep their numbers,
+  // and the pending ones share out the numbers that are left.
+  function handleReorder(ids: string[]) {
+    if (!route) return;
+    if (!savingOrder.current) savedRoute.current = route;
+    const byId = new Map(route.stops.map((s) => [s.id, s]));
+    let next = 0;
+    const stops = route.stops.map((s) =>
+      s.status === 'PENDING' ? { ...byId.get(ids[next++])!, sequence: s.sequence } : s,
+    );
+    setRoute({ ...route, stops });
+    setListError(null);
+    void saveOrder(stops);
+  }
+
+  // Same rule as the server: a move may not put more stops on the wrong side.
+  function orderIsValid(ids: string[]) {
+    if (!route) return false;
+    const byId = new Map(route.stops.map((s) => [s.id, s]));
+    return priorityInversions(ids.map((id) => byId.get(id)!)) <= priorityInversions(route.stops);
+  }
+
+  function handleMove(stop: Stop, direction: -1 | 1) {
+    if (!route) return;
+    const ids = route.stops.filter((s) => s.status === 'PENDING').map((s) => s.id);
+    const from = ids.indexOf(stop.id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    if (!orderIsValid(ids)) {
+      shakeCard(stop.id);
+      setRefusedStopId(stop.id);
+      clearTimeout(refusedTimer.current);
+      refusedTimer.current = setTimeout(() => setRefusedStopId(null), REFUSED_MESSAGE_MS);
+      return;
+    }
+    setRefusedStopId(null);
+    handleReorder(ids);
+  }
+
+  async function saveOrder(stops: Stop[]) {
+    queuedOrder.current = stops;
+    if (savingOrder.current) return;
+    savingOrder.current = true;
+    clearTimeout(savedTimer.current);
+    setOrderSave('saving');
+    const giveUp = async (message: string) => {
+      setListError(message);
+      if (savedRoute.current) setRoute(savedRoute.current); // even if the reload below fails
+      await load(true);
+      // A move made while reloading was on the old list, which the reload just replaced.
+      queuedOrder.current = null;
+      setOrderSave('idle');
+    };
     try {
-      const res = await apiFetch(`/delivery-routes/${id}/stops/reorder`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          stops: route.stops.map((s) => {
-            if (s.id === stop.id) return { stopId: s.id, sequence: swapWith.sequence };
-            if (s.id === swapWith.id) return { stopId: s.id, sequence: stop.sequence };
-            return { stopId: s.id, sequence: s.sequence };
+      // Everything that can take a moment stays inside this loop, so a move made
+      // meanwhile is still picked up.
+      while (queuedOrder.current) {
+        const next = queuedOrder.current;
+        queuedOrder.current = null;
+        const res = await apiFetch(`/delivery-routes/${id}/stops/reorder`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            stops: next.map((s) => ({ stopId: s.id, sequence: s.sequence })),
+            expectedVersion: savedRoute.current?.version,
           }),
-        }),
-      });
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          await giveUp(
+            res.status === 409
+              ? t('delivery.routeDetail.orderChangedElsewhere')
+              : (body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status })),
+          );
+          return;
+        }
+        if (body) {
+          savedRoute.current = body;
+          // The reply carries the recalculated ETAs. Skip it if a newer move is waiting.
+          if (!queuedOrder.current) setRoute(body);
+        }
+        if (!queuedOrder.current && showHistory) await loadHistory();
+      }
+      setOrderSave('saved');
+      savedTimer.current = setTimeout(() => setOrderSave('idle'), 2000);
+    } catch {
+      await giveUp(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      savingOrder.current = false;
+    }
+  }
+
+  // One step back for a stop recorded by mistake: its result and photos go, and
+  // it's to-do again. Asked first, since the photo can't be brought back.
+  async function handleResetStop(stop: Stop) {
+    if (
+      !(await dialog.confirm(t('delivery.routeDetail.confirmReset', { name: stop.label }), {
+        danger: true,
+        confirmLabel: t('delivery.routeDetail.resetStop'),
+      }))
+    ) {
+      return;
+    }
+    setBusy(stop.id);
+    setListError(null);
+    try {
+      const res = await apiFetch(`/delivery-routes/${id}/stops/${stop.id}/reset`, { method: 'POST' });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        setListError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        await load(true);
         return;
       }
-      await load();
+      if (body) setRoute(body);
+      if (showHistory) await loadHistory();
     } catch {
-      setError(t('delivery.routeDetail.couldNotReachServer'));
+      setListError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
       setBusy(null);
     }
@@ -334,7 +483,7 @@ export default function DeliveryRouteDetailPage() {
         setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -367,7 +516,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setPickingStop(null);
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -401,7 +550,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setPickingStop(null);
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -431,7 +580,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setPickingStart(false);
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -454,7 +603,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setUnscheduled(body?.unscheduled ?? []);
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -474,7 +623,7 @@ export default function DeliveryRouteDetailPage() {
         setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -502,8 +651,9 @@ export default function DeliveryRouteDetailPage() {
         method: 'PATCH',
         body: JSON.stringify({
           priority: editPriority,
-          deliveryWindowStart: editWindowStart ? new Date(editWindowStart).toISOString() : undefined,
-          deliveryWindowEnd: editWindowEnd ? new Date(editWindowEnd).toISOString() : undefined,
+          // Blank clears it.
+          deliveryWindowStart: editWindowStart ? new Date(editWindowStart).toISOString() : null,
+          deliveryWindowEnd: editWindowEnd ? new Date(editWindowEnd).toISOString() : null,
         }),
       });
       const body = await res.json().catch(() => null);
@@ -512,7 +662,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setEditingStop(null);
-      await load();
+      await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -545,7 +695,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setChangingTeam(false);
-      await load();
+      await load(true);
       if (showHistory) await loadHistory();
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
@@ -569,6 +719,12 @@ export default function DeliveryRouteDetailPage() {
   }
 
   const routeOpen = route.status !== 'COMPLETED' && route.status !== 'CANCELLED';
+  // Finished stops stay put, so only pending ones can move.
+  const pendingIds = route.stops.filter((s) => s.status === 'PENDING').map((s) => s.id);
+  // Held back while another action on this route is running. Saves of the order
+  // itself queue up, so they don't hold it back.
+  const canReorder =
+    !isDriver && routeOpen && !busy && !optimizing && !restoringOrder && !savingDetails && !savingLocation && !savingTeam;
   const mapStops = route.stops
     .filter((s) => s.destinationLatitude && s.destinationLongitude)
     .map<MapStop>((s) => ({
@@ -677,7 +833,7 @@ export default function DeliveryRouteDetailPage() {
             {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
             {SHOW_OPTIMIZE && (
               <button data-tour="dlv-route-optimize"
-                disabled={optimizing || !route.startPoint || route.stops.every((s) => s.status !== 'PENDING')}
+                disabled={optimizing || orderSaving || !route.startPoint || route.stops.every((s) => s.status !== 'PENDING')}
                 onClick={handleOptimize}
                 title={!route.startPoint ? t('delivery.routeDetail.setStart') : undefined}
                 className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
@@ -688,7 +844,7 @@ export default function DeliveryRouteDetailPage() {
             )}
             {SHOW_OPTIMIZE && routeOpen && route.originalOrder != null && (
               <button
-                disabled={optimizing || restoringOrder}
+                disabled={optimizing || restoringOrder || orderSaving}
                 onClick={handleRestoreOrder}
                 className="flex items-center justify-center gap-1.5 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-gray-50 disabled:opacity-50"
               >
@@ -700,7 +856,19 @@ export default function DeliveryRouteDetailPage() {
         )}
 
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{t('delivery.routeDetail.stopsTitle')}</h2>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              {t('delivery.routeDetail.stopsTitle')}
+              {orderSave !== 'idle' && (
+                <span role="status" className="text-[11px] font-normal text-gray-500">
+                  {t(orderSaving ? 'delivery.routeDetail.orderSaving' : 'delivery.routeDetail.orderSaved')}
+                </span>
+              )}
+            </h2>
+            {route.stops.some((s) => s.status === 'PENDING' && s.priority === 'HIGH') && (
+              <p className="text-[11px] text-gray-500">{t('delivery.routeDetail.highPriorityHint')}</p>
+            )}
+          </div>
           {!isDriver && routeOpen && (
             <button data-tour="dlv-route-add-stop"
               onClick={async () => {
@@ -812,7 +980,7 @@ export default function DeliveryRouteDetailPage() {
               </>
             )}
             <button
-              disabled={busy === 'add-stop' || (stopMode === 'CUSTOMER' ? !selectedCustomer : !selectedOrderId)}
+              disabled={busy === 'add-stop' || orderSaving || (stopMode === 'CUSTOMER' ? !selectedCustomer : !selectedOrderId)}
               onClick={handleAddStop}
               className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
             >
@@ -823,14 +991,38 @@ export default function DeliveryRouteDetailPage() {
 
         <div data-tour="dlv-route-stops" className="space-y-2">
           {route.stops.length === 0 && <p className="text-sm text-gray-500">{t('delivery.routeDetail.noStops')}</p>}
-          {route.stops.map((stop, idx) => {
+          {listError && (
+            <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-3 py-2">{listError}</div>
+          )}
+          <SortableStops ids={pendingIds} onReorder={handleReorder} isValidOrder={orderIsValid}>
+          {route.stops.map((stop) => {
+            const pendingIndex = pendingIds.indexOf(stop.id);
+            // A photo sent but never confirmed counts as something to undo too.
+            const canReset =
+              route.status !== 'CANCELLED' &&
+              !(isDriver && route.status === 'COMPLETED') &&
+              !stop.superseded &&
+              (stop.status !== 'PENDING' || stop.hasProofPhoto || !!stop.pendingReceivedBy);
+            // The one map link on the card: where the driver actually was once
+            // there's a record of it, else where the stop is.
+            const mapsAt =
+              stop.status === 'DELIVERED' && stop.completedLatitude
+                ? { lat: stop.completedLatitude, lng: stop.completedLongitude }
+                : stop.status === 'PENDING' && stop.hasProofPhoto && stop.photoLatitude
+                  ? { lat: stop.photoLatitude, lng: stop.photoLongitude }
+                  : { lat: stop.destinationLatitude, lng: stop.destinationLongitude };
             const isCurrent = route.currentStop?.id === stop.id;
             const rowBusy = busy === stop.id;
             const onMap = !!(stop.destinationLatitude && stop.destinationLongitude);
             const focused = mapFocus?.stopId === stop.id;
             return (
-              <div
+              <SortableStopCard
                 key={stop.id}
+                id={stop.id}
+                enabled={ENABLE_DRAG_REORDER && canReorder && stop.status === 'PENDING'}
+                refused={refusedStopId === stop.id}
+                handleLabel={t('delivery.routeDetail.dragToReorder')}
+                refusedMessage={t(stop.priority === 'HIGH' ? 'delivery.routeDetail.highMustStayAbove' : 'delivery.routeDetail.normalCannotGoAbove')}
                 // Clicking the card (not its buttons/inputs) shows the stop on the map.
                 onClick={(e) => {
                   if (!onMap || (e.target as HTMLElement).closest('button, a, input, select, textarea, label, [data-no-map-focus]')) return;
@@ -840,8 +1032,13 @@ export default function DeliveryRouteDetailPage() {
                   focused ? 'border-blue-600 ring-2 ring-blue-200' : isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'
                 } ${onMap ? 'cursor-pointer hover:border-blue-300' : ''}`}
               >
+                {(handle) => (
+                <>
                 <div className="flex items-start sm:items-center gap-3 min-w-0">
-                  <div className="text-xs text-gray-400 font-medium w-6 shrink-0">#{stop.sequence}</div>
+                  <div className="text-xs text-gray-400 font-medium w-6 shrink-0 flex flex-col items-start gap-1">
+                    {handle}
+                    #{stop.sequence}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold truncate flex items-center gap-1.5">
                       {stop.kind === 'CUSTOMER' ? (
@@ -865,7 +1062,6 @@ export default function DeliveryRouteDetailPage() {
                     {stop.status === 'DELIVERED' && (
                       <div className="flex items-center gap-2 flex-wrap">
                         <DeliveryFixBadge accuracy={stop.completedLatitude ? stop.completedAccuracy : null} />
-                        <GoogleMapsLink lat={stop.completedLatitude} lng={stop.completedLongitude} className="!px-2 !py-1" />
                       </div>
                     )}
                     {stop.status === 'DELIVERED' && stop.hasProofPhoto && (
@@ -912,7 +1108,6 @@ export default function DeliveryRouteDetailPage() {
                         {stop.photoLatitude && (
                           <div className="flex items-center gap-2 flex-wrap">
                             <DeliveryFixBadge accuracy={stop.photoAccuracy} />
-                            <GoogleMapsLink lat={stop.photoLatitude} lng={stop.photoLongitude} className="!px-2 !py-1" />
                           </div>
                         )}
                         <ProofPhoto
@@ -1024,6 +1219,19 @@ export default function DeliveryRouteDetailPage() {
                     squeezing the stop details down to nothing beside them. */}
                 <div className="flex items-center gap-2 flex-wrap pl-9 sm:pl-0 sm:flex-nowrap sm:shrink-0">
                   {statusBadge(stop.status, statusLabels[stop.status])}
+                  {/* Beside the status it undoes, in words and away from the
+                      delete-stop bin, which only a pending stop has. */}
+                  {canReset && (
+                    <button
+                      disabled={rowBusy || orderSaving}
+                      onClick={() => handleResetStop(stop)}
+                      title={t('delivery.routeDetail.resetStopHint')}
+                      className="inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium text-amber-800 border border-amber-300 bg-amber-50 hover:bg-amber-100 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
+                    >
+                      <RotateCcw size={12} />
+                      {t('delivery.routeDetail.resetStop')}
+                    </button>
+                  )}
                   {(stop.deliveryOrder || (stop.status === 'PENDING' && routeOpen && !isDriver)) && (
                     <button
                       onClick={() => openEditDetails(stop)}
@@ -1060,29 +1268,35 @@ export default function DeliveryRouteDetailPage() {
                           ? t('delivery.routeDetail.locationSet')
                           : t('delivery.routeDetail.noLocation')}
                       </button>
-                      <GoogleMapsLink lat={stop.destinationLatitude} lng={stop.destinationLongitude} />
                     </>
                   )}
-                  {!isDriver && routeOpen && (
+                  <GoogleMapsLink lat={mapsAt.lat} lng={mapsAt.lng} />
+                  {!ENABLE_DRAG_REORDER && !isDriver && routeOpen && stop.status === 'PENDING' && (
                     <>
                       <button
-                        disabled={rowBusy || idx === 0}
+                        disabled={!canReorder || pendingIndex === 0}
                         onClick={() => handleMove(stop, -1)}
                         aria-label={t('delivery.routeDetail.moveUp')}
+                        title={t('delivery.routeDetail.moveUp')}
                         className="p-2 sm:p-1 rounded border border-gray-200 disabled:opacity-30"
                       >
                         <ArrowUp size={14} />
                       </button>
                       <button
-                        disabled={rowBusy || idx === route.stops.length - 1}
+                        disabled={!canReorder || pendingIndex === pendingIds.length - 1}
                         onClick={() => handleMove(stop, 1)}
                         aria-label={t('delivery.routeDetail.moveDown')}
+                        title={t('delivery.routeDetail.moveDown')}
                         className="p-2 sm:p-1 rounded border border-gray-200 disabled:opacity-30"
                       >
                         <ArrowDown size={14} />
                       </button>
+                    </>
+                  )}
+                  {!isDriver && routeOpen && stop.status === 'PENDING' && (
+                    <>
                       <button
-                        disabled={rowBusy}
+                        disabled={rowBusy || orderSaving}
                         onClick={() => handleRemove(stop)}
                         aria-label={t('delivery.routeDetail.remove')}
                         className="p-2 sm:p-1 rounded border border-red-200 text-red-600 disabled:opacity-30"
@@ -1092,9 +1306,12 @@ export default function DeliveryRouteDetailPage() {
                     </>
                   )}
                 </div>
-              </div>
+                </>
+                )}
+              </SortableStopCard>
             );
           })}
+          </SortableStops>
         </div>
 
         <div>
@@ -1124,6 +1341,7 @@ export default function DeliveryRouteDetailPage() {
                           </span>
                         )}
                         {t(`delivery.routeDetail.historyType.${h.type}`)}
+                        {h.type === 'STOP_RESET' && h.metadata?.label && ` · ${h.metadata.label}`}
                         {snapshot && (
                           <button
                             onClick={() => setExpandedVersion(open ? null : h.id)}
@@ -1167,7 +1385,7 @@ export default function DeliveryRouteDetailPage() {
           onClose={() => setRescheduleStop(null)}
           onDone={async () => {
             setRescheduleStop(null);
-            await load();
+            await load(true);
             if (showHistory) await loadHistory();
           }}
         />

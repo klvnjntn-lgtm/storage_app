@@ -74,6 +74,12 @@ export type DriverAvailability = {
   hoursLabel: string | null;
 };
 
+type DriverCursor = {
+  vehicle: OptimizerVehicle;
+  at: Date;
+  matrixIndex: number;
+};
+
 const DAY_OF_WEEK_BY_UTC_DAY: DayOfWeek[] = [
   DayOfWeek.SUN,
   DayOfWeek.MON,
@@ -84,7 +90,8 @@ const DAY_OF_WEEK_BY_UTC_DAY: DayOfWeek[] = [
   DayOfWeek.SAT,
 ];
 
-// VROOM decides who goes where and in what order; OSRM supplies the
+// VROOM decides who goes where and in what order, solving HIGH stops and
+// normal stops separately; OSRM supplies the
 // travel matrix it decides over. ETAs are then computed here from that
 // same matrix — earliest departure, waiting at a stop whose delivery
 // window hasn't opened yet — rather than taken from VROOM, which may
@@ -159,10 +166,11 @@ export class RouteOptimizerService {
   }
 
   // Assigns and sequences `jobs` across `vehicles`, all starting at
-  // `depot`. With `keepUnassigned` (single-vehicle re-optimize of an
-  // existing route), jobs VROOM couldn't fit are still appended to the
-  // end of the one vehicle's route — they're already on it — and still
-  // reported in `unassigned` so the caller can warn about them.
+  // `depot`, with every HIGH stop ahead of every normal one. With
+  // `keepUnassigned` (single-vehicle re-optimize of an existing route), jobs
+  // VROOM couldn't fit are still appended to the end of their priority group
+  // on the one vehicle's route — they're already on it — and still reported
+  // in `unassigned` so the caller can warn about them.
   async optimize(input: {
     depot: LatLng;
     vehicles: OptimizerVehicle[];
@@ -221,58 +229,75 @@ export class RouteOptimizerService {
         id: i + 1,
         locationIndex: i + 1,
         serviceSeconds: STOP_DWELL_SECONDS,
-        priority: j.priority === DeliveryPriority.HIGH ? 100 : 0,
         timeWindow: window,
       });
     });
 
-    const solution = await this.vroom.solve({
-      vehicles: input.vehicles.map((v, i) => ({
-        id: i + 1,
-        startIndex: 0,
-        timeWindow: [
-          sec(v.availableFrom),
-          v.availableUntil
-            ? Math.max(sec(v.availableFrom), sec(v.availableUntil))
-            : sec(v.availableFrom) + OPEN_ENDED_SECONDS,
-        ],
-      })),
-      jobs: vroomJobs,
-      matrix: matrix!,
-    });
+    // Where and when each driver is free next; moves on as stops are added.
+    const cursors: DriverCursor[] = input.vehicles.map((vehicle) => ({
+      vehicle,
+      at: vehicle.availableFrom,
+      matrixIndex: 0,
+    }));
+    const addStops = (cursor: DriverCursor, order: { job: OptimizerJob; index: number }[]) => {
+      if (order.length === 0) return;
+      const stops = this.schedule(cursor.at, order, matrix!, cursor.matrixIndex);
+      routes.get(cursor.vehicle.key)!.push(...stops);
+      cursor.at = new Date(stops[stops.length - 1].eta!.getTime() + STOP_DWELL_SECONDS * 1000);
+      cursor.matrixIndex = order[order.length - 1].index;
+    };
 
-    for (const r of solution.routes) {
-      const vehicle = input.vehicles[r.vehicleId - 1];
-      const order = r.jobIds.map((id) => ({ job: routable[id - 1], index: id }));
-      routes.set(vehicle.key, this.schedule(vehicle.availableFrom, order, matrix!));
-    }
+    // Each tier is its own solve: HIGH from the start point, then normal stops
+    // from wherever the HIGH run ended, so neither order bends around the other.
+    for (const tier of [DeliveryPriority.HIGH, DeliveryPriority.NORMAL]) {
+      const tierJobs = vroomJobs.filter((j) => routable[j.id - 1].priority === tier);
+      if (tierJobs.length > 0) {
+        // Where this tier started: "could a driver reach it directly?" must not
+        // be asked from the end of the run it was left out of.
+        const tierStart = cursors.map((c) => ({ ...c }));
+        const solution = await this.vroom.solve({
+          vehicles: cursors.map((c, i) => ({
+            id: i + 1,
+            startIndex: c.matrixIndex,
+            timeWindow: [
+              sec(c.at),
+              c.vehicle.availableUntil
+                ? Math.max(sec(c.at), sec(c.vehicle.availableUntil))
+                : sec(c.at) + OPEN_ENDED_SECONDS,
+            ],
+          })),
+          jobs: tierJobs,
+          matrix: matrix!,
+        });
 
-    for (const id of solution.unassignedJobIds) {
-      const job = routable[id - 1];
-      unassigned.push({ key: job.key, reason: this.unassignedReason(job, id, input.vehicles, matrix!) });
-    }
+        for (const r of solution.routes) {
+          addStops(
+            cursors[r.vehicleId - 1],
+            r.jobIds.map((id) => ({ job: routable[id - 1], index: id })),
+          );
+        }
+        for (const id of solution.unassignedJobIds) {
+          const job = routable[id - 1];
+          unassigned.push({ key: job.key, reason: this.unassignedReason(job, id, tierStart, matrix!) });
+        }
+      }
 
-    if (input.keepUnassigned && input.vehicles.length === 1) {
-      const vehicle = input.vehicles[0];
-      const scheduled = routes.get(vehicle.key)!;
-      const lastIndex = scheduled.length
-        ? routable.findIndex((j) => j.key === scheduled[scheduled.length - 1].key) + 1
-        : 0;
-      const stillRoutable = unassigned
-        .map((u) => routable.findIndex((j) => j.key === u.key))
-        .filter((i) => i >= 0)
-        .sort((a, b) => a - b) // keep their current relative order
-        .map((i) => ({ job: routable[i], index: i + 1 }));
-      const lastEta = scheduled.length ? scheduled[scheduled.length - 1].eta : null;
-      const resumeAt = lastEta
-        ? new Date(lastEta.getTime() + STOP_DWELL_SECONDS * 1000)
-        : vehicle.availableFrom;
-      const tail = this.schedule(resumeAt, stillRoutable, matrix!, lastIndex);
-      const unroutable = input.jobs
-        .filter((j) => unassigned.some((u) => u.key === j.key))
-        .filter((j) => !stillRoutable.some((s) => s.job.key === j.key))
-        .map((j) => ({ key: j.key, eta: null, leg: null }));
-      routes.set(vehicle.key, [...scheduled, ...tail, ...unroutable]);
+      // Stays inside its own tier: a HIGH stop that can't fit still goes ahead
+      // of the normal stops.
+      if (input.keepUnassigned && input.vehicles.length === 1) {
+        const left = input.jobs.filter(
+          (j) => j.priority === tier && unassigned.some((u) => u.key === j.key),
+        );
+        addStops(
+          cursors[0],
+          routable.flatMap((job, i) => (left.includes(job) ? [{ job, index: i + 1 }] : [])),
+        );
+        routes.get(cursors[0].vehicle.key)!.push(
+          ...left
+            .filter((j) => !routable.includes(j))
+            .map((j) => ({ key: j.key, eta: null, leg: null })),
+        );
+      }
     }
 
     return { routes, unassigned };
@@ -325,19 +350,18 @@ export class RouteOptimizerService {
   private unassignedReason(
     job: OptimizerJob,
     matrixIndex: number,
-    vehicles: OptimizerVehicle[],
+    cursors: DriverCursor[],
     matrix: TravelMatrix,
   ): UnscheduledReason {
     if (!job.windowStart && !job.windowEnd) return 'NO_TIME';
-    const direct = matrix.durations[0][matrixIndex] * 1000;
-    const anyFits = vehicles.some((v) => {
+    const anyFits = cursors.some((c) => {
       const earliest = Math.max(
-        v.availableFrom.getTime() + direct,
+        c.at.getTime() + matrix.durations[c.matrixIndex][matrixIndex] * 1000,
         job.windowStart?.getTime() ?? 0,
       );
       const latest = Math.min(
         job.windowEnd?.getTime() ?? Infinity,
-        v.availableUntil?.getTime() ?? Infinity,
+        c.vehicle.availableUntil?.getTime() ?? Infinity,
       );
       return earliest <= latest;
     });

@@ -32,6 +32,7 @@ const INVOICE_POS_FIELDS: (keyof UpdateOrganizationSettingsInput)[] = [
   'npwp',
   'logoUrl',
   'taxEnabled',
+  'pricesIncludePpn',
   'stockPolicy',
   'stockOverrideRequiresAdmin',
 ];

@@ -21,6 +21,7 @@ import {
   type OptimizerJob,
   type UnscheduledReason,
 } from './route-optimizer.service';
+import { highPriorityFirst } from './priority-order';
 import { ApplyRoutePlanDto, PlanRoutesDto } from './dto/plan-routes.dto';
 
 const planDeliveryOrderSelect = {
@@ -494,7 +495,9 @@ export class RoutePlannerService {
         .filter((r) => r.deliveryOrderIds.length > 0)
         .map(async (r) => {
           const departAt = ctx.availability.get(r.teamId)!.availableFrom;
-          const jobs = r.deliveryOrderIds.map((id) => {
+          // The client sends the previewed order; a priority may have changed since.
+          const ids = highPriorityFirst(r.deliveryOrderIds, (id) => orderById.get(id)!.priority);
+          const jobs = ids.map((id) => {
             const job = this.toJob(orderById.get(id)!);
             return { ...job, location: job.location! };
           });
@@ -612,6 +615,12 @@ export class RoutePlannerService {
       }
       return saved;
     });
+
+    // A customer stop kept on a reused route may be HIGH. Best-effort: the plan
+    // has already saved.
+    for (const r of result) {
+      await this.routes.applyPriorityOrder(organizationId, r.routeId, userId);
+    }
 
     // History + notifications after commit, best-effort like elsewhere.
     const savedIds = new Set(result.map((r) => r.routeId));

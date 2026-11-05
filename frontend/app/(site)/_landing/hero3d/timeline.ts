@@ -1,17 +1,19 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import type { SolutionKey } from '../solutions';
 
 /* ─── Hero story, as pure functions of loop time ────────────────────
-   One 18s loop, the same Receive → Move → Track as "How it works":
-     receive  a crate drops onto the dock conveyor and gets scanned
-     putaway  the AGV carries it down the aisle into A-03
-     move     a transfer pulls it back out and re-slots it in B-11
-     track    the feed logs both, and a low-stock alert fires
+   One 24s loop following one order through the whole business, so the
+   warehouse reads as part of a bigger operation:
+     warehouse  a crate lands on the dock, gets scanned and shelved
+     sales      the counter prints an invoice; the order flies to the shelf
+     delivery   the AGV loads the crate onto the truck, and it drives off
+     workshop   a car on the lift finishes its service and comes down
    Everything here is deterministic so the reduced-motion render can just
    evaluate one frame. World units ≈ metres; +y up, +z toward camera. */
 
-export const LOOP = 18;
-/** Frame shown when motion is reduced: every event has happened. */
-export const STATIC_T = 14;
+export const LOOP = 24;
+/** Frame shown when motion is reduced: truck loaded, car up on the lift. */
+export const STATIC_T = 15.3;
 
 // Racks: a long row across the back (A) and a shorter one down the left
 // side (B), both opening onto the floor the camera looks at, so the AGV
@@ -50,8 +52,7 @@ export const CRATE = { w: 0.56, h: 0.42, d: 0.5 };
 export const DECK_REST = 0.34;
 export const DECK_UP = LEVELS[1];
 
-export const SLOT_A03 = slotAt('A', 2, 1);
-export const SLOT_B11 = slotAt('B', 1, 1);
+export const SLOT_PICK = slotAt('A', 2, 1);
 export const SLOT_LOW = slotAt('A', 4, 2);
 
 // Dock: crate lands under the scan arch, the conveyor feeds it -z onto
@@ -67,11 +68,22 @@ const curve = (pts: [number, number][]) =>
   );
 const xz = (v: Vector3): [number, number] => [v.x, v.z];
 
-const LEG_PUTAWAY = curve([xz(AGV_HOME), [3.0, 0.3], [2.0, -1.45], xz(SLOT_A03.front)]);
-const LEG_MOVE = curve([xz(SLOT_A03.front), [-2.3, -1.6], [-3.3, -0.9], xz(SLOT_B11.front)]);
-const LEG_RETURN = curve([xz(SLOT_B11.front), [-3.2, 1.7], [-2.0, 2.4], [0.6, 2.3], [1.7, 1.6], xz(AGV_HOME)]);
+// Delivery bay: a road down the right edge. The truck noses toward -z, so
+// its open tail faces the AGV's loading spot.
+export const ROAD = { x: 5.2, z0: -3.45, z1: 5.15, w: 1.6 };
+export const TRUCK_LEN = 2.8;
+export const LOAD_AT = new Vector3(ROAD.x, 0, TRUCK_LEN / 2 + 0.95);
+export const CARGO_FLOOR = 0.56;
+
+export const COUNTER = new Vector3(-1.0, 0, 0.8);
+export const PRINTER_TOP = new Vector3(COUNTER.x + 0.45, 0.98, COUNTER.z);
+export const LIFT = { x: -1.6, z: 3.5, rise: 0.8 };
+
+const LEG_PUTAWAY = curve([xz(AGV_HOME), [3.0, 0.3], [2.0, -1.45], xz(SLOT_PICK.front)]);
+const LEG_LOAD = curve([xz(SLOT_PICK.front), [1.4, -1.0], [3.4, 0.8], [3.9, 2.5], xz(LOAD_AT)]);
+const LEG_RETURN = curve([xz(LOAD_AT), [4.1, 1.5], [3.2, 1.05], xz(AGV_HOME)]);
 /** Robot lanes painted on the floor. */
-export const LANES = [LEG_PUTAWAY, LEG_MOVE, LEG_RETURN];
+export const LANES = [LEG_PUTAWAY, LEG_LOAD, LEG_RETURN];
 
 // Key times (s).
 export const T = {
@@ -80,15 +92,26 @@ export const T = {
   scanned: 1.8,
   scanEnd: 2.2,
   onAgv: 3.0,
-  atA03: 6.2,
-  putaway: 7.1,
-  moveStart: 8.5,
-  atB11: 11.0,
-  moved: 11.9,
-  alert: 12.6,
-  returnStart: 12.3,
-  home: 16.6,
-  fadeStart: 17.2,
+  atSlot: 6.2,
+  stored: 7.1,
+  printStart: 7.5,
+  paid: 8.7,
+  orderSent: 9.0,
+  orderAtShelf: 10.4,
+  pickDone: 11.3,
+  loadStart: 11.7,
+  atTruck: 14.2,
+  loaded: 15.2,
+  returnStart: 15.6,
+  home: 17.8,
+  truckIn: 1.0,
+  truckParked: 4.0,
+  truckOut: 15.6,
+  truckGone: 18.6,
+  serviced: 19.2,
+  liftDown: 20.6,
+  liftUpStart: 22.6,
+  liftUp: 23.8,
 };
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -104,8 +127,38 @@ const easeOutBounce = (v: number) => {
 };
 const lerp = (a: number, b: number, v: number) => a + (b - a) * v;
 
-/** Progress 0..1 of the transfer card's bar. */
-export const moveProgress = (t: number) => span(t, T.moveStart, T.moved);
+/** Progress 0..1 of the delivery card's route bar. */
+export const routeProgress = (t: number) => span(t, T.truckOut, T.truckGone);
+
+/** Height the car has risen on the lift: up by default, down once serviced. */
+export const liftHeight = (t: number) =>
+  LIFT.rise * (1 - easeInOut(span(t, T.serviced, T.liftDown)) + easeInOut(span(t, T.liftUpStart, T.liftUp)));
+
+/** Truck z along the road and its scale (it fades in/out at the platform edges). */
+export function truckPose(t: number) {
+  if (t < T.truckIn || t >= T.truckGone) return { z: 0, scale: 0 };
+  if (t < T.truckParked) {
+    const v = span(t, T.truckIn, T.truckParked);
+    const eased = 1 - (1 - v) * (1 - v) * (1 - v);
+    return { z: lerp(ROAD.z1 - 0.2, 0, eased), scale: easeInOut(span(v, 0, 0.3)) };
+  }
+  if (t < T.truckOut) return { z: 0, scale: 1 };
+  const v = span(t, T.truckOut, T.truckGone);
+  return { z: lerp(0, ROAD.z0 + 0.2, v * v), scale: 1 - easeInOut(span(v, 0.72, 1)) };
+}
+
+/** The invoice's order sheet: rises from the printer, then arcs to the shelf. */
+export function orderSheet(t: number, out: Vector3) {
+  if (t < T.printStart || t >= T.orderAtShelf) return 0;
+  if (t < T.orderSent) {
+    out.copy(PRINTER_TOP).setY(PRINTER_TOP.y + 0.34 * easeInOut(span(t, T.printStart, T.paid)));
+    return 1;
+  }
+  const v = easeInOut(span(t, T.orderSent, T.orderAtShelf));
+  out.lerpVectors(PRINTER_TOP, SLOT_PICK.pos, v);
+  out.y += 0.34 * (1 - v) + Math.sin(v * Math.PI) * 1.1 + v * 0.6;
+  return 1 - span(v, 0.85, 1);
+}
 
 export type AgvPose = { pos: Vector3; dir: Vector3; deck: number; moving: boolean };
 
@@ -120,7 +173,7 @@ function onLeg(leg: CatmullRomCurve3, v: number, out: AgvPose) {
 function deckAt(t: number) {
   const lift = (up: number, down: number) =>
     easeInOut(span(t, up, up + 0.4)) - easeInOut(span(t, down, down + 0.4));
-  const v = Math.max(lift(T.atA03, 7.1), lift(T.moveStart, 9.4), lift(T.atB11, T.moved));
+  const v = Math.max(lift(T.atSlot, T.stored), lift(T.orderAtShelf, T.pickDone), lift(T.atTruck, T.loaded));
   return lerp(DECK_REST, DECK_UP, v);
 }
 
@@ -130,10 +183,10 @@ export function agvPose(t: number, out: AgvPose) {
     out.pos.copy(AGV_HOME);
     out.dir.set(1, 0, 0);
     out.moving = false;
-  } else if (t < T.atA03) onLeg(LEG_PUTAWAY, span(t, T.onAgv, T.atA03), out);
-  else if (t < 9.8) onLeg(LEG_PUTAWAY, 1, out);
-  else if (t < T.atB11) onLeg(LEG_MOVE, span(t, 9.8, T.atB11), out);
-  else if (t < T.returnStart) onLeg(LEG_MOVE, 1, out);
+  } else if (t < T.atSlot) onLeg(LEG_PUTAWAY, span(t, T.onAgv, T.atSlot), out);
+  else if (t < T.loadStart) onLeg(LEG_PUTAWAY, 1, out);
+  else if (t < T.atTruck) onLeg(LEG_LOAD, span(t, T.loadStart, T.atTruck), out);
+  else if (t < T.returnStart) onLeg(LEG_LOAD, 1, out);
   else if (t < T.home) onLeg(LEG_RETURN, span(t, T.returnStart, T.home), out);
   else onLeg(LEG_RETURN, 1, out);
   return out;
@@ -153,14 +206,21 @@ export function cratePose(t: number, agv: AgvPose, out: Vector3): number {
     out.set(DOCK_LAND.x, DOCK_LAND.y + half, DOCK_LAND.z);
   } else if (t < T.onAgv) {
     out.set(DOCK_LAND.x, DECK_REST + half, lerp(DOCK_LAND.z, AGV_HOME.z, easeInOut(span(t, T.scanEnd, T.onAgv))));
-  } else if (t < 6.6 || (t >= 9.4 && t < 11.4)) {
+  } else if (t < T.atSlot + 0.4) {
     out.set(agv.pos.x, agv.deck + half, agv.pos.z);
-  } else if (t < 9.4) {
-    slot(SLOT_A03, Math.min(span(t, 6.6, T.putaway), 1 - span(t, 8.9, 9.4)));
+  } else if (t < T.pickDone) {
+    // shelved after T.stored, slides back out once the order reaches the shelf
+    slot(SLOT_PICK, Math.min(span(t, T.atSlot + 0.4, T.stored), 1 - span(t, T.orderAtShelf + 0.4, T.pickDone)));
+  } else if (t < T.atTruck + 0.4) {
+    out.set(agv.pos.x, agv.deck + half, agv.pos.z);
+  } else if (t < T.loaded) {
+    // off the deck and in through the truck's open tail
+    const v = easeInOut(span(t, T.atTruck + 0.4, T.loaded));
+    out.set(LOAD_AT.x, lerp(DECK_UP + half, CARGO_FLOOR + half, v), lerp(LOAD_AT.z, TRUCK_LEN / 2 - 0.5, v));
   } else {
-    slot(SLOT_B11, span(t, 11.4, T.moved));
+    return 0; // inside the truck, out of sight
   }
-  return 1 - easeInOut(span(t, T.fadeStart, LOOP));
+  return 1;
 }
 
 /** Scan laser height over the crate, or null when idle. */
@@ -174,12 +234,27 @@ export function scanLaser(t: number) {
 export const flash = (t: number, at: number, len = 0.9) =>
   t < at || t > at + len ? 0 : 1 - (t - at) / len;
 
-export type Phase = { scanned: boolean; stored: boolean; moving: boolean; moved: boolean; alert: boolean };
+export type Phase = {
+  zone: SolutionKey;
+  scanned: boolean;
+  stored: boolean;
+  printing: boolean;
+  paid: boolean;
+  loaded: boolean;
+  delivered: boolean;
+  serviced: boolean;
+};
+
+export const zoneAt = (t: number): SolutionKey =>
+  t < T.printStart ? 'warehouse' : t < T.orderAtShelf ? 'sales' : t < T.truckGone ? 'delivery' : 'workshop';
 
 export const phaseAt = (t: number): Phase => ({
+  zone: zoneAt(t),
   scanned: t >= T.scanned,
-  stored: t >= T.putaway,
-  moving: t >= T.moveStart && t < T.moved,
-  moved: t >= T.moved,
-  alert: t >= T.alert,
+  stored: t >= T.stored,
+  printing: t >= T.printStart && t < T.paid,
+  paid: t >= T.paid,
+  loaded: t >= T.loaded,
+  delivered: t >= T.truckGone,
+  serviced: t >= T.serviced,
 });

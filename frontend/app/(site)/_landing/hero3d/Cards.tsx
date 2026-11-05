@@ -1,8 +1,9 @@
 'use client';
 
-import { memo, type RefObject } from 'react';
-import { CheckCircle2, Hand, Package, Pin, TriangleAlert } from 'lucide-react';
-import { SLOT_A03, SLOT_B11, type Phase } from './timeline';
+import { memo, type CSSProperties, type RefObject } from 'react';
+import { CheckCircle2, Hand, Pin, ScanBarcode, Truck } from 'lucide-react';
+import { SLOT_PICK, type Phase } from './timeline';
+import { solutionByKey, type SolutionKey } from '../solutions';
 import type { AnchorKey } from './Story';
 import type { PartKey, StockInfo } from './Warehouse';
 import styles from './Hero3D.module.css';
@@ -11,36 +12,36 @@ import styles from './Hero3D.module.css';
    Plain DOM in the page's own React tree. Story's projector moves each
    anchor onto its 3D point every frame. */
 
-export type SceneLabels = Record<
-  | 'receive'
-  | 'move'
-  | 'track'
-  | 'liveActivity'
-  | 'lowStock'
-  | 'left'
-  | 'badgeReceive'
-  | 'badgeMove'
-  | 'badgeAdjust'
-  | 'badgeShip'
-  | 'location'
-  | 'qty'
-  | 'dragHint',
-  string
-> & { parts: Record<PartKey, string> };
+export const SCENE_LABEL_KEYS = [
+  'warehouse',
+  'sales',
+  'workshop',
+  'delivery',
+  'scanning',
+  'shelved',
+  'invoicing',
+  'paid',
+  'loading',
+  'onRoute',
+  'delivered',
+  'inService',
+  'serviceDone',
+  'location',
+  'qty',
+  'dragHint',
+] as const;
+
+export type SceneLabels = Record<(typeof SCENE_LABEL_KEYS)[number], string> & { parts: Record<PartKey, string> };
 
 export type Anchors = Partial<Record<AnchorKey, HTMLDivElement | null>>;
 
-function Barcode() {
-  const bars = [2, 1, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 1, 3, 1, 2, 2, 1, 3];
-  let x = 0;
+function Tag({ zone, label }: { zone: SolutionKey; label: string }) {
+  const Icon = solutionByKey(zone).icon;
   return (
-    <svg width="118" height="34" viewBox="0 0 118 34" className={styles.barcode}>
-      {bars.map((w, i) => {
-        const bar = i % 2 === 0 ? <rect key={i} x={x} y="0" width={w * 1.8} height="34" /> : null;
-        x += w * 1.8 + 1.8;
-        return bar;
-      })}
-    </svg>
+    <span className={styles.tag}>
+      <Icon size={10} strokeWidth={2.4} />
+      {label}
+    </span>
   );
 }
 
@@ -60,103 +61,81 @@ const StoryCards = memo(function StoryCards({
   const anchor = (key: AnchorKey) => (el: HTMLDivElement | null) => {
     anchors.current[key] = el;
   };
+  const cardCls = (zone: SolutionKey, done: boolean) =>
+    `${styles.card} ${phase.zone === zone ? styles.active : ''} ${done ? styles.done : ''}`;
+  const tint = (zone: SolutionKey) => ({ '--zone': solutionByKey(zone).rgb }) as CSSProperties;
 
   return (
     <>
-      <div ref={anchor('receive')} className={styles.anchor}>
-        <div className={`${styles.card} ${phase.scanned ? styles.done : styles.active}`}>
+      <div ref={anchor('warehouse')} className={styles.anchor} style={tint('warehouse')}>
+        <div className={cardCls('warehouse', phase.stored)}>
           <div className={styles.head}>
-            <span className={styles.tag}>01 · {labels.receive}</span>
+            <Tag zone="warehouse" label={labels.warehouse} />
             <span className={styles.time}>09:13</span>
           </div>
-          <div className={styles.viewfinder}>
-            <Barcode />
-            <span className={styles.mono}>BRK-2041</span>
-            {!phase.scanned && <span className={styles.laser} />}
-          </div>
-          <div className={`${styles.result} ${phase.scanned ? styles.show : ''}`}>
-            <CheckCircle2 size={13} strokeWidth={2.2} className={styles.ok} />
-            <span className={styles.mono}>BRK-2041</span>
-            <b className={styles.plus}>+12</b>
-            <span className={styles.muted}>→ {SLOT_A03.label}</span>
-          </div>
-        </div>
-      </div>
-
-      <div ref={anchor('move')} className={styles.anchor}>
-        <div className={`${styles.card} ${phase.moving ? styles.active : ''} ${phase.moved ? styles.done : ''}`}>
-          <div className={styles.head}>
-            <span className={styles.tag}>02 · {labels.move}</span>
-            <span className={styles.time}>09:14</span>
-          </div>
-          <div className={styles.route}>
-            <b className={styles.bin}>{SLOT_A03.label}</b>
-            <span ref={barRef} className={styles.track}>
-              <span className={styles.bar} />
-              <Package size={12} strokeWidth={2.2} className={styles.parcel} />
-            </span>
-            <b className={`${styles.bin} ${phase.moved ? styles.binOn : ''}`}>{SLOT_B11.label}</b>
-          </div>
+          <p className={styles.line}>
+            <span className={styles.mono}>SKU-2041</span>
+            <b className={styles.plus}>{phase.scanned ? '+12' : '…'}</b>
+          </p>
           <p className={styles.meta}>
-            12× <span className={styles.mono}>BRK-2041</span> · Rina
-            {phase.moved && <CheckCircle2 size={12} strokeWidth={2.4} className={styles.ok} />}
+            {phase.stored ? <CheckCircle2 size={12} strokeWidth={2.4} className={styles.ok} /> : <ScanBarcode size={12} strokeWidth={2.2} />}
+            {phase.stored ? `${labels.shelved} ${SLOT_PICK.label}` : labels.scanning}
           </p>
         </div>
       </div>
 
-      <div ref={anchor('feed')} className={styles.anchor}>
-        <div className={`${styles.card} ${styles.feed}`}>
+      <div ref={anchor('sales')} className={styles.anchor} style={tint('sales')}>
+        <div className={cardCls('sales', phase.paid)}>
           <div className={styles.head}>
-            <span className={styles.tag}>03 · {labels.track}</span>
-            <span className={styles.liveTag}>
-              <i />
-              {labels.liveActivity}
-            </span>
+            <Tag zone="sales" label={labels.sales} />
+            <span className={styles.time}>09:20</span>
           </div>
-          <div className={styles.rows}>
-            <div className={`${styles.row} ${styles.newRow} ${phase.moved ? styles.show : ''}`}>
-              <span className={`${styles.avatar} ${styles.avBlue}`}>R</span>
-              <span className={`${styles.badge} ${styles.bMove}`}>{labels.badgeMove}</span>
-              <span className={styles.rowText}>12× {SLOT_A03.label} → {SLOT_B11.label}</span>
-            </div>
-            <div className={`${styles.row} ${styles.newRow} ${phase.scanned ? styles.show : ''}`}>
-              <span className={`${styles.avatar} ${styles.avGreen}`}>B</span>
-              <span className={`${styles.badge} ${styles.bReceive}`}>{labels.badgeReceive}</span>
-              <span className={styles.rowText}>+12 BRK-2041</span>
-            </div>
-            <div className={styles.row}>
-              <span className={`${styles.avatar} ${styles.avAmber}`}>S</span>
-              <span className={`${styles.badge} ${styles.bAdjust}`}>{labels.badgeAdjust}</span>
-              <span className={styles.rowText}>FLT-0187 9 → 4</span>
-            </div>
-            <div className={styles.row}>
-              <span className={`${styles.avatar} ${styles.avViolet}`}>D</span>
-              <span className={`${styles.badge} ${styles.bShip}`}>{labels.badgeShip}</span>
-              <span className={styles.rowText}>DO-2210 · R-12</span>
-            </div>
-          </div>
+          <p className={styles.line}>
+            <span className={styles.mono}>INV-2291</span>
+            <b>Rp 2.450.000</b>
+          </p>
+          <p className={styles.meta}>
+            {phase.paid && <CheckCircle2 size={12} strokeWidth={2.4} className={styles.ok} />}
+            {phase.paid ? labels.paid : labels.invoicing}
+          </p>
         </div>
       </div>
 
-      <div ref={anchor('alert')} className={styles.anchor}>
-        <div className={`${styles.toast} ${phase.alert ? styles.show : ''}`}>
-          <span className={styles.toastIcon}>
-            <TriangleAlert size={13} strokeWidth={2.2} />
-          </span>
-          <span>
-            <b>{labels.lowStock}</b>
-            <span className={styles.muted}>
-              <span className={styles.mono}>FLT-0187</span> · {labels.left}
+      <div ref={anchor('delivery')} className={styles.anchor} style={tint('delivery')}>
+        <div className={cardCls('delivery', phase.delivered)}>
+          <div className={styles.head}>
+            <Tag zone="delivery" label={labels.delivery} />
+            <span className={styles.time}>10:05</span>
+          </div>
+          <p className={styles.line}>
+            <span className={styles.mono}>DO-0418</span>
+            <span ref={barRef} className={styles.track}>
+              <span className={styles.bar} />
+              <Truck size={12} strokeWidth={2.2} className={styles.parcel} />
             </span>
-          </span>
+          </p>
+          <p className={styles.meta}>
+            {phase.delivered && <CheckCircle2 size={12} strokeWidth={2.4} className={styles.ok} />}
+            {phase.delivered ? labels.delivered : phase.loaded ? labels.onRoute : labels.loading}
+          </p>
         </div>
       </div>
 
-      <div ref={anchor('slotA03')} className={styles.anchor}>
-        <span className={`${styles.slotTag} ${phase.stored && !phase.moved ? styles.slotLit : ''}`}>{SLOT_A03.label}</span>
-      </div>
-      <div ref={anchor('slotB11')} className={styles.anchor}>
-        <span className={`${styles.slotTag} ${phase.moved ? styles.slotLit : ''}`}>{SLOT_B11.label}</span>
+      <div ref={anchor('workshop')} className={styles.anchor} style={tint('workshop')}>
+        <div className={cardCls('workshop', phase.serviced)}>
+          <div className={styles.head}>
+            <Tag zone="workshop" label={labels.workshop} />
+            <span className={styles.time}>10:40</span>
+          </div>
+          <p className={styles.line}>
+            <span className={styles.plate}>B 1234 KJT</span>
+            <span className={styles.muted}>WO-118</span>
+          </p>
+          <p className={styles.meta}>
+            {phase.serviced && <CheckCircle2 size={12} strokeWidth={2.4} className={styles.ok} />}
+            {phase.serviced ? labels.serviceDone : labels.inService}
+          </p>
+        </div>
       </div>
     </>
   );

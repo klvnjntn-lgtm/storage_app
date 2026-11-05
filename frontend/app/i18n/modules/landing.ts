@@ -7,7 +7,8 @@ export const landing = {
   en: {
     landing: {
       nav: {
-        products: 'Products',
+        products: 'Solutions',
+        custom: 'Custom Apps',
         howItWorks: 'How it works',
         faq: 'FAQ',
         contact: 'Contact',
@@ -16,17 +17,17 @@ export const landing = {
         toggleMenu: 'Toggle menu',
       },
       hero: {
-        eyebrow: 'Built for spare parts businesses',
-        headline: 'Stop losing track of your spare parts.',
-        sub1: 'WareSys keeps your inventory, locations, and stock movements in one place.',
-        sub2: 'Scan parts. Move stock. Know exactly what you have and where it is.',
+        eyebrow: 'Software for real-world operations',
+        headline: 'Business Operations, Simplified.',
+        sub1: 'Software solutions designed to help businesses manage inventory, sales, workshops, and deliveries — all in one ecosystem.',
         ctaDemo: 'Book a Demo',
-        ctaHowItWorks: 'See How It Works ↓',
+        ctaSolutions: 'Explore Solutions ↓',
+        customLine: 'Need something different? We build custom apps too.',
         pauseAnimation: 'Pause animation',
         playAnimation: 'Play animation',
-        platformLabel: 'One login, four apps →',
+        platformLabel: 'Four solutions, one login',
         platformWarehouse: 'Warehouse',
-        platformInvoice: 'Invoicing',
+        platformSales: 'Sales',
         platformWorkshop: 'Workshop',
         platformDelivery: 'Delivery',
       },
@@ -42,70 +43,70 @@ export const landing = {
       },
       scene: {
         warehouse: 'Warehouse',
-        live: 'LIVE',
-        dashboard: 'Dashboard',
-        stock: 'Stock',
-        receiving: 'Receiving',
-        transfers: 'Transfers',
-        deliveries: 'Deliveries',
-        auditLog: 'Audit log',
-        today: 'Today',
-        lowStock: 'Low stock',
-        unitsInStock: 'Units in stock',
-        transfersToday: 'Transfers today',
+        sales: 'Sales',
+        workshop: 'Workshop',
+        delivery: 'Delivery',
+        scanning: 'Scanning…',
+        shelved: 'Shelved in',
+        invoicing: 'Issuing invoice…',
+        paid: 'Paid',
+        loading: 'Loading the truck',
+        onRoute: 'On route',
+        delivered: 'Delivered',
+        inService: 'In service · 40.000 km',
+        serviceDone: 'Service complete',
         sku: 'SKU',
         item: 'Item',
         location: 'Location',
         qty: 'Qty',
-        receive: 'Receive',
-        move: 'Move',
-        track: 'Track',
-        liveActivity: 'Live activity',
-        left: '4 left',
         badgeReceive: 'RECEIVE',
         badgeMove: 'MOVE',
         badgeAdjust: 'ADJUST',
-        badgeShip: 'SHIP',
         dragHint: 'Drag to look around · hover a box',
         items: {
-          brakePads: 'Brake pad set',
+          waterGallon: 'Water gallon 19L',
           oilFilter: 'Oil filter',
+          beverageCase: 'Beverage case',
+          brakePads: 'Brake pad set',
+          packaging: 'Packaging cartons',
+          engineOil: 'Engine oil 1L',
           timingBelt: 'Timing belt',
           sparkPlug: 'Spark plug',
           wheelBearing: 'Wheel bearing',
-          clutchKit: 'Clutch kit',
         },
       },
       techMarquee: {
         tags: {
           barcodeScanning: 'BARCODE SCANNING',
+          invoicing: 'INVOICING',
+          workOrders: 'WORK ORDERS',
+          routePlanning: 'ROUTE PLANNING',
+          proofOfDelivery: 'PROOF OF DELIVERY',
           realTimeSync: 'REAL-TIME SYNC',
           roleBasedAccess: 'ROLE-BASED ACCESS',
           auditTrail: 'AUDIT TRAIL',
           multiLocationTracking: 'MULTI-LOCATION TRACKING',
-          transferHistory: 'TRANSFER HISTORY',
-          liveStockCounts: 'LIVE STOCK COUNTS',
         },
       },
       problem: {
         eyebrow: 'Sound familiar?',
-        heading: 'Still managing stock with Excel, paper, or WhatsApp?',
+        heading: 'Still running your business on Excel, paper, and WhatsApp?',
         cards: {
           mismatch: {
             title: 'Stock doesn’t match',
-            body: 'Manual entries create mistakes.',
+            body: 'Manual entries create mistakes, and nobody knows which number is right.',
           },
-          disappear: {
-            title: 'Parts disappear',
-            body: 'You know something moved, but not who moved it.',
+          invoices: {
+            title: 'Invoices slip through',
+            body: 'Sales, payments, and what’s still owed live in different places.',
           },
-          location: {
-            title: 'Nobody knows the location',
-            body: 'Your team wastes time searching shelves.',
+          jobs: {
+            title: 'Jobs live on a whiteboard',
+            body: 'Who’s working on what, and which parts it used, gets lost.',
           },
-          forever: {
-            title: 'Inventory takes forever',
-            body: 'Counting and updating stock manually eats hours.',
+          deliveries: {
+            title: 'Nobody knows where the delivery is',
+            body: 'Your team finds out by calling the driver.',
           },
         },
         mockLog: {
@@ -114,7 +115,7 @@ export const landing = {
         visual: {
           mismatch: 'Mismatch — last seen Bay 7',
           chatSender: 'Budi (Warehouse)',
-          chatMessage: 'Did anyone move the brake pads??',
+          chatMessage: 'Has that order reached the customer yet??',
           chatTime: '2 days ago',
           note: 'Recount on Friday?',
         },
@@ -159,86 +160,154 @@ export const landing = {
         },
       },
       howItWorks: {
-        eyebrow: 'How it works',
-        heading: 'From the dock to the shelf.',
+        eyebrow: 'How it connects',
+        heading: 'One system, from stock to customer.',
         steps: {
-          receive: {
-            title: 'Receive inventory',
-            body: 'Scan or enter parts as they arrive. Every item is timestamped and assigned to a location immediately.',
+          warehouse: {
+            title: 'Stock comes in',
+            body: 'Goods are scanned on arrival, so everyone sees what you have and where it is.',
           },
-          move: {
-            title: 'Move stock',
-            body: 'Transfer parts between shelves or warehouses. The system records who moved what, and when.',
+          sales: {
+            title: 'The sale is recorded',
+            body: 'Issuing an invoice takes the goods out of stock and tracks what’s been paid.',
           },
-          track: {
-            title: 'Track everything',
-            body: 'See live stock counts per location, pull audit logs, and know exactly what you have — and where.',
+          delivery: {
+            title: 'The order goes out',
+            body: 'Delivery orders go onto a route, and each driver reports from their phone.',
+          },
+          workshop: {
+            title: 'The workshop stays in sync',
+            body: 'Parts on a work order are held from stock, then billed on one invoice.',
           },
         },
       },
       ecosystem: {
-        eyebrow: 'The bigger picture',
-        heading: 'One platform for your entire operation.',
-        statusLive: 'Live',
-        statusComingSoon: 'Coming soon',
+        eyebrow: 'Our solutions',
+        heading: 'Four solutions. One ecosystem.',
+        sub: 'Use the one your business needs today. Each is built for its own kind of work, and they all work together.',
         hubCaption: 'One login. One source of truth.',
         products: {
-          warehouse: {
-            tag: 'Inventory & warehouse management',
-            body: 'Track stock, locations, transfers, and every movement.',
+          warehouse: { tag: 'Inventory & warehouse management' },
+          sales: { tag: 'Sales & invoicing' },
+          workshop: { tag: 'Automotive workshop management' },
+          delivery: { tag: 'Delivery & route management' },
+        },
+      },
+      solutions: {
+        warehouse: {
+          audience: 'For spare-parts businesses, distributors, wholesalers, and retailers',
+          title: 'Know every part, every shelf, every movement.',
+          body: 'Built around real spare-parts operations, where thousands of SKUs move every day. Scan goods in, move them between locations, and always know what you have and where it is.',
+        },
+        sales: {
+          audience: 'For businesses that sell and invoice',
+          title: 'From quotation to paid invoice.',
+          body: 'Quote, take the order, invoice it, and see what’s been paid and what you actually earned, without retyping anything between steps.',
+          features: {
+            documents: { title: 'Quotations to invoices', body: 'One flow from quotation to sales order to invoice.' },
+            payments: { title: 'Split payments', body: 'Take one invoice across several payment methods.' },
+            tax: { title: 'Tax report', body: 'A clear, printable report for your tax administrator.' },
+            margin: { title: 'Margin reports', body: 'See the profit on what you sell, not only the revenue.' },
           },
-          invoice: {
-            tag: 'Sales & invoicing',
-            body: 'Create invoices, manage products, track sales and calculate profit.',
+          mock: {
+            paid: 'Paid',
+            line1: 'Goods',
+            line2: 'Delivery & service',
+            total: 'Total',
+            transfer: 'Transfer',
+            cash: 'Cash',
           },
-          workshop: {
-            tag: 'Workshop management',
-            body: 'Manage customers, vehicles, service history, reminders, invoices and workshop operations.',
+        },
+        workshop: {
+          audience: 'For automotive workshops',
+          title: 'Run your bays, not your paperwork.',
+          body: 'Made for automotive workshops: every vehicle, job, mechanic, and part in one place, from the moment a car rolls in until the customer pays.',
+          features: {
+            workOrders: { title: 'Work orders', body: 'Track each job from intake to invoice, parts included.' },
+            vehicles: { title: 'Vehicle history', body: 'Every plate’s customer and service record, a search away.' },
+            mechanic: { title: 'Mechanic app', body: 'Mechanics see and update their jobs from their phone.' },
+            reminders: { title: 'Service reminders', body: 'Know which customers are due back for service.' },
           },
-          delivery: {
-            tag: 'Delivery management',
-            body: 'Plan routes, dispatch drivers, and follow every delivery order until it arrives.',
+          mock: {
+            status: 'In progress',
+            job: 'Periodic service',
+            part1: 'Oil filter',
+            part2: 'Engine oil',
+            next: 'Next service',
           },
+        },
+        delivery: {
+          audience: 'For water distributors, logistics operators, and delivery businesses',
+          title: 'Plan the route. Follow every drop.',
+          body: 'Made for businesses with drivers on the road every day: plan better routes, dispatch them in minutes, and know what arrived.',
+          features: {
+            routes: { title: 'Route planning', body: 'Put stops in an efficient order, then adjust by hand.' },
+            driver: { title: 'Driver app', body: 'Drivers get their stops and navigation on their phone.' },
+            monitoring: { title: 'Delivery monitoring', body: 'See every route’s progress from the office.' },
+            proof: { title: 'Proof of delivery', body: 'A photo from the driver confirms each drop.' },
+          },
+          mock: {
+            stop1: 'Toko Makmur',
+            stop2: 'Depot Sejahtera',
+            stop3: 'CV Berkah Jaya',
+            stop4: 'Warung Bu Sari',
+          },
+        },
+      },
+      custom: {
+        eyebrow: 'Custom apps',
+        heading: 'Need something built just for you?',
+        body: 'Not every business fits a standard product. Tell us how yours works, and we’ll design and build software around it, on its own or connected to your WareSys solutions.',
+        cta: 'Tell Us What You Need',
+        offers: {
+          apps: { title: 'Custom apps', body: 'Web and mobile apps built around how your team works.' },
+          integrations: { title: 'Integrations', body: 'Connect WareSys to the systems you already use.' },
+          workflows: { title: 'Custom workflows', body: 'Your approvals, rules, and processes, built in.' },
+          reports: { title: 'Reports & documents', body: 'The reports and printed forms your business needs.' },
         },
       },
       whoItsFor: {
         eyebrow: "Who it's for",
-        heading: 'Built for businesses that move parts every day.',
+        heading: 'Built for businesses that keep things moving.',
         cards: {
+          distributors: {
+            title: 'Distributors & Wholesalers',
+            body: 'Keep stock, orders, and deliveries in step across every location.',
+          },
           spareParts: {
-            title: 'Spare Parts Shops',
-            body: 'Track thousands of SKUs without losing location visibility.',
+            title: 'Spare Parts Shops & Retailers',
+            body: 'Track thousands of SKUs without losing location visibility, and sell from live stock.',
           },
           workshops: {
             title: 'Automotive Workshops',
-            body: 'Know what parts are available before starting a job.',
+            body: 'Know which parts are available before starting a job, and bill it all on one invoice.',
           },
-          multiLocation: {
-            title: 'Multi-Location Businesses',
-            body: 'Move inventory between locations with a complete history.',
+          logistics: {
+            title: 'Water Distributors & Logistics',
+            body: 'Plan daily routes, dispatch drivers, and confirm every drop.',
           },
         },
-        footNote: 'If your inventory is still managed through Excel, paper, or memory, WareSys is built for you.',
+        footNote: 'Don’t see your business here? We also build custom apps around how you work.',
       },
       proof: {
-        eyebrow: 'Why WARESYS',
-        heading: 'Built for real spare-parts operations.',
+        eyebrow: 'Why WareSys',
+        heading: 'Built for how operations really run.',
         cards: {
-          location: {
-            title: 'Know where every part is.',
-            body: 'Track stock by warehouse, rack, shelf, or location.',
+          connected: {
+            title: 'Everything stays connected.',
+            body: 'Your teams work from the same data, not their own spreadsheets.',
           },
-          whoMoved: {
-            title: 'Know who moved it.',
-            body: 'Every stock movement is recorded.',
+          whoDid: {
+            title: 'Know who did what.',
+            body: 'Every important action is recorded with a name and a time.',
           },
-          spreadsheets: {
-            title: 'Stop relying on spreadsheets.',
-            body: 'Your team works from the same inventory data.',
+          modular: {
+            title: 'Start with what you need.',
+            body: 'Activate one solution now and add others as you grow.',
           },
           quickStart: {
             title: 'Get started without months of setup.',
-            body: 'Import your existing stock and start using it.',
+            body: 'Import your existing data and start using it.',
           },
         },
       },
@@ -250,27 +319,35 @@ export const landing = {
         contactCta: 'Contact us',
         items: {
           whatDoesItDo: {
-            q: 'What does it actually do?',
-            a: 'It replaces your spreadsheets. Receive parts, move them between locations, and see live stock counts — with a full history of every action.',
+            q: 'What does WareSys actually do?',
+            a: 'WareSys is business software with four solutions: Warehouse for inventory, Invoice POS for sales, Workshop RMS for automotive workshops, and Delivery DMS for routes and drivers. They replace scattered spreadsheets, paper, and chat groups.',
+          },
+          needAll: {
+            q: 'Do I need all four solutions?',
+            a: 'No. Start with the one that fits your business and add others later. They share one login and work together when you use more than one.',
+          },
+          custom: {
+            q: 'Can you build something custom for my business?',
+            a: 'Yes. Beyond the four solutions, we build custom apps, integrations, and workflows. Tell us what you need and we’ll scope it with you.',
           },
           multipleEmployees: {
             q: 'Can multiple employees use it?',
             a: 'Yes. Each employee gets their own login. Admins see everything; staff see what they need.',
           },
           multiLocation: {
-            q: 'Can I track stock across multiple locations?',
-            a: 'Yes. Parts are tracked per shelf or warehouse. Every transfer is logged so you always know where a part went.',
+            q: 'Does it work across multiple locations?',
+            a: 'Yes. Stock is tracked per warehouse and shelf, and every transfer is logged so you always know where something went.',
           },
           getStarted: {
             q: 'How do I get started?',
-            a: 'Book a demo below. We will set up your account, import your existing stock, and get your team trained in one session.',
+            a: 'Book a demo below. We will set up your account, import your existing data, and get your team trained.',
           },
         },
       },
       contact: {
         eyebrow: '// Get in touch',
-        heading: 'Ready to take control of your stock?',
-        sub: 'Book a demo or reach out directly. We will get back to you the same day.',
+        heading: 'Ready to simplify your operations?',
+        sub: 'Book a demo or ask about a custom app. We will get back to you the same day.',
         whatsapp: {
           sub: 'Fastest response',
         },
@@ -279,7 +356,7 @@ export const landing = {
         },
       },
       footer: {
-        tagline: 'Built for spare parts businesses',
+        tagline: 'Business Operations, Simplified.',
         product: 'Product',
         contact: 'Contact',
         language: 'Language',
@@ -289,7 +366,8 @@ export const landing = {
   id: {
     landing: {
       nav: {
-        products: 'Produk',
+        products: 'Solusi',
+        custom: 'Aplikasi Kustom',
         howItWorks: 'Cara Kerja',
         faq: 'Pertanyaan Umum',
         contact: 'Kontak',
@@ -298,17 +376,17 @@ export const landing = {
         toggleMenu: 'Buka menu',
       },
       hero: {
-        eyebrow: 'Dibuat khusus untuk bisnis suku cadang',
-        headline: 'Berhenti kehilangan jejak suku cadang Anda.',
-        sub1: 'WareSys menyatukan inventaris, lokasi, dan pergerakan stok Anda dalam satu tempat.',
-        sub2: 'Pindai suku cadang. Pindahkan stok. Ketahui persis apa yang Anda miliki dan di mana lokasinya.',
+        eyebrow: 'Software untuk operasional sehari-hari',
+        headline: 'Operasional Bisnis, Jadi Lebih Sederhana.',
+        sub1: 'Solusi software yang membantu bisnis mengelola inventaris, penjualan, bengkel, dan pengiriman — semua dalam satu ekosistem.',
         ctaDemo: 'Jadwalkan Demo',
-        ctaHowItWorks: 'Lihat Cara Kerjanya ↓',
+        ctaSolutions: 'Lihat Solusi ↓',
+        customLine: 'Butuh yang berbeda? Kami juga membuat aplikasi kustom.',
         pauseAnimation: 'Jeda animasi',
         playAnimation: 'Putar animasi',
-        platformLabel: 'Satu login, empat aplikasi →',
+        platformLabel: 'Empat solusi, satu login',
         platformWarehouse: 'Gudang',
-        platformInvoice: 'Faktur',
+        platformSales: 'Penjualan',
         platformWorkshop: 'Bengkel',
         platformDelivery: 'Pengiriman',
       },
@@ -324,70 +402,70 @@ export const landing = {
       },
       scene: {
         warehouse: 'Gudang',
-        live: 'LIVE',
-        dashboard: 'Dasbor',
-        stock: 'Stok',
-        receiving: 'Penerimaan',
-        transfers: 'Transfer',
-        deliveries: 'Pengiriman',
-        auditLog: 'Log audit',
-        today: 'Hari ini',
-        lowStock: 'Stok menipis',
-        unitsInStock: 'Unit tersedia',
-        transfersToday: 'Transfer hari ini',
+        sales: 'Penjualan',
+        workshop: 'Bengkel',
+        delivery: 'Pengiriman',
+        scanning: 'Memindai…',
+        shelved: 'Disimpan di',
+        invoicing: 'Menerbitkan faktur…',
+        paid: 'Lunas',
+        loading: 'Memuat ke truk',
+        onRoute: 'Dalam perjalanan',
+        delivered: 'Terkirim',
+        inService: 'Diservis · 40.000 km',
+        serviceDone: 'Servis selesai',
         sku: 'SKU',
         item: 'Barang',
         location: 'Lokasi',
         qty: 'Jml',
-        receive: 'Terima',
-        move: 'Pindah',
-        track: 'Lacak',
-        liveActivity: 'Aktivitas langsung',
-        left: 'sisa 4',
         badgeReceive: 'TERIMA',
         badgeMove: 'PINDAH',
         badgeAdjust: 'KOREKSI',
-        badgeShip: 'KIRIM',
         dragHint: 'Geser untuk melihat · arahkan ke kotak',
         items: {
-          brakePads: 'Set kampas rem',
+          waterGallon: 'Galon air 19L',
           oilFilter: 'Filter oli',
+          beverageCase: 'Dus minuman',
+          brakePads: 'Set kampas rem',
+          packaging: 'Karton kemasan',
+          engineOil: 'Oli mesin 1L',
           timingBelt: 'Timing belt',
           sparkPlug: 'Busi',
           wheelBearing: 'Bearing roda',
-          clutchKit: 'Kit kopling',
         },
       },
       techMarquee: {
         tags: {
           barcodeScanning: 'PEMINDAIAN BARCODE',
+          invoicing: 'FAKTUR',
+          workOrders: 'WORK ORDER',
+          routePlanning: 'PERENCANAAN RUTE',
+          proofOfDelivery: 'BUKTI PENGIRIMAN',
           realTimeSync: 'SINKRONISASI REAL-TIME',
           roleBasedAccess: 'AKSES BERBASIS PERAN',
           auditTrail: 'JEJAK AUDIT',
           multiLocationTracking: 'PELACAKAN MULTI-LOKASI',
-          transferHistory: 'RIWAYAT TRANSFER',
-          liveStockCounts: 'JUMLAH STOK REAL-TIME',
         },
       },
       problem: {
         eyebrow: 'Terdengar familiar?',
-        heading: 'Masih mengelola stok pakai Excel, kertas, atau WhatsApp?',
+        heading: 'Bisnis Anda masih jalan pakai Excel, kertas, dan WhatsApp?',
         cards: {
           mismatch: {
             title: 'Stok tidak sesuai',
-            body: 'Input manual menimbulkan kesalahan.',
+            body: 'Input manual menimbulkan kesalahan, dan tidak ada yang tahu angka mana yang benar.',
           },
-          disappear: {
-            title: 'Suku cadang menghilang',
-            body: 'Anda tahu sesuatu berpindah, tapi tidak tahu siapa yang memindahkannya.',
+          invoices: {
+            title: 'Faktur terlewat',
+            body: 'Penjualan, pembayaran, dan sisa tagihan tercatat di tempat yang berbeda-beda.',
           },
-          location: {
-            title: 'Tidak ada yang tahu lokasinya',
-            body: 'Tim Anda buang waktu mencari-cari di rak.',
+          jobs: {
+            title: 'Pekerjaan bengkel cuma di papan tulis',
+            body: 'Siapa mengerjakan apa, dan suku cadang apa yang dipakai, jadi tidak terlacak.',
           },
-          forever: {
-            title: 'Stock opname makan waktu lama',
-            body: 'Menghitung dan memperbarui stok manual menghabiskan berjam-jam.',
+          deliveries: {
+            title: 'Tidak ada yang tahu posisi kiriman',
+            body: 'Tim Anda baru tahu setelah menelepon pengemudi.',
           },
         },
         mockLog: {
@@ -396,7 +474,7 @@ export const landing = {
         visual: {
           mismatch: 'Tidak cocok — terakhir di Bay 7',
           chatSender: 'Budi (Gudang)',
-          chatMessage: 'Ada yang mindahin kampas rem??',
+          chatMessage: 'Pesanan itu sudah sampai ke pelanggan belum??',
           chatTime: '2 hari lalu',
           note: 'Hitung ulang hari Jumat?',
         },
@@ -441,86 +519,154 @@ export const landing = {
         },
       },
       howItWorks: {
-        eyebrow: 'Cara Kerja',
-        heading: 'Dari dermaga bongkar muat sampai ke rak.',
+        eyebrow: 'Cara terhubungnya',
+        heading: 'Satu sistem, dari stok sampai ke pelanggan.',
         steps: {
-          receive: {
-            title: 'Terima inventaris',
-            body: 'Pindai atau input suku cadang saat tiba. Setiap barang langsung tercatat waktu dan lokasinya.',
+          warehouse: {
+            title: 'Stok masuk',
+            body: 'Barang dipindai saat tiba, sehingga semua orang tahu apa yang ada dan di mana lokasinya.',
           },
-          move: {
-            title: 'Pindahkan stok',
-            body: 'Transfer suku cadang antar rak atau gudang. Sistem mencatat siapa memindahkan apa, dan kapan.',
+          sales: {
+            title: 'Penjualan tercatat',
+            body: 'Menerbitkan faktur langsung mengurangi stok dan melacak yang sudah dibayar.',
           },
-          track: {
-            title: 'Lacak semuanya',
-            body: 'Lihat jumlah stok real-time per lokasi, tarik log audit, dan ketahui persis apa yang Anda miliki — dan di mana.',
+          delivery: {
+            title: 'Pesanan dikirim',
+            body: 'Surat jalan masuk ke rute, dan setiap pengemudi melapor dari ponselnya.',
+          },
+          workshop: {
+            title: 'Bengkel tetap sinkron',
+            body: 'Suku cadang di work order ditahan dari stok, lalu ditagih dalam satu faktur.',
           },
         },
       },
       ecosystem: {
-        eyebrow: 'Gambaran yang lebih besar',
-        heading: 'Satu platform untuk seluruh operasional Anda.',
-        statusLive: 'Aktif',
-        statusComingSoon: 'Segera hadir',
+        eyebrow: 'Solusi kami',
+        heading: 'Empat solusi. Satu ekosistem.',
+        sub: 'Pakai yang dibutuhkan bisnis Anda hari ini. Masing-masing dibuat untuk jenis pekerjaannya sendiri, dan semuanya saling terhubung.',
         hubCaption: 'Satu login. Satu sumber data.',
         products: {
-          warehouse: {
-            tag: 'Manajemen inventaris & gudang',
-            body: 'Lacak stok, lokasi, transfer, dan setiap pergerakan.',
+          warehouse: { tag: 'Manajemen inventaris & gudang' },
+          sales: { tag: 'Penjualan & faktur' },
+          workshop: { tag: 'Manajemen bengkel otomotif' },
+          delivery: { tag: 'Manajemen pengiriman & rute' },
+        },
+      },
+      solutions: {
+        warehouse: {
+          audience: 'Untuk bisnis suku cadang, distributor, grosir, dan ritel',
+          title: 'Tahu setiap barang, setiap rak, setiap pergerakan.',
+          body: 'Dibuat dari operasional suku cadang yang sesungguhnya, dengan ribuan SKU yang bergerak setiap hari. Pindai barang masuk, pindahkan antar lokasi, dan selalu tahu apa yang Anda miliki dan di mana lokasinya.',
+        },
+        sales: {
+          audience: 'Untuk bisnis yang menjual dan menerbitkan faktur',
+          title: 'Dari penawaran sampai faktur lunas.',
+          body: 'Buat penawaran, terima pesanan, terbitkan faktur, lalu lihat yang sudah dibayar dan untung sebenarnya, tanpa mengetik ulang di tiap langkah.',
+          features: {
+            documents: { title: 'Penawaran sampai faktur', body: 'Satu alur dari penawaran, pesanan penjualan, hingga faktur.' },
+            payments: { title: 'Pembayaran terpisah', body: 'Terima satu faktur dengan beberapa metode pembayaran.' },
+            tax: { title: 'Laporan pajak', body: 'Laporan jelas yang siap dicetak untuk admin pajak Anda.' },
+            margin: { title: 'Laporan margin', body: 'Lihat keuntungan dari yang Anda jual, bukan hanya omzetnya.' },
           },
-          invoice: {
-            tag: 'Penjualan & faktur',
-            body: 'Buat faktur, kelola produk, lacak penjualan, dan hitung keuntungan.',
+          mock: {
+            paid: 'Lunas',
+            line1: 'Barang',
+            line2: 'Pengiriman & jasa',
+            total: 'Total',
+            transfer: 'Transfer',
+            cash: 'Tunai',
           },
-          workshop: {
-            tag: 'Manajemen bengkel',
-            body: 'Kelola pelanggan, kendaraan, riwayat servis, pengingat, faktur, dan operasional bengkel.',
+        },
+        workshop: {
+          audience: 'Untuk bengkel otomotif',
+          title: 'Urus bengkelnya, bukan kertasnya.',
+          body: 'Dibuat untuk bengkel otomotif: setiap kendaraan, pekerjaan, mekanik, dan suku cadang di satu tempat, sejak mobil masuk sampai pelanggan membayar.',
+          features: {
+            workOrders: { title: 'Work order', body: 'Lacak setiap pekerjaan dari masuk hingga faktur, termasuk suku cadangnya.' },
+            vehicles: { title: 'Riwayat kendaraan', body: 'Data pelanggan dan riwayat servis setiap pelat, tinggal dicari.' },
+            mechanic: { title: 'Aplikasi mekanik', body: 'Mekanik melihat dan memperbarui pekerjaannya dari ponsel.' },
+            reminders: { title: 'Pengingat servis', body: 'Tahu pelanggan mana yang sudah waktunya servis lagi.' },
           },
-          delivery: {
-            tag: 'Manajemen pengiriman',
-            body: 'Rencanakan rute, tugaskan pengemudi, dan pantau setiap surat jalan hingga sampai tujuan.',
+          mock: {
+            status: 'Dikerjakan',
+            job: 'Servis berkala',
+            part1: 'Filter oli',
+            part2: 'Oli mesin',
+            next: 'Servis berikutnya',
           },
+        },
+        delivery: {
+          audience: 'Untuk distributor air, operator logistik, dan bisnis pengiriman',
+          title: 'Rencanakan rute. Pantau setiap kiriman.',
+          body: 'Dibuat untuk bisnis dengan pengemudi di jalan setiap hari: susun rute lebih baik, tugaskan dalam hitungan menit, dan tahu apa yang sudah sampai.',
+          features: {
+            routes: { title: 'Perencanaan rute', body: 'Susun urutan pemberhentian yang efisien, lalu sesuaikan manual.' },
+            driver: { title: 'Aplikasi pengemudi', body: 'Pengemudi mendapat daftar pemberhentian dan navigasi di ponsel.' },
+            monitoring: { title: 'Pemantauan pengiriman', body: 'Lihat progres setiap rute dari kantor.' },
+            proof: { title: 'Bukti pengiriman', body: 'Foto dari pengemudi mengonfirmasi setiap kiriman.' },
+          },
+          mock: {
+            stop1: 'Toko Makmur',
+            stop2: 'Depot Sejahtera',
+            stop3: 'CV Berkah Jaya',
+            stop4: 'Warung Bu Sari',
+          },
+        },
+      },
+      custom: {
+        eyebrow: 'Aplikasi kustom',
+        heading: 'Butuh yang dibuat khusus untuk Anda?',
+        body: 'Tidak semua bisnis cocok dengan produk standar. Ceritakan cara kerja bisnis Anda, dan kami akan merancang serta membuat software sesuai kebutuhan, berdiri sendiri atau terhubung dengan solusi WareSys Anda.',
+        cta: 'Ceritakan Kebutuhan Anda',
+        offers: {
+          apps: { title: 'Aplikasi kustom', body: 'Aplikasi web dan mobile sesuai cara kerja tim Anda.' },
+          integrations: { title: 'Integrasi', body: 'Hubungkan WareSys dengan sistem yang sudah Anda pakai.' },
+          workflows: { title: 'Alur kerja kustom', body: 'Persetujuan, aturan, dan proses Anda, langsung di sistem.' },
+          reports: { title: 'Laporan & dokumen', body: 'Laporan dan formulir cetak yang dibutuhkan bisnis Anda.' },
         },
       },
       whoItsFor: {
         eyebrow: 'Untuk siapa',
-        heading: 'Dibuat untuk bisnis yang memindahkan suku cadang setiap hari.',
+        heading: 'Dibuat untuk bisnis yang terus bergerak.',
         cards: {
+          distributors: {
+            title: 'Distributor & Grosir',
+            body: 'Selaraskan stok, pesanan, dan pengiriman di setiap lokasi.',
+          },
           spareParts: {
-            title: 'Toko Suku Cadang',
-            body: 'Lacak ribuan SKU tanpa kehilangan visibilitas lokasi.',
+            title: 'Toko Suku Cadang & Ritel',
+            body: 'Lacak ribuan SKU tanpa kehilangan visibilitas lokasi, dan jual dari stok real-time.',
           },
           workshops: {
             title: 'Bengkel Otomotif',
-            body: 'Ketahui suku cadang yang tersedia sebelum memulai pekerjaan.',
+            body: 'Ketahui suku cadang yang tersedia sebelum memulai pekerjaan, dan tagih semuanya dalam satu faktur.',
           },
-          multiLocation: {
-            title: 'Bisnis Multi-Lokasi',
-            body: 'Pindahkan inventaris antar lokasi dengan riwayat lengkap.',
+          logistics: {
+            title: 'Distributor Air & Logistik',
+            body: 'Rencanakan rute harian, tugaskan pengemudi, dan konfirmasi setiap kiriman.',
           },
         },
-        footNote: 'Jika inventaris Anda masih dikelola lewat Excel, kertas, atau ingatan, WareSys dibuat untuk Anda.',
+        footNote: 'Bisnis Anda tidak ada di sini? Kami juga membuat aplikasi kustom sesuai cara kerja Anda.',
       },
       proof: {
-        eyebrow: 'Mengapa WARESYS',
-        heading: 'Dibuat untuk operasional suku cadang yang sesungguhnya.',
+        eyebrow: 'Mengapa WareSys',
+        heading: 'Dibuat sesuai cara operasional berjalan.',
         cards: {
-          location: {
-            title: 'Tahu persis di mana setiap suku cadang berada.',
-            body: 'Lacak stok berdasarkan gudang, rak, atau lokasi.',
+          connected: {
+            title: 'Semuanya tetap terhubung.',
+            body: 'Tim Anda bekerja dari data yang sama, bukan spreadsheet masing-masing.',
           },
-          whoMoved: {
-            title: 'Tahu siapa yang memindahkannya.',
-            body: 'Setiap pergerakan stok tercatat.',
+          whoDid: {
+            title: 'Tahu siapa melakukan apa.',
+            body: 'Setiap aksi penting tercatat dengan nama dan waktunya.',
           },
-          spreadsheets: {
-            title: 'Berhenti bergantung pada spreadsheet.',
-            body: 'Tim Anda bekerja dari data inventaris yang sama.',
+          modular: {
+            title: 'Mulai dari yang Anda butuhkan.',
+            body: 'Aktifkan satu solusi sekarang dan tambah yang lain seiring bisnis tumbuh.',
           },
           quickStart: {
             title: 'Mulai tanpa perlu berbulan-bulan setup.',
-            body: 'Impor stok yang sudah ada dan langsung gunakan.',
+            body: 'Impor data yang sudah ada dan langsung gunakan.',
           },
         },
       },
@@ -532,27 +678,35 @@ export const landing = {
         contactCta: 'Hubungi kami',
         items: {
           whatDoesItDo: {
-            q: 'Sebenarnya ini untuk apa?',
-            a: 'Ini menggantikan spreadsheet Anda. Terima suku cadang, pindahkan antar lokasi, dan lihat jumlah stok secara real-time — dengan riwayat lengkap setiap aksi.',
+            q: 'Sebenarnya WareSys itu untuk apa?',
+            a: 'WareSys adalah software bisnis dengan empat solusi: Warehouse untuk inventaris, Invoice POS untuk penjualan, Workshop RMS untuk bengkel otomotif, dan Delivery DMS untuk rute dan pengemudi. Semuanya menggantikan spreadsheet, kertas, dan grup chat yang tercecer.',
+          },
+          needAll: {
+            q: 'Apakah saya harus memakai keempat solusi?',
+            a: 'Tidak. Mulai dari yang cocok untuk bisnis Anda dan tambah yang lain nanti. Semuanya memakai satu login dan saling terhubung saat Anda memakai lebih dari satu.',
+          },
+          custom: {
+            q: 'Bisakah membuat aplikasi khusus untuk bisnis saya?',
+            a: 'Bisa. Selain keempat solusi, kami membuat aplikasi kustom, integrasi, dan alur kerja. Ceritakan kebutuhan Anda dan kami akan membahas lingkupnya bersama Anda.',
           },
           multipleEmployees: {
             q: 'Bisa dipakai banyak karyawan sekaligus?',
             a: 'Bisa. Setiap karyawan punya login sendiri. Admin bisa melihat semuanya; staf melihat yang mereka butuhkan.',
           },
           multiLocation: {
-            q: 'Bisakah melacak stok di beberapa lokasi sekaligus?',
-            a: 'Bisa. Suku cadang dilacak per rak atau gudang. Setiap transfer tercatat sehingga Anda selalu tahu ke mana suku cadang itu pergi.',
+            q: 'Apakah bisa untuk beberapa lokasi?',
+            a: 'Bisa. Stok dilacak per gudang dan rak, dan setiap transfer tercatat sehingga Anda selalu tahu ke mana barang pergi.',
           },
           getStarted: {
             q: 'Bagaimana cara memulainya?',
-            a: 'Jadwalkan demo di bawah ini. Kami akan menyiapkan akun Anda, mengimpor stok yang ada, dan melatih tim Anda dalam satu sesi.',
+            a: 'Jadwalkan demo di bawah ini. Kami akan menyiapkan akun Anda, mengimpor data yang ada, dan melatih tim Anda.',
           },
         },
       },
       contact: {
         eyebrow: '// Hubungi Kami',
-        heading: 'Siap mengambil kendali penuh atas stok Anda?',
-        sub: 'Jadwalkan demo atau hubungi kami langsung. Kami akan membalas di hari yang sama.',
+        heading: 'Siap menyederhanakan operasional Anda?',
+        sub: 'Jadwalkan demo atau tanyakan soal aplikasi kustom. Kami akan membalas di hari yang sama.',
         whatsapp: {
           sub: 'Respons tercepat',
         },
@@ -561,7 +715,7 @@ export const landing = {
         },
       },
       footer: {
-        tagline: 'Dibuat untuk bisnis suku cadang',
+        tagline: 'Operasional Bisnis, Jadi Lebih Sederhana.',
         product: 'Produk',
         contact: 'Kontak',
         language: 'Bahasa',

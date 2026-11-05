@@ -63,6 +63,39 @@ export function hasWebGL() {
   }
 }
 
+/* ─── Hero tier ──────────────────────────────────────────────────────
+   Decides how much of the hero a device gets, before three.js downloads:
+     lite    static HeroLite only. Low-end hints, no WebGL, or a software
+             renderer (no GPU, where the 3D scene would crawl).
+     medium  3D with no shadows or reflections, at capped resolution. Phones
+             and mid-range machines.
+     high    the full scene.
+   HeroCanvas's frame-rate watchdog corrects the guess at runtime. */
+export type HeroQuality = 'high' | 'medium';
+
+function softwareRenderer() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    if (!gl || !ext) return false;
+    const name = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return /swiftshader|llvmpipe|software|microsoft basic render/i.test(name);
+  } catch {
+    return false;
+  }
+}
+
+export function heroTier(): 'lite' | HeroQuality {
+  if (isLowEndDevice() || !hasWebGL() || softwareRenderer()) return 'lite';
+  const nav = navigator as NavigatorHints;
+  const modest =
+    window.matchMedia('(max-width: 767px), (pointer: coarse)').matches ||
+    (nav.hardwareConcurrency !== undefined && nav.hardwareConcurrency <= 6) ||
+    (nav.deviceMemory !== undefined && nav.deviceMemory <= 6);
+  return modest ? 'medium' : 'high';
+}
+
 /** `data-anim` value for a decorative-animation root: paused when the
  *  user paused motion or the element is offscreen. Pair with the global
  *  `[data-anim='paused']` rule in globals.css. */

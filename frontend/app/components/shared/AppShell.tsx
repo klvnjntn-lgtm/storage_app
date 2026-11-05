@@ -531,7 +531,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/ar-aging', label: t('nav.items.arAging'), icon: Wallet },
     { href: '/accounting/ap-aging', label: t('nav.items.apAging'), icon: ShoppingCart },
     { href: '/accounting/cash-statement/new', label: t('nav.items.cashStatement'), icon: ScrollText },
-    { href: '/accounting/tax-export', label: t('nav.items.taxExport'), icon: FileSpreadsheet },
+    { href: '/accounting/tax-report', label: t('nav.items.taxReport'), icon: FileSpreadsheet },
     { href: '/accounting/ledger', label: t('nav.items.accountLedger'), icon: BookOpen },
   ].filter((item) => isMaster || BRANCH_ADMIN_ACCOUNTING.has(item.href));
 

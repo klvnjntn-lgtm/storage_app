@@ -757,6 +757,369 @@ describe('Team routes & customer stops', () => {
     expect(found.map((s) => s.id)).toEqual([stops[2].id]);
   });
 
+  describe('HIGH priority stops come first', () => {
+    const order = async (routeId: string) =>
+      (await routes.getRoute(orgId, routeId)).stops.map((s) => s.id);
+    const threeStops = async () => {
+      const route = await mkRoute();
+      const a = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('HpA')).id });
+      const b = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('HpB')).id });
+      const c = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('HpC')).id });
+      return { route, a, b, c };
+    };
+
+    it('puts an added HIGH stop above normal stops but below earlier HIGH stops', async () => {
+      const { route, a, b } = await threeStops();
+      const high1 = await routes.addStop(orgId, route.id, {
+        customerId: (await mkCustomer('HpH1')).id,
+        priority: 'HIGH',
+      });
+      expect(high1.sequence).toBe(1);
+      const high2 = await routes.addStop(orgId, route.id, {
+        customerId: (await mkCustomer('HpH2')).id,
+        priority: 'HIGH',
+      });
+      expect((await order(route.id)).slice(0, 4)).toEqual([high1.id, high2.id, a.id, b.id]);
+    });
+
+    it('moves a stop when its priority is edited', async () => {
+      const { route, a, b, c } = await threeStops();
+      await routes.updateCustomerStopDetails(orgId, route.id, c.id, { priority: 'HIGH' });
+      expect(await order(route.id)).toEqual([c.id, a.id, b.id]);
+      await routes.updateCustomerStopDetails(orgId, route.id, c.id, { priority: 'NORMAL' });
+      expect(await order(route.id)).toEqual([c.id, a.id, b.id]);
+    });
+
+    const swapFirstTwo = async (routeId: string) => {
+      const [x, y, ...rest] = await prisma.routeStop.findMany({ where: { routeId }, orderBy: { sequence: 'asc' } });
+      return [
+        { stopId: y.id, sequence: x.sequence },
+        { stopId: x.id, sequence: y.sequence },
+        ...rest.map((r) => ({ stopId: r.id, sequence: r.sequence })),
+      ];
+    };
+    const versionOf = async (routeId: string) =>
+      (await prisma.route.findUniqueOrThrow({ where: { id: routeId } })).version;
+
+    it('leaves finished stops in place when a HIGH stop is added', async () => {
+      const { route, a, b, c } = await threeStops();
+      await prisma.routeStop.update({ where: { id: a.id }, data: { signedAt: new Date() } });
+      const high = await routes.addStop(orgId, route.id, {
+        customerId: (await mkCustomer('HpFin')).id,
+        priority: 'HIGH',
+      });
+      expect(await order(route.id)).toEqual([a.id, high.id, b.id, c.id]);
+      expect(high.sequence).toBe(2);
+    });
+
+    it("doesn't touch the route when a finished stop's priority changes", async () => {
+      const { route, a, b } = await threeStops();
+      await prisma.routeStop.update({ where: { id: b.id }, data: { signedAt: new Date(), priority: 'HIGH' } });
+      const version = await versionOf(route.id);
+      const notify = jest.spyOn(
+        (routes as unknown as { notifications: { create: () => Promise<unknown> } }).notifications,
+        'create',
+      );
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.ACTIVE } });
+
+      expect(await routes.applyPriorityOrder(orgId, route.id)).toBe(false);
+
+      expect((await order(route.id))[0]).toBe(a.id);
+      expect(await versionOf(route.id)).toBe(version);
+      expect(notify).not.toHaveBeenCalled();
+      notify.mockRestore();
+    });
+
+    it('refuses to move a finished stop', async () => {
+      const { route, a } = await threeStops();
+      await prisma.routeStop.update({ where: { id: a.id }, data: { signedAt: new Date() } });
+      await expect(
+        routes.reorderStops(orgId, route.id, { stops: await swapFirstTwo(route.id) }),
+      ).rejects.toThrow(/keeps its place/);
+    });
+
+    it('refuses a reorder built from an older version of the route', async () => {
+      const { route } = await threeStops();
+      const version = await versionOf(route.id);
+      await expect(
+        routes.reorderStops(orgId, route.id, {
+          stops: await swapFirstTwo(route.id),
+          expectedVersion: version - 1,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      const view = await routes.reorderStops(orgId, route.id, {
+        stops: await swapFirstTwo(route.id),
+        expectedVersion: version,
+      });
+      expect(view.version).toBe(version + 1);
+    });
+
+    it('lets a route already out of order be reordered and tidied, not made worse', async () => {
+      const { route, a, b, c } = await threeStops();
+      await prisma.routeStop.update({ where: { id: c.id }, data: { priority: 'HIGH' } });
+      const send = (ids: string[]) =>
+        routes.reorderStops(orgId, route.id, {
+          stops: ids.map((stopId, i) => ({ stopId, sequence: i + 1 })),
+        });
+      await send([b.id, a.id, c.id]); // same mistake, no worse
+      await send([b.id, c.id, a.id]); // better
+      await expect(send([a.id, b.id, c.id])).rejects.toThrow(/must stay above/); // worse
+      await send([c.id, b.id, a.id]);
+      expect(await order(route.id)).toEqual([c.id, b.id, a.id]);
+    });
+
+    it('sorts a route when it is reopened', async () => {
+      const { route, a, b, c } = await threeStops();
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.CANCELLED } });
+      await prisma.routeStop.update({ where: { id: c.id }, data: { priority: 'HIGH' } });
+      expect(await order(route.id)).toEqual([a.id, b.id, c.id]);
+
+      await routes.updateRoute(orgId, route.id, { status: RouteStatus.PLANNED });
+
+      expect(await order(route.id)).toEqual([c.id, a.id, b.id]);
+    });
+
+    it('takes reorders of one route one at a time', async () => {
+      const { route, a, b, c } = await threeStops();
+      const send = (ids: string[]) =>
+        routes.reorderStops(orgId, route.id, {
+          stops: ids.map((stopId, i) => ({ stopId, sequence: i + 1 })),
+        });
+      await Promise.all([send([c.id, b.id, a.id]), send([b.id, a.id, c.id]), send([a.id, c.id, b.id])]);
+      const sequences = (await prisma.routeStop.findMany({ where: { routeId: route.id } })).map((s) => s.sequence);
+      expect(sequences.sort()).toEqual([1, 2, 3]);
+    });
+
+    it('never fails the saved change if the re-sort does', async () => {
+      const { route, a } = await threeStops();
+      const tx = jest.spyOn(prisma, '$transaction').mockRejectedValueOnce(new Error('deadlock'));
+      await expect(routes.applyPriorityOrder(orgId, route.id)).resolves.toBe(false);
+      tx.mockRestore();
+      expect((await order(route.id))[0]).toBe(a.id);
+    });
+
+    it('clears a window with null and keeps it when left out', async () => {
+      const { route, a } = await threeStops();
+      const end = new Date('2031-03-01T10:00:00.000Z');
+      await routes.updateCustomerStopDetails(orgId, route.id, a.id, { deliveryWindowEnd: end.toISOString() });
+      await routes.updateCustomerStopDetails(orgId, route.id, a.id, { priority: 'NORMAL' });
+      const kept = await prisma.routeStop.findUniqueOrThrow({ where: { id: a.id } });
+      expect(kept.deliveryWindowEnd).toEqual(end);
+      await routes.updateCustomerStopDetails(orgId, route.id, a.id, { deliveryWindowEnd: null });
+      const cleared = await prisma.routeStop.findUniqueOrThrow({ where: { id: a.id } });
+      expect(cleared.deliveryWindowEnd).toBeNull();
+    });
+
+    it("follows a delivery order's details on its live stop only", async () => {
+      const { route, a, b } = await threeStops();
+      const mkDo = (status: DeliveryOrderStatus) =>
+        prisma.deliveryOrder.create({
+          data: { organizationId: orgId, customerName: 'HP DO', status, priority: 'HIGH' },
+        });
+      const order1 = await mkDo(DeliveryOrderStatus.SHIPPED);
+      await prisma.deliveryOrder.update({ where: { id: order1.id }, data: { priority: 'NORMAL' } });
+      const stop = await routes.addStop(orgId, route.id, { deliveryOrderId: order1.id });
+      await prisma.routeStop.update({
+        where: { id: stop.id },
+        data: { atRiskNotifiedAt: new Date(), lateNotifiedAt: new Date() },
+      });
+
+      await prisma.deliveryOrder.update({ where: { id: order1.id }, data: { priority: 'HIGH' } });
+      await routes.afterDeliveryOrderDetailsChanged(orgId, order1.id, { priority: true, window: false });
+      expect((await order(route.id))[0]).toBe(stop.id);
+      expect((await order(route.id)).slice(1, 3)).toEqual([a.id, b.id]);
+      const unchanged = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+      expect(unchanged.atRiskNotifiedAt).not.toBeNull();
+
+      await routes.afterDeliveryOrderDetailsChanged(orgId, order1.id, { priority: false, window: true });
+      const rearmed = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
+      expect(rearmed.atRiskNotifiedAt).toBeNull();
+      expect(rearmed.lateNotifiedAt).toBeNull();
+    });
+
+    it('refuses a reorder that mixes the groups, allows one within a group', async () => {
+      const { route, a, b, c } = await threeStops();
+      await routes.updateCustomerStopDetails(orgId, route.id, b.id, { priority: 'HIGH' });
+      await routes.updateCustomerStopDetails(orgId, route.id, c.id, { priority: 'HIGH' });
+      const send = (ids: string[]) =>
+        routes.reorderStops(orgId, route.id, {
+          stops: ids.map((stopId, i) => ({ stopId, sequence: i + 1 })),
+        });
+      await expect(send([b.id, a.id, c.id])).rejects.toThrow(/must stay above/);
+      await expect(send([a.id, b.id, c.id])).rejects.toThrow(/must stay above/);
+      await send([c.id, b.id, a.id]);
+      expect(await order(route.id)).toEqual([c.id, b.id, a.id]);
+    });
+  });
+
+  it('lists finished stops in the order they were done, with their route numbers, for monitoring', async () => {
+    const route = await mkRoute();
+    const stops: { id: string; sequence: number }[] = [];
+    for (const n of ['Tl1', 'Tl2', 'Tl3']) {
+      stops.push(await routes.addStop(orgId, route.id, { customerId: (await mkCustomer(n)).id }));
+    }
+    const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 9, minute));
+    await prisma.route.update({ where: { id: route.id }, data: { plannedDepartureAt: at(0) } });
+    // Stop 3 first, stop 1 failed next, stop 2 still to do.
+    await prisma.routeStop.update({ where: { id: stops[2].id }, data: { signedAt: at(20) } });
+    await prisma.routeStop.update({ where: { id: stops[0].id }, data: { failedAt: at(50) } });
+
+    const date = route.routeDate.toISOString().slice(0, 10);
+    const row = (await routes.monitoringByTeam(orgId, date)).find((r) => r.routeId === route.id)!;
+    expect(row.timeline.map((e) => [e.stopId, e.sequence, e.status, e.durationSeconds])).toEqual([
+      [stops[2].id, stops[2].sequence, 'DELIVERED', 20 * 60],
+      [stops[0].id, stops[0].sequence, 'FAILED', 30 * 60],
+    ]);
+  });
+
+  it("times a rescheduled stop by its own attempt, not the delivery's later failure", async () => {
+    const route = await mkRoute();
+    const order = await prisma.deliveryOrder.create({
+      data: {
+        organizationId: orgId,
+        customerName: 'Retry DO',
+        status: DeliveryOrderStatus.SHIPPED,
+      },
+    });
+    const stop = await routes.addStop(orgId, route.id, { deliveryOrderId: order.id });
+    await prisma.deliveryOrder.update({
+      where: { id: order.id },
+      data: {
+        status: DeliveryOrderStatus.FAILED,
+        failedAt: new Date(Date.UTC(2026, 0, 2, 9)), // the later attempt, on another route
+      },
+    });
+    const supersededAt = new Date(Date.UTC(2026, 0, 1, 9));
+    await prisma.routeStop.update({
+      where: { id: stop.id },
+      data: { supersededAt, activeDeliveryOrderId: null },
+    });
+
+    const date = route.routeDate.toISOString().slice(0, 10);
+    const row = (await routes.monitoringByTeam(orgId, date)).find((r) => r.routeId === route.id)!;
+    expect(row.timeline[0].at).toEqual(supersededAt);
+  });
+
+  describe('resetting a stop', () => {
+    const storage = () => (proofs as unknown as { storage: { exists(k: string): Promise<boolean> } }).storage;
+    const savedStop = (id: string) => prisma.routeStop.findUniqueOrThrow({ where: { id } });
+    const statusOf = async (routeId: string, id: string) =>
+      (await routes.getRoute(orgId, routeId)).stops.find((s) => s.id === id)!.status;
+    const delivered = async (routeId: string) => {
+      const customer = await mkCustomer(`Reset ${randomUUID()}`);
+      const stop = await routes.addStop(orgId, routeId, { customerId: customer.id });
+      await proofs.uploadPhoto(orgId, routeId, stop.id, photo, admin(), {}, photo);
+      await routes.recordCustomerStopProof(orgId, routeId, stop.id, { receivedBy: 'Ani' }, admin());
+      return { stop, customer };
+    };
+
+    it('puts a delivered stop back to pending, removing its photo and the landmark made from it', async () => {
+      const route = await mkStartedRoute();
+      const { stop, customer } = await delivered(route.id);
+      const { proofPhotoKey } = await savedStop(stop.id);
+      const landmark = await prisma.customerLocationPhoto.findFirst({ where: { customerId: customer.id } });
+      expect(landmark?.fromProofOf).toBe(stop.id);
+
+      const view = await proofs.resetStop(orgId, route.id, stop.id, admin());
+
+      expect(view.stops.find((s) => s.id === stop.id)!.status).toBe('PENDING');
+      const after = await savedStop(stop.id);
+      expect(after).toMatchObject({ signedAt: null, receivedBy: null, proofPhotoKey: null, completedLatitude: null });
+      expect(await storage().exists(proofPhotoKey!)).toBe(false);
+      expect(await storage().exists(landmark!.storageKey)).toBe(false);
+      expect(await prisma.customerLocationPhoto.count({ where: { customerId: customer.id } })).toBe(0);
+      const event = await prisma.routeHistoryEvent.findFirst({
+        where: { routeId: route.id, type: 'STOP_RESET' },
+      });
+      expect(event?.createdByUserId).toBe(adminId);
+      expect(event?.metadata).toMatchObject({ previousStatus: 'DELIVERED', receivedBy: 'Ani', photosDeleted: 1 });
+    });
+
+    it('lets the stop be delivered again afterwards', async () => {
+      const route = await mkStartedRoute();
+      const { stop } = await delivered(route.id);
+      await proofs.resetStop(orgId, route.id, stop.id, admin());
+      await proofs.uploadPhoto(orgId, route.id, stop.id, photo, admin());
+      await routes.recordCustomerStopProof(orgId, route.id, stop.id, { receivedBy: 'Budi' }, admin());
+      expect(await statusOf(route.id, stop.id)).toBe('DELIVERED');
+    });
+
+    it('resets a failed delivery order to shipped, on the delivery order itself', async () => {
+      const route = await mkStartedRoute();
+      const order = await prisma.deliveryOrder.create({
+        data: { organizationId: orgId, customerName: 'Reset DO', status: DeliveryOrderStatus.SHIPPED },
+      });
+      const stop = await routes.addStop(orgId, route.id, { deliveryOrderId: order.id });
+      await prisma.deliveryOrder.update({
+        where: { id: order.id },
+        data: { status: DeliveryOrderStatus.FAILED, failedAt: new Date(), failureReason: 'Closed' },
+      });
+
+      await proofs.resetStop(orgId, route.id, stop.id, admin());
+
+      const after = await prisma.deliveryOrder.findUniqueOrThrow({ where: { id: order.id } });
+      expect(after).toMatchObject({ status: DeliveryOrderStatus.SHIPPED, failedAt: null, failureReason: null });
+      expect(await statusOf(route.id, stop.id)).toBe('PENDING');
+    });
+
+    it('refuses a returned delivery, a rescheduled stop and a stop with nothing recorded', async () => {
+      const route = await mkStartedRoute();
+      const order = await prisma.deliveryOrder.create({
+        data: { organizationId: orgId, customerName: 'Returned DO', status: DeliveryOrderStatus.SHIPPED },
+      });
+      const doStop = await routes.addStop(orgId, route.id, { deliveryOrderId: order.id });
+      await prisma.deliveryOrder.update({
+        where: { id: order.id },
+        data: { status: DeliveryOrderStatus.RETURNED, signedAt: new Date() },
+      });
+      await expect(proofs.resetStop(orgId, route.id, doStop.id, admin())).rejects.toThrow(/returned or closed/);
+
+      const empty = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('Reset empty')).id });
+      await expect(proofs.resetStop(orgId, route.id, empty.id, admin())).rejects.toThrow(/nothing to reset/);
+
+      await prisma.routeStop.update({
+        where: { id: empty.id },
+        data: { failedAt: new Date(), supersededAt: new Date() },
+      });
+      await expect(proofs.resetStop(orgId, route.id, empty.id, admin())).rejects.toThrow(/rescheduled/);
+    });
+
+    it("holds a driver to their own team's open route, and tells the office", async () => {
+      const route = await mkStartedRoute();
+      const { stop } = await delivered(route.id);
+      await expect(
+        proofs.resetStop(orgId, route.id, stop.id, { sub: otherDriverId, role: 'DRIVER' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.COMPLETED } });
+      await expect(proofs.resetStop(orgId, route.id, stop.id, driver())).rejects.toThrow(/ask the office/);
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.ACTIVE } });
+
+      const notify = jest.spyOn(
+        (routes as unknown as { notifications: { notifyOrgStaff: () => Promise<unknown> } }).notifications,
+        'notifyOrgStaff',
+      );
+      await proofs.resetStop(orgId, route.id, stop.id, driver());
+      expect(await statusOf(route.id, stop.id)).toBe('PENDING');
+      expect(notify).toHaveBeenCalledWith(orgId, 'ROUTE_STOPS_CHANGED', expect.stringContaining('reset'), expect.anything());
+      notify.mockRestore();
+    });
+
+    it('reopens a completed route for the office, and puts a HIGH stop back above normal ones', async () => {
+      const route = await mkStartedRoute();
+      const { stop } = await delivered(route.id);
+      await prisma.routeStop.update({ where: { id: stop.id }, data: { priority: 'HIGH' } });
+      const before = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('Reset N1')).id });
+      await prisma.routeStop.update({ where: { id: before.id }, data: { sequence: 0 } });
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.COMPLETED } });
+
+      const view = await proofs.resetStop(orgId, route.id, stop.id, admin());
+
+      expect(view.status).toBe(RouteStatus.ACTIVE);
+      expect(view.stops[0].id).toBe(stop.id);
+    });
+  });
+
   describe('keeping ETAs up to date', () => {
     const MIN = 60_000;
     const dwell = STOP_DWELL_SECONDS * 1000;
@@ -797,6 +1160,39 @@ describe('Team routes & customer stops', () => {
       );
 
     afterEach(() => jest.restoreAllMocks());
+
+    it('keeps the solved ETAs and a finished stop in place when optimizing HIGH stops', async () => {
+      const { route, stops } = await mkPlanned(['HpEta1', 'HpEta2', 'HpEta3']);
+      await fail(route.id, stops[0].id);
+      await prisma.routeStop.update({ where: { id: stops[2].id }, data: { priority: 'HIGH' } });
+      const later = new Date(Date.now() + 2 * 3600_000);
+      // HIGH first, as the real optimizer returns them.
+      jest.spyOn(optimizer(), 'optimize').mockImplementation(async (input) => ({
+        routes: new Map([
+          [
+            input.vehicles[0].key,
+            [...input.jobs]
+              .sort((x, y) => (x.priority === 'HIGH' ? 0 : 1) - (y.priority === 'HIGH' ? 0 : 1))
+              .map((j, i) => ({
+                key: j.key,
+                eta: new Date(input.vehicles[0].availableFrom.getTime() + (i + 1) * MIN),
+                leg: { durationSeconds: 60, distanceMeters: 500 },
+              })),
+          ],
+        ]),
+        unassigned: [],
+      }));
+      const schedule = spySchedule();
+      schedule.mockClear();
+
+      await routes.optimize(orgId, route.id, { departureAt: later.toISOString() });
+
+      expect(schedule).not.toHaveBeenCalled();
+      expect((await saved(stops[0].id)).sequence).toBe(1);
+      const high = await saved(stops[2].id);
+      expect(high.sequence).toBe(2);
+      expect(high.plannedEta!.getTime()).toBeGreaterThan(later.getTime());
+    });
 
     it('walks the cached legs without OSRM when stops are done in order', async () => {
       const { route, stops } = await mkPlanned(['Ord1', 'Ord2', 'Ord3']);

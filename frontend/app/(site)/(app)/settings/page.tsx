@@ -34,12 +34,13 @@ type BusinessDetails = {
   address: string | null;
   phone: string | null;
   logoUrl: string | null;
+  pricesIncludePpn: boolean | null;
 };
 
 
 
 // The business-identity fields saveBusinessDetails sends.
-const BUSINESS_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone'] as const;
+const BUSINESS_FIELDS = ['legalName', 'npwp', 'logoUrl', 'address', 'phone', 'pricesIncludePpn'] as const;
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -118,6 +119,7 @@ export default function SettingsPage() {
           logoUrl: data.logoUrl ?? null,
           address: data.address ?? null,
           phone: data.phone ?? null,
+          pricesIncludePpn: data.pricesIncludePpn ?? null,
         };
         setBusiness(details);
         setBusinessForm(details);
@@ -301,6 +303,7 @@ export default function SettingsPage() {
           logoUrl: businessForm.logoUrl ?? '',
           address: businessForm.address ?? '',
           phone: businessForm.phone ?? '',
+          pricesIncludePpn: businessForm.pricesIncludePpn ?? null,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -450,6 +453,23 @@ export default function SettingsPage() {
                 placeholder={t('settings.businessIdentity.npwpPlaceholder')}
                 className="border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)] transition-all"
               />
+              <label className="block sm:col-span-2">
+                <span className="text-xs text-gray-500 mb-1 block">{t('settings.businessIdentity.pricesIncludePpnLabel')}</span>
+                <select
+                  value={businessForm.pricesIncludePpn == null ? '' : String(businessForm.pricesIncludePpn)}
+                  onChange={(e) =>
+                    setBusinessForm((f) => ({
+                      ...f,
+                      pricesIncludePpn: e.target.value === '' ? null : e.target.value === 'true',
+                    }))
+                  }
+                  className="w-full border border-blue-500/20 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500/50"
+                >
+                  <option value="">{t('settings.businessIdentity.pricesUnset')}</option>
+                  <option value="true">{t('settings.businessIdentity.pricesIncluded')}</option>
+                  <option value="false">{t('settings.businessIdentity.pricesExcluded')}</option>
+                </select>
+              </label>
               <input
                 value={businessForm.address ?? ''}
                 onChange={(e) => setBusinessForm((f) => ({ ...f, address: e.target.value }))}

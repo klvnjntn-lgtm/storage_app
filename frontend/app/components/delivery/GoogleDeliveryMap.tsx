@@ -30,7 +30,8 @@ type Popup = { key: string; lat: number; lng: number; label: string; detail?: st
 
 function FitBounds({ positions }: { positions: google.maps.LatLngLiteral[] }) {
   const map = useMap();
-  const key = JSON.stringify(positions);
+  // Sorted: reordering a route's stops moves no pin, so it must not refit the map.
+  const key = JSON.stringify(positions.map((p) => `${p.lat},${p.lng}`).sort());
   useEffect(() => {
     if (!map || positions.length === 0) return;
     if (positions.length === 1) {

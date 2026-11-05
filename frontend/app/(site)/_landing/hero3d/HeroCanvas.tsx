@@ -9,20 +9,34 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useMotionPause } from '../primitives';
 import Warehouse, { type PartKey, type StockInfo } from './Warehouse';
 import Story from './Story';
-import Cards, { type Anchors, type SceneLabels } from './Cards';
+import Cards, { SCENE_LABEL_KEYS, type Anchors, type SceneLabels } from './Cards';
+import { heroBus, type SolutionKey } from '../solutions';
+import type { HeroQuality } from '../primitives';
 import { STATIC_T, phaseAt, type Phase } from './timeline';
 
 /* ─── WebGL hero ─────────────────────────────────────────────────────
-   A miniature warehouse running the Receive → Move → Track story (see
-   timeline.ts). Loaded with ssr:false from the landing page; low-end or
-   WebGL-less devices get the CSS HeroScene instead. Drag orbits the
-   camera, hovering a stocked box shows its card (click pins it), and the
-   robot hops when clicked. Scrolling flies the camera up over the racks.
-   The render loop stops while paused or offscreen; with reduced motion
-   one finished frame is drawn on demand. Mouse-only extras, so the whole
-   thing stays aria-hidden. */
+   A miniature operation: warehouse, sales counter, workshop and delivery
+   bay, with one order running through them (see timeline.ts). Loaded with
+   ssr:false from the landing page; low-end or WebGL-less devices keep the
+   static HeroLite instead and never download this bundle. Drag orbits the
+   camera, hovering a stocked box shows its card (click pins it), hovering a
+   hero chip flies to that zone, and the robot hops when clicked. The render
+   loop stops while paused or offscreen; with reduced motion one finished
+   frame is drawn on demand. Mouse-only extras, so it all stays aria-hidden.
 
-const LOOK_AT = new Vector3(-0.4, 0.7, -0.3);
+   Quality: `high` adds shadows, studio reflections and sparkles; `medium`
+   drops them and caps the resolution lower. A frame-rate watchdog steps down
+   from high to medium, and bails out to HeroLite if medium can't hold up,
+   so a weak device the hints misjudged recovers on its own. */
+
+const LOOK_AT = new Vector3(0.3, 0.7, 0.7);
+/** Where the camera goes for a hovered chip: look target, angles, zoom. */
+const ZONE_VIEWS: Record<SolutionKey, { look: Vector3; az: number; el: number; zoom: number }> = {
+  warehouse: { look: new Vector3(-0.8, 1.0, -2.0), az: 0.5, el: 0.46, zoom: 0.84 },
+  sales: { look: new Vector3(-1.0, 0.8, 0.8), az: 0.55, el: 0.5, zoom: 0.76 },
+  workshop: { look: new Vector3(-1.6, 0.8, 3.5), az: 0.4, el: 0.46, zoom: 0.76 },
+  delivery: { look: new Vector3(4.8, 0.8, 1.0), az: 0.9, el: 0.46, zoom: 0.76 },
+};
 const AZ_RANGE: [number, number] = [-1.0, 1.0];
 const EL_RANGE: [number, number] = [-0.3, 0.45];
 /** Seconds without input before a dragged camera eases home. */
@@ -42,6 +56,8 @@ function CameraRig({ still, onDrag }: { still: boolean; onDrag: (dragging: boole
   const goal = useRef(new Vector3());
   const look = useRef(new Vector3());
   const placed = useRef(false);
+  const focusAmt = useRef(0);
+  const lastZone = useRef<SolutionKey>('warehouse');
 
   useEffect(() => {
     if (still || !window.matchMedia('(pointer: fine)').matches) return;
@@ -108,10 +124,15 @@ function CameraRig({ still, onDrag }: { still: boolean; onDrag: (dragging: boole
     }
     const scroll = still ? 0 : Math.min(1, window.scrollY / (window.innerHeight * 0.9));
     const sway = still ? 0 : Math.sin(state.clock.elapsedTime * 0.15) * 0.07;
-    const az = 0.68 + o.az + pointer.current.x * 0.25 + sway - scroll * 0.4;
-    const el = 0.5 + o.el - pointer.current.y * 0.1 + scroll * 0.42;
-    const r = 19.5 * Math.max(1, 1.5 / aspect) * (1 - scroll * 0.14);
-    look.current.copy(LOOK_AT).setY(LOOK_AT.y - scroll * 0.5);
+    const focus = still ? null : heroBus.focus;
+    if (focus) lastZone.current = focus;
+    focusAmt.current += ((focus ? 1 : 0) - focusAmt.current) * (1 - Math.exp(-dt * 3.5));
+    const f = focusAmt.current;
+    const view = ZONE_VIEWS[lastZone.current];
+    const az = 0.68 + (view.az - 0.68) * f + o.az + pointer.current.x * 0.25 * (1 - f) + sway - scroll * 0.4;
+    const el = 0.56 + (view.el - 0.56) * f + o.el - pointer.current.y * 0.1 * (1 - f) + scroll * 0.42;
+    const r = 25 * Math.max(1, 1.16 / aspect) * (1 - scroll * 0.14) * (1 + (view.zoom - 1) * f);
+    look.current.copy(LOOK_AT).lerp(view.look, f).setY(LOOK_AT.y + (view.look.y - LOOK_AT.y) * f - scroll * 0.5);
     goal.current
       .set(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r)
       .add(look.current);
@@ -126,7 +147,35 @@ function CameraRig({ still, onDrag }: { still: boolean; onDrag: (dragging: boole
   return null;
 }
 
+/** Averages frame time over 2s windows and reports a sustained struggle.
+ *  Skips the first seconds (shader compile) and a very long gap (hidden tab). */
+function FrameWatchdog({ onSlow }: { onSlow: () => void }) {
+  const w = useRef({ warmup: 3, sum: 0, frames: 0, strikes: 0 });
+  useFrame((_, delta) => {
+    const s = w.current;
+    if (delta > 2) return;
+    if (s.warmup > 0) {
+      s.warmup -= delta;
+      return;
+    }
+    s.sum += delta;
+    s.frames++;
+    if (s.sum < 2) return;
+    const fps = s.frames / s.sum;
+    s.sum = 0;
+    s.frames = 0;
+    s.strikes = fps < 24 ? s.strikes + 1 : 0;
+    if (s.strikes >= 2) {
+      s.strikes = 0;
+      s.warmup = 2;
+      onSlow();
+    }
+  });
+  return null;
+}
+
 type SceneProps = {
+  quality: HeroQuality;
   still: boolean;
   phase: Phase;
   onPhase: (p: Phase) => void;
@@ -137,63 +186,62 @@ type SceneProps = {
   onPick: (info: StockInfo) => void;
   onPointable: (on: boolean) => void;
   onDrag: (dragging: boolean) => void;
+  onSlow: () => void;
 };
 
 /** Everything inside the canvas. Memoised with stable props so hover,
  *  cursor and drag state in HeroCanvas never re-render the 3D tree. */
-const Scene = memo(function Scene({ still, phase, onPhase, anchors, barRef, activeRef, onHover, onPick, onPointable, onDrag }: SceneProps) {
+const Scene = memo(function Scene({ quality, still, phase, onPhase, anchors, barRef, activeRef, onHover, onPick, onPointable, onDrag, onSlow }: SceneProps) {
+  const high = quality === 'high';
   return (
     <>
       <CameraRig still={still} onDrag={onDrag} />
 
-      <hemisphereLight args={['#9cc2ff', '#0b1020', 0.55]} />
+      <hemisphereLight args={['#9cc2ff', '#0b1020', high ? 0.55 : 1.5]} />
       <directionalLight
         position={[6, 10, 5]}
         intensity={1.6}
         color="#e8f0ff"
-        castShadow
+        castShadow={high}
         shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-7}
-        shadow-camera-right={7}
-        shadow-camera-top={6}
-        shadow-camera-bottom={-6}
+        shadow-camera-left={-9}
+        shadow-camera-right={9}
+        shadow-camera-top={8}
+        shadow-camera-bottom={-8}
         shadow-bias={-0.0005}
       />
       <pointLight position={[-5, 3, -4]} intensity={18} distance={14} color="#3b82f6" />
-      <pointLight position={[5, 2.5, 4]} intensity={8} distance={10} color="#22d3ee" />
+      {high && <pointLight position={[5, 2.5, 4]} intensity={8} distance={10} color="#22d3ee" />}
 
       {/* procedural studio reflections — no HDR download */}
-      <Environment resolution={128} frames={1}>
-        <Lightformer form="rect" intensity={2} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[10, 6, 1]} color="#dbeafe" />
-        <Lightformer form="rect" intensity={3} position={[-6, 2, -3]} rotation-y={Math.PI / 2} scale={[8, 2, 1]} color="#3b82f6" />
-        <Lightformer form="ring" intensity={2} position={[6, 3, 4]} scale={3} color="#22d3ee" />
-      </Environment>
+      {high && (
+        <Environment resolution={128} frames={1}>
+          <Lightformer form="rect" intensity={2} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[10, 6, 1]} color="#dbeafe" />
+          <Lightformer form="rect" intensity={3} position={[-6, 2, -3]} rotation-y={Math.PI / 2} scale={[8, 2, 1]} color="#3b82f6" />
+          <Lightformer form="ring" intensity={2} position={[6, 3, 4]} scale={3} color="#22d3ee" />
+        </Environment>
+      )}
 
       <Warehouse activeRef={activeRef} onHover={onHover} onPick={onPick} />
       <Story still={still} phase={phase} onPhase={onPhase} anchors={anchors} barRef={barRef} activeRef={activeRef} onPointable={onPointable} />
-      {!still && <Sparkles count={70} scale={[11, 4, 7]} position={[0, 2, 0]} size={2.2} speed={0.25} opacity={0.6} color="#93c5fd" />}
+      {!still && high && <Sparkles count={60} scale={[13, 4, 9]} position={[0.5, 2, 0.8]} size={2.2} speed={0.25} opacity={0.6} color="#93c5fd" />}
+      {!still && <FrameWatchdog onSlow={onSlow} />}
     </>
   );
 });
 
-const LABEL_KEYS = [
-  'receive',
-  'move',
-  'track',
-  'liveActivity',
-  'lowStock',
-  'left',
-  'badgeReceive',
-  'badgeMove',
-  'badgeAdjust',
-  'badgeShip',
-  'location',
-  'qty',
-  'dragHint',
-] as const;
-const PART_KEYS: PartKey[] = ['brakePads', 'oilFilter', 'timingBelt', 'sparkPlug', 'wheelBearing', 'clutchKit'];
+const PART_KEYS: PartKey[] = ['waterGallon', 'oilFilter', 'beverageCase', 'brakePads', 'packaging', 'engineOil'];
 
-function HeroCanvas() {
+function HeroCanvas({
+  initialQuality,
+  onReady,
+  onGiveUp,
+}: {
+  initialQuality: HeroQuality;
+  onReady: () => void;
+  /** The device can't hold a usable frame rate: hand back to HeroLite. */
+  onGiveUp: () => void;
+}) {
   const { t } = useLanguage();
   const reduce = useReducedMotion() ?? false;
   const { paused } = useMotionPause();
@@ -217,6 +265,14 @@ function HeroCanvas() {
     activeRef.current = inspect;
   }, [inspect]);
 
+  const [quality, setQuality] = useState(initialQuality);
+  const onSlow = useCallback(() => {
+    if (quality === 'medium') onGiveUp();
+    else setQuality('medium');
+  }, [quality, onGiveUp]);
+
+  useEffect(() => () => heroBus.setActive(null), []);
+
   const onDrag = useCallback((d: boolean) => {
     setDragging(d);
     setTouched(true);
@@ -230,7 +286,7 @@ function HeroCanvas() {
   const labels = useMemo(
     () =>
       ({
-        ...Object.fromEntries(LABEL_KEYS.map((k) => [k, t(`landing.scene.${k}`)])),
+        ...Object.fromEntries(SCENE_LABEL_KEYS.map((k) => [k, t(`landing.scene.${k}`)])),
         parts: Object.fromEntries(PART_KEYS.map((k) => [k, t(`landing.scene.items.${k}`)])),
       }) as SceneLabels,
     [t],
@@ -247,8 +303,8 @@ function HeroCanvas() {
     >
       <Canvas
         frameloop={frameloop}
-        shadows
-        dpr={[1, 1.75]}
+        shadows={quality === 'high'}
+        dpr={quality === 'high' ? [1, 1.75] : [1, 1.5]}
         // size only; tracking page offset on scroll re-applies the size and
         // reallocates the drawing buffer on every scroll step
         resize={{ scroll: false }}
@@ -260,10 +316,14 @@ function HeroCanvas() {
           touchAction: 'pan-y',
           cursor: dragging ? 'grabbing' : hover || robotHover ? 'pointer' : 'grab',
         }}
-        onCreated={() => setReady(true)}
+        onCreated={() => {
+          setReady(true);
+          onReady();
+        }}
         onPointerMissed={() => setPinned(null)}
       >
         <Scene
+          quality={quality}
           still={reduce}
           phase={phase}
           onPhase={setPhase}
@@ -274,6 +334,7 @@ function HeroCanvas() {
           onPick={onPick}
           onPointable={setRobotHover}
           onDrag={onDrag}
+          onSlow={onSlow}
         />
       </Canvas>
       <Cards

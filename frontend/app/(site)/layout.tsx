@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     default: "WareSys",
     template: "%s · WareSys",
   },
-  description: "Warehouse inventory management system",
+  description: "Business operations, simplified. WareSys software helps businesses manage inventory, sales, workshops, and deliveries — all in one ecosystem.",
   manifest: "/manifest.json",
   icons: { apple: "/apple-touch-icon.png" },
   // Home-screen launch on iOS opens full screen, titled WareSys.

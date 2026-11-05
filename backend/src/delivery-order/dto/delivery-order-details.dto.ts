@@ -2,6 +2,7 @@
 import { DeliveryPriority } from '@prisma/client';
 import { IsDateString, IsEnum, IsOptional } from 'class-validator';
 
+// A window edge left out stays as it is; null clears it.
 export class UpdateDeliveryOrderDetailsDto {
   @IsOptional()
   @IsEnum(DeliveryPriority)
@@ -9,9 +10,9 @@ export class UpdateDeliveryOrderDetailsDto {
 
   @IsOptional()
   @IsDateString()
-  deliveryWindowStart?: string;
+  deliveryWindowStart?: string | null;
 
   @IsOptional()
   @IsDateString()
-  deliveryWindowEnd?: string;
+  deliveryWindowEnd?: string | null;
 }

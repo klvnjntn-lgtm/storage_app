@@ -13,6 +13,7 @@ export type UpdateOrganizationSettingsInput = {
   address?: string;
   phone?: string;
   taxEnabled?: boolean;
+  pricesIncludePpn?: boolean | null;
   timezone?: string;
   stockPolicy?: StockPolicy;
   stockOverrideRequiresAdmin?: boolean;
@@ -77,6 +78,7 @@ export class OrganizationService {
           address: true,
           phone: true,
           taxEnabled: true,
+          pricesIncludePpn: true,
           timezone: true,
           stockPolicy: true,
           stockOverrideRequiresAdmin: true,
@@ -95,6 +97,7 @@ export class OrganizationService {
       address: org?.address ?? null,
       phone: org?.phone ?? null,
       taxEnabled: org?.taxEnabled ?? false,
+      pricesIncludePpn: org?.pricesIncludePpn ?? null,
       timezone: org?.timezone ?? DEFAULT_TIMEZONE,
       // Pick/pack/ship always deducts stock strictly (StockService.decrease(),
       // session PICK stage) — that path doesn't read this field at all, so
@@ -113,6 +116,7 @@ export class OrganizationService {
       fulfillmentMode,
       posPricingEnabled,
       taxEnabled,
+      pricesIncludePpn,
       timezone,
       stockPolicy,
       stockOverrideRequiresAdmin,
@@ -141,6 +145,10 @@ export class OrganizationService {
 
     if (taxEnabled !== undefined && typeof taxEnabled !== 'boolean') {
       throw new BadRequestException('taxEnabled must be a boolean');
+    }
+
+    if (pricesIncludePpn !== undefined && pricesIncludePpn !== null && typeof pricesIncludePpn !== 'boolean') {
+      throw new BadRequestException('pricesIncludePpn must be true, false or null');
     }
 
     if (timezone !== undefined && (typeof timezone !== 'string' || !isValidTimezone(timezone))) {
@@ -212,6 +220,7 @@ export class OrganizationService {
         ...(fulfillmentMode !== undefined && { fulfillmentMode }),
         ...(posPricingEnabled !== undefined && { posPricingEnabled }),
         ...(taxEnabled !== undefined && { taxEnabled }),
+        ...(pricesIncludePpn !== undefined && { pricesIncludePpn }),
         ...(timezone !== undefined && { timezone }),
         ...(stockPolicy !== undefined && { stockPolicy }),
         ...(stockOverrideRequiresAdmin !== undefined && { stockOverrideRequiresAdmin }),
@@ -232,6 +241,7 @@ export class OrganizationService {
         address: true,
         phone: true,
         taxEnabled: true,
+        pricesIncludePpn: true,
         timezone: true,
         stockPolicy: true,
         stockOverrideRequiresAdmin: true,

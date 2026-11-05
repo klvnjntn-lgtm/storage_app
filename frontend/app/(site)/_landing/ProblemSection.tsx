@@ -3,9 +3,9 @@
 import { motion } from 'framer-motion';
 import {
   TriangleAlert,
-  CircleHelp,
-  MapPin,
-  Clock,
+  ReceiptText,
+  Wrench,
+  Truck,
   FileSpreadsheet,
   CheckCheck,
   ArrowDown,
@@ -161,9 +161,9 @@ export default function ProblemSection() {
   const { t } = useLanguage();
   const pains = [
     { icon: TriangleAlert, key: 'mismatch' },
-    { icon: CircleHelp, key: 'disappear' },
-    { icon: MapPin, key: 'location' },
-    { icon: Clock, key: 'forever' },
+    { icon: ReceiptText, key: 'invoices' },
+    { icon: Wrench, key: 'jobs' },
+    { icon: Truck, key: 'deliveries' },
   ];
 
   return (

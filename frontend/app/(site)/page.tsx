@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ChevronRight, Menu, X, ArrowUp, Pause, Play, Package, ReceiptText, Wrench, Truck } from 'lucide-react';
+import { ArrowRight, ChevronRight, Menu, X, ArrowUp, Pause, Play } from 'lucide-react';
 import {
   motion,
   MotionConfig,
@@ -19,24 +19,23 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import LanguageSwitcher from '@/app/components/shared/LanguageSwitcher';
 import ThemeToggle from '@/app/components/shared/ThemeToggle';
 import { useTheme } from '@/app/context/ThemeContext';
-import HeroScene from './_landing/HeroScene';
-import FeatureBento from './_landing/FeatureBento';
+import HeroLite from './_landing/HeroLite';
+import HeroChips from './_landing/HeroChips';
 import ProblemSection from './_landing/ProblemSection';
 import HowItWorks from './_landing/HowItWorks';
-import Ecosystem from './_landing/Ecosystem';
+import Solutions from './_landing/Solutions';
+import CustomBuild from './_landing/CustomBuild';
 import { Contact, Faq, SiteFooter, TechMarquee, WhoItsFor, WhySection } from './_landing/Sections';
 import {
   EASE_OUT,
   GridBackdrop,
-  hasWebGL,
-  isLowEndDevice,
+  heroTier,
+  type HeroQuality,
   Kicker,
   MotionPauseContext,
   ParallaxGlow,
   useLowEndDevice,
-  Reveal,
   SectionDivider,
-  SectionHeading,
 } from './_landing/primitives';
 
 // three.js stays out of the main bundle and off the server.
@@ -97,12 +96,33 @@ export default function LandingPage() {
   const motionPaused = userPaused ?? lite;
   const toggleMotion = () => setUserPaused(!motionPaused);
   const reduceMotion = useReducedMotion() || lite;
-  // WebGL hero where the device can carry it, the CSS scene otherwise.
-  const [heroMode, setHeroMode] = useState<'pending' | '3d' | 'css'>('pending');
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only APIs once after mount
-    setHeroMode(!isLowEndDevice() && hasWebGL() ? '3d' : 'css');
+  // The static HeroLite paints first and is all a low-end device ever gets.
+  // Everyone else fetches three.js once the browser is idle, so it can't
+  // compete with first paint, and the canvas fades in over the poster.
+  const [canvasQuality, setCanvasQuality] = useState<HeroQuality | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
+  const onCanvasReady = useCallback(() => setCanvasReady(true), []);
+  const onCanvasGiveUp = useCallback(() => {
+    setCanvasQuality(null);
+    setCanvasReady(false);
   }, []);
+  useEffect(() => {
+    const tier = heroTier();
+    if (tier === 'lite') return;
+    const start = () => setCanvasQuality(tier);
+    if (!('requestIdleCallback' in window)) {
+      const id = setTimeout(start, 200);
+      return () => clearTimeout(id);
+    }
+    const id = requestIdleCallback(start, { timeout: 1500 });
+    return () => cancelIdleCallback(id);
+  }, []);
+  const solutionLabels = {
+    warehouse: t('landing.hero.platformWarehouse'),
+    sales: t('landing.hero.platformSales'),
+    workshop: t('landing.hero.platformWorkshop'),
+    delivery: t('landing.hero.platformDelivery'),
+  };
 
   // Nav: transparent over the hero, solid once scrolled; slides away while
   // scrolling down and comes back on any upward scroll.
@@ -116,8 +136,6 @@ export default function LandingPage() {
   const { scrollYProgress: heroProgress } = useScroll({ target: heroRef, offset: ['start start', 'end start'] });
   const heroTextY = useTransform(heroProgress, [0, 1], [0, 140]);
   const heroTextOpacity = useTransform(heroProgress, [0, 0.6], [1, 0]);
-  const sceneY = useTransform(heroProgress, [0, 1], [0, 200]);
-  const sceneScale = useTransform(heroProgress, [0, 1], [1, 0.92]);
 
   // Paint the whole document in the landing background while this page
   // is mounted so overscroll bounce and not-yet-painted tiles during fast
@@ -148,6 +166,7 @@ export default function LandingPage() {
 
   const navLinks = [
     { href: '#products', label: t('landing.nav.products') },
+    { href: '#custom', label: t('landing.nav.custom') },
     { href: '#how-it-works', label: t('landing.nav.howItWorks') },
     { href: '#faq', label: t('landing.nav.faq') },
     { href: '#contact', label: t('landing.nav.contact') },
@@ -272,29 +291,17 @@ export default function LandingPage() {
             <h1 className={`${display.className} text-[2.5rem] sm:text-6xl xl:text-7xl font-bold tracking-[-0.035em] leading-[0.98] mb-6 sm:mb-7`}>
               {t('landing.hero.headline')}
             </h1>
-            <p className="text-white/60 text-base leading-relaxed mb-3">{t('landing.hero.sub1')}</p>
-            <p className="text-white/60 text-base leading-relaxed mb-6">{t('landing.hero.sub2')}</p>
+            <p className="text-white/65 text-base sm:text-lg leading-relaxed mb-6">{t('landing.hero.sub1')}</p>
+            <p className="mb-2.5 text-[11px] font-mono uppercase tracking-[0.14em] text-white/55">{t('landing.hero.platformLabel')}</p>
+            <div className="mb-3">
+              <HeroChips labels={solutionLabels} />
+            </div>
             <a
-              href="#products"
-              className="group mb-8 sm:mb-10 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400"
+              href="#custom"
+              className="group mb-7 sm:mb-8 inline-block py-1 text-sm text-white/70 hover:text-white transition-colors rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
             >
-              <span className="w-full text-[11px] font-mono uppercase tracking-[0.14em] text-white/45 group-hover:text-white/70 transition">
-                {t('landing.hero.platformLabel')}
-              </span>
-              {[
-                { icon: Package, label: t('landing.hero.platformWarehouse') },
-                { icon: ReceiptText, label: t('landing.hero.platformInvoice') },
-                { icon: Wrench, label: t('landing.hero.platformWorkshop') },
-                { icon: Truck, label: t('landing.hero.platformDelivery') },
-              ].map(({ icon: Icon, label }) => (
-                <span
-                  key={label}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-white/75 group-hover:border-white/25 transition"
-                >
-                  <Icon size={12} strokeWidth={2.2} aria-hidden="true" className="text-blue-300" />
-                  {label}
-                </span>
-              ))}
+              {t('landing.hero.customLine')}
+              <ArrowRight size={14} aria-hidden="true" className="ml-1.5 inline text-blue-300 transition-transform group-hover:translate-x-0.5" />
             </a>
             <div className="flex gap-3 flex-wrap">
               <a
@@ -304,33 +311,27 @@ export default function LandingPage() {
                 {t('landing.hero.ctaDemo')} <ChevronRight size={15} aria-hidden="true" />
               </a>
               <a
-                href="#how-it-works"
+                href="#products"
                 className="flex items-center gap-1.5 text-sm px-5 py-3 rounded-md border border-white/15 hover:bg-white/5 hover:border-white/30 font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
               >
-                {t('landing.hero.ctaHowItWorks')}
+                {t('landing.hero.ctaSolutions')}
               </a>
             </div>
           </div>
         </motion.div>
 
         <div className="relative h-[300px] sm:h-[470px] lg:absolute lg:inset-y-0 lg:right-0 lg:h-auto lg:w-[60%] pointer-events-none">
-          {/* the 3D hero does its own scroll motion with the camera; scaling its
-              box would make the canvas re-measure and resize on every frame */}
-          <motion.div
-            style={reduceMotion || heroMode === '3d' ? { y: 0, scale: 1 } : { y: sceneY, scale: sceneScale }}
-            className="absolute inset-0"
+          <div
+            className={`dark-island absolute inset-0 grid place-items-center px-2 transition-opacity duration-700 ${canvasReady ? 'opacity-0' : 'opacity-100'}`}
           >
-            {heroMode === '3d' && (
-              <div className="dark-island absolute inset-0">
-                <HeroCanvas />
-              </div>
-            )}
-            {heroMode === 'css' && (
-              <div className="dark-island absolute left-[53%] lg:left-[60%] xl:left-[52%] top-1/2 lg:top-[52%] -translate-x-1/2 -translate-y-1/2 scale-[0.4] sm:scale-[0.64] lg:scale-[0.56] xl:scale-[0.84] 2xl:scale-[0.96]">
-                <HeroScene />
-              </div>
-            )}
-          </motion.div>
+            <HeroLite labels={solutionLabels} />
+          </div>
+          {canvasQuality && (
+            // the left edge fades so the scene never ends in a hard line beside the copy
+            <div className="dark-island absolute inset-0 lg:[mask-image:linear-gradient(90deg,transparent,#000_11%)]">
+              <HeroCanvas initialQuality={canvasQuality} onReady={onCanvasReady} onGiveUp={onCanvasGiveUp} />
+            </div>
+          )}
         </div>
 
         {/* one control pauses every decorative loop on the page (WCAG 2.2.2) */}
@@ -351,23 +352,13 @@ export default function LandingPage() {
 
       <SectionDivider />
 
-      {/* ─── 02 · FEATURES ───────────────────────────────────── */}
-      <section className="relative overflow-hidden">
-        <ParallaxGlow className="absolute -top-32 right-0 h-[30rem] w-[30rem] rounded-full bg-blue-600/[0.12] blur-[140px]" speed={0.18} />
-        <div className="relative max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32">
-          <Reveal className="mb-14 sm:mb-16">
-            <SectionHeading index="02" eyebrow={t('landing.features.eyebrow')} title={t('landing.features.heading')} className="max-w-3xl" />
-          </Reveal>
-          <FeatureBento />
-        </div>
-      </section>
-
+      <Solutions />
       <SectionDivider />
       <HowItWorks />
       <SectionDivider />
-      <Ecosystem />
-      <SectionDivider />
       <WhoItsFor />
+      <SectionDivider />
+      <CustomBuild />
       <SectionDivider />
       <WhySection />
       <SectionDivider />

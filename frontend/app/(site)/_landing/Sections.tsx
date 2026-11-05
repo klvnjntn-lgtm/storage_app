@@ -4,12 +4,14 @@ import { useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  Package,
+  Blocks,
+  Boxes,
+  Layers,
+  Store,
+  Truck,
   Wrench,
-  Building2,
   MapPin,
   History,
-  Users,
   Zap,
   Plus,
   MessageCircle,
@@ -19,8 +21,9 @@ import {
   ScanBarcode,
   RefreshCw,
   ShieldCheck,
-  ArrowLeftRight,
-  Activity,
+  Camera,
+  ReceiptText,
+  Route as RouteIcon,
 } from 'lucide-react';
 import { display } from '@/lib/fonts';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -36,6 +39,7 @@ import {
   StaggerItem,
   useAnimState,
 } from './primitives';
+import { SOLUTIONS, solutionByKey, type SolutionKey } from './solutions';
 import styles from './Sections.module.css';
 
 import { CONTACT_EMAIL, WHATSAPP_URL } from '@/lib/support';
@@ -49,12 +53,14 @@ export function TechMarquee() {
   const anim = useAnimState(ref);
   const tags = [
     { icon: ScanBarcode, key: 'barcodeScanning' },
+    { icon: ReceiptText, key: 'invoicing' },
+    { icon: Wrench, key: 'workOrders' },
+    { icon: RouteIcon, key: 'routePlanning' },
+    { icon: Camera, key: 'proofOfDelivery' },
     { icon: RefreshCw, key: 'realTimeSync' },
     { icon: ShieldCheck, key: 'roleBasedAccess' },
     { icon: History, key: 'auditTrail' },
     { icon: MapPin, key: 'multiLocationTracking' },
-    { icon: ArrowLeftRight, key: 'transferHistory' },
-    { icon: Activity, key: 'liveStockCounts' },
   ];
   return (
     <div ref={ref} data-anim={anim} className="relative border-y border-white/[0.06] bg-white/[0.012]">
@@ -76,42 +82,66 @@ export function TechMarquee() {
   );
 }
 
-/* ─── 05 · Who it's for ─────────────────────────────────────────── */
+/* ─── 04 · Who it's for. Each industry names only the solutions it needs,
+   so no product claims to serve everyone. ─────────────────────────── */
+const INDUSTRIES: { key: string; icon: typeof Boxes; glow: string; solutions: SolutionKey[] }[] = [
+  { key: 'distributors', icon: Boxes, glow: '96, 165, 250', solutions: ['warehouse', 'sales', 'delivery'] },
+  { key: 'spareParts', icon: Store, glow: '52, 211, 153', solutions: ['warehouse', 'sales'] },
+  { key: 'workshops', icon: Wrench, glow: '251, 191, 36', solutions: ['workshop', 'warehouse', 'sales'] },
+  { key: 'logistics', icon: Truck, glow: '167, 139, 250', solutions: ['delivery', 'sales'] },
+];
+
 export function WhoItsFor() {
   const { t } = useLanguage();
-  const cards = [
-    { key: 'spareParts', icon: Package, glow: '96, 165, 250', ink: 'text-blue-300', tile: 'bg-blue-500/[0.14] ring-blue-400/30' },
-    { key: 'workshops', icon: Wrench, glow: '52, 211, 153', ink: 'text-emerald-300', tile: 'bg-emerald-500/[0.14] ring-emerald-400/30' },
-    { key: 'multiLocation', icon: Building2, glow: '167, 139, 250', ink: 'text-violet-300', tile: 'bg-violet-500/[0.14] ring-violet-400/30' },
-  ];
   return (
     <section className="relative overflow-hidden">
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32">
         <Reveal>
-          <SectionHeading index="05" eyebrow={t('landing.whoItsFor.eyebrow')} title={t('landing.whoItsFor.heading')} className="max-w-3xl" />
+          <SectionHeading index="04" eyebrow={t('landing.whoItsFor.eyebrow')} title={t('landing.whoItsFor.heading')} className="max-w-3xl" />
         </Reveal>
-        <Stagger className="mt-14 grid gap-4 md:grid-cols-3">
-          {cards.map(({ key, icon: Icon, glow, ink, tile }) => (
+        <Stagger className="mt-14 grid gap-4 md:grid-cols-2">
+          {INDUSTRIES.map(({ key, icon: Icon, glow, solutions }) => {
+            const tint = glow.replaceAll(',', '');
+            return (
             <StaggerItem key={key}>
-              <SpotlightCard glow={glow} className="group h-full p-7 sm:p-8 transition-transform duration-300 hover:-translate-y-1">
-                <span aria-hidden="true" className="absolute inset-x-8 top-0 h-px opacity-70" style={{ background: `linear-gradient(90deg, rgb(${glow}), transparent)` }} />
-                <Icon aria-hidden="true" size={150} strokeWidth={1} className={`pointer-events-none absolute -bottom-8 -right-8 ${ink} opacity-[0.06]`} />
-                <span className={`grid h-11 w-11 place-items-center rounded-xl ring-1 ring-inset ${tile} ${ink}`}>
+              <SpotlightCard glow={glow} className="h-full p-7 sm:p-8 flex flex-col">
+                <span aria-hidden="true" className="absolute inset-x-8 top-0 h-px opacity-70" style={{ background: `linear-gradient(90deg, rgb(${tint}), transparent)` }} />
+                <span
+                  className="grid h-11 w-11 place-items-center rounded-xl"
+                  style={{ color: `rgb(${tint})`, background: `rgb(${tint} / 0.14)`, boxShadow: `inset 0 0 0 1px rgb(${tint} / 0.3)` }}
+                >
                   <Icon size={20} strokeWidth={2} aria-hidden="true" />
                 </span>
                 <h3 className="mt-6 text-lg font-semibold tracking-[-0.01em] text-white">{t(`landing.whoItsFor.cards.${key}.title`)}</h3>
-                <p className="mt-2 text-[15px] leading-relaxed text-white/60">{t(`landing.whoItsFor.cards.${key}.body`)}</p>
+                <p className="mt-2 mb-6 text-[15px] leading-relaxed text-white/60">{t(`landing.whoItsFor.cards.${key}.body`)}</p>
+                <ul className="mt-auto flex flex-wrap gap-2">
+                  {solutions.map((k) => {
+                    const { name, icon: SolutionIcon, hex } = solutionByKey(k);
+                    return (
+                      <li key={k}>
+                        <a
+                          href={`#${k}`}
+                          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-white/80 transition-colors hover:border-white/30 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+                        >
+                          <SolutionIcon size={12} strokeWidth={2.2} aria-hidden="true" style={{ color: hex }} />
+                          {name}
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
               </SpotlightCard>
             </StaggerItem>
-          ))}
+            );
+          })}
         </Stagger>
         <Reveal className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-white/[0.07] pt-8">
           <p className="max-w-xl text-[15px] leading-relaxed text-white/60">{t('landing.whoItsFor.footNote')}</p>
           <a
-            href="#contact"
+            href="#custom"
             className="group inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-blue-300 hover:text-blue-200 transition-colors rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400"
           >
-            {t('landing.nav.bookDemo')}
+            {t('landing.nav.custom')}
             <ArrowRight size={15} aria-hidden="true" className="transition-transform group-hover:translate-x-0.5" />
           </a>
         </Reveal>
@@ -124,9 +154,9 @@ export function WhoItsFor() {
 export function WhySection() {
   const { t } = useLanguage();
   const items = [
-    { key: 'location', icon: MapPin },
-    { key: 'whoMoved', icon: History },
-    { key: 'spreadsheets', icon: Users },
+    { key: 'connected', icon: Layers },
+    { key: 'whoDid', icon: History },
+    { key: 'modular', icon: Blocks },
     { key: 'quickStart', icon: Zap },
   ];
   return (
@@ -161,7 +191,7 @@ export function WhySection() {
 export function Faq() {
   const { t } = useLanguage();
   const [open, setOpen] = useState(0);
-  const keys = ['whatDoesItDo', 'multipleEmployees', 'multiLocation', 'getStarted'];
+  const keys = ['whatDoesItDo', 'needAll', 'custom', 'multipleEmployees', 'multiLocation', 'getStarted'];
   return (
     <section id="faq" className="relative overflow-hidden scroll-mt-16 md:scroll-mt-20">
       <ParallaxGlow className="absolute top-10 -left-20 h-80 w-80 rounded-full bg-blue-600/[0.10] blur-[120px]" speed={0.15} />
@@ -291,8 +321,10 @@ export function SiteFooter() {
           <nav aria-label={t('landing.footer.product')}>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/40">{t('landing.footer.product')}</p>
             <ul className="mt-4 space-y-3">
-              <li><a href="#how-it-works" className={linkCls}>{t('landing.nav.howItWorks')}</a></li>
-              <li><a href="#faq" className={linkCls}>{t('landing.nav.faq')}</a></li>
+              {SOLUTIONS.map(({ key, name }) => (
+                <li key={key}><a href={`#${key}`} className={linkCls}>{name}</a></li>
+              ))}
+              <li><a href="#custom" className={linkCls}>{t('landing.nav.custom')}</a></li>
               <li><Link href="/login" className={linkCls}>{t('landing.nav.login')}</Link></li>
             </ul>
           </nav>

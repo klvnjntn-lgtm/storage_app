@@ -713,6 +713,8 @@ export const ERROR_MESSAGES_ID: ReadonlyArray<readonly [string, string]> = [
   ["target must be one of: {}", "target harus salah satu dari: {}"],
   ["targetId cannot also be a sourceId", "targetId tidak boleh juga menjadi sourceId"],
   ["taxEnabled must be a boolean", "taxEnabled harus bernilai true/false"],
+  ["pricesIncludePpn must be true, false or null", "pricesIncludePpn harus bernilai true, false, atau null"],
+  ["month must be YYYY-MM", "Bulan harus berformat YYYY-MM"],
   ["timezone must be a valid IANA timezone name (e.g. Asia/Jakarta)", "timezone harus nama zona waktu IANA yang valid (mis. Asia/Jakarta)"],
   ["toLocationId is required for returned stock", "toLocationId wajib untuk stok yang diretur"],
   ["toLocationId is required to complete a move", "toLocationId wajib untuk menyelesaikan perpindahan"],

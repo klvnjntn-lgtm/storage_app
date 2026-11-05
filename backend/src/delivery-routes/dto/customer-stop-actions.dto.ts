@@ -58,7 +58,7 @@ export class RecordCustomerStopFailureDto {
 }
 
 // Priority / requested window of a customer stop (a DO stop edits these
-// on its delivery order).
+// on its delivery order). A window edge left out stays as it is; null clears it.
 export class UpdateCustomerStopDetailsDto {
   @IsOptional()
   @IsEnum(DeliveryPriority)
@@ -66,11 +66,11 @@ export class UpdateCustomerStopDetailsDto {
 
   @IsOptional()
   @IsDateString()
-  deliveryWindowStart?: string;
+  deliveryWindowStart?: string | null;
 
   @IsOptional()
   @IsDateString()
-  deliveryWindowEnd?: string;
+  deliveryWindowEnd?: string | null;
 }
 
 // A failed customer visit tried again on a route (usually a later day's;

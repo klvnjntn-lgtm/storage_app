@@ -415,6 +415,7 @@ export class DeliveryRoutesController {
     @CurrentOrg() organizationId: string,
     @Param('id') routeId: string,
     @Param('stopId') stopId: string,
+    @Req() req,
     @Body() dto: UpdateCustomerStopDetailsDto,
   ) {
     return this.deliveryRoutesService.updateCustomerStopDetails(
@@ -422,6 +423,7 @@ export class DeliveryRoutesController {
       routeId,
       stopId,
       dto,
+      req.user.sub,
     );
   }
 
@@ -529,6 +531,19 @@ export class DeliveryRoutesController {
       dto,
       req.user,
     );
+  }
+
+  // Drivers too: they catch their own mistakes first. See resetStopResult.
+  @Post(':id/stops/:stopId/reset')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  resetStop(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+  ) {
+    return this.stopProof.resetStop(organizationId, routeId, stopId, req.user);
   }
 
   @Post(':id/stops/:stopId/failure')

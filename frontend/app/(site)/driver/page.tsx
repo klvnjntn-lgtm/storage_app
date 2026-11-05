@@ -33,6 +33,7 @@ import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatc
 import { shrinkPhotoVariants } from '@/lib/shrinkPhoto';
 import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/captureLocation';
 import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
+import { useDialog } from '@/app/components/shared/DialogProvider';
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
@@ -43,6 +44,8 @@ type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
 // A DO stop or a customer visit — see DeliveryRoutesService.presentStop.
 type Stop = {
+  // Failed attempt whose delivery was rescheduled elsewhere; history only.
+  superseded: boolean;
   id: string;
   sequence: number;
   status: StopStatus;
@@ -496,11 +499,15 @@ function StopRecord({
   stop,
   statusLabel,
   jumpedTo,
+  resetting,
+  onReset,
 }: {
   routeId: string;
   stop: Stop;
   statusLabel: string;
   jumpedTo: boolean;
+  resetting: boolean;
+  onReset: () => void;
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -606,6 +613,19 @@ function StopRecord({
               <SentProofPhoto linkPath={photoLink} />
             </>
           )}
+          {/* Tucked inside the opened record, and it asks first: a thumb on a
+              bumpy road shouldn't be able to undo a delivery. */}
+          {!stop.superseded && (stop.status !== 'PENDING' || stop.hasProofPhoto) && (
+            <button
+              type="button"
+              disabled={resetting}
+              onClick={onReset}
+              className="mt-1 w-full inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-base font-semibold text-amber-800 disabled:opacity-50"
+            >
+              <RotateCcw size={18} />
+              {t('delivery.driver.resetStop')}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -642,6 +662,7 @@ function dayAt(offset: number): string {
 export default function DriverRoutePage() {
   const router = useRouter();
   const { t, language } = useLanguage();
+  const dialog = useDialog();
   const { user, loading: userLoading } = useCurrentUser();
 
   const [routes, setRoutes] = useState<RouteWithStops[]>([]);
@@ -1106,6 +1127,46 @@ export default function DriverRoutePage() {
     return sent;
   }
 
+  // Undo a stop recorded by mistake. The server keeps who did it and tells the
+  // office; nothing kept on this phone may bring the old attempt back.
+  async function handleResetStop(routeId: string, stop: Stop) {
+    const confirmed = await dialog.confirm(t('delivery.driver.confirmReset', { name: stop.label }), {
+      danger: true,
+      confirmLabel: t('delivery.driver.resetStop'),
+    });
+    if (!confirmed) return;
+    const key = stop.id;
+    setActionLoading(key);
+    try {
+      const res = await apiFetch(`/delivery-routes/${routeId}/stops/${key}/reset`, {
+        method: 'POST',
+        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        await dialog.alert(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+        return;
+      }
+      void deleteDraft(key);
+      const without = <T,>(all: Record<string, T>) => {
+        const rest = { ...all };
+        delete rest[key];
+        return rest;
+      };
+      setPhotoDraft(without);
+      setReceivedByDraft(without);
+      setFailureDraft(without);
+      setPhotoFix(without);
+      setPhotoTakenAt(without);
+    } catch (err) {
+      await dialog.alert(t(isAbort(err) ? 'delivery.driver.slowConnection' : 'delivery.driver.couldNotReachServer'));
+    } finally {
+      setActionLoading(null);
+      // Also after a timeout: it may have landed, so show what the server has.
+      await load({ quiet: true });
+    }
+  }
+
   async function handleMarkDelivered(routeId: string, stop: Stop) {
     const key = stop.id;
     const urls = stopEndpoints(routeId, stop);
@@ -1344,7 +1405,7 @@ export default function DriverRoutePage() {
             // Finished stops collapse to one line so the remaining work
             // stands out; a day too far back shows every stop that way.
             if (stop.status !== 'PENDING' || !canAct) {
-              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} jumpedTo={jumpedToStop === stop.id} />;
+              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} jumpedTo={jumpedToStop === stop.id} resetting={actionLoading === stop.id} onReset={() => handleResetStop(route.id, stop)} />;
             }
 
             return (

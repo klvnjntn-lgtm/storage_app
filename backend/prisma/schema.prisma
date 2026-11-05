@@ -241,6 +241,8 @@ model Organization {
   taxEnabled             Boolean  @default(false)
   taxName                String?
   taxPercentage          Decimal? @db.Decimal(5, 2)
+  // Printed on the Laporan Pajak for the tax admin; null = not answered yet.
+  pricesIncludePpn       Boolean?
   address                String?
   phone                  String?
   // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
@@ -1514,6 +1516,7 @@ enum RouteHistoryEventType {
   OPTIMIZED
   STATUS_CHANGED
   STOP_RESCHEDULED
+  STOP_RESET
 }
 
 // Append-only audit trail of route changes — spec's "route version, time

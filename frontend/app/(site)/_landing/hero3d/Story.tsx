@@ -6,49 +6,53 @@ import { Line, RoundedBox } from '@react-three/drei';
 import { CanvasTexture, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, PointLight, Vector3 } from 'three';
 import type { Line2 } from 'three-stdlib';
 import {
+  COUNTER,
   CRATE,
   DOCK_LAND,
+  LIFT,
   LOOP,
-  SLOT_A03,
-  SLOT_B11,
-  SLOT_LOW,
+  ROAD,
+  SLOT_PICK,
   STATIC_T,
   T,
   agvPose,
   easeInOut,
   cratePose,
   flash,
-  moveProgress,
+  liftHeight,
+  orderSheet,
   phaseAt,
+  routeProgress,
   scanLaser,
+  truckPose,
   type AgvPose,
   type Phase,
 } from './timeline';
+import { heroBus, type SolutionKey } from '../solutions';
+import Zones, { activeZone } from './Zones';
 import type { Anchors } from './Cards';
 import type { StockInfo } from './Warehouse';
 
 type V3 = [number, number, number];
 
 // Where each card floats, and the point its beam lands on.
-const CARDS = {
-  receive: { at: [5.6, 1.5, 3.8] as V3, to: [DOCK_LAND.x + 0.5, 1.36, DOCK_LAND.z] as V3 },
-  move: { at: [-1.4, 3.9, -2.8] as V3, to: [-1.4, 2.25, -2.6] as V3 },
-  feed: { at: [-4.5, 3.5, 1.9] as V3, to: [-4.4, 2.25, 1.4] as V3 },
-  alert: { at: [2.6, 3.5, -2.8] as V3, to: [SLOT_LOW.pos.x, SLOT_LOW.pos.y + 0.2, SLOT_LOW.pos.z] as V3 },
+const CARDS: Record<SolutionKey, { at: V3; to: V3; color: string }> = {
+  warehouse: { at: [0.6, 3.75, -2.7], to: [SLOT_PICK.pos.x, 2.25, -2.6], color: '#60a5fa' },
+  sales: { at: [-0.1, 2.7, 0.5], to: [COUNTER.x - 0.42, 1.4, COUNTER.z], color: '#34d399' },
+  workshop: { at: [-3.4, 2.7, 4.3], to: [LIFT.x, 1.9, LIFT.z], color: '#fbbf24' },
+  delivery: { at: [ROAD.x + 0.1, 3.3, -0.4], to: [ROAD.x, 1.85, -0.2], color: '#a78bfa' },
 };
+const CARD_KEYS = Object.keys(CARDS) as SolutionKey[];
 
-export type AnchorKey = keyof typeof CARDS | 'slotA03' | 'slotB11' | 'inspect';
+export type AnchorKey = SolutionKey | 'inspect';
 
-const ANCHORS: Record<Exclude<AnchorKey, 'inspect'>, Vector3> = {
-  ...(Object.fromEntries(Object.entries(CARDS).map(([k, c]) => [k, new Vector3(...c.at)])) as Record<keyof typeof CARDS, Vector3>),
-  slotA03: SLOT_A03.pos.clone().addScaledVector(SLOT_A03.face, 0.36).setY(SLOT_A03.pos.y + 0.62),
-  slotB11: SLOT_B11.pos.clone().addScaledVector(SLOT_B11.face, 0.36).setY(SLOT_B11.pos.y + 0.62),
-};
-/** Cards dropped when the canvas is too narrow to read them. */
-const WIDE_ONLY: AnchorKey[] = ['feed', 'alert', 'slotA03', 'slotB11'];
+const ANCHORS = Object.fromEntries(CARD_KEYS.map((k) => [k, new Vector3(...CARDS[k].at)])) as Record<SolutionKey, Vector3>;
+/** Below this canvas width only the card for the current zone is shown. */
 const COMPACT_W = 600;
 /** World units per CSS px of card, before clamping. */
-const CARD_UNIT = 0.0135;
+const CARD_UNIT = 0.0235;
+/** Story card width in CSS px (Hero3D.module.css). */
+const CARD_W = 196;
 
 /** Pins each DOM anchor to its 3D point, scaled with perspective. */
 function Projector({ anchors, activeRef }: { anchors: RefObject<Anchors>; activeRef: RefObject<StockInfo | null> }) {
@@ -88,12 +92,14 @@ function Projector({ anchors, activeRef }: { anchors: RefObject<Anchors>; active
         continue;
       }
       v.copy(p).project(camera);
-      const hidden = v.z > 1 || (compact && WIDE_ONLY.includes(key));
+      const hidden = v.z > 1 || (compact && key !== 'inspect' && key !== (heroBus.focus ?? activeZone.current));
       put(el, key, 'visibility', hidden ? 'hidden' : 'visible');
       if (hidden) continue;
       const pxPerUnit = size.height / (2 * camera.position.distanceTo(p) * tanHalf);
-      const scale = Math.min(1.05, Math.max(0.5, pxPerUnit * CARD_UNIT));
-      const x = ((v.x + 1) / 2) * size.width;
+      const scale = Math.min(1, Math.max(0.72, pxPerUnit * CARD_UNIT));
+      // keep story cards fully inside the canvas: the overlay clips at its edge
+      const half = key === 'inspect' ? 0 : (CARD_W * scale) / 2 + 8;
+      const x = Math.min(size.width - half, Math.max(half, ((v.x + 1) / 2) * size.width));
       const y = ((1 - v.y) / 2) * size.height;
       put(
         el,
@@ -167,6 +173,11 @@ function Story({
   const hopAt = useRef(-Infinity);
   const clockRef = useRef(0);
 
+  const car = useRef<Group>(null);
+  const truck = useRef<Group>(null);
+  const screen = useRef<MeshBasicMaterial>(null);
+  const sheet = useRef<Mesh>(null);
+  const sheetPos = useMemo(() => new Vector3(), []);
   const agv = useRef<Group>(null);
   const deck = useRef<Mesh>(null);
   const mast = useRef<Mesh>(null);
@@ -174,10 +185,7 @@ function Story({
   const laser = useRef<Mesh>(null);
   const scanLight = useRef<PointLight>(null);
   const beacon = useRef<MeshBasicMaterial>(null);
-  const glowA = useRef<MeshBasicMaterial>(null);
-  const glowB = useRef<MeshBasicMaterial>(null);
-  const glowLow = useRef<MeshBasicMaterial>(null);
-  const lowLight = useRef<PointLight>(null);
+  const glowSlot = useRef<MeshBasicMaterial>(null);
   const beams = useRef<(Line2 | null)[]>([]);
 
   useFrame((state, delta) => {
@@ -233,20 +241,33 @@ function Story({
     }
     if (scanLight.current) scanLight.current.intensity = flash(t, T.scanned) * 6;
 
-    if (glowA.current) glowA.current.opacity = (t >= T.putaway && t < 9.4 ? 0.55 : 0) + flash(t, T.putaway) * 0.6;
-    if (glowB.current) glowB.current.opacity = (t >= T.moved ? 0.55 : 0) + flash(t, T.moved) * 0.6;
-    const pulse = t >= T.alert ? 0.5 + 0.5 * Math.sin(clock * 5) : 0;
-    if (glowLow.current) glowLow.current.opacity = pulse * 0.8;
-    if (lowLight.current) lowLight.current.intensity = pulse * 2.2;
+    if (glowSlot.current) glowSlot.current.opacity = (t >= T.stored && t < T.pickDone ? 0.55 : 0) + flash(t, T.stored) * 0.6;
 
-    if (barRef.current) barRef.current.style.setProperty('--p', moveProgress(t).toFixed(3));
+    if (car.current) car.current.position.y = liftHeight(t);
+    const tp = truckPose(t);
+    if (truck.current) {
+      truck.current.visible = tp.scale > 0.01;
+      truck.current.position.z = tp.z;
+      truck.current.scale.setScalar(Math.max(0.001, tp.scale));
+    }
+    if (screen.current) screen.current.color.set(t >= T.paid ? '#34d399' : t >= T.printStart ? '#fbbf24' : '#1e3a5f');
+    const sheetAlpha = orderSheet(t, sheetPos);
+    if (sheet.current) {
+      sheet.current.visible = sheetAlpha > 0.01;
+      sheet.current.position.copy(sheetPos);
+      sheet.current.rotation.y = clock * 1.2;
+    }
+
+    if (barRef.current) barRef.current.style.setProperty('--p', routeProgress(t).toFixed(3));
     for (const b of beams.current) if (b) b.material.dashOffset -= dt * 0.5;
 
     const next = phaseAt(t);
+    activeZone.current = next.zone;
     const key = Object.values(next).join();
     if (key !== phaseKey.current) {
       phaseKey.current = key;
       onPhase(next);
+      heroBus.setActive(next.zone);
     }
   });
 
@@ -259,6 +280,14 @@ function Story({
 
   return (
     <group>
+      <Zones car={car} truck={truck} screen={screen} />
+
+      {/* the order, on its way from the sales counter to the shelf */}
+      <mesh ref={sheet} visible={false}>
+        <boxGeometry args={[0.22, 0.3, 0.012]} />
+        <meshBasicMaterial color="#ecfdf5" toneMapped={false} />
+      </mesh>
+
       {/* ─── AGV ─────────────────────────────────────────── */}
       <group
         ref={agv}
@@ -330,40 +359,22 @@ function Story({
       </mesh>
       <pointLight ref={scanLight} position={[DOCK_LAND.x, 1.0, DOCK_LAND.z + 0.3]} color="#22c55e" intensity={0} distance={3} />
 
-      {/* ─── Slot highlights ──────────────────────────────── */}
-      <group position={[SLOT_A03.pos.x, SLOT_A03.pos.y + 0.003, SLOT_A03.pos.z]}>{glowPlane(glowA, '#3b82f6', 1.4)}</group>
-      <group position={[SLOT_B11.pos.x, SLOT_B11.pos.y + 0.003, SLOT_B11.pos.z]}>{glowPlane(glowB, '#22c55e', 1.4)}</group>
-      <group position={[SLOT_LOW.pos.x, SLOT_LOW.pos.y + 0.003, SLOT_LOW.pos.z]}>{glowPlane(glowLow, '#f59e0b', 1.4)}</group>
-      <pointLight
-        ref={lowLight}
-        position={SLOT_LOW.pos.clone().addScaledVector(SLOT_LOW.face, 0.5).setY(SLOT_LOW.pos.y + 0.4)}
-        color="#f59e0b"
-        intensity={0}
-        distance={2.5}
-      />
+      {/* ─── Slot highlight ───────────────────────────────── */}
+      <group position={[SLOT_PICK.pos.x, SLOT_PICK.pos.y + 0.003, SLOT_PICK.pos.z]}>{glowPlane(glowSlot, '#3b82f6', 1.4)}</group>
 
       {/* ─── Floating UI ──────────────────────────────────── */}
-      {(
-        [
-          ['receive', '#60a5fa', true],
-          ['move', '#60a5fa', phase.moving || phase.moved],
-          ['feed', '#a78bfa', true],
-          ['alert', '#f59e0b', phase.alert],
-        ] as const
-      )
-        .filter(([k]) => !(compact && WIDE_ONLY.includes(k)))
-        .map(([k, color, on], i) => (
-          <Beam
-            key={k}
-            from={CARDS[k].at}
-            to={CARDS[k].to}
-            color={color}
-            on={on}
-            beamRef={(l) => {
-              beams.current[i] = l;
-            }}
-          />
-        ))}
+      {CARD_KEYS.filter((k) => !compact || k === phase.zone).map((k, i) => (
+        <Beam
+          key={k}
+          from={CARDS[k].at}
+          to={CARDS[k].to}
+          color={CARDS[k].color}
+          on={k === phase.zone}
+          beamRef={(l) => {
+            beams.current[i] = l;
+          }}
+        />
+      ))}
       <Projector anchors={anchors} activeRef={activeRef} />
     </group>
   );

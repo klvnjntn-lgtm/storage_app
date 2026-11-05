@@ -100,6 +100,9 @@ describe('Delivery proof photos', () => {
   });
 
   afterAll(async () => {
+    await prisma.routeHistoryEvent.deleteMany({
+      where: { route: { organizationId: orgId } },
+    });
     await prisma.routeStop.deleteMany({
       where: { route: { organizationId: orgId } },
     });
@@ -149,6 +152,46 @@ describe('Delivery proof photos', () => {
     }
     return order;
   };
+
+  it('updateDetails: refuses a reversed window, clears one, and moves a stop made HIGH', async () => {
+    const mkDo = () =>
+      prisma.deliveryOrder.create({
+        data: { organizationId: orgId, customerName: 'Details', status: DeliveryOrderStatus.SHIPPED },
+      });
+    const [first, second] = [await mkDo(), await mkDo()];
+    const team = await prisma.user.findUniqueOrThrow({ where: { id: driverId } });
+    const route = await prisma.route.create({
+      data: {
+        organizationId: orgId,
+        teamId: team.teamId!,
+        routeDate: new Date('2031-05-05T00:00:00.000Z'),
+        stops: {
+          create: [
+            { sequence: 1, deliveryOrderId: first.id, activeDeliveryOrderId: first.id },
+            { sequence: 2, deliveryOrderId: second.id, activeDeliveryOrderId: second.id },
+          ],
+        },
+      },
+    });
+
+    const start = new Date('2031-05-05T09:00:00.000Z');
+    const end = new Date('2031-05-05T10:00:00.000Z');
+    await expect(
+      orders.updateDetails(orgId, second.id, { deliveryWindowStart: end, deliveryWindowEnd: start }),
+    ).rejects.toThrow(/end must be after/);
+
+    await orders.updateDetails(orgId, second.id, { deliveryWindowStart: start, deliveryWindowEnd: end });
+    const cleared = await orders.updateDetails(orgId, second.id, { deliveryWindowEnd: null });
+    expect(cleared.deliveryWindowStart).toEqual(start);
+    expect(cleared.deliveryWindowEnd).toBeNull();
+
+    await orders.updateDetails(orgId, second.id, { priority: 'HIGH' });
+    const stops = await prisma.routeStop.findMany({
+      where: { routeId: route.id },
+      orderBy: { sequence: 'asc' },
+    });
+    expect(stops.map((s) => s.deliveryOrderId)).toEqual([second.id, first.id]);
+  });
 
   it('moves the photo to a failed attempt, so a rescheduled delivery starts clean', async () => {
     const order = await shippedDo(driverId);

@@ -728,16 +728,24 @@ export class DeliveryOrderService {
     id: string,
     params: {
       priority?: DeliveryPriority;
-      deliveryWindowStart?: Date;
-      deliveryWindowEnd?: Date;
+      deliveryWindowStart?: Date | null;
+      deliveryWindowEnd?: Date | null;
     },
+    userId?: string,
   ) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
     });
     if (!deliveryOrder) throw new NotFoundException('Delivery order not found');
+    const start =
+      params.deliveryWindowStart === undefined ? deliveryOrder.deliveryWindowStart : params.deliveryWindowStart;
+    const end =
+      params.deliveryWindowEnd === undefined ? deliveryOrder.deliveryWindowEnd : params.deliveryWindowEnd;
+    if (start && end && start >= end) {
+      throw new BadRequestException('Delivery window end must be after its start');
+    }
 
-    return this.prisma.deliveryOrder.update({
+    const updated = await this.prisma.deliveryOrder.update({
       where: { id },
       data: {
         priority: params.priority,
@@ -745,6 +753,15 @@ export class DeliveryOrderService {
         deliveryWindowEnd: params.deliveryWindowEnd,
       },
     });
+    const sameTime = (a: Date | null, b: Date | null) => a?.getTime() === b?.getTime();
+    const changed = {
+      priority: updated.priority !== deliveryOrder.priority,
+      window: !sameTime(start, deliveryOrder.deliveryWindowStart) || !sameTime(end, deliveryOrder.deliveryWindowEnd),
+    };
+    if (changed.priority || changed.window) {
+      await this.deliveryRoutesService.afterDeliveryOrderDetailsChanged(organizationId, id, changed, userId);
+    }
+    return updated;
   }
 
   // Puts a FAILED delivery back into SHIPPED so it can be re-attempted.
