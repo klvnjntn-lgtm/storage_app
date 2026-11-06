@@ -1,8 +1,8 @@
 'use client';
 
 import { homeFor } from '@/lib/roles';
-import { Suspense, useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { display } from '@/lib/fonts';
 import { LogIn, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -14,22 +14,11 @@ import { CSRF_HEADERS, markSignedIn } from '@/lib/session';
 import { errorMessage } from '@/lib/api-error';
 
 
-// FIX — useSearchParams() (below, in LoginForm) requires a Suspense
-// boundary for static prerendering, or `next build` fails outright with
-// "useSearchParams() should be wrapped in a suspense boundary at page
-// /login" — this wasn't a lint nitpick, it broke the production build
-// entirely. Mirrors the standard Next.js App Router fix.
+// The URL params are read after mount rather than with useSearchParams(): that
+// hook makes the whole form client-rendered, so the server would send an empty
+// page and a slow device showed nothing until all the JavaScript had run.
 export default function LoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
-  );
-}
-
-function LoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { t } = useLanguage();
 
   const [email, setEmail] = useState('');
@@ -43,17 +32,30 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resetSuccess, setResetSuccess] = useState(false);
+  // Why the previous session ended (set by apifetch on a 401).
+  const [signedOutReason, setSignedOutReason] = useState<string | null>(null);
+
+  // The form is visible before the JavaScript has run; the button stays greyed
+  // until then, so a tap can't look like it was ignored.
+  const [ready, setReady] = useState(false);
+
+  // Stays true until the next page has actually rendered. The sign-in request
+  // finishes long before that on a slow device, and a button re-enabled in the
+  // gap gets tapped again, which signs in again and restarts the navigation.
+  const [navigating, startNavigating] = useTransition();
+  const busy = loading || navigating;
 
   useEffect(() => {
-    if (searchParams.get('reset') === 'success') {
-      setResetSuccess(true);
-    }
-  }, [searchParams]);
-
-  // Why the previous session ended (set by apifetch on a 401).
-  const signedOutReason = searchParams.get('reason');
+    const params = new URLSearchParams(window.location.search);
+    /* eslint-disable react-hooks/set-state-in-effect -- reads browser-only values once after mount */
+    if (params.get('reset') === 'success') setResetSuccess(true);
+    setSignedOutReason(params.get('reason'));
+    setReady(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   async function handleLogin() {
+    if (busy) return;
     setError('');
 
     if (!email.trim() || !password) {
@@ -103,7 +105,7 @@ function LoginForm() {
   }
 
   async function handleMfa() {
-    if (!mfaToken || !code.trim()) return;
+    if (busy || !mfaToken || !code.trim()) return;
     setError('');
     setLoading(true);
     try {
@@ -149,7 +151,7 @@ function LoginForm() {
     // the dedicated /driver route instead (own minimal layout, no
     // sidebar). Every other role keeps the existing /home redirect.
     const meData = await meRes.json();
-    router.replace(homeFor(meData?.role));
+    startNavigating(() => router.replace(homeFor(meData?.role)));
   }
 
   return (
@@ -215,10 +217,10 @@ function LoginForm() {
             <p className="text-xs text-gray-500">{t('security.loginRecoveryHint')}</p>
             <button
               onClick={handleMfa}
-              disabled={loading || !code.trim()}
+              disabled={busy || !code.trim()}
               className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40"
             >
-              {loading ? t('auth.login.signingIn') : t('security.verify')}
+              {busy ? t('auth.login.signingIn') : t('security.verify')}
             </button>
             <button
               onClick={() => {
@@ -268,10 +270,10 @@ function LoginForm() {
 
           <button
             onClick={handleLogin}
-            disabled={loading}
+            disabled={busy || !ready}
             className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? t('auth.login.signingIn') : t('auth.login.signIn')}
+            {busy ? t('auth.login.signingIn') : t('auth.login.signIn')}
           </button>
         </div>
         )}

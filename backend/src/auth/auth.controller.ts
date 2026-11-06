@@ -1,3 +1,4 @@
+import { NoApiKey } from './decorators/no-api-key.decorator';
 import {
   Body,
   Controller,
@@ -35,6 +36,7 @@ import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.deco
 import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 import { TwoFactorLoginDto } from './dto/two-factor.dto';
 
+@NoApiKey()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

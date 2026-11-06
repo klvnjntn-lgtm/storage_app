@@ -381,12 +381,15 @@ export class MessagingService implements OnModuleInit {
     customerId: string,
     range: { from: Date; to: Date },
     opts: SendOptions,
+    branchId?: string,
   ) {
     const statement = await this.invoices.getCustomerStatement(
       organizationId,
       customerId,
       range.from,
       range.to,
+      undefined,
+      branchId,
     );
     const customer = await this.prisma.customer.findFirstOrThrow({
       where: { id: customerId, organizationId },

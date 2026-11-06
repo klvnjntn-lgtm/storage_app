@@ -71,6 +71,7 @@ export class ApiKeysService {
       readOnly?: boolean;
       expiresInDays?: number;
     },
+    actingRole?: string,
   ) {
     if (dto.role === Role.DRIVER || dto.role === Role.MECHANIC)
       throw new BadRequestException('Keys can be USER, ADMIN or MASTER');
@@ -79,7 +80,13 @@ export class ApiKeysService {
       where: { id: userId, organizationId },
       select: { role: true },
     });
-    if (!creator || ROLE_RANK[creator.role] < ROLE_RANK[dto.role ?? Role.USER])
+    const requested = ROLE_RANK[dto.role ?? Role.USER];
+    if (
+      !creator ||
+      ROLE_RANK[creator.role] < requested ||
+      // The caller's own role too, so a credential can't mint one above itself.
+      (actingRole && (ROLE_RANK[actingRole as Role] ?? -1) < requested)
+    )
       throw new BadRequestException('A key can’t have a higher role than yours');
     const key = `${API_KEY_PREFIX}${randomBytes(24).toString('base64url')}`;
     const row = await this.prisma.apiKey.create({

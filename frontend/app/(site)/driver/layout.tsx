@@ -60,7 +60,8 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
       <header className="sticky top-0 z-30 flex items-center justify-between gap-3 bg-white/80 backdrop-blur-md border-b border-blue-500/15 px-4 py-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
           <Image
-            src="/waresys-logo.svg"
+            src="/waresys-logo.webp"
+            unoptimized
             alt={t('appShell.brand')}
             width={1600}
             height={442}

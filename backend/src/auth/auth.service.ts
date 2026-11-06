@@ -87,7 +87,6 @@ export class AuthService {
       this.loginLockout.recordFailure(normalizedEmail);
       throw new UnauthorizedException('Invalid credentials');
     }
-    this.loginLockout.recordSuccess(normalizedEmail);
 
     // DRIVER-only restrictions — see devices.service.ts / access-schedule.util.ts.
     if (user.role === 'DRIVER') {
@@ -131,6 +130,9 @@ export class AuthService {
       return { mfaRequired: true as const, mfaToken: this.twoFactor.createChallenge(user.id) };
     }
 
+    // Only a finished login clears the failure count. Clearing it at the
+    // password step let a stolen password reset the count between code guesses.
+    this.loginLockout.recordSuccess(normalizedEmail);
     return this.issueToken(user.id, user.email, user.role, user.organizationId);
   }
 

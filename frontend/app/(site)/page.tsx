@@ -194,10 +194,11 @@ export default function LandingPage() {
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-8 h-16 md:h-20 flex justify-between items-center gap-3">
           <Image
-            src="/WARESYS.svg"
+            src="/WARESYS.webp"
+            unoptimized
             alt="WareSys"
-            width={360}
-            height={84}
+            width={384}
+            height={192}
             className="landing-logo h-10 sm:h-12 md:h-16 w-auto shrink-0"
             priority
           />

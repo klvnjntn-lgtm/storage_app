@@ -307,7 +307,7 @@ export function SiteFooter() {
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 pt-16 pb-10">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
           <div>
-            <Image src="/WARESYS.svg" alt="WareSys" width={360} height={84} className="landing-logo h-12 w-auto" />
+            <Image src="/WARESYS.webp" unoptimized alt="WareSys" width={384} height={192} className="landing-logo h-12 w-auto" />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/55">{t('landing.footer.tagline')}</p>
           </div>
           <nav aria-label={t('landing.footer.product')}>

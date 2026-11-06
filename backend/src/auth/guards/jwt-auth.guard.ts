@@ -9,6 +9,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { NO_API_KEY } from '../decorators/no-api-key.decorator';
 import {
   API_KEY_PREFIX,
   ApiKeysService,
@@ -41,13 +42,14 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     const request = context.switchToHttp().getRequest();
     const header: string | undefined = request.headers?.authorization;
     if (header?.startsWith(`Bearer ${API_KEY_PREFIX}`) && this.apiKeys) {
-      return this.authenticateApiKey(request, header.slice('Bearer '.length));
+      return this.authenticateApiKey(context, request, header.slice('Bearer '.length));
     }
 
     return super.canActivate(context);
   }
 
   private async authenticateApiKey(
+    context: ExecutionContext,
     request: any,
     key: string,
   ): Promise<boolean> {
@@ -59,10 +61,13 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
     // Keys can't manage keys or webhooks: a leaked key mustn't be able to
     // mint itself a successor or redirect the org's event stream.
-    if (
-      String(request.path ?? '').startsWith('/integrations-api') ||
-      String(request.path ?? '').startsWith('/auth/')
-    ) {
+    // Decided from the matched route: routing ignores case, so a path check
+    // let /INTEGRATIONS-API/keys through.
+    const refused = this.reflector.getAllAndOverride<boolean>(NO_API_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (refused) {
       throw new ForbiddenException('Not available to API keys');
     }
     request.user = principal;

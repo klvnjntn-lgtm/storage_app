@@ -1,3 +1,4 @@
+import { NoApiKey } from '../auth/decorators/no-api-key.decorator';
 import {
   Body,
   Controller,
@@ -22,6 +23,7 @@ import {
 // Managing API keys and webhooks is admin-only — and only from a real
 // sign-in: an API key can't mint more keys (see JwtAuthGuard).
 @Roles('ADMIN')
+@NoApiKey()
 @Controller('integrations-api')
 export class ApiAccessController {
   constructor(
@@ -40,7 +42,7 @@ export class ApiAccessController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateApiKeyDto,
   ) {
-    return this.keys.create(organizationId, user.sub, dto);
+    return this.keys.create(organizationId, user.sub, dto, user.role);
   }
 
   @Delete('keys/:id')

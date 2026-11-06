@@ -53,12 +53,14 @@ export class PlatformOwnerGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<{
-      user?: { sub?: string };
+      user?: { sub?: string; apiKeyId?: string };
       platformActor?: PlatformActor;
     }>();
     const userId = req.user?.sub;
     const owners = platformOwnerEmails();
-    if (!userId || owners.size === 0) throw new NotFoundException();
+    // An API key has no login session, so it can never have done the unlock
+    // this guard checks for. It would otherwise borrow the owner's browser one.
+    if (!userId || req.user?.apiKeyId || owners.size === 0) throw new NotFoundException();
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

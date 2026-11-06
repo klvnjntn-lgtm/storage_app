@@ -103,6 +103,7 @@ export class WorkOrdersController {
 
   // A quotation (accepted by the customer or not) becomes a job; an additional quotation joins its
   // original's job.
+  @BranchRecord('salesQuotation', 'quotationId')
   @Post('from-quotation/:quotationId')
   fromQuotation(
     @CurrentOrg() orgId: string,

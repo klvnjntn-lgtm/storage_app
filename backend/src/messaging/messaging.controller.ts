@@ -14,6 +14,7 @@ import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/decorators/current-user.decorator';
+import { filterBranchId } from '../auth/branch-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   businessDayBounds,
@@ -99,6 +100,7 @@ export class MessagingController {
       dto.customerId,
       { from: bounds.gte!, to: bounds.lte! },
       dto,
+      filterBranchId(user),
     );
   }
 

@@ -1,3 +1,4 @@
+import { NoApiKey } from './decorators/no-api-key.decorator';
 import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Roles } from './decorators/roles.decorator';
@@ -17,6 +18,7 @@ import {
 // (see JwtStrategy), since this is where they set it up.
 @Roles('ADMIN', 'USER', 'DRIVER')
 @AllowSuspendedOrg()
+@NoApiKey()
 @Controller('auth/2fa')
 export class TwoFactorController {
   constructor(private twoFactor: TwoFactorService) {}
@@ -44,7 +46,8 @@ export class TwoFactorController {
     return this.twoFactor.disable(user.sub, dto.password, dto.code);
   }
 
-  @Roles('ADMIN')
+  // The whole business's sign-in rule, so the owner's to set.
+  @Roles('MASTER')
   @Patch('policy')
   policy(
     @CurrentOrg() organizationId: string,

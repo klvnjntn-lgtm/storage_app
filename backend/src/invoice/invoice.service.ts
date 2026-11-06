@@ -1677,6 +1677,8 @@ async editIssuedInvoice(
   dto: EditIssuedInvoiceDto,
   userId: string,
 ) {
+  await this.tenantOwnership.validate(organizationId, { employeeId: dto.employeeId });
+
   // Which serial-numbered units a changed line sold can't be worked out
   // from a quantity change, so those invoices are voided and re-issued.
   const soldSerials = await this.prisma.productSerial.count({ where: { organizationId, invoiceId } });

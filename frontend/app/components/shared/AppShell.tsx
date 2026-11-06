@@ -883,7 +883,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex items-center gap-3 px-5 py-4 border-b border-blue-500/15">
           <h1 className="min-w-0 flex-1">
             <Image
-              src="/waresys-logo.svg"
+              src="/waresys-logo.webp"
+              unoptimized
               alt={t('appShell.brand')}
               width={1600}
               height={442}
@@ -955,7 +956,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3">
             <h1 className="min-w-0">
               <Image
-                src="/waresys-logo.svg"
+                src="/waresys-logo.webp"
+                unoptimized
                 alt={t('appShell.brand')}
                 width={1600}
                 height={442}
@@ -1063,7 +1065,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-blue-500/10">
                 <h2 id="more-sheet-title">
                   <Image
-                    src="/waresys-logo.svg"
+                    src="/waresys-logo.webp"
+                    unoptimized
                     alt={t('appShell.brand')}
                     width={1600}
                     height={442}

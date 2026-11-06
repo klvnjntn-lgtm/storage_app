@@ -15,6 +15,12 @@ import { effectiveBranchId } from './branch-scope';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LAST_ACTIVE_RESOLUTION_MS = 5 * 60 * 1000;
 
+// What an admin held for 2FA setup can still reach. Listed one by one so that
+// finishing setup is the only way out: the policy switch and invites stay shut.
+export function isTwoFactorSetupRoute(path: string): boolean {
+  return /^\/auth\/(me|logout|2fa(\/(setup|enable))?)\/?$/.test(path);
+}
+
 interface JwtPayload {
   sub: string;
   email: string;
@@ -101,13 +107,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     // The org requires two-factor sign-in for admins and this one hasn't
-    // set it up: only the /auth routes (profile, logout, 2FA setup) work
-    // until they do. The frontend sends them to the security page.
+    // set it up: only profile, logout and 2FA setup work until they do. The
+    // frontend sends them to the security page.
     if (
       isAdminRole(user.role) &&
       user.organization.require2faForAdmins &&
       !user.totpEnabledAt &&
-      !req.path.startsWith('/auth/')
+      !isTwoFactorSetupRoute(req.path)
     ) {
       throw new ForbiddenException({
         statusCode: 403,

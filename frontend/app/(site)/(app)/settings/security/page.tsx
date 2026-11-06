@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, ToggleRow, btnPrimary, btnDanger, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
-import { isAdminRole } from '@/lib/roles';
+import { isMasterRole } from '@/lib/roles';
 
 type Status = { enabled: boolean; enabledAt: string | null; recoveryCodesLeft: number; requiredByOrg: boolean };
 type Setup = { secret: string; otpauthUrl: string; qrCode: string };
@@ -24,7 +24,7 @@ function SecurityPageInner() {
   const { t } = useLanguage();
   const { user } = useCurrentUser();
   const search = useSearchParams();
-  const isAdmin = isAdminRole(user?.role);
+  const isMaster = isMasterRole(user?.role);
 
   const [status, setStatus] = useState<Status | null>(null);
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -181,7 +181,7 @@ function SecurityPageInner() {
         </Card>
       )}
 
-      {isAdmin && status && (
+      {isMaster && status && (status.enabled || !status.requiredByOrg) && (
         <Card title={t('security.policyTitle')}>
           <ToggleRow
             title={t('security.policyLabel')}
