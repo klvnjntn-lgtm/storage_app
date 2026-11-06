@@ -31,6 +31,12 @@ export function toCalendarDateString(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+// Before today on this device's calendar. Blank means "no date", not past.
+export function isPastDate(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return toCalendarDateString(parseCalendarDate(value)) < toCalendarDateString(new Date());
+}
+
 // How every numeric date in the app reads, in both languages: DD/MM/YYYY
 // (11/10/2026 is 11 October). Uses local getters, like toLocaleDateString()
 // did before — pass a calendar date through parseCalendarDate() first.

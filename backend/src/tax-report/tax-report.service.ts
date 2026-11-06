@@ -30,6 +30,13 @@ const WALK_IN_NAMES = /^(cash|tunai|umum|walk[\s-]?in)$/i;
 const needsNpwp = (customerId: string | null, name: string | null, npwp: string | null) =>
   !!customerId && !npwp && !WALK_IN_NAMES.test((name ?? '').trim());
 
+// Compared on digits. A pre-2024 15-digit NPWP gains a leading zero (DJP's own
+// conversion), so the old and new forms of one number count as the same.
+function normalizeNpwp(npwp: string | null) {
+  const digits = (npwp ?? '').replace(/\D/g, '');
+  return digits.length === 15 ? `0${digits}` : digits;
+}
+
 // Within a rupiah counts as adding up, as for supplier bills.
 const ADDS_UP_TOLERANCE = 1;
 
@@ -67,10 +74,16 @@ export class TaxReportService {
     const tz = resolveTimezone(org);
     const branches = await this.prisma.branch.findMany({
       where: { organizationId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, address: true, legalName: true, npwp: true, nitku: true },
     });
     const branchName = new Map(branches.map((b) => [b.id, b.name]));
+    const branchById = new Map(branches.map((b) => [b.id, b]));
     if (branchId && !branchName.has(branchId)) throw new BadRequestException('Branch not found');
+    const selected = branchId ? branchById.get(branchId)! : null;
+    // A branch with its own NPWP is a separate taxpayer: its own name applies,
+    // and it can't be filed together with the business's.
+    const separateTaxpayer = (b: { npwp: string | null }) =>
+      !!b.npwp && normalizeNpwp(b.npwp) !== normalizeNpwp(org.npwp);
 
     const dates = { gte: parseDateOnly(from, 'from'), lte: parseDateOnly(to, 'to') };
     const instants = businessDayBounds(from, to, tz);
@@ -145,6 +158,7 @@ export class TaxReportService {
           invoiceNumber: inv.invoiceNumber,
           date: isoDate(inv.invoiceDate ?? toBusinessDate(inv.issuedAt ?? inv.createdAt, tz)),
           branch: inv.branchId ? (branchName.get(inv.branchId) ?? null) : null,
+          branchNitku: inv.branchId ? (branchById.get(inv.branchId)?.nitku ?? null) : null,
           customerName,
           customerNpwp,
           needsNpwp: needsNpwp(inv.customerId, customerName, customerNpwp),
@@ -264,6 +278,52 @@ export class TaxReportService {
         amount: Number(e.amount),
       }));
 
+    // --- Down payments received ----------------------------------------
+    // Listed for the admin because PPN can fall due when an advance is paid.
+    // The invoice it later goes to carries the full total, so these are not
+    // added to net sales.
+    const allDeposits = await this.prisma.customerDeposit.findMany({
+      where: { organizationId, date: dates },
+      orderBy: [{ date: 'asc' }, { depositNumber: 'asc' }],
+      include: { customer: { select: { id: true, name: true, npwp: true } } },
+    });
+    const customerDeposits = allDeposits
+      .filter((d) => inBranch(d.branchId))
+      .map((d) => ({
+        id: d.id,
+        date: isoDate(d.date),
+        depositNumber: d.depositNumber,
+        branch: d.branchId ? (branchName.get(d.branchId) ?? null) : null,
+        customerId: d.customerId,
+        customerName: d.customer.name,
+        customerNpwp: d.customer.npwp || null,
+        needsNpwp: needsNpwp(d.customerId, d.customer.name, d.customer.npwp || null),
+        amount: Number(d.amount),
+        voided: !!d.voidedAt,
+      }));
+    const activeDeposits = customerDeposits.filter((d) => !d.voided);
+
+    // --- Down payments paid to suppliers --------------------------------
+    const allSupplierDeposits = await this.prisma.supplierDeposit.findMany({
+      where: { organizationId, date: dates },
+      orderBy: [{ date: 'asc' }, { depositNumber: 'asc' }],
+      include: { supplier: { select: { id: true, name: true, npwp: true } } },
+    });
+    const supplierDeposits = allSupplierDeposits
+      .filter((d) => inBranch(d.branchId))
+      .map((d) => ({
+        id: d.id,
+        date: isoDate(d.date),
+        depositNumber: d.depositNumber,
+        branch: d.branchId ? (branchName.get(d.branchId) ?? null) : null,
+        supplierId: d.supplierId,
+        supplierName: d.supplier.name,
+        supplierNpwp: d.supplier.npwp || null,
+        amount: Number(d.amount),
+        voided: !!d.voidedAt,
+      }));
+    const activeSupplierDeposits = supplierDeposits.filter((d) => !d.voided);
+
     // --- Goods received with no bill -----------------------------------
     // Nothing in the purchases section would show these, so the admin
     // wouldn't know the month's purchases are incomplete.
@@ -290,10 +350,10 @@ export class TaxReportService {
     const purchaseReturnsTotal = sum(purchaseReturns, (r) => r.amount);
 
     const missingCustomers = new Set(
-      [...issued, ...salesReturns].filter((s) => s.needsNpwp).map((s) => s.customerId),
+      [...issued, ...salesReturns, ...activeDeposits].filter((s) => s.needsNpwp).map((s) => s.customerId),
     );
     const missingSuppliers = new Set(
-      [...activeBills, ...purchaseReturns].filter((p) => p.supplierId && !p.supplierNpwp).map((p) => p.supplierId),
+      [...activeBills, ...purchaseReturns, ...activeSupplierDeposits].filter((p) => p.supplierId && !p.supplierNpwp).map((p) => p.supplierId),
     );
 
     return {
@@ -301,18 +361,21 @@ export class TaxReportService {
       from,
       to,
       generatedAt: new Date(),
+      // Whose report this is: a branch's own details win over the business's.
       business: {
         name: org.name,
-        legalName: org.legalName,
-        npwp: org.npwp,
-        address: org.address,
+        legalName: selected?.legalName || org.legalName,
+        npwp: selected?.npwp || org.npwp,
+        address: selected?.address || org.address,
         pricesIncludePpn: org.pricesIncludePpn,
       },
-      branch: branchId ? { id: branchId, name: branchName.get(branchId)! } : null,
+      branch: selected ? { id: selected.id, name: selected.name, nitku: selected.nitku } : null,
       sales,
       salesReturns,
+      customerDeposits,
       purchases,
       purchaseReturns,
+      supplierDeposits,
       expenses,
       summary: {
         sales: {
@@ -327,15 +390,32 @@ export class TaxReportService {
         linesDiffer: sales.filter((s) => s.linesDiffer).length,
         salesReturns: { count: salesReturns.length, total: salesReturnsTotal },
         netSales: round2(salesTotal - salesReturnsTotal),
+        customerDeposits: { count: activeDeposits.length, total: sum(activeDeposits, (d) => d.amount) },
         purchases: { count: activeBills.length, total: purchasesTotal },
         purchaseReturns: { count: purchaseReturns.length, total: purchaseReturnsTotal },
         netPurchases: round2(purchasesTotal - purchaseReturnsTotal),
+        supplierDeposits: { count: activeSupplierDeposits.length, total: sum(activeSupplierDeposits, (d) => d.amount) },
         expenses: { count: expenses.length, total: sum(expenses, (e) => e.amount) },
       },
       notes: {
         customersMissingNpwp: missingCustomers.size,
         suppliersMissingNpwp: missingSuppliers.size,
         receivedWithoutBill: [...unbilled.values()],
+        // Only in the whole-business view, and only branches with activity in
+        // this period: these totals mix taxpayers, so they can't be filed as one.
+        separateTaxpayers: branchId
+          ? []
+          : branches
+              .filter(
+                (b) =>
+                  separateTaxpayer(b) &&
+                  (allInvoices.some((i) => i.branchId === b.id && i.status === InvoiceStatus.ISSUED) ||
+                    salesReturns.some((r) => r.branchId === b.id) ||
+                    allBills.some((x) => !x.voidedAt && poBranch(x.purchaseOrder) === b.id) ||
+                    allPurchaseReturns.some((r) => poBranch(r.purchaseOrder) === b.id) ||
+                    allExpenses.some((e) => e.branchId === b.id)),
+              )
+              .map((b) => ({ name: b.legalName || b.name, npwp: b.npwp })),
         unassigned: {
           sales: unassigned(
             allInvoices.filter((i) => i.status === InvoiceStatus.ISSUED),

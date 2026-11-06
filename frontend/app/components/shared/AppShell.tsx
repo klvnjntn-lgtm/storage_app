@@ -6,6 +6,9 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner';
 import {
+  ArrowLeftRight,
+  HandCoins,
+  Target,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -480,6 +483,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/sales/quotations', label: t('nav.items.salesQuotation'), icon: FileSpreadsheet },
     { href: '/sales/orders', label: t('nav.items.salesOrder'), icon: ClipboardList },
     { href: '/sales/invoices', label: t('nav.items.invoice'), icon: Receipt },
+    { href: '/sales/deposits', label: t('nav.items.customerDeposits'), icon: HandCoins },
     { href: '/sales/delivery-orders', label: t('nav.items.deliveryOrder'), icon: Truck },
   ];
 
@@ -500,7 +504,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/purchasing/reorder', label: t('nav.items.reorder'), icon: PackageSearch },
     { href: '/purchasing/returns', label: t('nav.items.purchaseReturns'), icon: Undo2 },
     ...(isAdminRole(profile?.role)
-      ? [{ href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 }]
+      ? [
+          { href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 },
+          { href: '/purchasing/deposits', label: t('nav.items.supplierDeposits'), icon: HandCoins },
+        ]
       : []),
     { href: '/approvals', label: t('nav.items.approvals'), icon: ShieldCheck },
   ];
@@ -523,6 +530,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/payroll', label: t('nav.items.payroll'), icon: Users },
     { href: '/accounting/fixed-assets', label: t('nav.items.fixedAssets'), icon: Building2 },
     { href: '/accounting/setup', label: t('nav.items.chartOfAccounts'), icon: Landmark },
+    { href: '/accounting/bank-reconciliation', label: t('nav.items.bankReconciliation'), icon: ArrowLeftRight },
+    { href: '/accounting/budget', label: t('nav.items.budget'), icon: Target },
     { href: '/accounting/fiscal-periods', label: t('nav.items.fiscalPeriods'), icon: CalendarClock },
     { href: '/accounting/profit-loss', label: t('nav.items.profitLoss'), icon: TrendingUp },
     { href: '/accounting/balance-sheet', label: t('nav.items.balanceSheet'), icon: Scale },
@@ -705,10 +714,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/home', label: t('nav.items.home'), icon: Home },
     hasStock && { href: '/inventory/stock', label: t('nav.items.stock'), icon: LayoutDashboard },
     hasInvoicePos && { href: '/sales', label: t('nav.items.sales'), icon: ShoppingCart },
-    hasDelivery && { href: '/delivery', label: t('nav.items.deliveryHome'), icon: Truck },
+    hasDelivery && { href: '/delivery', label: t('nav.items.delivery'), icon: Truck },
     hasDelivery && { href: '/delivery/routes', label: t('nav.items.deliveryRoutes'), icon: Navigation },
-    hasWorkshopRms && { href: '/workshop', label: t('nav.items.workshopHome'), icon: Car },
-    hasStock && { href: '/inventory', label: t('nav.items.inventoryHome'), icon: Inbox },
+    hasWorkshopRms && { href: '/workshop', label: t('nav.items.workshop'), icon: Car },
+    hasStock && { href: '/inventory', label: t('nav.items.inventory'), icon: Inbox },
     hasStock && { href: '/upload', label: t('nav.items.upload'), icon: UploadIcon },
   ];
   const bottomTabs = tabCandidates

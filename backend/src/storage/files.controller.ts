@@ -17,6 +17,7 @@ import {
 } from './file-storage.interface';
 import { SignedFileUrlService, isPrivateKey } from './signed-file-url.service';
 import { Public } from '../auth/decorators/public.decorator';
+import { Throttle } from '@nestjs/throttler';
 import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decorator';
 
 // Serves private files (delivery proofs) behind a signed, expiring link.
@@ -33,6 +34,9 @@ export class FilesController {
     private readonly signer: SignedFileUrlService,
   ) {}
 
+  // A page of proof photos is one request each, and an office shares one IP,
+  // so the default limit left photos failing to load for everyone there.
+  @Throttle({ default: { limit: 1000, ttl: 60000 } })
   @Get('signed')
   async signed(
     @Query('key') key: string,

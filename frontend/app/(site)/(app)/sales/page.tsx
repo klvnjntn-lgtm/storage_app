@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, ClipboardList, Receipt, Truck, Search, Loader2, CornerDownLeft } from 'lucide-react';
+import { HandCoins, FileText, ClipboardList, Receipt, Truck, Search, Loader2, CornerDownLeft } from 'lucide-react';
 import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 import Pagination from '@/app/components/shared/Pagination';
 import { apiFetch } from '@/lib/apifetch';
@@ -131,6 +131,13 @@ function SalesHomeInner() {
       href: '/sales/delivery-orders',
       icon: Truck,
       gradient: 'from-emerald-500 to-teal-700',
+    },
+    {
+      title: t('nav.items.customerDeposits'),
+      description: t('sales.overview.cardDepositsDesc'),
+      href: '/sales/deposits',
+      icon: HandCoins,
+      gradient: 'from-amber-500 to-orange-700',
     },
   ].filter((item) => !desktopApp || isDesktopRoute(item.href));
 

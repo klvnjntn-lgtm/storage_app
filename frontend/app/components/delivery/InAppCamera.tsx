@@ -187,7 +187,7 @@ export default function InAppCamera({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+    <div className="fixed inset-0 z-50 flex flex-col landscape:flex-row bg-black">
       {failed ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
           <Camera size={40} className="text-white/70" />
@@ -215,9 +215,10 @@ export default function InAppCamera({
               setReady(true);
               forgetFailures();
             }}
-            className="flex-1 min-h-0 w-full object-contain"
+            className="flex-1 min-h-0 min-w-0 w-full landscape:w-auto landscape:h-full object-contain"
           />
-          <div className="flex items-center justify-between px-6 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          {/* Beside the picture when the phone is on its side, where a bar below would eat most of it. */}
+          <div className="flex landscape:flex-col-reverse items-center justify-between px-6 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] landscape:px-4 landscape:py-3 landscape:pr-[max(1rem,env(safe-area-inset-right))]">
             <button
               onClick={onClose}
               aria-label={t('delivery.driver.closeCamera')}

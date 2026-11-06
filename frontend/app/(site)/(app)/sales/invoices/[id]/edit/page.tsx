@@ -21,6 +21,7 @@ import {
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
 import { resolveCartTarget } from '@/lib/invoice-cart';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import QtyInput from '@/app/components/shared/QtyInput';
@@ -53,6 +54,7 @@ export default function EditIssuedInvoicePage() {
   const params = useParams<{ id: string }>();
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -70,6 +72,8 @@ export default function EditIssuedInvoicePage() {
   const [vehicleLabel, setVehicleLabel] = useState<string | null>(null);
 
   const [dueDate, setDueDate] = useState('');
+  // Only a changed due date is asked about: an overdue invoice keeps its own.
+  const originalDueDate = useRef('');
 
   // Required justification for the edit — sent to the backend and
   // surfaced in the invoice detail page's edit-history list.
@@ -136,7 +140,8 @@ export default function EditIssuedInvoicePage() {
         setVehicleLabel(
           invoice.vehicle ? `${invoice.vehicle.plateNumber} · ${invoice.vehicle.vehicleModel}` : null,
         );
-        setDueDate(invoice.dueDate ? String(invoice.dueDate).slice(0, 10) : '');
+        originalDueDate.current = invoice.dueDate ? String(invoice.dueDate).slice(0, 10) : '';
+        setDueDate(originalDueDate.current);
 
         const restoredCart: Record<string, CartLine> = {};
         const restoredServices: ServiceLine[] = [];
@@ -464,6 +469,7 @@ function changeServiceUnit(key: string, value: string) {
       return;
     }
 
+    if (dueDate !== originalDueDate.current && !(await confirmPastDates({ due: dueDate }))) return;
     setSaving(true);
     setError('');
     try {

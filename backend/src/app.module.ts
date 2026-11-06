@@ -5,6 +5,7 @@ import { SentryModule } from '@sentry/nestjs/setup';
 import { TranslatingExceptionFilter } from './i18n/translating-exception.filter';
 import { TranslateMessageInterceptor } from './i18n/translate-message.interceptor';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ClientErrorsModule } from './client-errors/client-errors.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -46,6 +47,10 @@ import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { PerformanceModule } from './performance/performance.module';
 import { TaxExportModule } from './tax-export/tax-export.module';
 import { TaxReportModule } from './tax-report/tax-report.module';
+import { BudgetModule } from './budget/budget.module';
+import { BankReconciliationModule } from './bank-reconciliation/bank-reconciliation.module';
+import { CustomerDepositsModule } from './customer-deposits/customer-deposits.module';
+import { SupplierDepositsModule } from './supplier-deposits/supplier-deposits.module';
 import { PartCatalogModule } from './part-catalog/part-catalog.module';
 import { VehicleRemindersModule } from './vehicles/vehicle-reminders.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
@@ -97,6 +102,7 @@ import { SerialsModule } from './serials/serials.module';
     SentryModule.forRoot(),
     PrismaModule,
     StorageModule,
+    ClientErrorsModule,
     WarehouseModule,
     AuthModule,
     CategoryModule,
@@ -131,6 +137,10 @@ import { SerialsModule } from './serials/serials.module';
     PerformanceModule,
     TaxExportModule,
     TaxReportModule,
+    BudgetModule,
+    BankReconciliationModule,
+    CustomerDepositsModule,
+    SupplierDepositsModule,
     PartCatalogModule,
     CustomersModule,
     VehicleRemindersModule,

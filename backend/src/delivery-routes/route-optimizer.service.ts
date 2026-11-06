@@ -189,9 +189,10 @@ export class RouteOptimizerService {
 
     // Unreachable pins are dropped and the matrix re-fetched without them,
     // so one bad pin doesn't block planning everything else.
-    let matrix: TravelMatrix;
+    // Nothing to route (every stop without a pin): no need to ask OSRM.
+    let matrix: TravelMatrix = { durations: [[0]], distances: [[0]] };
     const unreachable: OptimizerJob[] = [];
-    for (;;) {
+    while (routable.length > 0) {
       try {
         matrix = await this.osrm.table([
           input.depot,

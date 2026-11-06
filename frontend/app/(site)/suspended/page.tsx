@@ -53,7 +53,7 @@ export default function SuspendedPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black flex items-center justify-center px-4 py-10">
+    <main className="min-h-dvh bg-white text-black flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-md space-y-5">
         <div className="flex justify-end gap-2">
           <ThemeToggle />

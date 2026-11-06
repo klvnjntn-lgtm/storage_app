@@ -389,6 +389,7 @@ export class DeliveryRoutesService {
       // Saved-address name for a customer stop ("Gudang Timur"); null for
       // the main address and for DO stops.
       addressLabel: d ? null : stop.addressLabel,
+      customerAddressId: d ? null : stop.customerAddressId,
       receivedBy: d ? d.receivedBy : stop.receivedBy,
       signedAt: d ? d.signedAt : stop.signedAt,
       hasProofPhoto: d
@@ -890,24 +891,18 @@ export class DeliveryRoutesService {
     });
     if (!route) throw new NotFoundException('Route not found');
     this.assertRouteOpen(route);
+    const orderOnly = !!dto.orderOnly;
     const start = await this.getStartPoint(organizationId);
-    if (!start) {
+    // ETAs have to be counted from somewhere; an order doesn't.
+    if (!start && !orderOnly) {
       throw new BadRequestException('Set the start point before optimizing');
     }
 
     const pendingStops = route.stops.filter(
       (s) => this.stopStatus(s) === 'PENDING',
     );
-    const missingDestination = pendingStops.filter((s) => {
-      const t = stopTarget(s);
-      return t.destinationLatitude == null || t.destinationLongitude == null;
-    });
-    if (missingDestination.length > 0) {
-      const names = missingDestination.map(stopLabel).join(', ');
-      throw new BadRequestException(
-        `These stops need a destination pin before optimizing: ${names}`,
-      );
-    }
+    // A stop with no pin can't be placed, but it shouldn't hold up the others: it
+    // stays at the end of its priority group and is reported in `unscheduled`.
     if (pendingStops.length === 0) {
       return { ...(await this.getRoute(organizationId, routeId)), unscheduled: [] };
     }
@@ -921,7 +916,9 @@ export class DeliveryRoutesService {
     // asked: left to the route's own day (see driverAvailability), so a future
     // route doesn't get ETAs for today, which the late-stop alerts would act on.
     const requestedDeparture = underway ? (asked && asked > now ? asked : now) : (asked ?? undefined);
-    const availability = (
+    const availability = orderOnly
+      ? null
+      : (
       await this.teamAvailability(
         organizationId,
         [route.teamId],
@@ -931,13 +928,18 @@ export class DeliveryRoutesService {
     ).get(route.teamId)!;
     // A driver with no hours on this day was still put on this route by a
     // dispatcher — that's an override, so don't drop every stop over it.
-    const vehicle = {
-      key: route.teamId,
-      availableFrom: availability.availableFrom,
-      availableUntil: availability.offDuty ? null : availability.availableUntil,
-    };
+    const vehicle = availability
+      ? {
+          key: route.teamId,
+          availableFrom: availability.availableFrom,
+          availableUntil: availability.offDuty ? null : availability.availableUntil,
+        }
+      : { key: route.teamId, availableFrom: now, availableUntil: null };
 
-    const jobs = pendingStops.map(optimizerJob);
+    const jobs = pendingStops
+      .map(optimizerJob)
+      // A window means nothing without a clock to hold it against.
+      .map((job) => (orderOnly ? { ...job, windowStart: null, windowEnd: null } : job));
     const solveFrom = (from: { latitude: number; longitude: number }) =>
       this.optimizer.optimize({
         depot: { lat: from.latitude, lng: from.longitude },
@@ -945,11 +947,18 @@ export class DeliveryRoutesService {
         jobs,
         keepUnassigned: true,
       });
-    const position = this.whereabouts(route, start).position!;
+    // Order only, with no start point and nothing done yet: from the first pin.
+    const firstPin = jobs.find((job) => job.location)?.location;
+    const position =
+      this.whereabouts(route, start).position ??
+      (firstPin
+        ? { latitude: firstPin.lat, longitude: firstPin.lng, source: 'DEPOT' as const }
+        : { latitude: 0, longitude: 0, source: 'DEPOT' as const }); // no pins: nothing gets routed
     let { routes, unassigned } = await solveFrom(position);
     // No road out of the driver's last spot makes every stop look unreachable,
     // which says nothing about the stops: order them from the depot instead.
     if (
+      start &&
       position.source === 'LAST_STOP' &&
       unassigned.length === jobs.length &&
       unassigned.every((u) => u.reason === 'UNREACHABLE')
@@ -974,10 +983,11 @@ export class DeliveryRoutesService {
             where: { id: stop.key },
             data: {
               sequence: highestResolvedSequence + visitPosition + 1,
-              travelMetersFromPrevious: stop.leg?.distanceMeters ?? null,
+              travelMetersFromPrevious: orderOnly ? null : (stop.leg?.distanceMeters ?? null),
               travelSecondsFromPrevious:
-                stop.leg != null ? Math.round(stop.leg.durationSeconds) : null,
-              plannedEta: stop.eta,
+                !orderOnly && stop.leg != null ? Math.round(stop.leg.durationSeconds) : null,
+              // Order only leaves none behind: an old one would describe another trip.
+              plannedEta: orderOnly ? null : stop.eta,
               // New ETA — a later slip deserves a fresh alert.
               atRiskNotifiedAt: null,
               lateNotifiedAt: null,
@@ -988,7 +998,7 @@ export class DeliveryRoutesService {
           where: { id: routeId },
           data: {
             // Once a stop is done the departure is history; monitoring still reads it.
-            ...(anyResolved ? {} : { plannedDepartureAt: vehicle.availableFrom }),
+            ...(anyResolved ? {} : { plannedDepartureAt: orderOnly ? null : vehicle.availableFrom }),
             // Only the first time: a second optimize still goes back to the list
             // the office started from.
             ...(route.originalOrder == null
@@ -1475,8 +1485,8 @@ export class DeliveryRoutesService {
     // just can't be optimized until then.
     const site = await this.resolveStopSite(organizationId, customer, dto.customerAddressId);
     // Same customer at two different sites on one route is fine; the same
-    // site twice isn't.
-    const duplicate = await this.prisma.routeStop.findFirst({
+    // site twice needs the office to have confirmed it (route page).
+    const duplicate = dto.allowDuplicate ? null : await this.prisma.routeStop.findFirst({
       where: {
         routeId,
         customerId: customer.id,
@@ -2596,6 +2606,20 @@ export class DeliveryRoutesService {
       lastStop,
       nextStop,
       plannedDepartureAt: route.plannedDepartureAt,
+      // What's left, in route order, for the monitoring page.
+      unfinished: stops
+        .filter((stop) => stop.status === 'PENDING')
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((stop) => ({
+          stopId: stop.id,
+          sequence: stop.sequence,
+          label: stop.label,
+          plannedEta: stop.plannedEta,
+          late: stop.late,
+          atRisk: stop.atRisk,
+          // Photo sent, Done never tapped: the driver may well have been there.
+          unconfirmed: stop.hasProofPhoto,
+        })),
       timeline: completionTimeline(
         resolved.map(({ stop, at }) => ({
           stopId: stop.id,

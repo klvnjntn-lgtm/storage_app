@@ -93,7 +93,7 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-center mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center mb-3">
         {(['ordered', 'received', 'billed'] as const).map((k) => (
           <div key={k} className="rounded-md bg-gray-50 p-2">
             <div className="text-[11px] text-gray-500 uppercase">{t(`purchasing.bills.${k}`)}</div>

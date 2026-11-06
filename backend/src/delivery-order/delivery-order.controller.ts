@@ -1,3 +1,4 @@
+import { LogPhotoRefusalInterceptor } from '../delivery-routes/log-photo-refusal.interceptor';
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, Res, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -127,6 +128,8 @@ export class DeliveryOrderController {
   // `landmark`: the same photo without its stamp, sent when the customer
   // has no landmark photo yet (see landmarkFromProof).
   @UseInterceptors(
+    // First, so it also sees a refusal from the file handling after it.
+    LogPhotoRefusalInterceptor,
     FileFieldsInterceptor(
       [
         { name: 'file', maxCount: 1 },

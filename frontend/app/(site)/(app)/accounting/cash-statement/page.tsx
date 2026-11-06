@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Landmark, Printer, Calendar } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
-import { toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
+import { toCalendarDateString, formatDMY, formatDMYTime, parseCalendarDate } from '@/lib/dates';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useMergeQueryParams } from '@/lib/useQuerySync';
@@ -144,6 +145,32 @@ function CashStatementPageInner() {
 
   const multi = (statement?.accounts.length ?? 0) > 1;
 
+  const buildExcel = () => {
+    const col = (key: string) => t(`accounting.export.${key}`);
+    return {
+      fileName: `mutasi-kas-bank-${from}_${to}.xlsx`,
+      sheets: statement!.accounts.map((a) => ({
+        name: a.name,
+        rows: [
+          [col('date'), col('entry'), col('party'), col('description'), t('accounting.cashFlow.cashIn'), t('accounting.cashFlow.cashOut'), col('balance')],
+          [t('accounting.ledger.openingBalance'), '', '', '', '', '', a.opening],
+          ...a.lines.map((l) => [
+            formatDMY(parseCalendarDate(l.date)),
+            l.entryNumber ?? '',
+            l.party ?? '',
+            [l.reference, l.detail ?? l.memo].filter(Boolean).join(' — '),
+            l.moneyIn,
+            l.moneyOut,
+            l.balance,
+          ]),
+          [t('accounting.ledger.closingBalance'), '', '', '', a.moneyIn, a.moneyOut, a.closing],
+        ],
+        money: [4, 5, 6],
+        widths: [12, 14, 28, 44, 16, 16, 16],
+      })),
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black print:bg-white"
@@ -184,6 +211,7 @@ function CashStatementPageInner() {
               >
                 {t('accounting.cashStatement.change')}
               </button>
+              <ExportExcelButton disabled={!statement} build={buildExcel} />
               <button
                 onClick={() => window.print()}
                 disabled={!statement}

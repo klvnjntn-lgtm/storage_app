@@ -11,6 +11,7 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useIsDesktopApp } from '@/lib/desktop';
 import { RecordPaymentDialog } from '@/app/components/invoices/RecordPaymentDialog';
 import { ApplyCreditDialog, CreditTarget } from '@/app/components/invoices/ApplyCreditDialog';
+import { ApplyDepositDialog, type OpenDeposit } from '@/app/components/shared/ApplyDepositDialog';
 import { useAuth } from '@/app/context/AuthContext';
 import { VoidInvoiceDialog } from '@/app/components/invoices/VoidInvoiceDialog';
 import { InvoicePrintArea } from '@/app/components/invoices/templates/InvoicePrintArea';
@@ -18,6 +19,7 @@ import { InvoiceFormat } from '@/app/components/invoices/types';
 import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
 import { parseCalendarDate, toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { PAGE_CSS, MARGIN_MM } from '@/lib/mappers/invoice-format';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -49,6 +51,7 @@ type CreditInfo = {
   balance: number; // still owed on this invoice
   customerCredit: number; // held on the customer's other invoices
   targets: CreditTarget[]; // the customer's other invoices with money owed
+  deposits: OpenDeposit[]; // the customer's down payments with money left
 };
 
 type ActivityEntry = {
@@ -219,6 +222,7 @@ export default function InvoiceDetailPage() {
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const hasWarehouseOps = useHasModule('WAREHOUSE_OPS');
   const { t, language } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   // The desktop app has no delivery orders (lib/desktop.ts).
   const desktopApp = useIsDesktopApp();
 
@@ -230,8 +234,10 @@ export default function InvoiceDetailPage() {
   const [applyCreditOpen, setApplyCreditOpen] = useState(false);
   const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
   const [applyingCredit, setApplyingCredit] = useState(false);
+  const [applyDepositOpen, setApplyDepositOpen] = useState(false);
   const { profile } = useAuth();
   const isAdmin = isAdminRole(profile?.role);
+  const openDeposits = creditInfo?.deposits ?? [];
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -303,6 +309,7 @@ export default function InvoiceDetailPage() {
 
   async function saveReminder() {
     if (!invoice?.vehicleId || !reminderNote.trim() || !reminderDueDate) return;
+    if (!(await confirmPastDates({ reminder: reminderDueDate }))) return;
     setReminderSaving(true);
     setReminderError('');
     try {
@@ -819,6 +826,22 @@ export default function InvoiceDetailPage() {
               </div>
             )}
 
+            {invoice.status === 'ISSUED' && balanceDue > 0 && openDeposits.length > 0 && (
+              <div className="border-2 border-emerald-300 bg-emerald-50 rounded-md p-3 text-sm flex flex-wrap items-center justify-between gap-2 print:hidden">
+                <p className="text-emerald-900">
+                  {t('sales.deposits.available', {
+                    amount: formatIDR(openDeposits.reduce((sum, d) => sum + d.remaining, 0)),
+                  })}
+                </p>
+                <button
+                  onClick={() => setApplyDepositOpen(true)}
+                  className="text-sm px-3 py-1.5 rounded-md border-2 border-emerald-600/40 text-emerald-800 font-semibold hover:bg-emerald-100 transition-colors"
+                >
+                  {t('sales.deposits.apply')}
+                </button>
+              </div>
+            )}
+
             {/* Payments — individual Payment rows, each voidable to reverse
                 a mistaken/duplicate entry (reverses its ledger entry and
                 recomputes amountPaid/paymentStatus). */}
@@ -841,7 +864,9 @@ export default function InvoiceDetailPage() {
                                 ? t('sales.invoiceDetail.kindRefund')
                                 : p.kind === 'CREDIT_OUT'
                                   ? t('sales.invoiceDetail.kindCreditOut')
-                                  : t('sales.invoiceDetail.kindCreditIn')}{' '}
+                                  : p.kind === 'DEPOSIT_IN'
+                                    ? t('sales.deposits.kindDepositIn')
+                                    : t('sales.invoiceDetail.kindCreditIn')}{' '}
                             </span>
                           )}
                           {(p.kind === 'PAYMENT' || p.kind === 'REFUND' || !p.kind) && (
@@ -892,14 +917,14 @@ export default function InvoiceDetailPage() {
                 <div className="border-2 border-gray-300 bg-white rounded-md divide-y divide-gray-200">
                   {activity.map((ev) => (
                     <div key={ev.id} className="p-3 text-sm">
-                      <div className="flex items-start justify-between gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-4">
                         <p className={`flex-1 font-medium ${ev.eventType === 'VOIDED' ? 'text-red-700' : ''}`}>
                           {t(ACTIVITY_LABEL_KEY[ev.eventType])}
                           {(ev.eventType === 'PAYMENT_RECORDED' || ev.eventType === 'REFUNDED' || ev.eventType === 'CREDIT_APPLIED') && ev.reason
                             ? `: ${ev.reason}`
                             : ''}
                         </p>
-                        <p className="text-gray-500 whitespace-nowrap text-xs">
+                        <p className="text-gray-500 sm:whitespace-nowrap break-words min-w-0 text-xs">
                           {formatDMYTime(new Date(ev.createdAt))}
                           {ev.user?.email ? ` · ${ev.user.email}` : ''}
                         </p>
@@ -1040,6 +1065,22 @@ export default function InvoiceDetailPage() {
               targets={creditInfo.targets}
               onApplied={load}
               onClose={() => setApplyCreditOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {invoice && applyDepositOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-md">
+            <ApplyDepositDialog
+              apiBase="/customer-deposits"
+              target={{ invoiceId: invoice.id }}
+              i18nPrefix="sales.deposits"
+              balance={balanceDue}
+              deposits={openDeposits}
+              onApplied={load}
+              onClose={() => setApplyDepositOpen(false)}
             />
           </div>
         </div>

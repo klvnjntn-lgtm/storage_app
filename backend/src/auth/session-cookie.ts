@@ -19,6 +19,34 @@ const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const CSRF_HEADER = 'x-requested-with';
 export const CSRF_HEADER_VALUE = 'waresys';
 
+// One log line for a write refused by the CSRF check, to tell a browser that
+// dropped the header (or an extension changing it) from a real cross-site
+// request. Never the cookie, and the referer without its query: print links
+// carry a token there. All of it is sent by the client, so it's treated as
+// untrusted and kept short.
+export function describeCsrfRefusal(req: Request, userId?: string) {
+  const flat = (v: unknown, max = 120) => String(v).replace(/[\r\n\t]+/g, ' ').slice(0, max);
+  const received = req.headers?.[CSRF_HEADER];
+  const referer = req.headers?.referer;
+  let refererPath = '-';
+  if (referer) {
+    try {
+      refererPath = new URL(referer).pathname;
+    } catch {
+      refererPath = 'invalid';
+    }
+  }
+  return (
+    `${flat(req.method, 10)} ${flat(req.originalUrl?.split('?')[0] ?? req.url?.split('?')[0])}` +
+    ` header=${received === undefined ? 'absent' : `"${flat(received, 60)}"`}` +
+    ` user=${flat(userId ?? '-')}` +
+    ` fetchSite=${flat(req.headers?.['sec-fetch-site'] ?? '-', 20)}` +
+    ` fetchMode=${flat(req.headers?.['sec-fetch-mode'] ?? '-', 20)}` +
+    ` from=${flat(refererPath)}` +
+    ` ua="${flat(req.headers?.['user-agent'] ?? '-', 160)}"`
+  );
+}
+
 function cookieOptions(req: Request) {
   return {
     httpOnly: true,

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import * as Sentry from '@sentry/browser';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { isConnectionError, reportClientError } from '@/lib/pageRecovery';
 
 // Fallback for the route error boundaries (error.tsx). Without one, a render
 // error left a blank white screen. Errors an error boundary catches never
@@ -18,10 +19,17 @@ export default function ErrorScreen({
   retry: () => void;
 }) {
   const { t } = useLanguage();
+  const connectionLost = isConnectionError(error);
 
   useEffect(() => {
     console.error(error);
     Sentry.captureException(error);
+    if (isConnectionError(error)) {
+      // Trying again without a reload would ask for the same failed files.
+      window.__waresysRecover?.('connection-lost', error.message, false);
+    } else {
+      reportClientError({ kind: 'page-crash', message: `${error.name}: ${error.message}`, digest: error.digest });
+    }
   }, [error]);
 
   return (
@@ -30,12 +38,19 @@ export default function ErrorScreen({
         <div className="mx-auto mb-4 w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
           <AlertTriangle size={22} />
         </div>
-        <h1 className="text-lg font-semibold text-black">{t('common.errorTitle')}</h1>
-        <p className="mt-2 text-sm text-gray-600">{t('common.errorBody')}</p>
-        {error.digest && <p className="mt-2 text-xs text-gray-400 font-mono">{error.digest}</p>}
+        <h1 className="text-lg font-semibold text-black">
+          {t(connectionLost ? 'common.connectionLostTitle' : 'common.errorTitle')}
+        </h1>
+        <p className="mt-2 text-sm text-gray-600">
+          {t(connectionLost ? 'common.connectionLostBody' : 'common.errorBody')}
+        </p>
+        {/* So a screenshot says which error it was. */}
+        <p className="mt-2 text-xs text-gray-400 font-mono break-words">
+          {error.digest ?? error.message.slice(0, 120)}
+        </p>
         <div className="mt-6 flex flex-col sm:flex-row gap-2 justify-center">
           <button
-            onClick={() => retry()}
+            onClick={() => (connectionLost ? window.location.reload() : retry())}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
           >
             <RotateCcw size={15} /> {t('common.tryAgain')}

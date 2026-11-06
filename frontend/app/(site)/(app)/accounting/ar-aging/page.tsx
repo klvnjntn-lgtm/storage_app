@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Wallet, Calendar, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { toCalendarDateString } from '@/lib/dates';
+import { toCalendarDateString, formatDMY, parseCalendarDate } from '@/lib/dates';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { OpeningBalancesNotice, SyncOpeningBalancesButton, type OpeningBalancesResult } from '@/app/components/accounting/OpeningBalances';
@@ -152,6 +153,44 @@ export default function ARAgingPage() {
     return c.customerId ?? `unlinked:${c.customerName ?? ''}`;
   }
 
+  const buildExcel = () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const none = t('accounting.arAging.noCustomerOnFile');
+    return {
+      fileName: `umur-piutang-${asOf}.xlsx`,
+      sheets: [
+        {
+          name: col('byCustomer'),
+          rows: [
+            [col('customer'), col('notDue'), '1-30', '31-60', '61-90', '90+', t('common.total')],
+            ...r.byCustomer.map((c) => [c.customerName ?? none, c.current, c.d1_30, c.d31_60, c.d61_90, c.d90plus, c.total]),
+            [t('common.total'), r.totals.current, r.totals.d1_30, r.totals.d31_60, r.totals.d61_90, r.totals.d90plus, r.totals.total],
+          ],
+          money: [1, 2, 3, 4, 5, 6],
+          widths: [36, 14, 14, 14, 14, 14, 16],
+        },
+        {
+          name: col('byInvoice'),
+          rows: [
+            [col('invoice'), col('customer'), col('dueDate'), col('daysOverdue'), col('total'), col('paid'), col('outstanding')],
+            ...r.lines.map((l) => [
+              l.invoiceNumber ?? '',
+              l.customerName ?? none,
+              l.dueDate ? formatDMY(parseCalendarDate(l.dueDate)) : '',
+              l.daysOverdue,
+              l.total,
+              l.amountPaid,
+              l.outstanding,
+            ]),
+          ],
+          money: [4, 5, 6],
+          widths: [18, 36, 12, 10, 16, 16, 16],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -187,6 +226,7 @@ export default function ARAgingPage() {
               onChange={(v) => setAsOf(v)}
             />
           </div>
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}

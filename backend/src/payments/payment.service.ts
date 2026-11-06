@@ -40,7 +40,7 @@ function creditOf(inv: MoneyFields) {
 
 // How a payment row moves the invoice's amountPaid (amounts are positive).
 function signOf(kind: PaymentKind) {
-  return kind === PaymentKind.PAYMENT || kind === PaymentKind.CREDIT_IN ? 1 : -1;
+  return kind === PaymentKind.PAYMENT || kind === PaymentKind.CREDIT_IN || kind === PaymentKind.DEPOSIT_IN ? 1 : -1;
 }
 
 const idr = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
@@ -385,6 +385,69 @@ export class PaymentService {
     return this.present(updated);
   }
 
+  // Pays this invoice from a customer's down payment. Amount defaults to as
+  // much as both sides allow. scope: a branch member may only use their own
+  // branch's down payments, on their own branch's invoices.
+  async applyDeposit(
+    organizationId: string,
+    invoiceId: string,
+    depositId: string,
+    requested: number | undefined,
+    userId?: string,
+    scope?: string,
+  ) {
+    const updated = await this.serializable(async (tx) => {
+      const invoice = await tx.invoice.findFirst({
+        where: { id: invoiceId, organizationId, ...(scope && { branchId: scope }) },
+        select: { id: true, status: true, total: true, amountPaid: true, creditedAmount: true, customerId: true, invoiceNumber: true },
+      });
+      if (!invoice) throw new NotFoundException('Invoice not found');
+      if (invoice.status !== InvoiceStatus.ISSUED) {
+        throw new BadRequestException('A down payment can only be applied to an issued invoice');
+      }
+      const deposit = await tx.customerDeposit.findFirst({
+        where: { id: depositId, organizationId, voidedAt: null, ...(scope && { branchId: scope }) },
+      });
+      if (!deposit) throw new NotFoundException('Down payment not found');
+      if (deposit.customerId !== invoice.customerId) {
+        throw new BadRequestException('This down payment belongs to another customer');
+      }
+      const owed = balanceOf(invoice);
+      const left = round2(Number(deposit.amount) - Number(deposit.appliedAmount) - Number(deposit.refundedAmount));
+      if (owed <= EPS) throw new BadRequestException('This invoice has nothing left to pay');
+      if (left <= EPS) throw new BadRequestException('Nothing is left of this down payment');
+      const amount = requested ?? round2(Math.min(owed, left));
+      if (amount > owed + EPS || amount > left + EPS) {
+        throw new BadRequestException('The amount is more than the invoice owes or the down payment has left');
+      }
+
+      const payment = await tx.payment.create({
+        data: {
+          invoiceId: invoice.id,
+          kind: PaymentKind.DEPOSIT_IN,
+          amount,
+          method: PaymentMethod.OTHER,
+          recordedById: userId,
+          customerDepositId: deposit.id,
+          note: `Down payment ${deposit.depositNumber}`,
+        },
+      });
+      await tx.customerDeposit.update({ where: { id: deposit.id }, data: { appliedAmount: { increment: amount } } });
+      await this.postingRules.postDepositApplied(organizationId, payment.id, tx);
+      await tx.invoiceActivityEvent.create({
+        data: {
+          invoiceId: invoice.id,
+          organizationId,
+          userId,
+          eventType: InvoiceActivityEventType.CREDIT_APPLIED,
+          reason: `${idr(amount)} from down payment ${deposit.depositNumber}`,
+        },
+      });
+      return this.applyToInvoice(tx, invoice, amount);
+    }, 'Applying the down payment conflicted with a concurrent update, please retry');
+    return this.present(updated);
+  }
+
   // Credit picture around one invoice: what credit it holds (refundable or
   // applicable elsewhere), what credit the customer holds on other invoices
   // (applicable here), and which of their invoices still have money owed.
@@ -410,12 +473,28 @@ export class PaymentService {
       .map((o) => ({ invoiceId: o.id, invoiceNumber: o.invoiceNumber, balance: balanceOf(o) }))
       .filter((o) => o.balance > 0);
 
+    // Down payments still holding money, to offer on the invoice.
+    const deposits = invoice.customerId
+      ? await this.prisma.customerDeposit.findMany({
+          where: { organizationId, customerId: invoice.customerId, voidedAt: null, ...(branchId && { branchId }) },
+          orderBy: { date: 'asc' },
+          select: { id: true, depositNumber: true, amount: true, appliedAmount: true, refundedAmount: true },
+        })
+      : [];
+
     return {
       credit: creditOf(invoice),
       balance: Math.max(0, balanceOf(invoice)),
       customerCredit: round2(sources.reduce((sum, s) => sum + s.credit, 0)),
       sources,
       targets,
+      deposits: deposits
+        .map((d) => ({
+          id: d.id,
+          depositNumber: d.depositNumber,
+          remaining: round2(Number(d.amount) - Number(d.appliedAmount) - Number(d.refundedAmount)),
+        }))
+        .filter((d) => d.remaining > EPS),
     };
   }
 
@@ -433,7 +512,7 @@ export class PaymentService {
     const updated = await this.serializable(async (tx) => {
       const payment = await tx.payment.findFirst({
         where: { id: paymentId, invoiceId, invoice: { organizationId }, voidedAt: null },
-        select: { id: true, amount: true, kind: true, linkedPaymentId: true, invoiceId: true },
+        select: { id: true, amount: true, kind: true, linkedPaymentId: true, invoiceId: true, customerDepositId: true },
       });
       if (!payment) throw new NotFoundException('Payment not found');
 
@@ -442,7 +521,7 @@ export class PaymentService {
         const other = payment.linkedPaymentId
           ? await tx.payment.findFirst({
               where: { id: payment.linkedPaymentId, voidedAt: null },
-              select: { id: true, amount: true, kind: true, linkedPaymentId: true, invoiceId: true },
+              select: { id: true, amount: true, kind: true, linkedPaymentId: true, invoiceId: true, customerDepositId: true },
             })
           : null;
         if (other) legs.push(other);
@@ -463,6 +542,18 @@ export class PaymentService {
         if (leg.kind === PaymentKind.PAYMENT || leg.kind === PaymentKind.REFUND) {
           const entry = await this.journal.findPostedBySource(organizationId, JournalSourceType.PAYMENT, leg.id, tx);
           if (entry) await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
+        }
+
+        // Puts the money back on the down payment it came from.
+        if (leg.kind === PaymentKind.DEPOSIT_IN) {
+          const entry = await this.journal.findPostedBySource(organizationId, JournalSourceType.CUSTOMER_DEPOSIT, leg.id, tx);
+          if (entry) await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
+          if (leg.customerDepositId) {
+            await tx.customerDeposit.update({
+              where: { id: leg.customerDepositId },
+              data: { appliedAmount: { decrement: leg.amount } },
+            });
+          }
         }
 
         // Kept, not deleted, so the payment history stays complete; every

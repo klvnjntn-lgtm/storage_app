@@ -477,7 +477,7 @@ export default function CustomerDetailPage() {
 
         {customer && !hasWorkshopRms && totals && (
           <>
-            <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
               <div className="border-2 border-gray-300 rounded-md p-3 bg-white">
                 <p className="text-xs text-gray-500">{t('customers.detailPage.totalInvoiced')}</p>
                 <p className="font-bold">{formatIDR(totals.total)}</p>

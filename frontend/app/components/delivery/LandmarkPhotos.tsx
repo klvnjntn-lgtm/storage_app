@@ -1,5 +1,6 @@
 'use client';
 
+import PhotoZoom from '@/app/components/shared/PhotoZoom';
 import { useEffect, useState } from 'react';
 import { Camera, ImagePlus, Trash2 } from 'lucide-react';
 import { apiFetch, getDeviceId } from '@/lib/apifetch';
@@ -196,14 +197,11 @@ export default function LandmarkPhotos({
           {tiles.map((p) => (
             <div key={p.key} className="w-32 space-y-1">
               <div className="relative">
-                <a href={p.src} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- signed URL / local preview, not optimizable */}
-                  <img
-                    src={p.src}
-                    alt={t('customers.driverInfo.photoAlt')}
-                    className="h-24 w-32 object-cover rounded border border-gray-300"
-                  />
-                </a>
+                <PhotoZoom
+                  src={p.src}
+                  alt={t('customers.driverInfo.photoAlt')}
+                  className="h-24 w-32 object-contain bg-gray-100 rounded border border-gray-300"
+                />
                 <button
                   type="button"
                   onClick={p.onRemove}

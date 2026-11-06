@@ -8,7 +8,16 @@ import { useCurrentUser } from './useCurrentUser';
 // sidebar included) refetches without a reload.
 export const BRANCHES_CHANGED = 'waresys:branches-changed';
 
-export type Branch = { id: string; name: string; address: string | null; phone: string | null; archivedAt: string | null };
+export type Branch = {
+  id: string;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  legalName: string | null;
+  npwp: string | null;
+  nitku: string | null;
+  archivedAt: string | null;
+};
 
 // The business's active branches. Branch choices (on invoices, expenses,
 // assets, the P&L) only appear once there are two — a single-branch

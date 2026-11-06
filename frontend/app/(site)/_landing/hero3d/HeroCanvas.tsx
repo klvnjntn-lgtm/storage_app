@@ -302,6 +302,8 @@ function HeroCanvas({
       style={{ opacity: ready ? 1 : 0 }}
     >
       <Canvas
+        // the scene's left edge fades so it never ends in a hard line beside the copy; the cards sit outside it
+        className="lg:[mask-image:linear-gradient(90deg,transparent,#000_11%)]"
         frameloop={frameloop}
         shadows={quality === 'high'}
         dpr={quality === 'high' ? [1, 1.75] : [1, 1.5]}

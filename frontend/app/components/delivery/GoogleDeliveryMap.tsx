@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AdvancedMarker, APIProvider, InfoWindow, Map, useMap } from '@vis.gl/react-google-maps';
 import type { MapDriver, MapStartPoint, MapStop, StopStatus } from './DeliveryMapInner';
+import { outcomeMark } from './teamColors';
 import { START_ICON_HEIGHT, START_ICON_HTML } from './startPointIcon';
 
 // Google Maps version of DeliveryMapInner — same props, so pages don't
@@ -138,7 +139,9 @@ export default function GoogleDeliveryMap({
                 setPopup({ key: stop.id, lat: stop.latitude, lng: stop.longitude, label: stop.label, detail: stop.detail })
               }
             >
-              <div style={dotStyle(stop.color ?? STATUS_COLOR[stop.status], 16, 2)} />
+              <div style={{ ...dotStyle(stop.color ?? STATUS_COLOR[stop.status], 16, 2), color: 'white', font: '700 11px/16px system-ui, sans-serif', textAlign: 'center' }}>
+                {outcomeMark(stop)}
+              </div>
             </AdvancedMarker>
           ))}
           {startPoint && (
@@ -180,7 +183,7 @@ export default function GoogleDeliveryMap({
             >
               <div
                 style={{
-                  background: driver.muted ? '#6b7280' : '#1d4ed8',
+                  background: driver.muted ? '#6b7280' : (driver.color ?? '#1d4ed8'),
                   color: 'white',
                   font: '600 11px/1 system-ui, sans-serif',
                   minWidth: 28,

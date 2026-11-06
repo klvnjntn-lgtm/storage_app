@@ -16,6 +16,7 @@ import { Supplier } from '@/app/components/suppliers/types';
 import { defaultLocation } from '@/lib/locations';
 import { LocationOption, POCartLine, PONewProductLine, POProduct } from '@/app/components/purchase-orders/types';
 import { useHasModule } from '@/lib/hooks/useHasModule';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { errorMessage } from '@/lib/api-error';
 import NumberInput from '@/app/components/shared/NumberInput';
@@ -58,6 +59,7 @@ function PurchaseOrderFormPageInner() {
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const hasWarehouseOps = useHasModule('WAREHOUSE_OPS');
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -468,6 +470,7 @@ function PurchaseOrderFormPageInner() {
       setError(errorMessage(e) ?? t('purchasing.purchaseOrderNew.checkNewProductRows'));
       return;
     }
+    if (!(await confirmPastDates({ document: orderDate, expected: expectedDate }))) return;
     setSaving(true);
     savedRef.current = true;
     try {

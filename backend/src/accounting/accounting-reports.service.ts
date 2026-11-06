@@ -1015,7 +1015,7 @@ async getARAging(
   ) {
     let paid = Number(amountPaid);
     for (const p of changes) {
-      const signed = (p.kind === PaymentKind.PAYMENT || p.kind === PaymentKind.CREDIT_IN ? 1 : -1) * Number(p.amount);
+      const signed = (p.kind === PaymentKind.PAYMENT || p.kind === PaymentKind.CREDIT_IN || p.kind === PaymentKind.DEPOSIT_IN ? 1 : -1) * Number(p.amount);
       // Made after asOf: take it back out. Voided after asOf: it still
       // counted then, so put it back.
       paid += p.createdAt > asOf ? -signed : signed;

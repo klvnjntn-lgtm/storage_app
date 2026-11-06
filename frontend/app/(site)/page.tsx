@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowRight, ChevronRight, Menu, X, ArrowUp, Pause, Play } from 'lucide-react';
+import { ChevronRight, Menu, X, ArrowUp, Pause, Play } from 'lucide-react';
 import {
   motion,
   MotionConfig,
@@ -31,7 +31,6 @@ import {
   GridBackdrop,
   heroTier,
   type HeroQuality,
-  Kicker,
   MotionPauseContext,
   ParallaxGlow,
   useLowEndDevice,
@@ -142,15 +141,17 @@ export default function LandingPage() {
   // scrolls never flash the app's body colour behind the sections.
   useEffect(() => {
     const els = [document.documentElement, document.body];
-    const prev = els.map((el) => [el.style.background, el.style.colorScheme] as const);
+    const prev = els.map((el) => [el.style.background, el.style.colorScheme, el.style.overflowX] as const);
     els.forEach((el) => {
       el.style.background = theme === 'dark' ? '#060a13' : '#f6f8fc';
       el.style.colorScheme = theme;
+      el.style.overflowX = 'clip';
     });
     return () =>
       els.forEach((el, i) => {
         el.style.background = prev[i][0];
         el.style.colorScheme = prev[i][1];
+        el.style.overflowX = prev[i][2];
       });
   }, [theme]);
 
@@ -178,7 +179,7 @@ export default function LandingPage() {
     <main
       data-anim={motionPaused ? 'paused' : undefined}
       data-lite={lite ? '' : undefined}
-      className="landing relative min-h-screen bg-[var(--l-bg)] text-white font-sans antialiased flex flex-col overflow-x-hidden selection:bg-blue-500/40"
+      className="landing relative min-h-screen bg-[var(--l-bg)] text-white font-sans antialiased flex flex-col overflow-x-clip selection:bg-blue-500/40"
     >
       {/* ─── NAV ─────────────────────────────────────────────── */}
       <motion.header
@@ -244,10 +245,11 @@ export default function LandingPage() {
         <div
           id="landing-mobile-menu"
           inert={!menuOpen}
-          className={`md:hidden overflow-hidden transition-all duration-300 ${
-            menuOpen ? 'max-h-96 opacity-100 border-t border-white/10' : 'max-h-0 opacity-0'
+          className={`md:hidden grid transition-[grid-template-rows,opacity] duration-300 ${
+            menuOpen ? 'grid-rows-[1fr] opacity-100 border-t border-white/10' : 'grid-rows-[0fr] opacity-0'
           }`}
         >
+          <div className="min-h-0 max-h-[calc(100dvh-4rem)] overflow-y-auto">
           <nav className="flex flex-col px-4 sm:px-6 py-2 text-sm font-medium text-white/80">
             {navLinks.map((link) => (
               <a
@@ -270,6 +272,7 @@ export default function LandingPage() {
               <LanguageSwitcher dark inline />
             </div>
           </nav>
+          </div>
         </div>
       </motion.header>
 
@@ -287,21 +290,18 @@ export default function LandingPage() {
         >
           {/* the wrapper spans the hero over the 3D scene; only the copy takes the pointer */}
           <div className="max-w-md animate-hero-in motion-reduce:animate-none pointer-events-auto">
-            <Kicker index="00" label={t('landing.hero.eyebrow')} className="mb-5 sm:mb-6" />
-            <h1 className={`${display.className} text-[2.5rem] sm:text-6xl xl:text-7xl font-bold tracking-[-0.035em] leading-[0.98] mb-6 sm:mb-7`}>
+            <h1 className={`${display.className} min-w-0 [overflow-wrap:break-word] text-[2.5rem] sm:text-6xl xl:text-7xl font-bold tracking-[-0.035em] leading-[0.98] mb-6 sm:mb-7`}>
               {t('landing.hero.headline')}
             </h1>
             <p className="text-white/65 text-base sm:text-lg leading-relaxed mb-6">{t('landing.hero.sub1')}</p>
-            <p className="mb-2.5 text-[11px] font-mono uppercase tracking-[0.14em] text-white/55">{t('landing.hero.platformLabel')}</p>
             <div className="mb-3">
               <HeroChips labels={solutionLabels} />
             </div>
             <a
               href="#custom"
-              className="group mb-7 sm:mb-8 inline-block py-1 text-sm text-white/70 hover:text-white transition-colors rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+              className="mb-7 sm:mb-8 inline-block py-1 text-sm text-white/70 underline decoration-white/30 underline-offset-4 hover:text-white hover:decoration-white/70 transition-colors rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
             >
               {t('landing.hero.customLine')}
-              <ArrowRight size={14} aria-hidden="true" className="ml-1.5 inline text-blue-300 transition-transform group-hover:translate-x-0.5" />
             </a>
             <div className="flex gap-3 flex-wrap">
               <a
@@ -327,8 +327,7 @@ export default function LandingPage() {
             <HeroLite labels={solutionLabels} />
           </div>
           {canvasQuality && (
-            // the left edge fades so the scene never ends in a hard line beside the copy
-            <div className="dark-island absolute inset-0 lg:[mask-image:linear-gradient(90deg,transparent,#000_11%)]">
+            <div className="dark-island absolute inset-0">
               <HeroCanvas initialQuality={canvasQuality} onReady={onCanvasReady} onGiveUp={onCanvasGiveUp} />
             </div>
           )}

@@ -27,6 +27,23 @@ const base = {
   en: {
     common: {
       documentLayout: { label: 'Layout', office: 'Office', retail: 'Cashier' },
+      excel: { download: 'Excel', preparing: 'Preparing...', failed: 'Could not prepare the Excel file. Please try again.' },
+      pastDate: {
+        confirm: 'This date has already passed — {list}. Continue anyway?',
+        fields: {
+          document: 'Document date',
+          payment: 'Payment date',
+          journal: 'Journal date',
+          disposal: 'Disposal date',
+          due: 'Due date',
+          expected: 'Expected date',
+          validUntil: 'Valid until',
+          reminder: 'Reminder date',
+          expiry: 'Expiry date',
+          route: 'Route date',
+          reschedule: 'New delivery date',
+        },
+      },
       docHeader: {
         date: 'Date',
         customer: 'Customer',
@@ -73,6 +90,10 @@ const base = {
         invoice: 'Invoice',
         workOrder: 'Work order',
       },
+      enlargePhoto: 'Enlarge photo',
+      rotatePhoto: 'Rotate photo',
+      connectionLostTitle: 'Connection lost',
+      connectionLostBody: 'This page could not finish loading. It will reload by itself when your connection is back.',
       errorTitle: 'Something went wrong',
       errorBody: 'This page hit an unexpected error. Your saved data is safe — try again, or go back to the home page.',
       tryAgain: 'Try again',
@@ -205,6 +226,10 @@ const base = {
         salesInsights: 'Sales Insights',
         taxExport: 'e-Faktur Export',
         taxReport: 'Tax Report',
+        budget: 'Budget',
+        bankReconciliation: 'Bank Reconciliation',
+        customerDeposits: 'Down Payments',
+        supplierDeposits: 'Supplier Down Payments',
         cashStatement: 'Cash & Bank Statement',
         workshopHome: 'Workshop Home',
         workOrders: 'Work Orders',
@@ -316,6 +341,7 @@ const base = {
       login: {
         emailPasswordRequired: 'Email and password are required',
         loginFailed: 'Login failed',
+        connectionProblem: 'Could not reach the server. Check your connection and try again.',
         reason: {
           hours: 'You can only use the app during your working hours. Try again when your shift starts.',
           devicePending: 'This is a new phone. The office must approve it first — ask your admin, then sign in again.',
@@ -390,6 +416,23 @@ const base = {
   id: {
     common: {
       documentLayout: { label: 'Tata letak', office: 'Kantor', retail: 'Kasir' },
+      excel: { download: 'Excel', preparing: 'Menyiapkan...', failed: 'File Excel tidak dapat disiapkan. Silakan coba lagi.' },
+      pastDate: {
+        confirm: 'Tanggal ini sudah lewat — {list}. Tetap lanjutkan?',
+        fields: {
+          document: 'Tanggal dokumen',
+          payment: 'Tanggal bayar',
+          journal: 'Tanggal jurnal',
+          disposal: 'Tanggal pelepasan',
+          due: 'Jatuh tempo',
+          expected: 'Tanggal perkiraan',
+          validUntil: 'Berlaku sampai',
+          reminder: 'Tanggal pengingat',
+          expiry: 'Tanggal kedaluwarsa',
+          route: 'Tanggal rute',
+          reschedule: 'Tanggal kirim baru',
+        },
+      },
       docHeader: {
         date: 'Tanggal',
         customer: 'Pelanggan',
@@ -436,6 +479,10 @@ const base = {
         invoice: 'Invois',
         workOrder: 'Perintah kerja',
       },
+      enlargePhoto: 'Perbesar foto',
+      rotatePhoto: 'Putar foto',
+      connectionLostTitle: 'Koneksi terputus',
+      connectionLostBody: 'Halaman ini belum termuat sepenuhnya. Halaman akan dimuat ulang otomatis saat koneksi kembali.',
       errorTitle: 'Terjadi kesalahan',
       errorBody: 'Halaman ini mengalami kesalahan tak terduga. Data yang sudah tersimpan aman — coba lagi, atau kembali ke beranda.',
       tryAgain: 'Coba lagi',
@@ -568,6 +615,10 @@ const base = {
         salesInsights: 'Wawasan Penjualan',
         taxExport: 'Ekspor e-Faktur',
         taxReport: 'Laporan Pajak',
+        budget: 'Anggaran',
+        bankReconciliation: 'Rekonsiliasi Bank',
+        customerDeposits: 'Uang Muka',
+        supplierDeposits: 'Uang Muka Pemasok',
         cashStatement: 'Laporan Kas & Bank',
         workshopHome: 'Beranda Bengkel',
         workOrders: 'Perintah Kerja',
@@ -679,6 +730,7 @@ const base = {
       login: {
         emailPasswordRequired: 'Email dan kata sandi wajib diisi',
         loginFailed: 'Gagal masuk',
+        connectionProblem: 'Tidak dapat menghubungi server. Periksa koneksi Anda lalu coba lagi.',
         reason: {
           hours: 'Aplikasi hanya bisa dipakai saat jam kerja Anda. Coba lagi saat shift dimulai.',
           devicePending: 'Ini HP baru. Kantor harus menyetujuinya dulu — minta admin Anda, lalu masuk lagi.',

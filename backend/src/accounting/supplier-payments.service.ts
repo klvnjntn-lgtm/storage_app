@@ -195,6 +195,13 @@ export class SupplierPaymentsService {
       if (entry) {
         await this.journal.voidEntry(organizationId, entry.id, userId, reason, tx);
       }
+      // Paid from a down payment: the money goes back on it.
+      if (payment.supplierDepositId) {
+        await tx.supplierDeposit.update({
+          where: { id: payment.supplierDepositId },
+          data: { appliedAmount: { decrement: payment.amount } },
+        });
+      }
       return tx.supplierPayment.findUniqueOrThrow({ where: { id } });
     });
   }

@@ -5,6 +5,7 @@ import { AlertCircle, PackageCheck, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { PurchaseOrderDetail } from './types';
@@ -33,6 +34,7 @@ export function ReceiveGoodsDialog({
   onClose: () => void;
 }) {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const [items, setItems] = useState<SummaryItem[] | null>(null);
   const [qty, setQty] = useState<Record<string, string>>({});
   // Batch-tracked lines only: batch number + expiry (YYYY-MM-DD).
@@ -123,6 +125,9 @@ export function ReceiveGoodsDialog({
       return;
     }
 
+    // Earliest first, so the popup names the batch that's furthest gone.
+    const expiries = lines.flatMap((l) => (l.expiryDate ? [l.expiryDate] : [])).sort();
+    if (!(await confirmPastDates({ expiry: expiries[0] }))) return;
     setSaving(true);
     setError('');
     try {

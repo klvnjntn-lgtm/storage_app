@@ -804,6 +804,18 @@ describe('Team routes & customer stops', () => {
     expect(found.map((s) => s.id)).toEqual([stops[2].id]);
   });
 
+  it('adds a pending duplicate only once the office has confirmed it', async () => {
+    const route = await mkRoute();
+    const customer = await mkCustomer('Dup Stop');
+    const first = await routes.addStop(orgId, route.id, { customerId: customer.id });
+    await expect(routes.addStop(orgId, route.id, { customerId: customer.id })).rejects.toThrow(/already a pending stop/);
+
+    const second = await routes.addStop(orgId, route.id, { customerId: customer.id, allowDuplicate: true });
+
+    expect(second.id).not.toBe(first.id);
+    expect((await routes.getRoute(orgId, route.id)).stops.find((s) => s.id === first.id)?.customerAddressId).toBeNull();
+  });
+
   describe('HIGH priority stops come first', () => {
     const order = async (routeId: string) =>
       (await routes.getRoute(orgId, routeId)).stops.map((s) => s.id);
@@ -1017,6 +1029,7 @@ describe('Team routes & customer stops', () => {
       [stops[2].id, stops[2].sequence, 'DELIVERED', 20 * 60],
       [stops[0].id, stops[0].sequence, 'FAILED', 30 * 60],
     ]);
+    expect(row.unfinished.map((s) => s.stopId)).toEqual([stops[1].id]);
   });
 
   it("times a rescheduled stop by its own attempt, not the delivery's later failure", async () => {
@@ -1164,6 +1177,52 @@ describe('Team routes & customer stops', () => {
 
       expect(view.status).toBe(RouteStatus.ACTIVE);
       expect(view.stops[0].id).toBe(stop.id);
+    });
+  });
+
+  describe('optimizing for order only', () => {
+    const optimizer = () => (routes as unknown as { optimizer: RouteOptimizerService }).optimizer;
+    afterEach(() => jest.restoreAllMocks());
+
+    it('needs no departure, hours, windows or pins, and leaves no ETAs', async () => {
+      const route = await mkRoute();
+      const pinned = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('OrdPin')).id });
+      const unpinned = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('OrdNoPin', false)).id });
+      await prisma.routeStop.update({
+        where: { id: pinned.id },
+        data: {
+          plannedEta: new Date(),
+          travelSecondsFromPrevious: 60,
+          deliveryWindowStart: new Date(Date.now() - 7200_000),
+          deliveryWindowEnd: new Date(Date.now() - 3600_000), // already over
+        },
+      });
+      await prisma.route.update({ where: { id: route.id }, data: { plannedDepartureAt: new Date() } });
+      const table = jest
+        .spyOn((optimizer() as unknown as { osrm: { table: () => Promise<unknown> } }).osrm, 'table')
+        .mockResolvedValue({ durations: [[0, 60], [60, 0]], distances: [[0, 500], [500, 0]] });
+      const solve = jest
+        .spyOn((optimizer() as unknown as { vroom: { solve: (p: { jobs: { id: number; timeWindow?: unknown }[] }) => Promise<unknown> } }).vroom, 'solve')
+        .mockImplementation(async (p) => ({ routes: [{ vehicleId: 1, jobIds: p.jobs.map((j) => j.id) }], unassignedJobIds: [] }));
+
+      const view = await routes.optimize(orgId, route.id, { orderOnly: true });
+
+      expect(table).toHaveBeenCalled();
+      expect(solve.mock.calls[0][0].jobs[0].timeWindow).toBeUndefined();
+      expect(view.stops.map((s) => s.id)).toEqual([pinned.id, unpinned.id]);
+      expect(view.stops.every((s) => s.plannedEta === null)).toBe(true);
+      expect(view.plannedDepartureAt).toBeNull();
+      expect(view.unscheduled).toEqual([expect.objectContaining({ stopId: unpinned.id, reason: 'NO_PIN' })]);
+    });
+
+    it('copes with a route where no stop has a pin', async () => {
+      const route = await mkRoute();
+      const a = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('OrdNo1', false)).id });
+      const b = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('OrdNo2', false)).id, priority: 'HIGH' });
+
+      const view = await routes.optimize(orgId, route.id, { orderOnly: true });
+
+      expect(view.stops.map((s) => s.id)).toEqual([b.id, a.id]);
     });
   });
 

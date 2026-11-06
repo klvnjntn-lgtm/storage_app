@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
+import PhotoZoom from '@/app/components/shared/PhotoZoom';
 
 // Proof photos are private: fetched on demand as a short-lived signed
 // link (legacy media-library proofs come back as their public URL).
@@ -51,15 +52,14 @@ export default function ProofPhoto({ linkPath }: { linkPath: string }) {
       </div>
       {failed && <p className="text-xs text-red-600">{t('sales.deliveryOrderDetail.proofPhotoFailed')}</p>}
       {src && (
-        // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived URL; not for next/image
-        <img
+        <PhotoZoom
           src={src}
           alt={t('sales.deliveryOrderDetail.proofPhoto')}
           onError={() => {
             setSrc(null);
             setFailed(true);
           }}
-          className="max-h-[480px] w-auto rounded-md border border-gray-200"
+          className="max-h-[480px] min-w-40 max-w-full w-auto rounded-md border border-gray-200"
         />
       )}
     </div>

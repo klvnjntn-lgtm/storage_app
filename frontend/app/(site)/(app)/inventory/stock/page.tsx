@@ -485,9 +485,9 @@ export default function StockPage() {
             </div>
           </div>
 
-          {/* Search + view toggle */}
-          <div className="flex items-center gap-2">
-            <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35 flex-1">
+          {/* Search + view toggle. On a phone the search takes the whole first row and the filter and view buttons sit below it. */}
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+            <div className="group relative flex items-center gap-3 rounded-xl border border-blue-500/20 bg-white px-4 py-3.5 shadow-sm w-full sm:w-auto transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.08)] hover:border-blue-500/35 flex-1">
               <Search size={17} strokeWidth={2} className="text-blue-600/70 shrink-0" />
               <input
                 type="text"
@@ -758,7 +758,7 @@ export default function StockPage() {
                       <td className={`px-4 py-3 text-gray-500 font-mono whitespace-nowrap ${cellHighlight('sku')}`}>
                         {product.sku ?? '-'}
                       </td>
-                      <td className={`px-4 py-3 font-medium ${cellHighlight('name')} ${product.active === false ? 'text-gray-400' : ''}`}>
+                      <td className={`min-w-48 px-4 py-3 font-medium ${cellHighlight('name')} ${product.active === false ? 'text-gray-400' : ''}`}>
                         {product.name}
                         {product.active === false && (
                           <span className="ml-1.5 align-middle text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">

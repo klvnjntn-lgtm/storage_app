@@ -7,6 +7,7 @@ import { display } from '@/lib/fonts';
 import { Banknote, ArrowDownToLine, ArrowUpFromLine, Info, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
@@ -102,6 +103,35 @@ export default function CashFlowPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
+  const buildExcel = () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const section = (title: string, totals: CashFlowSectionTotals) => [
+      [title],
+      ...totals.items.map((i) => [i.label, i.inflow, i.outflow, i.net]),
+      [t('common.total'), totals.inflow, totals.outflow, totals.net],
+    ];
+    return {
+      fileName: `arus-kas-${from}_${to}.xlsx`,
+      sheets: [
+        {
+          name: t('nav.items.cashFlow'),
+          rows: [
+            [col('description'), t('accounting.cashFlow.cashIn'), t('accounting.cashFlow.cashOut'), col('net')],
+            [t('accounting.cashFlow.openingCash'), '', '', r.openingCash],
+            ...section(t('accounting.cashFlow.operatingActivities'), r.operating),
+            ...section(t('accounting.cashFlow.investingActivities'), r.investing),
+            ...section(t('accounting.cashFlow.financingActivities'), r.financing),
+            [t('accounting.cashFlow.netChangeInCash'), '', '', r.netChange],
+            [t('accounting.cashFlow.closingCash'), '', '', r.closingCash],
+          ],
+          money: [1, 2, 3],
+          widths: [40, 16, 16, 16],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -130,7 +160,7 @@ export default function CashFlowPage() {
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {/* Filters */}
-        <div className="mb-5 sm:mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-5 sm:mb-6">
           <DateRangePicker
             from={from}
             to={to}
@@ -139,6 +169,7 @@ export default function CashFlowPage() {
               setTo(t ?? toCalendarDateString(new Date()));
             }}
           />
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && (

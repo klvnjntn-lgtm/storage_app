@@ -10,7 +10,7 @@ import { AppModule } from '../app.module';
 import { LicenseService } from '../license/license.service';
 import { MailerService } from './mailer/mailer.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SESSION_COOKIE } from './session-cookie';
+import { SESSION_COOKIE, describeCsrfRefusal } from './session-cookie';
 
 process.env.PRINT_TOKEN_SECRET ??= 'test-print-secret';
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -184,5 +184,37 @@ describe('session cookie (e2e)', () => {
     }
     // Even the right password is refused while locked.
     await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(429);
+  });
+});
+
+describe('describeCsrfRefusal', () => {
+  const req = (headers: Record<string, string>) =>
+    ({
+      method: 'POST',
+      originalUrl: '/delivery-routes/r1/stops?secret=1',
+      headers: { 'user-agent': 'Firefox/159', cookie: 'session=abc', ...headers },
+    }) as never;
+
+  it('tells an absent header from a changed one', () => {
+    expect(describeCsrfRefusal(req({}), 'u1')).toContain('POST /delivery-routes/r1/stops header=absent user=u1');
+    expect(describeCsrfRefusal(req({ 'x-requested-with': 'XMLHttpRequest' }))).toContain('header="XMLHttpRequest" user=-');
+  });
+
+  it('keeps the browser details but never the cookie or a query string', () => {
+    const line = describeCsrfRefusal(
+      req({
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        referer: 'https://waresys.id/print/x?token=tok123',
+      }),
+    );
+    expect(line).toContain('fetchSite=same-origin fetchMode=cors from=/print/x ua="Firefox/159"');
+    expect(line).not.toContain('abc');
+    expect(line).not.toContain('tok123');
+    expect(line).not.toContain('secret');
+  });
+
+  it('keeps client-sent text to one line', () => {
+    expect(describeCsrfRefusal(req({ 'x-requested-with': 'a\nFAKE LOG LINE' }))).not.toContain('\n');
   });
 });

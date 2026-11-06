@@ -74,7 +74,8 @@ function LoginForm() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
-      const loginData = await loginRes.json();
+      // A gateway error page isn't JSON.
+      const loginData = await loginRes.json().catch(() => null);
 
       if (!loginRes.ok) {
         // Device/access-hours rejections come back as specific, already
@@ -94,7 +95,8 @@ function LoginForm() {
       await finishLogin();
     } catch (err) {
       console.error(err);
-      setError(errorMessage(err) || t('auth.login.loginFailed'));
+      // TypeError = the request never got through, usually the phone's signal.
+      setError(err instanceof TypeError ? t('auth.login.connectionProblem') : errorMessage(err) || t('auth.login.loginFailed'));
     } finally {
       setLoading(false);
     }
@@ -152,7 +154,7 @@ function LoginForm() {
 
   return (
     <main
-      className="min-h-screen text-black flex items-center justify-center p-6"
+      className="min-h-dvh text-black flex items-center justify-center p-6"
       style={{
         backgroundColor: 'var(--page-bg)',
         backgroundImage:

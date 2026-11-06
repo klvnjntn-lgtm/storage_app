@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, JournalSourceType, PaymentMethod, SystemAccountKey } from '@prisma/client';
+import { AccountType, NormalBalance, Prisma, JournalSourceType, PaymentMethod, SystemAccountKey } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from './account-resolver.service';
 import { JournalService } from './journal.service';
@@ -265,6 +265,229 @@ export class PostingRulesService {
         lines: [
           { accountId: cash, debit: amount },
           { accountId: ar, credit: amount },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Orgs set up before down payments existed have no such account yet, so the
+  // first one makes it (the same way a bank account makes its own).
+  private async ensureSystemAccount(
+    organizationId: string,
+    db: Db,
+    account: { systemKey: SystemAccountKey; code: number; name: string; type: AccountType; normalBalance: NormalBalance },
+  ): Promise<string> {
+    const existing = await db.chartOfAccount.findUnique({
+      where: { organizationId_systemKey: { organizationId, systemKey: account.systemKey } },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+    let code = account.code;
+    while (await db.chartOfAccount.findUnique({ where: { organizationId_code: { organizationId, code: String(code) } }, select: { id: true } })) {
+      code += 1;
+    }
+    const created = await db.chartOfAccount.create({
+      data: { organizationId, code: String(code), name: account.name, type: account.type, normalBalance: account.normalBalance, systemKey: account.systemKey },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  private customerDepositsAccount(organizationId: string, db: Db) {
+    return this.ensureSystemAccount(organizationId, db, {
+      systemKey: SystemAccountKey.CUSTOMER_DEPOSITS,
+      code: 2500,
+      name: 'Customer Deposits',
+      type: AccountType.LIABILITY,
+      normalBalance: NormalBalance.CREDIT,
+    });
+  }
+
+  private supplierAdvancesAccount(organizationId: string, db: Db) {
+    return this.ensureSystemAccount(organizationId, db, {
+      systemKey: SystemAccountKey.SUPPLIER_ADVANCES,
+      code: 1400,
+      name: 'Advances to Suppliers',
+      type: AccountType.ASSET,
+      normalBalance: NormalBalance.DEBIT,
+    });
+  }
+
+  // Down payment to a supplier → Advances (debit) + Cash/Bank (credit). Nothing
+  // is owed yet, so AP isn't touched until it's set against a PO.
+  async postSupplierDepositPaid(organizationId: string, depositId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const deposit = await db.supplierDeposit.findFirstOrThrow({
+      where: { id: depositId, organizationId },
+      include: { supplier: { select: { name: true } } },
+    });
+    const amount = Number(deposit.amount);
+    const [advances, cash] = await Promise.all([
+      this.supplierAdvancesAccount(organizationId, db),
+      this.resolveCashDestination(organizationId, deposit.method, deposit.bankAccountId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: deposit.date,
+        memo: `Down payment ${deposit.depositNumber} to ${deposit.supplier.name}`,
+        sourceType: JournalSourceType.SUPPLIER_DEPOSIT,
+        sourceId: deposit.id,
+        lines: [
+          { accountId: advances, debit: amount },
+          { accountId: cash, credit: amount },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Down payment set against a PO → AP (debit) + Advances (credit). Posted as
+  // that SupplierPayment's own entry, so voiding the payment undoes exactly this.
+  async postSupplierDepositApplied(organizationId: string, supplierPaymentId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const payment = await db.supplierPayment.findFirstOrThrow({
+      where: { id: supplierPaymentId, organizationId },
+      include: { supplierDeposit: true, purchaseOrder: { select: { poNumber: true } } },
+    });
+    const amount = Number(payment.amount);
+    const [ap, advances] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_PAYABLE, db),
+      this.supplierAdvancesAccount(organizationId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: payment.paidAt,
+        memo: `Down payment ${payment.supplierDeposit?.depositNumber ?? ''} applied to PO ${payment.purchaseOrder.poNumber ?? payment.purchaseOrderId}`,
+        sourceType: JournalSourceType.SUPPLIER_PAYMENT,
+        sourceId: payment.id,
+        lines: [
+          { accountId: ap, debit: amount },
+          { accountId: advances, credit: amount },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Down payment returned by the supplier → Cash/Bank (debit) + Advances (credit).
+  async postSupplierDepositRefund(
+    organizationId: string,
+    params: { depositId: string; amount: number; method: PaymentMethod; bankAccountId: string | null; userId?: string },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const deposit = await db.supplierDeposit.findFirstOrThrow({
+      where: { id: params.depositId, organizationId },
+      include: { supplier: { select: { name: true } } },
+    });
+    const [advances, cash] = await Promise.all([
+      this.supplierAdvancesAccount(organizationId, db),
+      this.resolveCashDestination(organizationId, params.method, params.bankAccountId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: new Date(),
+        memo: `Down payment ${deposit.depositNumber} refunded by ${deposit.supplier.name}`,
+        sourceType: JournalSourceType.SUPPLIER_DEPOSIT,
+        sourceId: `${deposit.id}:refund:${Date.now()}`,
+        userId: params.userId,
+        lines: [
+          { accountId: cash, debit: params.amount, description: 'Refund received' },
+          { accountId: advances, credit: params.amount, description: 'Down payment refunded' },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Down payment received → Cash/Bank (debit) + Customer Deposits (credit).
+  // No revenue or AR yet: it's owed back until an invoice uses it.
+  async postDepositReceived(organizationId: string, depositId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const deposit = await db.customerDeposit.findFirstOrThrow({
+      where: { id: depositId, organizationId },
+      include: { customer: { select: { name: true } } },
+    });
+    const amount = Number(deposit.amount);
+    const [cash, deposits] = await Promise.all([
+      this.resolveCashDestination(organizationId, deposit.method, deposit.bankAccountId, db),
+      this.customerDepositsAccount(organizationId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: deposit.date,
+        memo: `Down payment ${deposit.depositNumber} from ${deposit.customer.name}`,
+        sourceType: JournalSourceType.CUSTOMER_DEPOSIT,
+        sourceId: deposit.id,
+        lines: [
+          { accountId: cash, debit: amount },
+          { accountId: deposits, credit: amount },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Down payment used on an invoice → Customer Deposits (debit) + AR (credit).
+  // Keyed by the Payment row, so voiding that row undoes exactly this.
+  async postDepositApplied(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const payment = await db.payment.findFirstOrThrow({
+      where: { id: paymentId, invoice: { organizationId } },
+      include: { invoice: true, customerDeposit: true },
+    });
+    const amount = Number(payment.amount);
+    const [deposits, ar] = await Promise.all([
+      this.customerDepositsAccount(organizationId, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_RECEIVABLE, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: payment.createdAt,
+        memo: `Down payment ${payment.customerDeposit?.depositNumber ?? ''} applied to invoice ${payment.invoice.invoiceNumber ?? payment.invoice.id}`,
+        sourceType: JournalSourceType.CUSTOMER_DEPOSIT,
+        sourceId: payment.id,
+        lines: [
+          { accountId: deposits, debit: amount },
+          { accountId: ar, credit: amount },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Down payment given back → Customer Deposits (debit) + Cash/Bank (credit).
+  async postDepositRefund(
+    organizationId: string,
+    params: { depositId: string; amount: number; method: PaymentMethod; bankAccountId: string | null; userId?: string },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const deposit = await db.customerDeposit.findFirstOrThrow({
+      where: { id: params.depositId, organizationId },
+      include: { customer: { select: { name: true } } },
+    });
+    const [deposits, cash] = await Promise.all([
+      this.customerDepositsAccount(organizationId, db),
+      this.resolveCashDestination(organizationId, params.method, params.bankAccountId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: new Date(),
+        memo: `Down payment ${deposit.depositNumber} refunded to ${deposit.customer.name}`,
+        sourceType: JournalSourceType.CUSTOMER_DEPOSIT,
+        sourceId: `${deposit.id}:refund:${Date.now()}`,
+        userId: params.userId,
+        lines: [
+          { accountId: deposits, debit: params.amount, description: 'Down payment refunded' },
+          { accountId: cash, credit: params.amount, description: 'Refund paid out' },
         ],
       },
       tx,

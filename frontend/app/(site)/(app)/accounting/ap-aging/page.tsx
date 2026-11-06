@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { ShoppingCart, Calendar, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
-import { toCalendarDateString } from '@/lib/dates';
+import { toCalendarDateString, formatDMY, parseCalendarDate } from '@/lib/dates';
 import { getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import Pagination from '@/app/components/shared/Pagination';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { OpeningBalancesNotice, SyncOpeningBalancesButton, type OpeningBalancesResult } from '@/app/components/accounting/OpeningBalances';
@@ -124,6 +125,43 @@ export default function APAgingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey, page, pageSize]);
 
+  // The screen holds one page, so fetch them all.
+  const buildExcel = async () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const lines: APLine[] = [];
+    for (let p = 1; ; p++) {
+      const res = await apiFetch(`/accounting/reports/ap-aging?asOf=${asOf}&page=${p}&pageSize=200`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const body: APAgingReport = await res.json();
+      lines.push(...body.lines);
+      if (p >= body.pagination.totalPages) break;
+    }
+    return {
+      fileName: `umur-utang-${asOf}.xlsx`,
+      sheets: [
+        {
+          name: t('nav.items.apAging'),
+          rows: [
+            [col('po'), col('supplier'), col('dueDate'), col('daysOverdue'), col('total'), col('paid'), col('outstanding')],
+            ...lines.map((l) => [
+              l.poNumber ?? '',
+              l.supplierName ?? t('accounting.apAging.noSupplierOnFile'),
+              l.dueDate ? formatDMY(parseCalendarDate(l.dueDate)) : '',
+              l.daysOverdue,
+              l.totalOwed,
+              l.amountPaid,
+              l.outstanding,
+            ]),
+            [t('common.total'), '', '', '', '', '', r.totals.total],
+          ],
+          money: [4, 5, 6],
+          widths: [18, 36, 12, 10, 16, 16, 16],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -159,6 +197,7 @@ export default function APAgingPage() {
               onChange={(v) => setAsOf(v)}
             />
           </div>
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}

@@ -709,7 +709,7 @@ export default function ImportPage() {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       <div>
                         <label className="text-[10px] font-semibold text-gray-500">{t('common.quantity')}</label>
                         <NumberInput

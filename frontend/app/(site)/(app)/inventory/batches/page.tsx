@@ -5,6 +5,7 @@ import { CalendarClock, Plus } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatDMY } from '@/lib/dates';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, type PickedProduct } from '@/app/components/shared/ProductPicker';
@@ -30,6 +31,7 @@ function expiryStyle(days: number | null) {
 
 export default function BatchesPage() {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const { user } = useCurrentUser();
   const isAdmin = isAdminRole(user?.role);
   const [filter, setFilter] = useState<'expiring' | 'all'>('expiring');
@@ -56,6 +58,7 @@ export default function BatchesPage() {
   async function addBatch(e: React.FormEvent) {
     e.preventDefault();
     if (!product) return;
+    if (!(await confirmPastDates({ expiry: form.expiryDate }))) return;
     setError(null);
     const res = await apiFetch('/batches', {
       method: 'POST',

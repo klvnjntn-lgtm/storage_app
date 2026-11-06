@@ -202,7 +202,7 @@ export function POProductSearch({ onAddProduct }: Props) {
       )}
 
       {!searching && results.length > 0 && viewMode === 'grid' && (
-        <div className="grid grid-cols-3 gap-2 max-h-72 overflow-y-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-72 overflow-y-auto">
           {results.map((p) => {
             const showImage = p.image && !brokenImageIds[p.id];
             return (

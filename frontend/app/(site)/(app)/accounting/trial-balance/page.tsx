@@ -7,6 +7,7 @@ import { display } from '@/lib/fonts';
 import { Rows3, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 
@@ -91,6 +92,28 @@ export default function TrialBalancePage() {
     return map;
   }, [report]);
 
+  const buildExcel = () => {
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const rows = TYPE_ORDER.flatMap((type) =>
+      (grouped?.get(type) ?? []).map((a) => [a.code, a.name, t(TYPE_LABEL_KEY[type]), a.debit, a.credit]),
+    );
+    return {
+      fileName: `neraca-saldo-${asOf}.xlsx`,
+      sheets: [
+        {
+          name: t('nav.items.trialBalance'),
+          rows: [
+            [col('code'), col('account'), col('type'), col('debit'), col('credit')],
+            ...rows,
+            [t('common.total'), '', '', report?.totalDebits, report?.totalCredits],
+          ],
+          money: [3, 4],
+          widths: [10, 36, 16, 16, 16],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -137,6 +160,7 @@ export default function TrialBalancePage() {
               {t('accounting.balanceSheet.yearEnd')}
             </button>
           </div>
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}

@@ -12,6 +12,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { useAuth } from '@/app/context/AuthContext';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useBranches } from '@/lib/hooks/useBranches';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -80,6 +81,7 @@ type ManualLine = { accountId: string; side: 'debit' | 'credit'; amount: string;
 export default function JournalPage() {
   const dialog = useDialog();
     const { t } = useLanguage();
+    const confirmPastDates = useConfirmPastDates();
   // Multi-branch businesses can tag a line with a branch (P&L by branch).
   const { branches, multiBranch } = useBranches();
     const { profile } = useAuth();
@@ -238,6 +240,7 @@ export default function JournalPage() {
       return;
     }
 
+    if (!(await confirmPastDates({ journal: manualDate }))) return;
     setManualSaving(true);
     try {
       const res = await apiFetch('/accounting/journal/manual', {

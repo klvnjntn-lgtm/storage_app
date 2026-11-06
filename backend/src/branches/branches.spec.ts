@@ -140,4 +140,19 @@ describe('Branches', () => {
     const [foreign] = await branches.list(other);
     await expect(sell(foreign.id, 1)).rejects.toThrow('Branch not found');
   });
+
+  it('stores branch tax numbers as digits, and refuses wrong lengths', async () => {
+    const b = await branches.create(orgId, {
+      name: 'Cabang Pajak',
+      npwp: '01.234.567.8-901.000',
+      nitku: '0123 4567 8901 2345 000001',
+      legalName: ' PT Cabang ',
+    });
+    expect(b).toMatchObject({ npwp: '012345678901000', nitku: '0123456789012345000001', legalName: 'PT Cabang' });
+    await expect(branches.update(orgId, b.id, { nitku: '123' })).rejects.toThrow('NITKU must be 22 digits');
+    await expect(branches.create(orgId, { name: 'Salah', npwp: '123' })).rejects.toThrow('NPWP must be 15 or 16 digits');
+    const cleared = await branches.update(orgId, b.id, { npwp: '', nitku: '', legalName: '' });
+    expect(cleared).toMatchObject({ npwp: null, nitku: null, legalName: null });
+    await branches.archive(orgId, b.id);
+  });
 });

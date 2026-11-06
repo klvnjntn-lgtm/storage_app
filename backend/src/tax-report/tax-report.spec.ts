@@ -163,7 +163,7 @@ describe('Laporan Pajak', () => {
       data: { organizationId: orgId, categoryId, amount: 7_000, expenseDate: new Date('2026-10-16T00:00:00Z') },
     });
     const report = await service.report(orgId, MONTH, branchB);
-    expect(report.branch).toEqual({ id: branchB, name: 'Cabang' });
+    expect(report.branch).toEqual({ id: branchB, name: 'Cabang', nitku: null });
     expect(report.sales.map(number)).toEqual(['A-2']);
     expect(report.summary.sales.total).toBe(50_000);
     expect(report.expenses.map((e) => e.id)).toEqual([expense.id]);
@@ -348,5 +348,53 @@ describe('Laporan Pajak', () => {
     report = await service.report(orgId, MONTH);
     expect(report.business.pricesIncludePpn).toBe(true);
     expect(report.summary.sales.tax).toBe(0);
+  });
+
+  describe('branch tax identity', () => {
+    afterAll(async () => {
+      await prisma.branch.updateMany({ where: { organizationId: orgId }, data: { legalName: null, npwp: null, nitku: null } });
+      await prisma.organization.update({ where: { id: orgId }, data: { npwp: null, legalName: null } });
+    });
+
+    it("prints the branch's own identity, falling back to the business's", async () => {
+      await prisma.organization.update({
+        where: { id: orgId },
+        data: { legalName: 'PT Induk', npwp: '0123456789012345', address: 'Jl. Pusat' },
+      });
+      await prisma.branch.update({
+        where: { id: branchB },
+        data: { legalName: 'PT Anak', npwp: '9999999999999999', nitku: '9999999999999999000000', address: 'Jl. Anak' },
+      });
+      const b = await service.report(orgId, MONTH, branchB);
+      expect(b.business).toMatchObject({ legalName: 'PT Anak', npwp: '9999999999999999', address: 'Jl. Anak' });
+      expect(b.branch!.nitku).toBe('9999999999999999000000');
+      expect(b.notes.separateTaxpayers).toEqual([]);
+
+      const a = await service.report(orgId, MONTH, branchA);
+      expect(a.business).toMatchObject({ legalName: 'PT Induk', npwp: '0123456789012345', address: 'Jl. Pusat' });
+      expect(a.branch!.nitku).toBeNull();
+    });
+
+    it('warns when the whole-business view mixes taxpayers, and shows each NITKU', async () => {
+      const whole = await service.report(orgId, MONTH);
+      expect(whole.business.legalName).toBe('PT Induk');
+      expect(whole.notes.separateTaxpayers).toEqual([{ name: 'PT Anak', npwp: '9999999999999999' }]);
+      expect(whole.sales.find((s) => number(s) === 'A-2')!.branchNitku).toBe('9999999999999999000000');
+      expect(whole.sales.find((s) => number(s) === 'A-1')!.branchNitku).toBeNull();
+    });
+
+    it("doesn't count a branch using the business's NPWP, in either form, as separate", async () => {
+      await prisma.organization.update({ where: { id: orgId }, data: { npwp: '01.234.567.8-901.234' } });
+      await prisma.branch.update({ where: { id: branchB }, data: { npwp: '0012345678901234' } });
+      const whole = await service.report(orgId, MONTH);
+      expect(whole.notes.separateTaxpayers).toEqual([]);
+    });
+
+    it('ignores a separate branch with nothing in the period', async () => {
+      await prisma.organization.update({ where: { id: orgId }, data: { npwp: '0123456789012345' } });
+      await prisma.branch.update({ where: { id: branchB }, data: { npwp: '9999999999999999' } });
+      const quiet = await service.report(orgId, '2020-01');
+      expect(quiet.notes.separateTaxpayers).toEqual([]);
+    });
   });
 });

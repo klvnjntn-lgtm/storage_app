@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Truck, Plus, UserPlus, Users, UserCog, Trash2, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -66,6 +67,7 @@ function DeliveryRoutesPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const { profile } = useAuth();
   const isAdmin = isAdminRole(profile?.role);
 
@@ -102,13 +104,14 @@ function DeliveryRoutesPageInner() {
   const [assigningDriverId, setAssigningDriverId] = useState<string | null>(null);
 
   async function loadDrivers() {
-    const res = await apiFetch('/delivery-routes/drivers');
-    if (res.ok) setDrivers(await res.json());
+    // A blip here only leaves a picker short; the route list reports its own.
+    const res = await apiFetch('/delivery-routes/drivers').catch(() => null);
+    if (res?.ok) setDrivers(await res.json());
   }
 
   async function loadTeams() {
-    const res = await apiFetch('/teams');
-    if (res.ok) setTeams(await res.json());
+    const res = await apiFetch('/teams').catch(() => null);
+    if (res?.ok) setTeams(await res.json());
   }
 
   async function handleCreateTeam() {
@@ -199,6 +202,7 @@ function DeliveryRoutesPageInner() {
 
   async function handleCreateRoute() {
     if (!newRouteTeamId || !date) return;
+    if (!(await confirmPastDates({ route: date }))) return;
     setCreatingRoute(true);
     setError(null);
     try {

@@ -249,7 +249,7 @@ export type CustomerStatement = {
   creditActivity?: {
     id: string;
     date: string;
-    kind: 'REFUND' | 'CREDIT_OUT' | 'CREDIT_IN';
+    kind: 'REFUND' | 'CREDIT_OUT' | 'CREDIT_IN' | 'DEPOSIT_IN';
     amount: number;
     method: string;
     note: string | null;

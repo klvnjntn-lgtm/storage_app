@@ -10,7 +10,7 @@ export default function HeroChips({ labels }: { labels: Record<(typeof SOLUTIONS
   const active = useHeroActive();
   return (
     <ul className="flex flex-wrap gap-2">
-      {SOLUTIONS.map(({ key, icon: Icon, hex, rgb }) => {
+      {SOLUTIONS.map(({ key, icon: Icon, ink, rgb }) => {
         const on = active === key;
         return (
           <li key={key}>
@@ -34,7 +34,7 @@ export default function HeroChips({ labels }: { labels: Record<(typeof SOLUTIONS
                 background: `rgb(${rgb} / ${on ? 0.16 : 0.05})`,
               }}
             >
-              <Icon size={14} strokeWidth={2.2} aria-hidden="true" style={{ color: hex }} />
+              <Icon size={14} strokeWidth={2.2} aria-hidden="true" style={{ color: ink }} />
               {labels[key]}
             </a>
           </li>

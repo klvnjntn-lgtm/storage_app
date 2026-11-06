@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import * as Sentry from '@sentry/browser';
+import { isConnectionError, reportClientError } from '@/lib/pageRecovery';
 
 // Last resort, for an error in a root layout itself. It replaces the whole
 // document, so no providers (language, theme) or global CSS are available:
@@ -16,7 +17,13 @@ export default function GlobalError({
   useEffect(() => {
     console.error(error);
     Sentry.captureException(error);
+    if (isConnectionError(error)) {
+      window.__waresysRecover?.('connection-lost', error.message, false);
+    } else {
+      reportClientError({ kind: 'layout-crash', message: `${error.name}: ${error.message}`, digest: error.digest });
+    }
   }, [error]);
+  const connectionLost = isConnectionError(error);
 
   return (
     <html lang="id">
@@ -37,11 +44,13 @@ export default function GlobalError({
         <div role="alert" style={{ maxWidth: 360 }}>
           <h1 style={{ fontSize: 18, margin: 0 }}>Terjadi kesalahan · Something went wrong</h1>
           <p style={{ fontSize: 14, opacity: 0.75, marginTop: 8 }}>
-            Data yang sudah tersimpan aman. · Your saved data is safe.
+            {connectionLost
+              ? 'Koneksi terputus. Halaman dimuat ulang otomatis saat koneksi kembali. · Connection lost. The page reloads by itself when it is back.'
+              : 'Data yang sudah tersimpan aman. · Your saved data is safe.'}
           </p>
           {error.digest && <p style={{ fontSize: 12, opacity: 0.5, fontFamily: 'monospace' }}>{error.digest}</p>}
           <button
-            onClick={() => retry()}
+            onClick={() => (connectionLost ? window.location.reload() : retry())}
             style={{
               marginTop: 16,
               padding: '10px 16px',

@@ -11,7 +11,7 @@ export default function NoAccessPage() {
   const { t } = useLanguage();
 
   return (
-    <main className="min-h-screen bg-white text-black flex items-center justify-center px-6">
+    <main className="min-h-dvh bg-white text-black flex items-center justify-center px-6">
       <div className="max-w-sm text-center space-y-4">
         <div className="flex justify-end gap-2">
           <ThemeToggle />

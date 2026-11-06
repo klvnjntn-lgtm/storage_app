@@ -53,6 +53,8 @@ type Stop = {
   label: string;
   customerId: string | null;
   customerName: string | null;
+  // Which saved address; null = the customer's main one (always null on a DO stop).
+  customerAddressId: string | null;
   doNumber: string | null;
   address: string | null;
   // Saved-address name for a customer stop ("Gudang Timur"); null = main address.
@@ -117,7 +119,13 @@ type RouteDetail = {
   originalOrder: unknown | null;
 };
 
-type AvailableOrder = { id: string; doNumber: string | null; customerName: string | null };
+type AvailableOrder = {
+  id: string;
+  doNumber: string | null;
+  customerName: string | null;
+  customerId?: string | null;
+  deliveryAddress?: string | null;
+};
 
 // datetime-local inputs want local "YYYY-MM-DDTHH:mm", not an ISO string.
 function toLocalInputValue(iso: string | null): string {
@@ -292,16 +300,41 @@ export default function DeliveryRouteDetailPage() {
     ) {
       return;
     }
+    // Same customer at the same address, in any state: added again by mistake,
+    // or a real second visit, which only the office can tell.
+    const pickedOrder = availableOrders.find((o) => o.id === selectedOrderId);
+    const alreadyOnRoute = route?.stops.find((s) =>
+      stopMode === 'CUSTOMER'
+        ? s.kind === 'CUSTOMER' &&
+          s.customerId === selectedCustomer?.id &&
+          (s.customerAddressId ?? '') === newStopAddressId
+        : !!pickedOrder?.customerId &&
+          s.customerId === pickedOrder.customerId &&
+          (s.address ?? '') === (pickedOrder.deliveryAddress ?? ''),
+    );
+    if (
+      alreadyOnRoute &&
+      !(await dialog.confirm(
+        t('delivery.routeDetail.confirmDuplicateStop', {
+          name: alreadyOnRoute.label,
+          sequence: alreadyOnRoute.sequence,
+          status: t(`delivery.routeDetail.statusLabel.${alreadyOnRoute.status}`),
+        }),
+      ))
+    ) {
+      return;
+    }
     setBusy('add-stop');
-    setError(null);
+    setListError(null);
     try {
       const res = await apiFetch(`/delivery-routes/${id}/stops`, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, ...(alreadyOnRoute ? { allowDuplicate: true } : {}) }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        // Beside the list: the banner up top may be scrolled out of view.
+        setListError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
         return;
       }
       setShowAddStop(false);
@@ -313,7 +346,7 @@ export default function DeliveryRouteDetailPage() {
       setNewStopWindowEnd('');
       await load(true);
     } catch {
-      setError(t('delivery.routeDetail.couldNotReachServer'));
+      setListError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
       setBusy(null);
     }
@@ -595,7 +628,10 @@ export default function DeliveryRouteDetailPage() {
     try {
       const res = await apiFetch(`/delivery-routes/${id}/optimize`, {
         method: 'POST',
-        body: JSON.stringify({ departureAt: departureTime ? new Date(departureTime).toISOString() : undefined }),
+        // A departure time is what asks for ETAs. Without one it just sets the order.
+        body: JSON.stringify(
+          departureTime ? { departureAt: new Date(departureTime).toISOString() } : { orderOnly: true },
+        ),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -837,9 +873,8 @@ export default function DeliveryRouteDetailPage() {
             {/* Hidden for now — flip SHOW_OPTIMIZE to bring it back. */}
             {SHOW_OPTIMIZE && (
               <button data-tour="dlv-route-optimize"
-                disabled={optimizing || orderSaving || !route.startPoint || route.stops.every((s) => s.status !== 'PENDING')}
+                disabled={optimizing || orderSaving || route.stops.every((s) => s.status !== 'PENDING')}
                 onClick={handleOptimize}
-                title={!route.startPoint ? t('delivery.routeDetail.setStart') : undefined}
                 className="flex items-center justify-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-md px-3 py-2.5 sm:py-1.5 hover:bg-blue-700 disabled:opacity-50"
               >
                 <Navigation size={14} />

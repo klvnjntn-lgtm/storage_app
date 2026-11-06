@@ -22,6 +22,21 @@ class CreateBranchDto {
   @IsString()
   @MaxLength(50)
   phone?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legalName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  npwp?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  nitku?: string | null;
 }
 
 class UpdateBranchDto {
@@ -40,6 +55,21 @@ class UpdateBranchDto {
   @IsString()
   @MaxLength(50)
   phone?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legalName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  npwp?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  nitku?: string | null;
 }
 
 // Not module-gated: any business can have branches (unlike stock

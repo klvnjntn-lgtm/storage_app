@@ -32,6 +32,7 @@ import {
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
 import { resolveCartTarget } from '@/lib/invoice-cart';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import type { BankAccountRow } from '@/lib/api-types';
 
@@ -88,6 +89,7 @@ function QuotationFormPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   // Office (document wide, search aside) or Cashier (search wide, cart aside); see useDocumentLayout.
   const { layout, setLayout } = useDocumentLayout();
   const urlDraftId = searchParams.get('draftId');
@@ -722,6 +724,7 @@ function QuotationFormPageInner() {
       return;
     }
 
+    if (!(await confirmPastDates({ document: quotationDate, validUntil }))) return;
     setPrinting(true);
     savedRef.current = true;
     try {

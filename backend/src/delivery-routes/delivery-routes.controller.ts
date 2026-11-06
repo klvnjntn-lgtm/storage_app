@@ -35,6 +35,7 @@ import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RoutePlannerService } from './route-planner.service';
 import { StopProofService } from './stop-proof.service';
+import { LogPhotoRefusalInterceptor } from './log-photo-refusal.interceptor';
 import { DeliveryReportService, type AttentionQuery } from './delivery-report.service';
 import {
   RecordCustomerStopFailureDto,
@@ -455,6 +456,8 @@ export class DeliveryRoutesController {
   // `landmark`: the same photo without its stamp, sent when the customer
   // has no landmark photo yet (see landmarkFromProof).
   @UseInterceptors(
+    // First, so it also sees a refusal from the file handling after it.
+    LogPhotoRefusalInterceptor,
     FileFieldsInterceptor(
       [
         { name: 'file', maxCount: 1 },

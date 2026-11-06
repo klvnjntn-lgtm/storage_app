@@ -1,10 +1,12 @@
 'use client';
 
+import { TEAM_COLORS } from '@/app/components/delivery/teamColors';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { ArrowLeft, Sparkles, Lock, MapPinOff, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap';
@@ -17,7 +19,6 @@ import TimeInput from '@/app/components/shared/TimeInput';
 import { toCalendarDateString } from '@/lib/dates';
 
 // One color per team in the preview (list swatch + map dots).
-const DRIVER_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#4b5563'];
 
 function todayIso() {
   // Local calendar date — toISOString() is UTC, still yesterday before 07:00 WIB.
@@ -49,6 +50,7 @@ function RoutePlanInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const [date, setDate] = useState(searchParams.get('date') || todayIso());
   const [departureTime, setDepartureTime] = useState('');
@@ -148,6 +150,7 @@ function RoutePlanInner() {
 
   async function handleSave() {
     if (!preview) return;
+    if (!(await confirmPastDates({ route: date }))) return;
     setSaving(true);
     setError(null);
     try {
@@ -177,7 +180,7 @@ function RoutePlanInner() {
 
   const colorOf = (teamId: string) => {
     const i = preview?.routes.findIndex((r) => r.team.id === teamId) ?? -1;
-    return DRIVER_COLORS[Math.max(0, i) % DRIVER_COLORS.length];
+    return TEAM_COLORS[Math.max(0, i) % TEAM_COLORS.length];
   };
 
   const previewMapStops: MapStop[] = (preview?.routes ?? []).flatMap((r) =>

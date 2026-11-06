@@ -82,6 +82,7 @@ model Customer {
   vehicles     Vehicle[]
   workOrders   WorkOrder[]
   addresses    CustomerAddress[]
+  deposits     CustomerDeposit[]
 
   // Price level this customer buys at (Wholesale, Member, …). New sales
   // lines for them start at this level; null = the org's default level.
@@ -292,6 +293,10 @@ model Organization {
   categories                   Category[]
   customers                    Customer[]
   customerAddresses            CustomerAddress[]
+  accountBudgets               AccountBudget[]
+  bankStatementLines           BankStatementLine[]
+  customerDeposits             CustomerDeposit[]
+  supplierDeposits             SupplierDeposit[]
   customerLocationPhotos       CustomerLocationPhoto[]
   events                       Event[]
   externalOrders               ExternalOrder[]
@@ -518,6 +523,7 @@ model Supplier {
   // Products this supplier is the usual source for (reorder suggestions).
   preferredFor   Product[]
   supplierBills  SupplierBill[]
+  deposits       SupplierDeposit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -553,10 +559,14 @@ model SupplierPayment {
   voidedAt        DateTime?
   voidedById      String?
   voidReason      String?
+  // Set when this was paid from a down payment rather than with new money.
+  supplierDepositId String?
+  supplierDeposit   SupplierDeposit? @relation(fields: [supplierDepositId], references: [id])
 
   @@unique([organizationId, externalId])
   @@index([purchaseOrderId])
   @@index([organizationId, paidAt])
+  @@index([supplierDepositId])
 }
 
 enum DocumentType {
@@ -1554,6 +1564,9 @@ model OrganizationBankAccount {
   expensePayments    ExpensePayment[]
   supplierPayments   SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
   fixedAssetPayments FixedAssetPayment[]
+  statementLines     BankStatementLine[]
+  customerDeposits   CustomerDeposit[]
+  supplierDeposits   SupplierDeposit[]
   payrolls           Payroll[] // NEW
   // Null = shared by every branch; else only offered on that branch's
   // documents.
@@ -2007,8 +2020,11 @@ model Payment {
   // plus a CREDIT_IN on the one it pays, linked to each other.
   kind            PaymentKind @default(PAYMENT)
   linkedPaymentId String?
+  customerDepositId String?
+  customerDeposit   CustomerDeposit? @relation(fields: [customerDepositId], references: [id])
 
   @@index([invoiceId])
+  @@index([customerDepositId])
 }
 
 enum PaymentKind {
@@ -2016,6 +2032,8 @@ enum PaymentKind {
   REFUND
   CREDIT_OUT
   CREDIT_IN
+  // Paid from a customer's down payment (customerDepositId names which).
+  DEPOSIT_IN
 }
 
 enum FulfillmentMode {
@@ -2634,6 +2652,8 @@ enum SystemAccountKey {
   EXPENSE_PAYABLE // generic AP for operating expenses (rent, electricity) before they're paid
   UNCATEGORIZED_EXPENSE // fallback when an ExpenseCategory has no accountId set
   RETAINED_EARNINGS
+  SUPPLIER_ADVANCES // ASSET, debit-normal: down payments paid, until set against a purchase order
+  CUSTOMER_DEPOSITS // LIABILITY, credit-normal: down payments held until applied to an invoice
   INVENTORY_ADJUSTMENT // EXPENSE, debit-normal: shrinkage, count corrections
   OPENING_BALANCE_EQUITY // EQUITY, credit-normal: stock loaded via import
 
@@ -2666,6 +2686,7 @@ model ChartOfAccount {
   journalLines         JournalEntryLine[]
   expenseCategories    ExpenseCategory[]
   salaryComponentTypes SalaryComponentType[]
+  budgets              AccountBudget[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, systemKey]) // nullable field, many NULLs allowed — only one row per systemKey per org
@@ -2710,6 +2731,11 @@ enum JournalSourceType {
   // AR/AP for documents that never posted (the Accurate import); see
   // OpeningBalanceService. One posted entry per side, replaced on re-sync.
   OPENING_BALANCE
+  // A down payment received, applied to an invoice, or refunded (src/customer-deposits).
+  CUSTOMER_DEPOSIT
+  // A down payment paid to a supplier, or refunded by them (src/supplier-deposits).
+  // Setting one against a PO posts as a SUPPLIER_PAYMENT, keyed by its payment row.
+  SUPPLIER_DEPOSIT
 }
 
 enum JournalEntryStatus {
@@ -2762,6 +2788,7 @@ model JournalEntryLine {
   journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id])
   account      ChartOfAccount @relation(fields: [accountId], references: [id])
   location     Location?      @relation(fields: [locationId], references: [id])
+  reconciliation BankReconciliationMatch?
 
   @@index([journalEntryId])
   @@index([accountId])
@@ -3482,6 +3509,11 @@ model Branch {
   name           String
   address        String?
   phone          String?
+  // Tax identity on its Laporan Pajak. Empty = files under the business's NPWP.
+  // nitku locates the branch; legalName + npwp mark a separate taxpayer.
+  legalName      String?
+  npwp           String?
+  nitku          String?
   archivedAt     DateTime?
   createdAt      DateTime  @default(now())
 
@@ -3493,6 +3525,8 @@ model Branch {
   journalLines    JournalEntryLine[]
   workOrders      WorkOrder[]
   users           User[]
+  customerDeposits CustomerDeposit[]
+  supplierDeposits SupplierDeposit[]
   bankAccounts    OrganizationBankAccount[]
   employees       Employee[]
   salesQuotations SalesQuotation[]
@@ -3501,4 +3535,138 @@ model Branch {
   purchaseOrders  PurchaseOrder[]
 
   @@index([organizationId])
+}
+
+// ---- Budgets (src/budget) ---------------------------------------------
+// One month's budget for one revenue or expense account. scope is '' for the
+// whole business or a branch id: a plain string rather than a nullable FK, so
+// the unique index also holds for the whole-business row.
+
+model AccountBudget {
+  id             String         @id @default(uuid())
+  organizationId String
+  accountId      String
+  year           Int
+  month          Int // 1-12
+  scope          String         @default("")
+  amount         Decimal        @db.Decimal(14, 2)
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  account        ChartOfAccount @relation(fields: [accountId], references: [id])
+
+  @@unique([organizationId, accountId, year, month, scope])
+  @@index([organizationId, year, scope])
+}
+
+// ---- Bank reconciliation (src/bank-reconciliation) ---------------------
+// Lines from a bank's statement file, ticked off against the ledger lines of
+// that bank account's GL account. amount is signed: money in is positive.
+
+enum BankStatementLineStatus {
+  UNMATCHED
+  MATCHED
+  IGNORED
+}
+
+model BankStatementLine {
+  id             String                    @id @default(cuid())
+  organizationId String
+  bankAccountId  String
+  date           DateTime                  @db.Date
+  description    String
+  amount         Decimal                   @db.Decimal(14, 2)
+  balance        Decimal?                  @db.Decimal(14, 2)
+  // So importing an overlapping statement doesn't add a line twice.
+  dedupeKey      String
+  fileName       String?
+  status         BankStatementLineStatus   @default(UNMATCHED)
+  createdById    String?
+  createdAt      DateTime                  @default(now())
+  organization   Organization              @relation(fields: [organizationId], references: [id])
+  bankAccount    OrganizationBankAccount   @relation(fields: [bankAccountId], references: [id])
+  matches        BankReconciliationMatch[]
+
+  @@unique([bankAccountId, dedupeKey])
+  @@index([organizationId, bankAccountId, date])
+}
+
+// A statement line can settle several ledger lines (one transfer paying two
+// invoices); a ledger line is only ever settled once.
+model BankReconciliationMatch {
+  id                 String            @id @default(cuid())
+  statementLineId    String
+  journalEntryLineId String            @unique
+  createdById        String?
+  createdAt          DateTime          @default(now())
+  statementLine      BankStatementLine @relation(fields: [statementLineId], references: [id], onDelete: Cascade)
+  journalEntryLine   JournalEntryLine  @relation(fields: [journalEntryLineId], references: [id])
+
+  @@index([statementLineId])
+}
+
+// ---- Customer down payments (src/customer-deposits) --------------------
+// Money taken before there's an invoice. Held as a liability until applied to
+// an invoice (a Payment of kind DEPOSIT_IN) or refunded.
+
+model CustomerDeposit {
+  id             String                   @id @default(cuid())
+  organizationId String
+  branchId       String?
+  customerId     String
+  depositNumber  String
+  date           DateTime                 @db.Date
+  amount         Decimal                  @db.Decimal(12, 2)
+  appliedAmount  Decimal                  @default(0) @db.Decimal(12, 2)
+  refundedAmount Decimal                  @default(0) @db.Decimal(12, 2)
+  method         PaymentMethod            @default(CASH)
+  bankAccountId  String?
+  note           String?
+  createdById    String?
+  createdAt      DateTime                 @default(now())
+  voidedAt       DateTime?
+  voidedById     String?
+  voidReason     String?
+  organization   Organization             @relation(fields: [organizationId], references: [id])
+  branch         Branch?                  @relation(fields: [branchId], references: [id])
+  customer       Customer                 @relation(fields: [customerId], references: [id])
+  bankAccount    OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  payments       Payment[]
+
+  @@unique([organizationId, depositNumber])
+  @@index([organizationId, customerId])
+  @@index([organizationId, date])
+}
+
+// ---- Supplier down payments (src/supplier-deposits) --------------------
+// Paid before goods arrive, so there's no payable to set it against yet. Held
+// as an asset until applied to a PO (a SupplierPayment with supplierDepositId)
+// or refunded.
+
+model SupplierDeposit {
+  id             String                   @id @default(cuid())
+  organizationId String
+  branchId       String?
+  supplierId     String
+  depositNumber  String
+  date           DateTime                 @db.Date
+  amount         Decimal                  @db.Decimal(12, 2)
+  appliedAmount  Decimal                  @default(0) @db.Decimal(12, 2)
+  refundedAmount Decimal                  @default(0) @db.Decimal(12, 2)
+  method         PaymentMethod            @default(TRANSFER)
+  bankAccountId  String?
+  note           String?
+  createdById    String?
+  createdAt      DateTime                 @default(now())
+  voidedAt       DateTime?
+  voidedById     String?
+  voidReason     String?
+  organization   Organization             @relation(fields: [organizationId], references: [id])
+  branch         Branch?                  @relation(fields: [branchId], references: [id])
+  supplier       Supplier                 @relation(fields: [supplierId], references: [id])
+  bankAccount    OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  payments       SupplierPayment[]
+
+  @@unique([organizationId, depositNumber])
+  @@index([organizationId, supplierId])
+  @@index([organizationId, date])
 }

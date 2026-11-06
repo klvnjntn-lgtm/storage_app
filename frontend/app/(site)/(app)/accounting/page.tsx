@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Landmark, TrendingUp, Receipt, Users, Rows3, Scale, Wallet, ShoppingCart, BookOpen, BookText, ArrowUpRight, Banknote, CalendarClock, Building2, BarChart3, PackageSearch } from 'lucide-react';
+import { ArrowLeftRight, Target, Landmark, TrendingUp, Receipt, Users, Rows3, Scale, Wallet, ShoppingCart, BookOpen, BookText, ArrowUpRight, Banknote, CalendarClock, Building2, BarChart3, PackageSearch } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 import { apiFetch } from '@/lib/apifetch';
@@ -72,6 +72,20 @@ function usePrimaryItems(t: (key: string) => string) {
       href: '/accounting/fixed-assets',
       icon: Building2,
       gradient: 'from-fuchsia-600 to-purple-900',
+    },
+    {
+      title: t('nav.items.bankReconciliation'),
+      description: t('accounting.overview.bankReconciliationDescription'),
+      href: '/accounting/bank-reconciliation',
+      icon: ArrowLeftRight,
+      gradient: 'from-emerald-500 to-teal-700',
+    },
+    {
+      title: t('nav.items.budget'),
+      description: t('accounting.overview.budgetDescription'),
+      href: '/accounting/budget',
+      icon: Target,
+      gradient: 'from-rose-500 to-red-700',
     },
   ];
 }

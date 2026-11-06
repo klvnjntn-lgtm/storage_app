@@ -11,6 +11,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useBranches } from '@/lib/hooks/useBranches';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -65,6 +66,7 @@ const STATUS_META: Record<Expense['status'], { labelKey: string; color: string; 
 export default function ExpensesPage() {
   const dialog = useDialog();
   const { t, language } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const [categories, setCategories] = useState<ExpenseCategory[] | null>(null);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[] | null>(null);
@@ -233,6 +235,7 @@ export default function ExpensesPage() {
       return;
     }
 
+    if (!(await confirmPastDates({ document: expenseForm.expenseDate, due: expenseForm.dueDate }))) return;
     setExpenseSaving(true);
     try {
       const res = await apiFetch('/expenses', {
@@ -274,6 +277,9 @@ export default function ExpensesPage() {
   }
 
   async function handleSaveExpenseEdit(id: string) {
+    // Only a date being changed: an unpaid expense's old due date stays as it was.
+    const originalDue = expenses?.data.find((x) => x.id === id)?.dueDate?.slice(0, 10) ?? '';
+    if (editExpenseForm.dueDate !== originalDue && !(await confirmPastDates({ due: editExpenseForm.dueDate }))) return;
     setEditExpenseError(null);
     setEditExpenseSaving(true);
     try {
@@ -410,6 +416,7 @@ export default function ExpensesPage() {
       return;
     }
 
+    if (!(await confirmPastDates({ payment: payForm.paidAt }))) return;
     setPaySaving(true);
     try {
       const res = await apiFetch(`/expenses/${payingId}/payments`, {

@@ -1,6 +1,7 @@
 // src/delivery-routes/dto/add-route-stop.dto.ts
 import { DeliveryPriority } from '@prisma/client';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -38,6 +39,12 @@ export class AddRouteStopDto {
   @IsOptional()
   @IsDateString()
   deliveryWindowEnd?: string;
+
+  // The office was told this customer and address are already pending on the
+  // route, and said to add it anyway.
+  @IsOptional()
+  @IsBoolean()
+  allowDuplicate?: boolean;
 
   // Omit to append at the end of the route.
   @IsOptional()

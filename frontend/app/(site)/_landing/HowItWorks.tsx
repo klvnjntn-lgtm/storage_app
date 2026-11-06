@@ -12,12 +12,7 @@ import { solutionByKey, type SolutionKey } from './solutions';
    light reaches it. No timers — scrolling is the only driver, and with
    reduced motion the rail is simply full. ───────────────────────── */
 
-const STEPS: { key: SolutionKey; chip: string }[] = [
-  { key: 'warehouse', chip: '+12 SKU-2041 → A-23' },
-  { key: 'sales', chip: 'INV-2291 · Rp 2.450.000' },
-  { key: 'delivery', chip: 'DO-0418 · R-12' },
-  { key: 'workshop', chip: 'WO-118 · B 1234 KJT' },
-];
+const STEPS: { key: SolutionKey }[] = [{ key: 'warehouse' }, { key: 'sales' }, { key: 'delivery' }, { key: 'workshop' }];
 
 function StepNode({
   index,
@@ -28,7 +23,7 @@ function StepNode({
   progress: MotionValue<number>;
   solution: SolutionKey;
 }) {
-  const { icon: Icon, rgb, hex } = solutionByKey(solution);
+  const { icon: Icon, rgb, ink } = solutionByKey(solution);
   const at = index / (STEPS.length - 1);
   const lit = useTransform(progress, [Math.max(0, at - 0.08), at], [0, 1]);
   return (
@@ -43,7 +38,7 @@ function StepNode({
           className="absolute inset-0 rounded-2xl border"
           style={{ borderColor: `rgb(${rgb} / 0.6)`, background: `rgb(${rgb} / 0.2)`, boxShadow: `0 0 40px -4px rgb(${rgb} / 0.8)` }}
         />
-        <Icon size={20} strokeWidth={2} className="relative" style={{ color: hex }} />
+        <Icon size={20} strokeWidth={2} className="relative" style={{ color: ink }} />
       </motion.span>
     </span>
   );
@@ -61,7 +56,7 @@ export default function HowItWorks() {
       <ParallaxGlow className="absolute -top-20 left-1/3 h-96 w-96 rounded-full bg-blue-600/[0.12] blur-[130px]" speed={0.15} />
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32">
         <Reveal>
-          <SectionHeading index="03" eyebrow={t('landing.howItWorks.eyebrow')} title={t('landing.howItWorks.heading')} className="max-w-3xl" />
+          <SectionHeading title={t('landing.howItWorks.heading')} className="max-w-3xl" />
         </Reveal>
 
         <div ref={railRef} className="relative mt-16 sm:mt-20">
@@ -78,26 +73,16 @@ export default function HowItWorks() {
           </div>
 
           <ol className="relative grid gap-12 md:grid-cols-4 md:gap-6">
-            {STEPS.map(({ key, chip }, i) => (
+            {STEPS.map(({ key }, i) => (
               <li key={key} className="flex gap-6 md:flex-col md:items-center md:text-center md:gap-0">
                 <StepNode index={i} progress={progress} solution={key} />
                 <Reveal delay={0.08 * i} className="md:mt-7 md:max-w-xs">
-                  <p className="font-mono text-[11px] tracking-[0.2em] text-blue-300/90">
-                    {String(i + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}
-                  </p>
-                  <h3 className="mt-2 text-xl font-semibold tracking-[-0.01em] text-white">
+                  <h3 className="text-xl font-semibold tracking-[-0.01em] text-white">
                     {t(`landing.howItWorks.steps.${key}.title`)}
                   </h3>
                   <p className="mt-2.5 text-[15px] leading-relaxed text-white/60">
                     {t(`landing.howItWorks.steps.${key}.body`)}
                   </p>
-                  <span
-                    aria-hidden="true"
-                    className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 font-mono text-[11px] whitespace-nowrap text-blue-200/90"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
-                    {chip}
-                  </span>
                 </Reveal>
               </li>
             ))}

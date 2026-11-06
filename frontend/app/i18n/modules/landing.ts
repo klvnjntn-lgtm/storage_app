@@ -1,6 +1,6 @@
 // i18n strings for the public marketing/landing page (app/(site)/page.tsx).
 // Only touches the top-level `landing` key: nav, hero, scanFeed (hero
-// terminal), techMarquee, problem, features, howItWorks, ecosystem,
+// terminal), techMarquee, problem, howItWorks, ecosystem, solutions, custom,
 // whoItsFor, proof, faq, contact, and footer.
 
 export const landing = {
@@ -17,15 +17,13 @@ export const landing = {
         toggleMenu: 'Toggle menu',
       },
       hero: {
-        eyebrow: 'Software for real-world operations',
         headline: 'Business Operations, Simplified.',
-        sub1: 'Software solutions designed to help businesses manage inventory, sales, workshops, and deliveries — all in one ecosystem.',
+        sub1: 'Inventory, sales, workshops, and deliveries, all in one ecosystem.',
         ctaDemo: 'Book a Demo',
-        ctaSolutions: 'Explore Solutions ↓',
-        customLine: 'Need something different? We build custom apps too.',
+        ctaSolutions: 'Explore Solutions',
+        customLine: 'We also build custom apps.',
         pauseAnimation: 'Pause animation',
         playAnimation: 'Play animation',
-        platformLabel: 'Four solutions, one login',
         platformWarehouse: 'Warehouse',
         platformSales: 'Sales',
         platformWorkshop: 'Workshop',
@@ -59,9 +57,6 @@ export const landing = {
         item: 'Item',
         location: 'Location',
         qty: 'Qty',
-        badgeReceive: 'RECEIVE',
-        badgeMove: 'MOVE',
-        badgeAdjust: 'ADJUST',
         dragHint: 'Drag to look around · hover a box',
         items: {
           waterGallon: 'Water gallon 19L',
@@ -72,24 +67,22 @@ export const landing = {
           engineOil: 'Engine oil 1L',
           timingBelt: 'Timing belt',
           sparkPlug: 'Spark plug',
-          wheelBearing: 'Wheel bearing',
         },
       },
       techMarquee: {
         tags: {
-          barcodeScanning: 'BARCODE SCANNING',
-          invoicing: 'INVOICING',
-          workOrders: 'WORK ORDERS',
-          routePlanning: 'ROUTE PLANNING',
-          proofOfDelivery: 'PROOF OF DELIVERY',
-          realTimeSync: 'REAL-TIME SYNC',
-          roleBasedAccess: 'ROLE-BASED ACCESS',
-          auditTrail: 'AUDIT TRAIL',
-          multiLocationTracking: 'MULTI-LOCATION TRACKING',
+          barcodeScanning: 'Barcode scanning',
+          invoicing: 'Invoicing',
+          workOrders: 'Work orders',
+          routePlanning: 'Route planning',
+          proofOfDelivery: 'Proof of delivery',
+          realTimeSync: 'Real-time sync',
+          roleBasedAccess: 'Role-based access',
+          auditTrail: 'Audit trail',
+          multiLocationTracking: 'Multi-location tracking',
         },
       },
       problem: {
-        eyebrow: 'Sound familiar?',
         heading: 'Still running your business on Excel, paper, and WhatsApp?',
         cards: {
           mismatch: {
@@ -121,46 +114,7 @@ export const landing = {
         },
         bridge: 'There’s a better way.',
       },
-      features: {
-        eyebrow: 'WareSys Warehouse',
-        heading: 'Everything your stock team needs.',
-        items: {
-          barcodeReceiving: {
-            label: 'Barcode receiving',
-            sub: 'Scan on any device, instantly logged',
-          },
-          transfers: {
-            label: 'Stock transfers',
-            sub: 'Between locations with full history',
-          },
-          tracking: {
-            label: 'Full inventory tracking',
-            sub: 'Live counts per location',
-          },
-          multiUser: {
-            label: 'Multi-user access with roles',
-            sub: 'Admins and staff, separate views',
-          },
-          auditLogs: {
-            label: 'Complete audit logs',
-            sub: 'Every action timestamped',
-          },
-          onboarding: {
-            label: 'Same-day onboarding',
-            sub: 'Import your existing stock and go',
-          },
-        },
-        visual: {
-          receivedToday: 'Received today',
-          scan: 'Scan',
-          imported: 'SKUs imported',
-          roleAdmin: 'Admin',
-          roleStaff: 'Staff',
-          roleDriver: 'Driver',
-        },
-      },
       howItWorks: {
-        eyebrow: 'How it connects',
         heading: 'One system, from stock to customer.',
         steps: {
           warehouse: {
@@ -182,10 +136,10 @@ export const landing = {
         },
       },
       ecosystem: {
-        eyebrow: 'Our solutions',
         heading: 'Four solutions. One ecosystem.',
         sub: 'Use the one your business needs today. Each is built for its own kind of work, and they all work together.',
         hubCaption: 'One login. One source of truth.',
+        shotCaption: 'A real WareSys screen, with sample data.',
         products: {
           warehouse: { tag: 'Inventory & warehouse management' },
           sales: { tag: 'Sales & invoicing' },
@@ -198,9 +152,19 @@ export const landing = {
           audience: 'For spare-parts businesses, distributors, wholesalers, and retailers',
           title: 'Know every part, every shelf, every movement.',
           body: 'Built around real spare-parts operations, where thousands of SKUs move every day. Scan goods in, move them between locations, and always know what you have and where it is.',
+          shotAlt: 'The WareSys stock page: products with their prices, quantities, and rack locations.',
+          features: {
+            scan: { title: 'Barcode receiving', body: 'Scan on any device, instantly logged.' },
+            transfers: { title: 'Stock transfers', body: 'Between locations, with full history.' },
+            tracking: { title: 'Live stock counts', body: 'See what’s on hand at each location.' },
+            roles: { title: 'Roles for your team', body: 'Admins and staff get separate views.' },
+            audit: { title: 'Audit logs', body: 'Every action recorded with a name and time.' },
+            import: { title: 'Same-day onboarding', body: 'Import your existing stock and go.' },
+          },
         },
         sales: {
           audience: 'For businesses that sell and invoice',
+          shotAlt: 'The WareSys invoice list: issued invoices with payment status and linked delivery orders.',
           title: 'From quotation to paid invoice.',
           body: 'Quote, take the order, invoice it, and see what’s been paid and what you actually earned, without retyping anything between steps.',
           features: {
@@ -209,17 +173,10 @@ export const landing = {
             tax: { title: 'Tax report', body: 'A clear, printable report for your tax administrator.' },
             margin: { title: 'Margin reports', body: 'See the profit on what you sell, not only the revenue.' },
           },
-          mock: {
-            paid: 'Paid',
-            line1: 'Goods',
-            line2: 'Delivery & service',
-            total: 'Total',
-            transfer: 'Transfer',
-            cash: 'Cash',
-          },
         },
         workshop: {
           audience: 'For automotive workshops',
+          shotAlt: 'The WareSys work order list: vehicles by plate with job status, mechanic, and price.',
           title: 'Run your bays, not your paperwork.',
           body: 'Made for automotive workshops: every vehicle, job, mechanic, and part in one place, from the moment a car rolls in until the customer pays.',
           features: {
@@ -228,16 +185,10 @@ export const landing = {
             mechanic: { title: 'Mechanic app', body: 'Mechanics see and update their jobs from their phone.' },
             reminders: { title: 'Service reminders', body: 'Know which customers are due back for service.' },
           },
-          mock: {
-            status: 'In progress',
-            job: 'Periodic service',
-            part1: 'Oil filter',
-            part2: 'Engine oil',
-            next: 'Next service',
-          },
         },
         delivery: {
           audience: 'For water distributors, logistics operators, and delivery businesses',
+          shotAlt: 'A WareSys delivery route: stops on a map with their order and delivery status.',
           title: 'Plan the route. Follow every drop.',
           body: 'Made for businesses with drivers on the road every day: plan better routes, dispatch them in minutes, and know what arrived.',
           features: {
@@ -246,17 +197,10 @@ export const landing = {
             monitoring: { title: 'Delivery monitoring', body: 'See every route’s progress from the office.' },
             proof: { title: 'Proof of delivery', body: 'A photo from the driver confirms each drop.' },
           },
-          mock: {
-            stop1: 'Toko Makmur',
-            stop2: 'Depot Sejahtera',
-            stop3: 'CV Berkah Jaya',
-            stop4: 'Warung Bu Sari',
-          },
         },
       },
       custom: {
-        eyebrow: 'Custom apps',
-        heading: 'Need something built just for you?',
+        heading: 'Need an app built just for you?',
         body: 'Not every business fits a standard product. Tell us how yours works, and we’ll design and build software around it, on its own or connected to your WareSys solutions.',
         cta: 'Tell Us What You Need',
         offers: {
@@ -267,7 +211,6 @@ export const landing = {
         },
       },
       whoItsFor: {
-        eyebrow: "Who it's for",
         heading: 'Built for businesses that keep things moving.',
         cards: {
           distributors: {
@@ -290,7 +233,6 @@ export const landing = {
         footNote: 'Don’t see your business here? We also build custom apps around how you work.',
       },
       proof: {
-        eyebrow: 'Why WareSys',
         heading: 'Built for how operations really run.',
         cards: {
           connected: {
@@ -312,7 +254,6 @@ export const landing = {
         },
       },
       faq: {
-        eyebrow: 'Common questions',
         heading: 'What owners usually ask.',
         stillQuestions: 'Still have questions?',
         stillQuestionsBody: 'Talk to us directly — we reply the same day.',
@@ -345,7 +286,6 @@ export const landing = {
         },
       },
       contact: {
-        eyebrow: '// Get in touch',
         heading: 'Ready to simplify your operations?',
         sub: 'Book a demo or ask about a custom app. We will get back to you the same day.',
         whatsapp: {
@@ -376,15 +316,13 @@ export const landing = {
         toggleMenu: 'Buka menu',
       },
       hero: {
-        eyebrow: 'Software untuk operasional sehari-hari',
         headline: 'Operasional Bisnis, Jadi Lebih Sederhana.',
-        sub1: 'Solusi software yang membantu bisnis mengelola inventaris, penjualan, bengkel, dan pengiriman — semua dalam satu ekosistem.',
+        sub1: 'Inventaris, penjualan, bengkel, dan pengiriman, dalam satu ekosistem.',
         ctaDemo: 'Jadwalkan Demo',
-        ctaSolutions: 'Lihat Solusi ↓',
-        customLine: 'Butuh yang berbeda? Kami juga membuat aplikasi kustom.',
+        ctaSolutions: 'Lihat Solusi',
+        customLine: 'Kami juga membuat aplikasi kustom.',
         pauseAnimation: 'Jeda animasi',
         playAnimation: 'Putar animasi',
-        platformLabel: 'Empat solusi, satu login',
         platformWarehouse: 'Gudang',
         platformSales: 'Penjualan',
         platformWorkshop: 'Bengkel',
@@ -418,9 +356,6 @@ export const landing = {
         item: 'Barang',
         location: 'Lokasi',
         qty: 'Jml',
-        badgeReceive: 'TERIMA',
-        badgeMove: 'PINDAH',
-        badgeAdjust: 'KOREKSI',
         dragHint: 'Geser untuk melihat · arahkan ke kotak',
         items: {
           waterGallon: 'Galon air 19L',
@@ -431,24 +366,22 @@ export const landing = {
           engineOil: 'Oli mesin 1L',
           timingBelt: 'Timing belt',
           sparkPlug: 'Busi',
-          wheelBearing: 'Bearing roda',
         },
       },
       techMarquee: {
         tags: {
-          barcodeScanning: 'PEMINDAIAN BARCODE',
-          invoicing: 'FAKTUR',
-          workOrders: 'WORK ORDER',
-          routePlanning: 'PERENCANAAN RUTE',
-          proofOfDelivery: 'BUKTI PENGIRIMAN',
-          realTimeSync: 'SINKRONISASI REAL-TIME',
-          roleBasedAccess: 'AKSES BERBASIS PERAN',
-          auditTrail: 'JEJAK AUDIT',
-          multiLocationTracking: 'PELACAKAN MULTI-LOKASI',
+          barcodeScanning: 'Pemindaian barcode',
+          invoicing: 'Faktur',
+          workOrders: 'Work order',
+          routePlanning: 'Perencanaan rute',
+          proofOfDelivery: 'Bukti pengiriman',
+          realTimeSync: 'Sinkronisasi real-time',
+          roleBasedAccess: 'Akses berbasis peran',
+          auditTrail: 'Jejak audit',
+          multiLocationTracking: 'Pelacakan multi-lokasi',
         },
       },
       problem: {
-        eyebrow: 'Terdengar familiar?',
         heading: 'Bisnis Anda masih jalan pakai Excel, kertas, dan WhatsApp?',
         cards: {
           mismatch: {
@@ -480,46 +413,7 @@ export const landing = {
         },
         bridge: 'Ada cara yang lebih baik.',
       },
-      features: {
-        eyebrow: 'WareSys Warehouse',
-        heading: 'Semua yang tim gudang Anda butuhkan.',
-        items: {
-          barcodeReceiving: {
-            label: 'Penerimaan barcode',
-            sub: 'Pindai di perangkat apa pun, langsung tercatat',
-          },
-          transfers: {
-            label: 'Transfer stok',
-            sub: 'Antar lokasi dengan riwayat lengkap',
-          },
-          tracking: {
-            label: 'Pelacakan inventaris penuh',
-            sub: 'Jumlah stok real-time per lokasi',
-          },
-          multiUser: {
-            label: 'Akses multi-pengguna dengan peran',
-            sub: 'Admin dan staf, tampilan terpisah',
-          },
-          auditLogs: {
-            label: 'Log audit lengkap',
-            sub: 'Setiap aksi tercatat waktunya',
-          },
-          onboarding: {
-            label: 'Onboarding di hari yang sama',
-            sub: 'Impor stok yang ada dan langsung jalan',
-          },
-        },
-        visual: {
-          receivedToday: 'Diterima hari ini',
-          scan: 'Pindai',
-          imported: 'SKU diimpor',
-          roleAdmin: 'Admin',
-          roleStaff: 'Staf',
-          roleDriver: 'Pengemudi',
-        },
-      },
       howItWorks: {
-        eyebrow: 'Cara terhubungnya',
         heading: 'Satu sistem, dari stok sampai ke pelanggan.',
         steps: {
           warehouse: {
@@ -541,10 +435,10 @@ export const landing = {
         },
       },
       ecosystem: {
-        eyebrow: 'Solusi kami',
         heading: 'Empat solusi. Satu ekosistem.',
         sub: 'Pakai yang dibutuhkan bisnis Anda hari ini. Masing-masing dibuat untuk jenis pekerjaannya sendiri, dan semuanya saling terhubung.',
         hubCaption: 'Satu login. Satu sumber data.',
+        shotCaption: 'Tampilan asli WareSys, dengan data contoh.',
         products: {
           warehouse: { tag: 'Manajemen inventaris & gudang' },
           sales: { tag: 'Penjualan & faktur' },
@@ -557,9 +451,19 @@ export const landing = {
           audience: 'Untuk bisnis suku cadang, distributor, grosir, dan ritel',
           title: 'Tahu setiap barang, setiap rak, setiap pergerakan.',
           body: 'Dibuat dari operasional suku cadang yang sesungguhnya, dengan ribuan SKU yang bergerak setiap hari. Pindai barang masuk, pindahkan antar lokasi, dan selalu tahu apa yang Anda miliki dan di mana lokasinya.',
+          shotAlt: 'Halaman stok WareSys: produk dengan harga, jumlah, dan lokasi raknya.',
+          features: {
+            scan: { title: 'Penerimaan barcode', body: 'Pindai di perangkat apa pun, langsung tercatat.' },
+            transfers: { title: 'Transfer stok', body: 'Antar lokasi, dengan riwayat lengkap.' },
+            tracking: { title: 'Stok real-time', body: 'Lihat stok yang ada di setiap lokasi.' },
+            roles: { title: 'Peran untuk tim Anda', body: 'Admin dan staf punya tampilan terpisah.' },
+            audit: { title: 'Log audit', body: 'Setiap aksi tercatat dengan nama dan waktunya.' },
+            import: { title: 'Onboarding di hari yang sama', body: 'Impor stok yang ada dan langsung jalan.' },
+          },
         },
         sales: {
           audience: 'Untuk bisnis yang menjual dan menerbitkan faktur',
+          shotAlt: 'Daftar faktur WareSys: faktur terbit dengan status pembayaran dan surat jalan terkait.',
           title: 'Dari penawaran sampai faktur lunas.',
           body: 'Buat penawaran, terima pesanan, terbitkan faktur, lalu lihat yang sudah dibayar dan untung sebenarnya, tanpa mengetik ulang di tiap langkah.',
           features: {
@@ -568,17 +472,10 @@ export const landing = {
             tax: { title: 'Laporan pajak', body: 'Laporan jelas yang siap dicetak untuk admin pajak Anda.' },
             margin: { title: 'Laporan margin', body: 'Lihat keuntungan dari yang Anda jual, bukan hanya omzetnya.' },
           },
-          mock: {
-            paid: 'Lunas',
-            line1: 'Barang',
-            line2: 'Pengiriman & jasa',
-            total: 'Total',
-            transfer: 'Transfer',
-            cash: 'Tunai',
-          },
         },
         workshop: {
           audience: 'Untuk bengkel otomotif',
+          shotAlt: 'Daftar perintah kerja WareSys: kendaraan per pelat dengan status, mekanik, dan harga.',
           title: 'Urus bengkelnya, bukan kertasnya.',
           body: 'Dibuat untuk bengkel otomotif: setiap kendaraan, pekerjaan, mekanik, dan suku cadang di satu tempat, sejak mobil masuk sampai pelanggan membayar.',
           features: {
@@ -587,16 +484,10 @@ export const landing = {
             mechanic: { title: 'Aplikasi mekanik', body: 'Mekanik melihat dan memperbarui pekerjaannya dari ponsel.' },
             reminders: { title: 'Pengingat servis', body: 'Tahu pelanggan mana yang sudah waktunya servis lagi.' },
           },
-          mock: {
-            status: 'Dikerjakan',
-            job: 'Servis berkala',
-            part1: 'Filter oli',
-            part2: 'Oli mesin',
-            next: 'Servis berikutnya',
-          },
         },
         delivery: {
           audience: 'Untuk distributor air, operator logistik, dan bisnis pengiriman',
+          shotAlt: 'Rute pengiriman WareSys: pemberhentian di peta dengan urutan dan status kirimnya.',
           title: 'Rencanakan rute. Pantau setiap kiriman.',
           body: 'Dibuat untuk bisnis dengan pengemudi di jalan setiap hari: susun rute lebih baik, tugaskan dalam hitungan menit, dan tahu apa yang sudah sampai.',
           features: {
@@ -605,17 +496,10 @@ export const landing = {
             monitoring: { title: 'Pemantauan pengiriman', body: 'Lihat progres setiap rute dari kantor.' },
             proof: { title: 'Bukti pengiriman', body: 'Foto dari pengemudi mengonfirmasi setiap kiriman.' },
           },
-          mock: {
-            stop1: 'Toko Makmur',
-            stop2: 'Depot Sejahtera',
-            stop3: 'CV Berkah Jaya',
-            stop4: 'Warung Bu Sari',
-          },
         },
       },
       custom: {
-        eyebrow: 'Aplikasi kustom',
-        heading: 'Butuh yang dibuat khusus untuk Anda?',
+        heading: 'Butuh aplikasi yang dibuat khusus?',
         body: 'Tidak semua bisnis cocok dengan produk standar. Ceritakan cara kerja bisnis Anda, dan kami akan merancang serta membuat software sesuai kebutuhan, berdiri sendiri atau terhubung dengan solusi WareSys Anda.',
         cta: 'Ceritakan Kebutuhan Anda',
         offers: {
@@ -626,7 +510,6 @@ export const landing = {
         },
       },
       whoItsFor: {
-        eyebrow: 'Untuk siapa',
         heading: 'Dibuat untuk bisnis yang terus bergerak.',
         cards: {
           distributors: {
@@ -649,7 +532,6 @@ export const landing = {
         footNote: 'Bisnis Anda tidak ada di sini? Kami juga membuat aplikasi kustom sesuai cara kerja Anda.',
       },
       proof: {
-        eyebrow: 'Mengapa WareSys',
         heading: 'Dibuat sesuai cara operasional berjalan.',
         cards: {
           connected: {
@@ -671,7 +553,6 @@ export const landing = {
         },
       },
       faq: {
-        eyebrow: 'Pertanyaan umum',
         heading: 'Yang biasa ditanyakan pemilik usaha.',
         stillQuestions: 'Masih punya pertanyaan?',
         stillQuestionsBody: 'Hubungi kami langsung — kami balas di hari yang sama.',
@@ -704,7 +585,6 @@ export const landing = {
         },
       },
       contact: {
-        eyebrow: '// Hubungi Kami',
         heading: 'Siap menyederhanakan operasional Anda?',
         sub: 'Jadwalkan demo atau tanyakan soal aplikasi kustom. Kami akan membalas di hari yang sama.',
         whatsapp: {

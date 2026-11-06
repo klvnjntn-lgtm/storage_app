@@ -36,6 +36,28 @@ export function authReason(message: string): string | null {
   return null;
 }
 
+// Phones drop off for a moment all the time. Reading is safe to repeat, so a
+// blip shouldn't turn into an empty page. Never a write: it may have landed
+// even though the reply was lost.
+const READ_RETRY_DELAYS_MS = [800, 2000];
+const GATEWAY_ERRORS = new Set([502, 503, 504]);
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const isRead = method === "GET" || method === "HEAD";
+  for (let attempt = 0; ; attempt++) {
+    const canRetry = isRead && attempt < READ_RETRY_DELAYS_MS.length;
+    try {
+      const res = await fetch(url, init);
+      if (!canRetry || !GATEWAY_ERRORS.has(res.status)) return res;
+    } catch (err) {
+      // TypeError = the network failed; an abort means the caller gave up.
+      if (!canRetry || !(err instanceof TypeError) || init.signal?.aborted) throw err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]));
+  }
+}
+
 export async function apiFetch(
   path: string,
   init?: RequestInit,
@@ -51,7 +73,7 @@ export async function apiFetch(
     "X-Device-Id": getDeviceId(),
   };
 
-  const res = await fetch(`/api${path}`, {
+  const res = await fetchWithRetry(`/api${path}`, {
     ...init,
     headers,
     credentials: "same-origin",

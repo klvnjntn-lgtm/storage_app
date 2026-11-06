@@ -6,6 +6,7 @@ import { FileText, FileDown, Printer, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, parseCalendarDate } from '@/lib/dates';
+import { downloadExcel, fileNamePart, type ExcelCell, type ExcelSheet } from '@/lib/excel-export';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useBranches } from '@/lib/hooks/useBranches';
 import { BranchFilter } from '@/app/components/shared/BranchFilter';
@@ -26,6 +27,7 @@ type Sale = {
   invoiceNumber: string | null;
   date: string;
   branch: string | null;
+  branchNitku: string | null;
   customerId: string | null;
   customerName: string | null;
   customerNpwp: string | null;
@@ -53,6 +55,28 @@ type SalesReturn = {
   customerNpwp: string | null;
   needsNpwp: boolean;
   amount: number;
+};
+type CustomerDepositRow = {
+  id: string;
+  date: string;
+  depositNumber: string;
+  branch: string | null;
+  customerName: string;
+  customerNpwp: string | null;
+  needsNpwp: boolean;
+  amount: number;
+  voided: boolean;
+};
+type SupplierDepositRow = {
+  id: string;
+  date: string;
+  depositNumber: string;
+  branch: string | null;
+  supplierId: string;
+  supplierName: string;
+  supplierNpwp: string | null;
+  amount: number;
+  voided: boolean;
 };
 type Purchase = {
   id: string;
@@ -98,11 +122,13 @@ type Report = {
     address: string | null;
     pricesIncludePpn: boolean | null;
   };
-  branch: { id: string; name: string } | null;
+  branch: { id: string; name: string; nitku: string | null } | null;
   sales: Sale[];
   salesReturns: SalesReturn[];
+  customerDeposits: CustomerDepositRow[];
   purchases: Purchase[];
   purchaseReturns: PurchaseReturn[];
+  supplierDeposits: SupplierDepositRow[];
   expenses: ExpenseRow[];
   summary: {
     sales: { count: number; subtotal: number; discount: number; tax: number; total: number };
@@ -111,15 +137,18 @@ type Report = {
     linesDiffer: number;
     salesReturns: { count: number; total: number };
     netSales: number;
+    customerDeposits: { count: number; total: number };
     purchases: { count: number; total: number };
     purchaseReturns: { count: number; total: number };
     netPurchases: number;
+    supplierDeposits: { count: number; total: number };
     expenses: { count: number; total: number };
   };
   notes: {
     customersMissingNpwp: number;
     suppliersMissingNpwp: number;
     receivedWithoutBill: { poNumber: string | null; supplierName: string | null }[];
+    separateTaxpayers: { name: string; npwp: string | null }[];
     unassigned: { sales: Unassigned; purchases: Unassigned; purchaseReturns: Unassigned; expenses: Unassigned };
   };
 };
@@ -313,6 +342,10 @@ export default function TaxReportPage() {
         { ...date, value: (s) => showDate(s.date), nowrap: true },
         { key: 'invoice', label: col('invoice'), value: (s) => s.invoiceNumber ?? '', href: (s) => `/sales/invoices/${s.id}`, nowrap: true, warn: (s) => s.linesDiffer },
         ...branch,
+        // In a branch's own report its NITKU is in the header instead.
+        ...(r.sales.some((s) => s.branchNitku)
+          ? [{ key: 'nitku', label: col('nitku'), value: (s: Sale) => s.branchNitku ?? '', nowrap: true }]
+          : []),
         { key: 'customer', label: col('customer'), value: (s) => s.customerName ?? walkIn },
         { key: 'npwp', label: col('npwp'), value: (s) => s.customerNpwp ?? '', warn: (s) => s.needsNpwp && s.status !== 'VOID' },
         { key: 'address', label: col('address'), value: (s) => s.customerAddress ?? '' },
@@ -351,6 +384,22 @@ export default function TaxReportPage() {
         { key: 'amount', label: col('amount'), value: (x) => x.amount, money: true },
       ],
     };
+    const customerDeposits: Section<CustomerDepositRow> = {
+      key: 'customerDeposits',
+      title: t('accounting.taxReport.sections.customerDeposits'),
+      rows: r.customerDeposits,
+      totals: { amount: r.summary.customerDeposits.total },
+      muted: (d) => d.voided,
+      columns: [
+        { ...date, value: (d) => showDate(d.date), nowrap: true },
+        { key: 'depositNumber', label: col('depositNumber'), value: (d) => d.depositNumber, nowrap: true },
+        ...branch,
+        { key: 'customer', label: col('customer'), value: (d) => d.customerName },
+        { key: 'npwp', label: col('npwp'), value: (d) => d.customerNpwp ?? '', warn: (d) => d.needsNpwp && !d.voided },
+        { key: 'amount', label: col('amount'), value: (d) => d.amount, money: true },
+        { key: 'status', label: col('status'), value: (d) => t(`accounting.taxReport.status.${d.voided ? 'VOID' : 'ACTIVE'}`) },
+      ],
+    };
     const purchases: Section<Purchase> = {
       key: 'purchases',
       title: t('accounting.taxReport.sections.purchases'),
@@ -383,6 +432,22 @@ export default function TaxReportPage() {
         { key: 'amount', label: col('amount'), value: (x) => x.amount, money: true },
       ],
     };
+    const supplierDeposits: Section<SupplierDepositRow> = {
+      key: 'supplierDeposits',
+      title: t('accounting.taxReport.sections.supplierDeposits'),
+      rows: r.supplierDeposits,
+      totals: { amount: r.summary.supplierDeposits.total },
+      muted: (d) => d.voided,
+      columns: [
+        { ...date, value: (d) => showDate(d.date), nowrap: true },
+        { key: 'depositNumber', label: col('depositNumber'), value: (d) => d.depositNumber, nowrap: true },
+        ...branch,
+        { key: 'supplier', label: col('supplier'), value: (d) => d.supplierName },
+        { key: 'npwp', label: col('npwp'), value: (d) => d.supplierNpwp ?? '', warn: (d) => !d.supplierNpwp && !d.voided },
+        { key: 'amount', label: col('amount'), value: (d) => d.amount, money: true },
+        { key: 'status', label: col('status'), value: (d) => t(`accounting.taxReport.status.${d.voided ? 'VOID' : 'ACTIVE'}`) },
+      ],
+    };
     const expenses: Section<ExpenseRow> = {
       key: 'expenses',
       title: t('accounting.taxReport.sections.expenses'),
@@ -396,27 +461,39 @@ export default function TaxReportPage() {
         { key: 'amount', label: col('amount'), value: (e) => e.amount, money: true },
       ],
     };
-    return { sales, salesReturns, purchases, purchaseReturns, expenses };
+    return { sales, salesReturns, customerDeposits, purchases, purchaseReturns, supplierDeposits, expenses };
   }
 
   const summaryRows = (r: Report): { label: string; count: number | null; amount: number; strong?: boolean }[] => [
     { label: t('accounting.taxReport.sections.sales'), count: r.summary.sales.count, amount: r.summary.sales.total },
     { label: t('accounting.taxReport.sections.salesReturns'), count: r.summary.salesReturns.count, amount: 0 - r.summary.salesReturns.total },
     { label: t('accounting.taxReport.summary.netSales'), count: null, amount: r.summary.netSales, strong: true },
+    { label: t('accounting.taxReport.sections.customerDeposits'), count: r.summary.customerDeposits.count, amount: r.summary.customerDeposits.total },
     { label: t('accounting.taxReport.sections.purchases'), count: r.summary.purchases.count, amount: r.summary.purchases.total },
     { label: t('accounting.taxReport.sections.purchaseReturns'), count: r.summary.purchaseReturns.count, amount: 0 - r.summary.purchaseReturns.total },
     { label: t('accounting.taxReport.summary.netPurchases'), count: null, amount: r.summary.netPurchases, strong: true },
+    { label: t('accounting.taxReport.sections.supplierDeposits'), count: r.summary.supplierDeposits.count, amount: r.summary.supplierDeposits.total },
     { label: t('accounting.taxReport.sections.expenses'), count: r.summary.expenses.count, amount: r.summary.expenses.total, strong: true },
   ];
 
   // Notes that bear on whether the numbers are complete, so they print too.
   const reportNotes = (r: Report): string[] => {
     const notes: string[] = [];
+    if (r.notes.separateTaxpayers.length > 0) {
+      notes.push(
+        t('accounting.taxReport.notes.separateTaxpayers', {
+          list: r.notes.separateTaxpayers.map((b) => `${b.name} (${b.npwp})`).join(', '),
+        }),
+      );
+    }
     if (r.summary.voidedInvoices > 0) {
       notes.push(t('accounting.taxReport.notes.voided', { count: r.summary.voidedInvoices }));
     }
     if (r.summary.changedAfterPeriod > 0) {
       notes.push(t('accounting.taxReport.notes.changedAfter', { count: r.summary.changedAfterPeriod }));
+    }
+    if (r.summary.customerDeposits.count > 0 || r.summary.supplierDeposits.count > 0) {
+      notes.push(t('accounting.taxReport.notes.customerDeposits'));
     }
     if (r.summary.linesDiffer > 0) {
       notes.push(t('accounting.taxReport.notes.linesDiffer', { count: r.summary.linesDiffer }));
@@ -444,7 +521,7 @@ export default function TaxReportPage() {
     return notes;
   };
 
-  async function downloadExcel() {
+  async function handleDownloadExcel() {
     setDownloading(true);
     setError(null);
     try {
@@ -454,26 +531,15 @@ export default function TaxReportPage() {
         setError(t('accounting.taxReport.loadFailed'));
         return;
       }
-      const XLSX = await import('xlsx');
-      const book = XLSX.utils.book_new();
-      const MONEY = '#,##0';
+      const sheets: ExcelSheet[] = [];
+      const addSheet = (name: string, rows: ExcelCell[][], money: number[], widths: number[]) =>
+        sheets.push({ name, rows, money, widths });
 
-      const addSheet = (name: string, rows: (string | number)[][], moneyColumns: number[], widths: number[], firstDataRow = 1) => {
-        const sheet = XLSX.utils.aoa_to_sheet(rows);
-        sheet['!cols'] = widths.map((wch) => ({ wch }));
-        for (let row = firstDataRow; row < rows.length; row++) {
-          for (const col of moneyColumns) {
-            const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })];
-            if (cell && cell.t === 'n') cell.z = MONEY;
-          }
-        }
-        XLSX.utils.book_append_sheet(book, sheet, name);
-      };
-
-      const titleRows: (string | number)[][] = [
+      const titleRows: ExcelCell[][] = [
         [t('accounting.taxReport.title')],
         [r.business.legalName || r.business.name],
         [t('accounting.taxReport.col.npwp'), r.business.npwp ?? ''],
+        ...(r.branch?.nitku ? [[t('accounting.taxReport.col.nitku'), r.branch.nitku]] : []),
         [t('accounting.taxReport.col.address'), r.business.address ?? ''],
         [t('accounting.taxReport.period'), periodLabel(r.month)],
         [t('accounting.taxReport.scope'), r.branch?.name ?? t('accounting.taxReport.wholeBusiness')],
@@ -481,7 +547,6 @@ export default function TaxReportPage() {
         [],
       ];
       const summary = summaryRows(r).map((s) => [s.label, s.amount, s.count ?? '']);
-      const summaryStart = titleRows.length + 1;
       const notes = reportNotes(r);
       addSheet(
         t('accounting.taxReport.summary.title'),
@@ -495,7 +560,6 @@ export default function TaxReportPage() {
         ],
         [1],
         [28, 22, 10],
-        summaryStart,
       );
 
       const addSection = <T extends { id: string }>(section: Section<T>) => {
@@ -535,12 +599,14 @@ export default function TaxReportPage() {
       addSheet(t('accounting.taxReport.sections.salesLines'), [lineHeader, ...lineRows], [8, 9, 10, 11], [12, 18, 24, 20, 36, 14, 8, 8, 14, 14, 14, 14]);
 
       addSection(sections.salesReturns);
+      addSection(sections.customerDeposits);
       addSection(sections.purchases);
       addSection(sections.purchaseReturns);
+      addSection(sections.supplierDeposits);
       addSection(sections.expenses);
 
-      const scope = r.branch ? `-${r.branch.name.replace(/[^\p{L}\p{N}]+/gu, '-')}` : '';
-      XLSX.writeFile(book, `laporan-pajak-${r.month}${scope}.xlsx`);
+      const scope = r.branch ? `-${fileNamePart(r.branch.name)}` : '';
+      await downloadExcel({ fileName: `laporan-pajak-${r.month}${scope}.xlsx`, sheets });
     } catch {
       setError(t('accounting.taxReport.serverError'));
     } finally {
@@ -597,7 +663,7 @@ export default function TaxReportPage() {
           <Printer size={16} strokeWidth={2} />
           {t('accounting.taxReport.print')}
         </button>
-        <button type="button" onClick={downloadExcel} disabled={!report || loading || downloading} className={`${btnPrimary} inline-flex items-center gap-2`}>
+        <button type="button" onClick={handleDownloadExcel} disabled={!report || loading || downloading} className={`${btnPrimary} inline-flex items-center gap-2`}>
           <FileDown size={16} strokeWidth={2} />
           {downloading ? t('accounting.taxReport.downloading') : t('accounting.taxReport.downloadExcel')}
         </button>
@@ -644,6 +710,11 @@ export default function TaxReportPage() {
                 <p className="text-xs text-black">
                   {t('accounting.taxReport.col.npwp')}: {report.business.npwp || '—'}
                 </p>
+                {report.branch?.nitku && (
+                  <p className="text-xs text-black">
+                    {t('accounting.taxReport.col.nitku')}: {report.branch.nitku}
+                  </p>
+                )}
                 {report.business.address && <p className="text-xs text-black">{report.business.address}</p>}
               </div>
               <div className="sm:text-right">
@@ -684,8 +755,10 @@ export default function TaxReportPage() {
 
             <ReportTable section={sections.sales} empty={empty} />
             <ReportTable section={sections.salesReturns} empty={empty} />
+            <ReportTable section={sections.customerDeposits} empty={empty} />
             <ReportTable section={sections.purchases} empty={empty} />
             <ReportTable section={sections.purchaseReturns} empty={empty} />
+            <ReportTable section={sections.supplierDeposits} empty={empty} />
             <ReportTable section={sections.expenses} empty={empty} />
 
             <p className="mt-6 pt-3 border-t border-gray-200 text-[11px] text-gray-500">{t('accounting.taxReport.disclaimer')}</p>

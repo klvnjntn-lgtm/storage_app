@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 
 // A workshop service reminder typed while making an invoice. It's only
 // "staged" until the invoice is issued — submit() saves it then — so an
 // abandoned invoice never leaves a reminder behind. Picking a different
 // vehicle starts over.
 export function useStagedReminder(vehicleId: string | null) {
+  const confirmPastDates = useConfirmPastDates();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -38,8 +40,9 @@ export function useStagedReminder(vehicleId: string | null) {
     setSaved(false);
   }
 
-  function stage() {
+  async function stage() {
     if (!vehicleId || !note.trim() || !dueDate) return;
+    if (!(await confirmPastDates({ reminder: dueDate }))) return;
     setStaged(true);
     setError('');
   }

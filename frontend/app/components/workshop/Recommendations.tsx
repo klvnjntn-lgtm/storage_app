@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatDMY } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 import type { Recommendation, WorkOrder } from './workOrders';
@@ -32,6 +33,7 @@ export default function Recommendations({
   onChange: (wo: WorkOrder) => void;
 }) {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const [note, setNote] = useState('');
   const [dueDate, setDueDate] = useState(defaultDue);
   // Optional: also due at this km ("oil at 45.000 km or in 3 months").
@@ -41,6 +43,7 @@ export default function Recommendations({
 
   async function add() {
     if (!note.trim() || !dueDate) return;
+    if (!(await confirmPastDates({ reminder: dueDate }))) return;
     setBusy(true);
     setError(null);
     try {

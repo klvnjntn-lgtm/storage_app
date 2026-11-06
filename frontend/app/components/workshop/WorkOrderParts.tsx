@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { PackageCheck, ShoppingCart, MessageCircle, XCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatDMY, parseCalendarDate } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { Card, ErrorNote, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
@@ -64,6 +65,7 @@ export default function WorkOrderParts({
   onStatusChange: () => void;
 }) {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const p = (key: string, vars?: Record<string, string | number>) => t(`workshop.workOrders.parts.${key}`, vars);
   const dialog = useDialog();
 
@@ -128,6 +130,7 @@ export default function WorkOrderParts({
     const lines = parts.lines
       .map((l) => ({ productId: l.productId, locationId: l.locationId, quantity: Number(ordering.qty[key(l)] ?? 0) }))
       .filter((l) => l.quantity > 0);
+    if (!(await confirmPastDates({ expected: ordering.expectedDate }))) return;
     const ok = await call(`/work-orders/${workOrderId}/parts-orders`, {
       supplierId: ordering.supplierId || undefined,
       expectedDate: ordering.expectedDate || undefined,

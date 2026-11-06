@@ -45,6 +45,7 @@ import {
 import { defaultLocation } from '@/lib/locations';
 import { rememberBranchId, rememberedBranchId, useBranches } from '@/lib/hooks/useBranches';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import {
@@ -99,6 +100,7 @@ function NewInvoicePage() {
   const urlDraftId = searchParams.get('draftId');
   const hasWorkshopRms = useHasModule('WORKSHOP_RMS');
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   // Office (document wide, search aside) or Cashier (search wide, cart aside); see useDocumentLayout.
   const { layout, setLayout } = useDocumentLayout();
 
@@ -680,6 +682,7 @@ function NewInvoicePage() {
       return;
     }
 
+    if (!(await confirmPastDates({ document: invoiceDate, due: dueDate }))) return;
     setPrinting(true);
     setError('');
 

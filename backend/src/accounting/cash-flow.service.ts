@@ -46,6 +46,9 @@ type Category = { section: CashFlowSection; key: string; label: string };
 
 const SOURCE_CATEGORY: Record<string, Category> = {
   PAYMENT: { section: 'operating', key: 'customer_receipts', label: 'Receipts from customers' },
+  // Down payments received and refunded. Applying one to an invoice moves no cash.
+  CUSTOMER_DEPOSIT: { section: 'operating', key: 'customer_receipts', label: 'Receipts from customers' },
+  SUPPLIER_DEPOSIT: { section: 'operating', key: 'supplier_payments', label: 'Payments to suppliers' },
   SUPPLIER_PAYMENT: { section: 'operating', key: 'supplier_payments', label: 'Payments to suppliers' },
   EXPENSE: { section: 'operating', key: 'operating_expenses', label: 'Operating expenses paid' },
   PAYROLL: { section: 'operating', key: 'payroll', label: 'Payroll disbursed' },

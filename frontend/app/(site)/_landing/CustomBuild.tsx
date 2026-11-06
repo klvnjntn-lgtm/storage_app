@@ -24,7 +24,7 @@ export default function CustomBuild() {
       <GridBackdrop size={44} opacity={0.06} mask="radial-gradient(ellipse at 20% 40%, black 10%, transparent 70%)" />
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32 grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16 items-center">
         <Reveal>
-          <SectionHeading index="05" eyebrow={c('eyebrow')} title={c('heading')} />
+          <SectionHeading title={c('heading')} />
           <p className="mt-6 max-w-lg text-base sm:text-lg leading-relaxed text-white/60">{c('body')}</p>
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
             <a

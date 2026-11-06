@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarClock, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DateTimePicker from '@/app/components/shared/DateTimePicker';
@@ -38,6 +39,7 @@ export default function RescheduleStopDialog({
   onDone: () => void | Promise<void>;
 }) {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const [date, setDate] = useState(() => toCalendarDateString(new Date(Date.now() + 24 * 60 * 60 * 1000)));
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [routeId, setRouteId] = useState('');
@@ -67,6 +69,7 @@ export default function RescheduleStopDialog({
 
   async function save() {
     if (needsRoute && !routeId) return;
+    if (!(await confirmPastDates({ reschedule: date }))) return;
     setSaving(true);
     setError(null);
     try {

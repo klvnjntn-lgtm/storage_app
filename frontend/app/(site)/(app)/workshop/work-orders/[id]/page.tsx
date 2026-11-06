@@ -8,6 +8,7 @@ import { ClipboardList, Receipt, Play, Pause, CheckCircle2, XCircle, RotateCcw, 
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, btnDanger } from '@/app/components/shared/PageFrame';
 import { isOdometerBelowLast } from '@/lib/odometer';
@@ -49,6 +50,7 @@ export default function WorkOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const [readyOpen, setReadyOpen] = useState(false);
   const [wo, setWo] = useState<WorkOrder | null>(null);
@@ -99,6 +101,7 @@ export default function WorkOrderDetailPage() {
       setError(problem);
       return;
     }
+    if (form.validUntil !== (wo?.validUntil?.slice(0, 10) ?? '') && !(await confirmPastDates({ validUntil: form.validUntil }))) return;
     const next = await call(`/work-orders/${params.id}`, 'PATCH', { ...formToPayload(form), items: toPayloadLines(form.lines) });
     if (next) apply(next);
   }

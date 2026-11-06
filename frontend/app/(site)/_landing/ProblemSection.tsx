@@ -1,6 +1,5 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import {
   TriangleAlert,
   ReceiptText,
@@ -12,7 +11,7 @@ import {
 } from 'lucide-react';
 import { display } from '@/lib/fonts';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { EASE_OUT, GridBackdrop, ParallaxGlow, Reveal, SectionHeading, Stagger, StaggerItem } from './primitives';
+import { GridBackdrop, ParallaxGlow, Reveal, SectionHeading, Stagger, StaggerItem } from './primitives';
 import styles from './ProblemSection.module.css';
 
 /* ─── 01 · The problem. The "before" picture: a spreadsheet nobody
@@ -103,46 +102,22 @@ function ChaosVisual() {
 
         {/* hand-drawn circle around the conflicting row */}
         <svg className={styles.scribble} viewBox="0 0 220 70" preserveAspectRatio="none">
-          <motion.path
-            d="M 20 38 C 18 12, 120 4, 196 14 C 222 20, 216 56, 170 62 C 110 70, 30 66, 14 48 C 8 40, 30 26, 60 22"
-            initial={{ pathLength: 0, opacity: 0 }}
-            whileInView={{ pathLength: 1, opacity: 1 }}
-            viewport={{ once: true, amount: 0.6 }}
-            transition={{ duration: 1.1, ease: EASE_OUT, delay: 0.5 }}
-          />
+          <path d="M 20 38 C 18 12, 120 4, 196 14 C 222 20, 216 56, 170 62 C 110 70, 30 66, 14 48 C 8 40, 30 26, 60 22" />
         </svg>
-        <motion.span
-          className={styles.mismatch}
-          initial={{ opacity: 0, y: 6 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.6 }}
-          transition={{ duration: 0.6, ease: EASE_OUT, delay: 1.3 }}
-        >
+        <span className={styles.mismatch}>
           <TriangleAlert size={11} strokeWidth={2.4} />
           {v('mismatch')}
-        </motion.span>
+        </span>
       </div>
 
       {/* sticky note */}
-      <motion.div
-        className={styles.note}
-        initial={{ opacity: 0, y: -14, rotate: 12 }}
-        whileInView={{ opacity: 1, y: 0, rotate: 6 }}
-        viewport={{ once: true, amount: 0.5 }}
-        transition={{ duration: 0.8, ease: EASE_OUT, delay: 0.25 }}
-      >
+      <div className={styles.note} style={{ transform: 'rotate(6deg)' }}>
         <span className={styles.tape} />
         <span className={display.className}>{v('note')}</span>
-      </motion.div>
+      </div>
 
       {/* the unanswered message */}
-      <motion.div
-        className={styles.chat}
-        initial={{ opacity: 0, y: 18, scale: 0.96, rotate: -2 }}
-        whileInView={{ opacity: 1, y: 0, scale: 1, rotate: -2 }}
-        viewport={{ once: true, amount: 0.5 }}
-        transition={{ duration: 0.8, ease: EASE_OUT, delay: 0.9 }}
-      >
+      <div className={styles.chat} style={{ transform: 'rotate(-2deg)' }}>
         <div className={styles.chatHead}>
           <span className={styles.chatAvatar}>B</span>
           <span className={styles.chatName}>{v('chatSender')}</span>
@@ -152,7 +127,7 @@ function ChaosVisual() {
           {v('chatTime')}
           <CheckCheck size={13} strokeWidth={2} />
         </p>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -175,7 +150,7 @@ export default function ProblemSection() {
       <div className="relative max-w-6xl mx-auto px-5 sm:px-8 pt-24 sm:pt-32 pb-10 grid lg:grid-cols-[1fr_1.05fr] gap-14 lg:gap-16 items-center">
         <div>
           <Reveal>
-            <SectionHeading index="01" eyebrow={t('landing.problem.eyebrow')} title={t('landing.problem.heading')} />
+            <SectionHeading title={t('landing.problem.heading')} />
           </Reveal>
           <Stagger className="mt-10 border-t border-white/[0.07]">
             {pains.map(({ icon: Icon, key }) => (

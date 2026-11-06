@@ -7,6 +7,7 @@ import { display } from '@/lib/fonts';
 import { Scale, Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 
@@ -76,6 +77,36 @@ export default function BalanceSheetPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asOf]);
 
+  const buildExcel = () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const lines = (items: BSLine[]) => items.map((l) => [l.code, l.name, l.amount]);
+    return {
+      fileName: `neraca-${asOf}.xlsx`,
+      sheets: [
+        {
+          name: t('nav.items.balanceSheet'),
+          rows: [
+            [col('code'), col('account'), col('amount')],
+            [t('accounting.balanceSheet.assets')],
+            ...lines(r.assets),
+            ['', t('accounting.balanceSheet.totalAssets'), r.totalAssets],
+            [t('accounting.balanceSheet.liabilities')],
+            ...lines(r.liabilities),
+            ['', t('accounting.balanceSheet.totalLiabilities'), r.totalLiabilities],
+            [t('accounting.balanceSheet.equity')],
+            ...lines(r.statedEquity),
+            ['', t('accounting.balanceSheet.accumulatedEarnings'), r.accumulatedEarnings],
+            ['', t('accounting.balanceSheet.totalEquity'), r.totalEquity],
+            ['', t('accounting.balanceSheet.totalLiabilitiesAndEquity'), r.totalLiabilitiesAndEquity],
+          ],
+          money: [2],
+          widths: [10, 40, 18],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -122,6 +153,7 @@ export default function BalanceSheetPage() {
               {t('accounting.balanceSheet.yearEnd')}
             </button>
           </div>
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}

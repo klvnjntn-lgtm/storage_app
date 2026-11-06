@@ -2,6 +2,28 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureDefaultBranch } from './resolve-branch';
 
+type TaxIdentity = { legalName?: string | null; npwp?: string | null; nitku?: string | null };
+
+// Digits only, so "01.234.567.8-901.000" and its plain form compare equal.
+// undefined = not being changed; empty = cleared.
+function taxNumber(value: string | null | undefined, lengths: number[], message: string) {
+  if (value === undefined) return undefined;
+  const digits = (value ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (!lengths.includes(digits.length)) throw new BadRequestException(message);
+  return digits;
+}
+
+function taxFields(dto: TaxIdentity) {
+  const npwp = taxNumber(dto.npwp, [15, 16], 'NPWP must be 15 or 16 digits');
+  const nitku = taxNumber(dto.nitku, [22], 'NITKU must be 22 digits');
+  return {
+    ...(dto.legalName !== undefined && { legalName: dto.legalName?.trim() || null }),
+    ...(npwp !== undefined && { npwp }),
+    ...(nitku !== undefined && { nitku }),
+  };
+}
+
 // Branches of the business — what accounting splits by. See the Branch model.
 @Injectable()
 export class BranchesService {
@@ -15,7 +37,8 @@ export class BranchesService {
     });
   }
 
-  async create(organizationId: string, dto: { name: string; address?: string | null; phone?: string | null }) {
+  async create(organizationId: string, dto: { name: string; address?: string | null; phone?: string | null } & TaxIdentity) {
+    const tax = taxFields(dto);
     await ensureDefaultBranch(this.prisma, organizationId);
     return this.prisma.branch.create({
       data: {
@@ -23,6 +46,7 @@ export class BranchesService {
         name: dto.name.trim(),
         address: dto.address?.trim() || null,
         phone: dto.phone?.trim() || null,
+        ...tax,
       },
     });
   }
@@ -30,8 +54,9 @@ export class BranchesService {
   async update(
     organizationId: string,
     id: string,
-    dto: { name?: string; address?: string | null; phone?: string | null },
+    dto: { name?: string; address?: string | null; phone?: string | null } & TaxIdentity,
   ) {
+    const tax = taxFields(dto);
     await this.getOrThrow(organizationId, id);
     return this.prisma.branch.update({
       where: { id },
@@ -39,6 +64,7 @@ export class BranchesService {
         ...(dto.name !== undefined && { name: dto.name.trim() }),
         ...(dto.address !== undefined && { address: dto.address?.trim() || null }),
         ...(dto.phone !== undefined && { phone: dto.phone?.trim() || null }),
+        ...tax,
       },
     });
   }

@@ -786,9 +786,9 @@ export default function SessionPage() {
             </h2>
             <div className="border border-blue-500/15 rounded-xl divide-y divide-gray-100 bg-white shadow-sm overflow-hidden">
               {session.reopenEvents.map((ev) => (
-                <div key={ev.id} className="p-3 text-sm flex items-start justify-between gap-4">
+                <div key={ev.id} className="p-3 text-sm flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-4">
                   <p className="flex-1">{ev.reason}</p>
-                  <p className="text-gray-500 whitespace-nowrap text-xs">
+                  <p className="text-gray-500 sm:whitespace-nowrap break-words min-w-0 text-xs">
                     {fmt(ev.createdAt, dateLocale)}{ev.user?.email ? ` · ${ev.user.email}` : ''}
                   </p>
                 </div>

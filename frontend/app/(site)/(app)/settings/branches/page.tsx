@@ -10,9 +10,9 @@ import { BRANCHES_CHANGED, type Branch } from '@/lib/hooks/useBranches';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 
 type StockLocation = { id: string; name: string; branchId: string | null };
-type Draft = { name: string; address: string; phone: string };
+type Draft = { name: string; address: string; phone: string; legalName: string; npwp: string; nitku: string };
 
-const EMPTY: Draft = { name: '', address: '', phone: '' };
+const EMPTY: Draft = { name: '', address: '', phone: '', legalName: '', npwp: '', nitku: '' };
 
 function errorText(body: { message?: string | string[] } | null, fallback: string) {
   if (Array.isArray(body?.message)) return body.message.join(', ');
@@ -128,6 +128,29 @@ export default function BranchesPage() {
                     placeholder={t('settings.branches.phone')}
                     onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })}
                   />
+                  <p className="sm:col-span-3 text-xs text-gray-500 mt-1">{t('settings.branches.taxHint')}</p>
+                  <input
+                    className={inputCls}
+                    value={editDraft.nitku}
+                    maxLength={30}
+                    inputMode="numeric"
+                    placeholder={t('settings.branches.nitku')}
+                    onChange={(e) => setEditDraft({ ...editDraft, nitku: e.target.value })}
+                  />
+                  <input
+                    className={inputCls}
+                    value={editDraft.legalName}
+                    maxLength={200}
+                    placeholder={t('settings.branches.legalName')}
+                    onChange={(e) => setEditDraft({ ...editDraft, legalName: e.target.value })}
+                  />
+                  <input
+                    className={inputCls}
+                    value={editDraft.npwp}
+                    maxLength={30}
+                    placeholder={t('settings.branches.npwp')}
+                    onChange={(e) => setEditDraft({ ...editDraft, npwp: e.target.value })}
+                  />
                   <div className="sm:col-span-3 flex justify-end gap-2">
                     <button type="button" className={btnSecondary} onClick={() => setEditingId(null)}>
                       {t('common.cancel')}
@@ -144,6 +167,17 @@ export default function BranchesPage() {
                     {(b.address || b.phone) && (
                       <p className="text-xs text-gray-500">{[b.address, b.phone].filter(Boolean).join(' · ')}</p>
                     )}
+                    {(b.legalName || b.npwp || b.nitku) && (
+                      <p className="text-xs text-gray-500">
+                        {[
+                          b.legalName,
+                          b.npwp && `NPWP ${b.npwp}`,
+                          b.nitku && `NITKU ${b.nitku}`,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button
@@ -152,7 +186,14 @@ export default function BranchesPage() {
                       aria-label={t('settings.branches.edit')}
                       onClick={() => {
                         setEditingId(b.id);
-                        setEditDraft({ name: b.name, address: b.address ?? '', phone: b.phone ?? '' });
+                        setEditDraft({
+                          name: b.name,
+                          address: b.address ?? '',
+                          phone: b.phone ?? '',
+                          legalName: b.legalName ?? '',
+                          npwp: b.npwp ?? '',
+                          nitku: b.nitku ?? '',
+                        });
                       }}
                     >
                       <Pencil size={14} />

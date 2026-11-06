@@ -61,7 +61,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black flex items-center justify-center p-6">
+    <main className="min-h-dvh bg-white text-black flex items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex justify-end gap-2">
           <ThemeToggle />

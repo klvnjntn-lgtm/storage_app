@@ -12,7 +12,6 @@ import {
 import { motion, useInView, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import { display } from '@/lib/fonts';
 
-export const SECTION_COUNT = '08';
 export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 /* ─── Page-wide motion switch ────────────────────────────────────────
@@ -105,39 +104,13 @@ export function useAnimState(ref: RefObject<Element | null>) {
   return paused || !inView ? 'paused' : 'running';
 }
 
-/* ─── Numbered mono section tag ─────────────────────────────────── */
-export function Kicker({
-  index,
-  label,
-  center = false,
-  className = '',
-}: {
-  index: string;
-  label: string;
-  center?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={`flex items-center gap-2.5 ${center ? 'justify-center' : ''} ${className}`}>
-      <span className="font-mono text-[10px] tracking-[0.2em] text-blue-200/90 px-2 py-1 rounded-full border border-blue-400/20 bg-blue-400/[0.07]">
-        {index}/{SECTION_COUNT}
-      </span>
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">{label}</p>
-    </div>
-  );
-}
-
-/* ─── Section heading: kicker + gradient display title ────────────── */
+/* ─── Section heading ──────────────────────────────────────────── */
 export function SectionHeading({
-  index,
-  eyebrow,
   title,
   center = false,
   className = '',
   titleClassName = '',
 }: {
-  index: string;
-  eyebrow: string;
   title: string;
   center?: boolean;
   className?: string;
@@ -145,9 +118,8 @@ export function SectionHeading({
 }) {
   return (
     <div className={`${center ? 'text-center mx-auto' : ''} ${className}`}>
-      <Kicker index={index} label={eyebrow} center={center} />
       <h2
-        className={`${display.className} mt-5 text-[2.1rem] leading-[1.04] sm:text-5xl lg:text-[3.4rem] font-semibold tracking-[-0.035em] text-balance bg-[linear-gradient(180deg,rgb(var(--ink))_40%,rgb(var(--ink)/0.6))] bg-clip-text text-transparent ${titleClassName}`}
+        className={`${display.className} min-w-0 [overflow-wrap:break-word] text-[2.1rem] leading-[1.04] sm:text-5xl lg:text-[3.4rem] font-semibold tracking-[-0.035em] text-balance text-white ${titleClassName}`}
       >
         {title}
       </h2>
@@ -155,8 +127,22 @@ export function SectionHeading({
   );
 }
 
-/* ─── Scroll-triggered fade/rise reveal. Reduced motion is handled by
-   <MotionConfig reducedMotion="user"> at the page root. ─────────── */
+/* ─── Scroll-triggered reveal. Content is visible in the server HTML, so a
+   slow device or a failed script never shows a blank page. Only after
+   hydration does an element still below the fold hide itself, off screen,
+   to fade in when reached. Reduced motion is handled by <MotionConfig> at
+   the page root. ──────────────────────────────────────────────────── */
+function useReveal<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [armed, setArmed] = useState(false);
+  const inView = useInView(ref, { once: true, amount: 0.12, margin: '0px 0px -8% 0px' });
+  useEffect(() => {
+    const el = ref.current;
+    if (el && el.getBoundingClientRect().top > window.innerHeight) setArmed(true);
+  }, []);
+  return { ref, hidden: armed && !inView };
+}
+
 export function Reveal({
   children,
   className = '',
@@ -168,38 +154,34 @@ export function Reveal({
   delay?: number;
   y?: number;
 }) {
+  const { ref, hidden } = useReveal<HTMLDivElement>();
   return (
     <motion.div
+      ref={ref}
       className={className}
-      initial={{ opacity: 0, y }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.15, margin: '0px 0px -8% 0px' }}
-      transition={{ duration: 0.9, ease: EASE_OUT, delay }}
+      initial={false}
+      animate={hidden ? { opacity: 0, y } : { opacity: 1, y: 0 }}
+      transition={hidden ? { duration: 0 } : { duration: 0.9, ease: EASE_OUT, delay }}
     >
       {children}
     </motion.div>
   );
 }
 
-/* Staggered reveal for grids: children rise in sequence, 60ms apart. */
+/* Staggered reveal for grids: children rise in sequence, 70ms apart. */
 const staggerParent = {
   hidden: {},
   show: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } },
 };
 const staggerChild = {
-  hidden: { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 24, transition: { duration: 0 } },
   show: { opacity: 1, y: 0, transition: { duration: 0.75, ease: EASE_OUT } },
 };
 
 export function Stagger({ children, className = '' }: { children: ReactNode; className?: string }) {
+  const { ref, hidden } = useReveal<HTMLDivElement>();
   return (
-    <motion.div
-      className={className}
-      variants={staggerParent}
-      initial="hidden"
-      whileInView="show"
-      viewport={{ once: true, amount: 0.12, margin: '0px 0px -8% 0px' }}
-    >
+    <motion.div ref={ref} className={className} variants={staggerParent} initial={false} animate={hidden ? 'hidden' : 'show'}>
       {children}
     </motion.div>
   );

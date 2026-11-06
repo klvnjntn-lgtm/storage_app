@@ -1588,7 +1588,7 @@ async getCustomerStatement(
   const creditPayments = await this.prisma.payment.findMany({
     where: {
       voidedAt: null,
-      kind: { in: [PaymentKind.REFUND, PaymentKind.CREDIT_OUT, PaymentKind.CREDIT_IN] },
+      kind: { in: [PaymentKind.REFUND, PaymentKind.CREDIT_OUT, PaymentKind.CREDIT_IN, PaymentKind.DEPOSIT_IN] },
       createdAt: { gte: from, lte: to },
       invoice: { organizationId, customerId, status: InvoiceStatus.ISSUED, ...vehicleFilter },
     },

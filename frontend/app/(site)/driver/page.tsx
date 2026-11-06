@@ -34,6 +34,7 @@ import { shrinkPhotoVariants } from '@/lib/shrinkPhoto';
 import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/captureLocation';
 import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import PhotoZoom from '@/app/components/shared/PhotoZoom';
 import { toCalendarDateString } from '@/lib/dates';
 import { GOOD_GPS_ACCURACY_M, WEAK_PIN_ACCURACY_M } from '@/app/components/delivery/PinStatus';
 import InAppCamera, { inAppCameraSupported } from '@/app/components/delivery/InAppCamera';
@@ -333,18 +334,27 @@ function GpsBlockedBanner({ status }: { status: GpsStatus }) {
   );
 }
 
-// Thumbnail of the photo the driver just took, so they can see it worked.
-// The blob URL is released once the image has decoded — it keeps showing.
+// Thumbnail of the photo the driver just took, so they can see it worked, and
+// tap to check it properly. The blob URL has to last for that, so it's released
+// once this goes away (after a moment, as React's dev mode remounts everything).
 function PhotoThumb({ file }: { file: File }) {
+  const { t } = useLanguage();
   const url = useMemo(() => URL.createObjectURL(file), [file]);
+  const release = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    clearTimeout(release.current);
+    return () => {
+      release.current = setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+  }, [url]);
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- local blob preview
-    <img
-      src={url}
-      alt=""
-      onLoad={() => URL.revokeObjectURL(url)}
-      className="h-16 w-16 rounded-lg object-cover border border-gray-200 shrink-0"
-    />
+    <div className="shrink-0">
+      <PhotoZoom
+        src={url}
+        alt={t('delivery.driver.proofPhotoAlt')}
+        className="h-16 w-16 rounded-lg object-contain bg-gray-100 border border-gray-200"
+      />
+    </div>
   );
 }
 
@@ -480,15 +490,12 @@ function SentProofPhoto({ linkPath }: { linkPath: string }) {
   if (failed) return <p className="text-sm text-red-600">{t('delivery.driver.photoLoadFailed')}</p>;
   if (!src) return <p className="text-sm text-gray-500">{t('delivery.driver.loadingPhoto')}</p>;
   return (
-    <a href={src} target="_blank" rel="noreferrer" className="block">
-      {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived URL; not for next/image */}
-      <img
-        src={src}
-        alt={t('delivery.driver.proofPhotoAlt')}
-        onError={() => setFailed(true)}
-        className="w-full max-h-80 object-contain rounded-lg border border-gray-200 bg-gray-50"
-      />
-    </a>
+    <PhotoZoom
+      src={src}
+      alt={t('delivery.driver.proofPhotoAlt')}
+      onError={() => setFailed(true)}
+      className="w-full max-h-80 object-contain rounded-lg border border-gray-200 bg-gray-50"
+    />
   );
 }
 
@@ -1475,14 +1482,13 @@ export default function DriverRoutePage() {
                       {info.locationPhotos.length > 0 && (
                         <div className="flex gap-2 overflow-x-auto">
                           {info.locationPhotos.map((p) => (
-                            <a key={p.id} href={`/api${p.path}`} target="_blank" rel="noreferrer" className="block shrink-0">
-                              {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL, not optimizable */}
-                              <img
+                            <div key={p.id} className="shrink-0">
+                              <PhotoZoom
                                 src={`/api${p.path}`}
                                 alt={t('delivery.driver.locationPhotoAlt')}
-                                className="h-24 w-32 object-cover rounded-lg border border-blue-200"
+                                className="h-24 w-32 object-contain bg-gray-100 rounded-lg border border-blue-200"
                               />
-                            </a>
+                            </div>
                           ))}
                         </div>
                       )}

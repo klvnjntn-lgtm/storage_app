@@ -12,6 +12,7 @@ import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
 import { useBranches } from '@/lib/hooks/useBranches';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -60,6 +61,7 @@ const STATUS_META: Record<FixedAsset['status'], { labelKey: string; color: strin
 export default function FixedAssetsPage() {
   const dialog = useDialog();
   const { t, language } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   // Assets are booked to a branch (P&L by branch); asked only of
   // multi-branch businesses.
   const { branches, multiBranch } = useBranches();
@@ -239,6 +241,7 @@ export default function FixedAssetsPage() {
       return;
     }
 
+    if (!(await confirmPastDates({ payment: payForm.paidAt }))) return;
     setPaySaving(true);
     try {
       const res = await apiFetch(`/fixed-assets/${payingId}/payments`, {
@@ -287,6 +290,7 @@ export default function FixedAssetsPage() {
       return;
     }
 
+    if (!(await confirmPastDates({ disposal: disposeForm.disposedAt }))) return;
     setDisposeSaving(true);
     try {
       const res = await apiFetch(`/fixed-assets/${disposingId}/dispose`, {

@@ -99,6 +99,8 @@ const MAX_LINES = 2000;
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const KIND_BY_SOURCE: Partial<Record<JournalSourceType, StatementKind>> = {
+  CUSTOMER_DEPOSIT: 'CUSTOMER_PAYMENT',
+  SUPPLIER_DEPOSIT: 'SUPPLIER_PAYMENT',
   SUPPLIER_PAYMENT: 'SUPPLIER_PAYMENT',
   EXPENSE: 'EXPENSE',
   PAYROLL: 'PAYROLL',

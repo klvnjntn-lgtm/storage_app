@@ -8,6 +8,7 @@ import { Users, Plus, X, Loader2, ChevronDown, ChevronUp, Wallet, Trash2, Send, 
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import Pagination from '@/app/components/shared/Pagination';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -142,6 +143,7 @@ export default function PayrollPage() {
 
 function RunsTab() {
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const router = useRouter();
   const [runs, setRuns] = useState<PayrollRun[] | null>(null);
   const [employees, setEmployees] = useState<Employee[] | null>(null);
@@ -244,6 +246,7 @@ function RunsTab() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!(await confirmPastDates({ document: form.documentDate }))) return;
     setCreateError(null);
     setCreateSaving(true);
     try {
@@ -330,6 +333,7 @@ function RunsTab() {
       setPayError(t('accounting.payroll.chooseDisbursementBankAccount'));
       return;
     }
+    if (!(await confirmPastDates({ payment: payForm.paidAt }))) return;
     setPaySaving(true);
     try {
       const res = await apiFetch(`/payroll/runs/${payingId}/mark-paid`, {
@@ -420,7 +424,7 @@ function RunsTab() {
       {showCreate && (
         <form onSubmit={handleCreate} className="border-2 border-blue-500/30 rounded-md bg-blue-50/40 p-4 mb-5 flex flex-col gap-3">
           {createError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{createError}</p>}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.month')}</label>
               <select

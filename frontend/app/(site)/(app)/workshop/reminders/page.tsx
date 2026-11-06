@@ -8,6 +8,7 @@ import { Bell, Check, Clock, Trash2, Car, Wrench } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { Reminder } from '@/app/components/invoices/types';
 import { toCalendarDateString, formatDMY } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -70,6 +71,7 @@ export default function RemindersPage() {
   const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +123,7 @@ export default function RemindersPage() {
 
   async function snooze(id: string, dueDate: string) {
     if (!dueDate) return;
+    if (!(await confirmPastDates({ reminder: dueDate }))) return;
     setBusyId(id);
     try {
       const res = await apiFetch(`/reminders/${id}/snooze`, {

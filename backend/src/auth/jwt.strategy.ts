@@ -1,6 +1,6 @@
 // src/auth/jwt.strategy.ts
 
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { DevicesService } from './devices.service';
-import { CSRF_HEADER, CSRF_HEADER_VALUE, readSessionCookie } from './session-cookie';
+import { CSRF_HEADER, CSRF_HEADER_VALUE, describeCsrfRefusal, readSessionCookie } from './session-cookie';
 import { isAdminRole } from './roles';
 import { effectiveBranchId } from './branch-scope';
 
@@ -42,6 +42,8 @@ export function getJwtSecret(): string {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  private readonly logger = new Logger('CsrfRefused');
+
   constructor(
     private prisma: PrismaService,
     private devices: DevicesService,
@@ -69,6 +71,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       !SAFE_METHODS.has(req.method) &&
       req.headers[CSRF_HEADER] !== CSRF_HEADER_VALUE
     ) {
+      this.logger.warn(describeCsrfRefusal(req, payload.sub));
       throw new ForbiddenException('Missing request header');
     }
 

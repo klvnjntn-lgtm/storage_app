@@ -9,8 +9,10 @@ import { BookOpen, Landmark, Wallet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
-import { toCalendarDateString } from '@/lib/dates';
+import { toCalendarDateString, formatDMY, parseCalendarDate } from '@/lib/dates';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
+import { fileNamePart } from '@/lib/excel-export';
 import { useLanguage } from '@/app/context/LanguageContext';
 
 
@@ -193,6 +195,45 @@ export default function AccountLedgerPage() {
     return { cashAndBank, byType: rest };
   }, [accounts]);
 
+  // The screen holds one page, so fetch them all.
+  const buildExcel = async () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const entries: LedgerEntry[] = [];
+    for (let p = 1; ; p++) {
+      const res = await apiFetch(
+        `/accounting/reports/account-ledger?accountId=${accountId}&from=${from}&to=${to}&page=${p}&pageSize=500`,
+      );
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const body: LedgerReport = await res.json();
+      entries.push(...body.entries);
+      if (p >= body.pagination.totalPages) break;
+    }
+    return {
+      fileName: `buku-besar-${fileNamePart(r.account.code)}-${from}_${to}.xlsx`,
+      sheets: [
+        {
+          name: `${r.account.code} ${r.account.name}`,
+          rows: [
+            [col('date'), col('entry'), col('description'), col('debit'), col('credit'), col('balance')],
+            [t('accounting.ledger.openingBalance'), '', '', '', '', r.openingBalance],
+            ...entries.map((e) => [
+              formatDMY(parseCalendarDate(e.date)),
+              e.entryNumber ?? '',
+              e.memo ?? '',
+              e.debit,
+              e.credit,
+              e.runningBalance,
+            ]),
+            [t('accounting.ledger.closingBalance'), '', '', '', '', r.closingBalance],
+          ],
+          money: [3, 4, 5],
+          widths: [14, 14, 48, 16, 16, 16],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -269,6 +310,7 @@ export default function AccountLedgerPage() {
               setTo(t ?? toCalendarDateString(new Date()));
             }}
           />
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}

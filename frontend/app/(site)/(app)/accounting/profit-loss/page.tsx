@@ -8,6 +8,8 @@ import { Scale, DollarSign, PackageSearch, Percent, Info, Receipt, MapPin } from
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useBranches } from '@/lib/hooks/useBranches';
+import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
+import { fileNamePart } from '@/lib/excel-export';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
@@ -121,6 +123,46 @@ export default function ProfitAndLossPage() {
   const hasExpenses = !!report && report.operatingExpenses.length > 0;
   const hasMultipleRevenueLines = !!report && report.revenue.length > 1;
 
+  const buildExcel = () => {
+    const r = report!;
+    const col = (key: string) => t(`accounting.export.${key}`);
+    const lines = (items: PnlLine[]) => items.map((l) => [l.code, l.name, l.amount]);
+    const branchName = branches.find((b) => b.id === branchId)?.name;
+    return {
+      fileName: `laba-rugi-${from}_${to}${branchName ? `-${fileNamePart(branchName)}` : ''}.xlsx`,
+      sheets: [
+        {
+          name: t('nav.items.profitLoss'),
+          rows: [
+            [col('code'), col('account'), col('amount')],
+            [t('accounting.profitLoss.revenue')],
+            ...lines(r.revenue),
+            ['', t('accounting.profitLoss.totalRevenue'), r.totalRevenue],
+            ['', t('accounting.profitLoss.cogs'), r.cogs],
+            ['', t('accounting.profitLoss.grossProfit'), r.grossProfit],
+            [t('accounting.profitLoss.operatingExpenses')],
+            ...lines(r.operatingExpenses),
+            ['', t('accounting.profitLoss.totalOperatingExpenses'), r.totalOperatingExpenses],
+            ['', t('accounting.profitLoss.netProfit'), r.netProfit],
+            // Same as on screen: what a branch's figures leave out.
+            ...(r.unallocated
+              ? [
+                  [],
+                  [t('accounting.profitLoss.unallocatedRevenue')],
+                  ...lines(r.unallocated.revenue),
+                  [t('accounting.profitLoss.unallocatedExpenses')],
+                  ...lines(r.unallocated.operatingExpenses),
+                  ['', t('accounting.profitLoss.unallocatedNet'), r.unallocated.netAmount],
+                ]
+              : []),
+          ],
+          money: [2],
+          widths: [10, 40, 18],
+        },
+      ],
+    };
+  };
+
   return (
     <main
       className="min-h-screen text-black"
@@ -177,6 +219,7 @@ export default function ProfitAndLossPage() {
               </select>
             </div>
           )}
+          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
         </div>
 
         {error && (

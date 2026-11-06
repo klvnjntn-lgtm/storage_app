@@ -5,6 +5,8 @@ import AuthGuard from "../components/shared/AuthGuard";
 import { LanguageProvider } from "../context/LanguageContext";
 import { DialogProvider } from "../components/shared/DialogProvider";
 import { ThemeProvider, themeInitScript } from "../context/ThemeContext";
+import PageReady from "../components/shared/PageReady";
+import { pageRecoveryScript } from "@/lib/pageRecovery";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,9 +43,11 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: pageRecoveryScript }} />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col">
+        <PageReady />
         <ThemeProvider>
           <LanguageProvider>
             <DialogProvider>

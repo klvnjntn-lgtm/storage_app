@@ -144,9 +144,7 @@
 .headRow > span {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.85);
 }
 
 .n {

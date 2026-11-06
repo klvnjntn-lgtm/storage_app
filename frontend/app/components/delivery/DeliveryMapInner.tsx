@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 're
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { START_ICON_HEIGHT, START_ICON_HTML, START_ICON_WIDTH } from './startPointIcon';
+import { outcomeMark } from './teamColors';
 
 export type StopStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
 
@@ -18,6 +19,8 @@ export type MapStop = {
   detail?: string | null;
   // Overrides the status color (e.g. one color per driver in a plan preview).
   color?: string;
+  // With a color that isn't the status: finished stops still show how they ended.
+  showOutcome?: boolean;
 };
 
 // A driver's best-guess position (see DeliveryRoutesService.whereabouts) —
@@ -32,6 +35,8 @@ export type MapDriver = {
   detail?: string | null;
   // Grey when we only know the depot, not a stop they've reached.
   muted?: boolean;
+  // Instead of the default blue (e.g. the driver's team color).
+  color?: string;
 };
 
 // Where the business's routes leave from.
@@ -55,10 +60,10 @@ const STATUS_COLOR: Record<StopStatus, string> = {
 // sidesteps the well-known bundler/default-marker-asset-404 issue
 // entirely, and matches the existing status badge colors used elsewhere
 // in the delivery module.
-function dotIcon(color: string) {
+function dotIcon(color: string, mark = '') {
   return L.divIcon({
     className: '',
-    html: `<div style="background:${color};width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 0 0 1px rgba(0,0,0,0.25)"></div>`,
+    html: `<div style="background:${color};width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 0 0 1px rgba(0,0,0,0.25);color:white;font:700 11px/16px system-ui,sans-serif;text-align:center">${mark}</div>`,
     iconSize: [16, 16],
     iconAnchor: [8, 8],
   });
@@ -79,11 +84,11 @@ const startIcon = L.divIcon({
   popupAnchor: [0, -START_ICON_HEIGHT],
 });
 
-function driverIcon(badge: string, muted: boolean) {
+function driverIcon(badge: string, muted: boolean, color = '#1d4ed8') {
   const safe = badge.replace(/[&<>"']/g, '');
   return L.divIcon({
     className: '',
-    html: `<div style="background:${muted ? '#6b7280' : '#1d4ed8'};color:white;font:600 11px/1 system-ui,sans-serif;min-width:28px;height:28px;padding:0 6px;border-radius:14px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35)">${safe}</div>`,
+    html: `<div style="background:${muted ? '#6b7280' : color};color:white;font:600 11px/1 system-ui,sans-serif;min-width:28px;height:28px;padding:0 6px;border-radius:14px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35)">${safe}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
   });
@@ -192,7 +197,7 @@ export default function DeliveryMapInner({
           <Marker
             key={stop.id}
             position={[stop.latitude, stop.longitude]}
-            icon={dotIcon(stop.color ?? STATUS_COLOR[stop.status])}
+            icon={dotIcon(stop.color ?? STATUS_COLOR[stop.status], outcomeMark(stop))}
             ref={(m) => {
               if (m) markers.current[stop.id] = m;
               else delete markers.current[stop.id];
@@ -215,7 +220,7 @@ export default function DeliveryMapInner({
           <Marker
             key={`driver-${driver.id}`}
             position={[driver.latitude, driver.longitude]}
-            icon={driverIcon(driver.badge, !!driver.muted)}
+            icon={driverIcon(driver.badge, !!driver.muted, driver.color)}
             zIndexOffset={1000}
           >
             <Popup>

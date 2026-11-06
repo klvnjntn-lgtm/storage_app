@@ -20,6 +20,7 @@ import { SalesOrderCartPanel } from '@/app/components/sales-orders/SalesOrderCar
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
 import { resolveCartTarget } from '@/lib/invoice-cart';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import {
   CartLine,
@@ -75,6 +76,7 @@ export default function SalesOrderFormPage() {
 function SalesOrderFormPageInner() {
   const router = useRouter();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   // Office (document wide, search aside) or Cashier (search wide, cart aside); see useDocumentLayout.
   const { layout, setLayout } = useDocumentLayout();
   const searchParams = useSearchParams();
@@ -671,6 +673,7 @@ function SalesOrderFormPageInner() {
       return;
     }
 
+    if (!(await confirmPastDates({ document: orderDate }))) return;
     setSaving(true);
     savedRef.current = true;
     try {

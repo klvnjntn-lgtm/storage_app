@@ -217,6 +217,32 @@ body {
   animation-play-state: paused !important;
 }
 
+/* Solution colours for text and icons on the page itself. The raw zone tints
+   only clear contrast on dark, so light mode gets its own inks. */
+:root {
+  --zone-ink-warehouse: #60a5fa;
+  --zone-ink-sales: #34d399;
+  --zone-ink-workshop: #fbbf24;
+  --zone-ink-delivery: #a78bfa;
+}
+:root[data-theme='light'] {
+  --zone-ink-warehouse: #1d4ed8;
+  --zone-ink-sales: #047857;
+  --zone-ink-workshop: #92400e;
+  --zone-ink-delivery: #6d28d9;
+}
+.landing :focus-visible {
+  outline-color: var(--zone-ink-warehouse) !important;
+}
+.landing a:active,
+.landing button:active {
+  opacity: 0.82;
+}
+.landing button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Lite mode (low-end devices, set by useLowEndDevice): swap the 120–150px
    blur glows for a radial mask — same soft look, no full-layer blur pass —
    drop backdrop blurs, and let the browser skip offscreen sections. */

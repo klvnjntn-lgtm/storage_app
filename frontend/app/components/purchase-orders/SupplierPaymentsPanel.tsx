@@ -5,9 +5,11 @@ import { Plus, Trash2, Wallet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, toCalendarDateString } from '@/lib/dates';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import { ApplyDepositDialog, type OpenDeposit } from '@/app/components/shared/ApplyDepositDialog';
 
 type Method = 'CASH' | 'TRANSFER' | 'QRIS' | 'OTHER';
 type Payment = {
@@ -26,6 +28,7 @@ type BankAccountOption = { id: string; bankName: string; accountNumber: string; 
 export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchaseOrderId: string; refreshKey: number }) {
   const dialog = useDialog();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [outstanding, setOutstanding] = useState(0);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
@@ -33,12 +36,16 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
   const [form, setForm] = useState({ amount: '', method: 'TRANSFER' as Method, bankAccountId: '', paidAt: toCalendarDateString(new Date()), note: '' });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openDeposits, setOpenDeposits] = useState<OpenDeposit[]>([]);
+  const [applyDepositOpen, setApplyDepositOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [listRes, outRes] = await Promise.all([
+    const [listRes, outRes, depositRes] = await Promise.all([
       apiFetch(`/supplier-payments?purchaseOrderId=${purchaseOrderId}`),
       apiFetch(`/supplier-payments/outstanding/${purchaseOrderId}`),
+      apiFetch(`/supplier-deposits/for-purchase-order/${purchaseOrderId}`),
     ]);
+    if (depositRes.ok) setOpenDeposits(await depositRes.json());
     if (listRes.ok) setPayments(await listRes.json());
     if (outRes.ok) setOutstanding(Number((await outRes.json()).outstanding ?? 0));
   }, [purchaseOrderId]);
@@ -73,6 +80,7 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
       setError(t('purchasing.supplierPayments.bankAccountRequired'));
       return;
     }
+    if (!(await confirmPastDates({ payment: form.paidAt }))) return;
     setBusy(true);
     setError(null);
     const res = await apiFetch('/supplier-payments', {
@@ -158,6 +166,39 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
             </li>
           ))}
         </ul>
+      )}
+
+      {outstanding > 0 && openDeposits.length > 0 && (
+        <div className="border-2 border-emerald-300 bg-emerald-50 rounded-md p-3 text-sm flex flex-wrap items-center justify-between gap-2 mb-2">
+          <p className="text-emerald-900">
+            {t('purchasing.deposits.available', {
+              amount: formatIDR(openDeposits.reduce((sum, d) => sum + d.remaining, 0)),
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={() => setApplyDepositOpen(true)}
+            className="text-sm px-3 py-1.5 rounded-md border-2 border-emerald-600/40 text-emerald-800 font-semibold hover:bg-emerald-100 transition-colors"
+          >
+            {t('purchasing.deposits.apply')}
+          </button>
+        </div>
+      )}
+
+      {applyDepositOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center print:hidden z-50">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-md shadow-lg w-full max-w-md">
+            <ApplyDepositDialog
+              apiBase="/supplier-deposits"
+              target={{ purchaseOrderId }}
+              i18nPrefix="purchasing.deposits"
+              balance={outstanding}
+              deposits={openDeposits}
+              onApplied={load}
+              onClose={() => setApplyDepositOpen(false)}
+            />
+          </div>
+        </div>
       )}
 
       {error && !adding && <p className="text-xs text-red-700 mb-2">{error}</p>}

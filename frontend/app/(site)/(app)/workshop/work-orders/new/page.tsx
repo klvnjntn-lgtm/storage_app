@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClipboardList, Search, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
+import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { PageFrame, ErrorNote, btnPrimary, btnSecondary, inputCls } from '@/app/components/shared/PageFrame';
 import WorkOrderForm, {
@@ -45,6 +46,7 @@ function NewWorkOrderPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLanguage();
+  const confirmPastDates = useConfirmPastDates();
 
   const [vehicle, setVehicle] = useState<PickedVehicle | null>(null);
   const [query, setQuery] = useState('');
@@ -122,6 +124,7 @@ function NewWorkOrderPage() {
       setError(problem);
       return;
     }
+    if (!(await confirmPastDates({ validUntil: form.validUntil }))) return;
     setSaving(true);
     setError(null);
     try {

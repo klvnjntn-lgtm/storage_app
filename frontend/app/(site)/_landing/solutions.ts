@@ -15,14 +15,17 @@ export type Solution = {
   icon: LucideIcon;
   /** space-separated rgb channels, for rgb(var(--zone) / a) */
   rgb: string;
+  /** decorative tint on the dark 3D surfaces */
   hex: string;
+  /** readable on the page in either theme (globals.css) */
+  ink: string;
 };
 
 export const SOLUTIONS: Solution[] = [
-  { key: 'warehouse', name: 'WareSys Warehouse', icon: Package, rgb: '96 165 250', hex: '#60a5fa' },
-  { key: 'sales', name: 'Invoice POS', icon: ReceiptText, rgb: '52 211 153', hex: '#34d399' },
-  { key: 'workshop', name: 'Workshop RMS', icon: Wrench, rgb: '251 191 36', hex: '#fbbf24' },
-  { key: 'delivery', name: 'Delivery DMS', icon: Truck, rgb: '167 139 250', hex: '#a78bfa' },
+  { key: 'warehouse', name: 'WareSys Warehouse', icon: Package, rgb: '96 165 250', hex: '#60a5fa', ink: 'var(--zone-ink-warehouse)' },
+  { key: 'sales', name: 'Invoice POS', icon: ReceiptText, rgb: '52 211 153', hex: '#34d399', ink: 'var(--zone-ink-sales)' },
+  { key: 'workshop', name: 'Workshop RMS', icon: Wrench, rgb: '251 191 36', hex: '#fbbf24', ink: 'var(--zone-ink-workshop)' },
+  { key: 'delivery', name: 'Delivery DMS', icon: Truck, rgb: '167 139 250', hex: '#a78bfa', ink: 'var(--zone-ink-delivery)' },
 ];
 
 export const solutionByKey = (key: SolutionKey) => SOLUTIONS.find((s) => s.key === key)!;

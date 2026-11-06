@@ -65,139 +65,17 @@
   width: 36px;
   height: 36px;
   border-radius: 11px;
-  color: rgb(var(--zone));
   background: rgb(var(--zone) / 0.13);
   box-shadow: inset 0 0 0 1px rgb(var(--zone) / 0.28);
 }
 
-.mono {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-}
-
-/* ─── Product mocks: decorative, always dark like the 3D cards ─────── */
-
-.mock {
-  padding: 18px;
-  border-radius: 18px;
-  color: #cbd5e1;
-  font-size: 13.5px;
-  background: linear-gradient(180deg, #0f172a, #080d1b);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 30px 60px -30px rgba(0, 0, 0, 0.7),
-    0 0 70px -24px rgb(var(--zone) / 0.7);
-}
-
-.mockHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 12px;
-  margin-bottom: 4px;
-  color: #f1f5f9;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.mockBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: rgb(var(--zone));
-  background: rgb(var(--zone) / 0.14);
-}
-
-.mockRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-}
-
-.mockRow > span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mockRow b {
-  color: #f1f5f9;
-  font-weight: 600;
-}
-
-.mockTotal {
-  margin-top: 4px;
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.mockSplit {
-  display: flex;
-  gap: 3px;
-  height: 7px;
-  margin-top: 6px;
-}
-
-.mockSplit i {
-  border-radius: 7px;
-  background: rgb(var(--zone));
-}
-
-.mockSplit i + i {
-  background: rgb(var(--zone) / 0.4);
-}
-
-.plate {
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #fff;
-  background: #05070c;
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.7);
-}
-
-.stops {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-}
-
-.stops li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-}
-
-.stopDot {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-}
-
-.stopDone {
-  color: #f1f5f9;
-}
-
-.stopDone .stopDot {
-  color: #0f172a;
-  border-color: transparent;
-  background: rgb(var(--zone));
+.shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--ink) / 0.12);
+  box-shadow: 0 24px 50px -28px rgb(0 0 0 / 0.45);
 }
 
 @media (prefers-reduced-motion: reduce) {
