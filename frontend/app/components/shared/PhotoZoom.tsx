@@ -54,7 +54,9 @@ export default function PhotoZoom({
         className="block max-w-full cursor-zoom-in"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- signed URL or local preview, not optimizable */}
-        <img src={src} alt={alt} onError={onError} className={className} />
+        {/* Lazy: a driver's route can show dozens of full-size photos as thumbnails,
+            and fetching them all up front is several MB on a phone's signal. */}
+        <img src={src} alt={alt} loading="lazy" decoding="async" onError={onError} className={className} />
       </button>
       {open &&
         // On <body>: a transformed ancestor would otherwise trap a fixed overlay.

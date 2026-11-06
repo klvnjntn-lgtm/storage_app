@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/apifetch';
+import { apiFetch, timeoutSignal } from '@/lib/apifetch';
 import { getSessionMarker } from '@/lib/session';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { homeFor } from '@/lib/roles';
@@ -16,6 +16,7 @@ const checkIsPublic = (pathname: string) =>
 // or other modules (the backend refuses them anyway, see DriverScopeGuard). Password reset stays
 // reachable.
 const SCOPED_ROLES = ['DRIVER', 'MECHANIC'];
+const VERIFY_TIMEOUT_MS = 20_000;
 const scopedMayView = (role: string, pathname: string) =>
   [homeFor(role), '/forgot-password', '/reset-password', '/suspended'].some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
@@ -53,6 +54,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   // Role of the verified token — drives the DRIVER-only routing above.
   const [role, setRole] = useState<string | null>(null);
   const [suspended, setSuspended] = useState(false);
+  // The session check couldn't reach the server. Bumping `attempt` tries again.
+  const [unreachable, setUnreachable] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,10 +103,11 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     // and redirecting to /login on a 401 — we just need to not render
     // the page shell while that's in flight.
     setChecked(false);
+    setUnreachable(false);
 
     async function verify() {
       try {
-        const res = await apiFetch('/auth/me');
+        const res = await apiFetch('/auth/me', { signal: timeoutSignal(VERIFY_TIMEOUT_MS) });
         if (cancelled) return;
 
         if (!res.ok) {
@@ -125,9 +130,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
           return;
         }
         setChecked(true);
-      } catch {
-        // apiFetch already cleared storage + redirected on 401.
-        // Nothing further to do here.
+      } catch (err) {
+        // apiFetch already cleared storage + redirected on 401, so that keeps
+        // the loading screen. A failed or timed-out request has nothing coming
+        // after it: without this it stayed on "Loading" until a manual reload.
+        const noResponse = err instanceof TypeError || (err as Error)?.name === 'AbortError';
+        if (!cancelled && noResponse) setUnreachable(true);
       }
     }
 
@@ -136,13 +144,28 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router, role, suspended]);
+  }, [pathname, router, role, suspended, attempt]);
 
   const isPublic = checkIsPublic(pathname);
   // Don't flash a page (landing, AppShell) a driver or the mechanic account is being sent away from.
   const leavingAsDriver = !!role && SCOPED_ROLES.includes(role) && !scopedMayView(role, pathname);
   // Nor a page of a suspended org's app (it would only fill with errors).
   const leavingAsSuspended = suspended && pathname !== '/suspended' && !isPublic;
+
+  if (unreachable && !checked && !isPublic) {
+    return (
+      <main className="min-h-screen bg-white flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-sm text-gray-700 max-w-xs">{t('auth.login.connectionProblem')}</p>
+        <button
+          type="button"
+          onClick={() => setAttempt((n) => n + 1)}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700"
+        >
+          {t('common.retry')}
+        </button>
+      </main>
+    );
+  }
 
   if ((!checked && !isPublic) || leavingAsDriver || leavingAsSuspended) {
     return (

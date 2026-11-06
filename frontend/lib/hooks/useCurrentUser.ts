@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiFetch } from '@/lib/apifetch';
+import { apiFetch, timeoutSignal } from '@/lib/apifetch';
 import { getSessionMarker } from '@/lib/session';
 import type { Role } from '@/lib/roles';
 
@@ -20,12 +20,13 @@ export type CurrentUser = {
 // new on every sign-in, so signing in as someone else never sees the
 // previous user.
 const CACHE_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 let cached: { at: number; marker: string | null; promise: Promise<CurrentUser | null> } | null = null;
 
 function fetchCurrentUser(): Promise<CurrentUser | null> {
   const marker = getSessionMarker();
   if (cached && cached.marker === marker && Date.now() - cached.at < CACHE_MS) return cached.promise;
-  const promise = apiFetch('/auth/me')
+  const promise = apiFetch('/auth/me', { signal: timeoutSignal(REQUEST_TIMEOUT_MS) })
     .then(async (res) => (res.ok ? ((await res.json()) as CurrentUser) : null))
     .catch((err) => {
       console.error(err);

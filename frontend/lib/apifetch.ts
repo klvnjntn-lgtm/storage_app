@@ -58,6 +58,14 @@ async function fetchWithRetry(url: string, init: RequestInit): Promise<Response>
   }
 }
 
+// fetch() has no timeout of its own, so a dying signal can leave a request
+// hanging for minutes, and anything waiting on it with it.
+export function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 export async function apiFetch(
   path: string,
   init?: RequestInit,

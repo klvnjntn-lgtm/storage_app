@@ -85,10 +85,35 @@ describe('SignedFileUrlService', () => {
     expect(signer.verify(q.key, q.exp, '')).toBeNull();
   });
 
+  it('gives the same link within an expiry step, lasting at least the TTL', () => {
+    const key = 'delivery-proofs/org/do/p.webp';
+    // Just after a step begins, so both calls land in the same one.
+    const start = 900 * 2_000_000 * 1000 + 1000;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const first = signer.sign(key);
+      clock.mockReturnValue(start + 60_000);
+      expect(signer.sign(key).path).toBe(first.path);
+      expect(
+        first.expiresAt.getTime() - (start + 60_000),
+      ).toBeGreaterThanOrEqual(14 * 60_000);
+      clock.mockReturnValue(start + 900_000);
+      expect(signer.sign(key).path).not.toBe(first.path);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('rejects an expired link', () => {
-    const { path } = signer.sign('delivery-proofs/org/do/p.webp', -1);
+    const { path } = signer.sign('delivery-proofs/org/do/p.webp', 60);
     const q = parse(path);
-    expect(signer.verify(q.key, q.exp, q.sig)).toBeNull();
+    const now = Date.now();
+    const later = jest.spyOn(Date, 'now').mockReturnValue(now + 2 * 3600_000);
+    try {
+      expect(signer.verify(q.key, q.exp, q.sig)).toBeNull();
+    } finally {
+      later.mockRestore();
+    }
   });
 });
 

@@ -17,12 +17,19 @@ export const isPrivateKey = (key: string) =>
 
 const DEFAULT_TTL_SECONDS = 15 * 60;
 
+// Expiries are rounded up to this step, so asking for the same file again
+// within it gives the same link. A link that changed on every request could
+// never be served from the browser's cache: each reload of a driver's route
+// downloaded all of its photos again.
+const EXPIRY_STEP_SECONDS = 15 * 60;
+
 // Temporary links for private files, for use in <img src> — the browser
 // can't attach the app's Bearer token there, so the link itself carries
 // the permission: an HMAC over (key, expiry). Whoever is allowed to see a
 // file asks an authenticated endpoint for a link; the link then works for
 // anyone holding it until it expires, and can't be altered to point at a
-// different file or live longer.
+// different file or live longer. It lasts at least the TTL asked for, and up
+// to one EXPIRY_STEP_SECONDS more.
 //
 // FILE_URL_SECRET if set, otherwise JWT_SECRET — prefixed with a purpose
 // label so a signature here can never double as anything else.
@@ -48,7 +55,8 @@ export class SignedFileUrlService {
     key: string,
     ttlSeconds = DEFAULT_TTL_SECONDS,
   ): { path: string; expiresAt: Date } {
-    const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+    const earliest = Math.floor(Date.now() / 1000) + ttlSeconds;
+    const exp = Math.ceil(earliest / EXPIRY_STEP_SECONDS) * EXPIRY_STEP_SECONDS;
     const params = new URLSearchParams({
       key,
       exp: String(exp),
