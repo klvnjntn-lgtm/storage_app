@@ -231,7 +231,8 @@ export default function DeliveryMonitoringPage() {
   const now = updatedAt?.getTime() ?? 0;
   const mapDrivers = useMemo<MapDriver[]>(() => {
     return byTeam
-      .filter((d) => d.position && (!mapTeamId || d.team.id === mapTeamId))
+      // A team with no stops that day isn't going anywhere, so it gets no badge.
+      .filter((d) => d.total > 0 && d.position && (!mapTeamId || d.team.id === mapTeamId))
       .map((d) => ({
         id: d.routeId,
         latitude: d.position!.latitude,
@@ -248,6 +249,12 @@ export default function DeliveryMonitoringPage() {
           : t('delivery.monitoring.atDepot'),
       }));
   }, [byTeam, mapTeamId, noDriver, t, now, teamColor]);
+
+  // Teams with no stops that day go last; the order is otherwise unchanged.
+  const teamCards = useMemo(
+    () => [...byTeam.filter((d) => d.total > 0), ...byTeam.filter((d) => d.total === 0)],
+    [byTeam],
+  );
 
   // Popup shows the stop, then its team/driver and status.
   const visibleMapStops = useMemo<MapStop[]>(
@@ -369,7 +376,7 @@ export default function DeliveryMonitoringPage() {
           {!loading && byTeam.length === 0 && (
             <p className="text-sm text-gray-500">{t('delivery.monitoring.noTeams')}</p>
           )}
-          {byTeam.map((d) => {
+          {teamCards.map((d) => {
             const done = d.delivered + d.failed;
             return (
               <div

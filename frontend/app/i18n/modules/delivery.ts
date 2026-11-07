@@ -529,6 +529,8 @@ export const delivery = {
         retakePhoto: 'Retake photo',
         shutter: 'Take photo',
         closeCamera: 'Close',
+        switchCamera: 'Switch camera',
+        cameraSwitchFailed: "That camera couldn't open. Staying on the current one.",
         usePhoneCamera: 'Use phone camera',
         cameraUnavailable: 'The camera could not open here. Allow camera access for this site, or use the phone camera.',
         cameraBlocked:
@@ -1161,6 +1163,8 @@ export const delivery = {
         retakePhoto: 'Ambil ulang foto',
         shutter: 'Ambil foto',
         closeCamera: 'Tutup',
+        switchCamera: 'Ganti kamera',
+        cameraSwitchFailed: 'Kamera itu tidak bisa dibuka. Tetap memakai kamera sebelumnya.',
         usePhoneCamera: 'Pakai kamera HP',
         cameraUnavailable: 'Kamera tidak bisa dibuka di sini. Izinkan akses kamera untuk situs ini, atau pakai kamera HP.',
         cameraBlocked:
