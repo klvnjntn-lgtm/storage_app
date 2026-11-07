@@ -16,8 +16,19 @@ const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // which the backend's origin allowlist refuses. SameSite=Lax already stops
 // most cross-site requests; this covers same-site ones (another app on the
 // same host or LAN IP) too.
+//
+// Any non-empty value passes. The preflight is what stops other origins, and
+// it's needed whatever the value is. This header name is also a common one:
+// a browser extension or an Android WebView can overwrite ours (a Firefox
+// sending "XMLHttpRequest" had every write refused), so an exact match only
+// ever blocked real users.
 export const CSRF_HEADER = 'x-requested-with';
 export const CSRF_HEADER_VALUE = 'waresys';
+
+export function hasCsrfHeader(req: Pick<Request, 'headers'>) {
+  const value = req.headers?.[CSRF_HEADER];
+  return typeof value === 'string' && value.trim() !== '';
+}
 
 // One log line for a write refused by the CSRF check, to tell a browser that
 // dropped the header (or an extension changing it) from a real cross-site

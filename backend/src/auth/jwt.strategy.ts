@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { DevicesService } from './devices.service';
-import { CSRF_HEADER, CSRF_HEADER_VALUE, describeCsrfRefusal, readSessionCookie } from './session-cookie';
+import { describeCsrfRefusal, hasCsrfHeader, readSessionCookie } from './session-cookie';
 import { isAdminRole } from './roles';
 import { effectiveBranchId } from './branch-scope';
 
@@ -75,7 +75,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (
       viaCookie &&
       !SAFE_METHODS.has(req.method) &&
-      req.headers[CSRF_HEADER] !== CSRF_HEADER_VALUE
+      !hasCsrfHeader(req)
     ) {
       this.logger.warn(describeCsrfRefusal(req, payload.sub));
       throw new ForbiddenException('Missing request header');

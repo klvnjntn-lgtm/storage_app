@@ -26,7 +26,10 @@ export default function GlobalError({
   const connectionLost = isConnectionError(error);
 
   return (
-    <html lang="id">
+    <html lang="id" translate="no">
+      <head>
+        <meta name="google" content="notranslate" />
+      </head>
       <body
         style={{
           margin: 0,

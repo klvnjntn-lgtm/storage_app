@@ -10,7 +10,7 @@ import { AppModule } from '../app.module';
 import { LicenseService } from '../license/license.service';
 import { MailerService } from './mailer/mailer.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SESSION_COOKIE, describeCsrfRefusal } from './session-cookie';
+import { SESSION_COOKIE, describeCsrfRefusal, hasCsrfHeader } from './session-cookie';
 
 process.env.PRINT_TOKEN_SECRET ??= 'test-print-secret';
 jest.mock('puppeteer', () => ({ __esModule: true, default: {} }));
@@ -78,6 +78,14 @@ describe('session cookie (e2e)', () => {
       .patch('/auth/me')
       .set('Cookie', cookie)
       .set('X-Requested-With', 'waresys')
+      .send({ avatarUrl: null })
+      .expect(200);
+
+    // A browser extension can overwrite the value; that's still a real user.
+    await request(app.getHttpServer())
+      .patch('/auth/me')
+      .set('Cookie', cookie)
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({ avatarUrl: null })
       .expect(200);
 
@@ -184,6 +192,18 @@ describe('session cookie (e2e)', () => {
     }
     // Even the right password is refused while locked.
     await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(429);
+  });
+});
+
+describe('hasCsrfHeader', () => {
+  const req = (headers: Record<string, string>) => ({ headers }) as never;
+
+  it('accepts any non-empty value and refuses an absent or blank one', () => {
+    expect(hasCsrfHeader(req({ 'x-requested-with': 'waresys' }))).toBe(true);
+    expect(hasCsrfHeader(req({ 'x-requested-with': 'XMLHttpRequest' }))).toBe(true);
+    expect(hasCsrfHeader(req({}))).toBe(false);
+    expect(hasCsrfHeader(req({ 'x-requested-with': '' }))).toBe(false);
+    expect(hasCsrfHeader(req({ 'x-requested-with': '   ' }))).toBe(false);
   });
 });
 

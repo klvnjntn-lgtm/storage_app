@@ -18,11 +18,13 @@ export default function PublicRootLayout({
   return (
     <html
       lang="id"
+      translate="no"
       className="antialiased"
       // the theme script below sets data-theme/color-scheme before hydration
       suppressHydrationWarning
     >
       <head>
+        <meta name="google" content="notranslate" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       {/* Same light/dark palette as the app (theme.css): the customer's saved choice, else their phone's. */}

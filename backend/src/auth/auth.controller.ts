@@ -15,9 +15,8 @@ import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import {
-  CSRF_HEADER,
-  CSRF_HEADER_VALUE,
   clearSessionCookie,
+  hasCsrfHeader,
   readSessionCookie,
   setSessionCookie,
 } from './session-cookie';
@@ -208,7 +207,7 @@ export class AuthController {
   @SkipLicenseCheck()
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    if (req.headers[CSRF_HEADER] !== CSRF_HEADER_VALUE) {
+    if (!hasCsrfHeader(req)) {
       throw new ForbiddenException('Missing request header');
     }
     const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '');

@@ -38,11 +38,15 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      translate="no"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       // the theme script below sets data-theme/color-scheme before hydration
       suppressHydrationWarning
     >
       <head>
+        {/* Chrome's page translation rewrites text behind React's back, which crashed
+            the driver page on slow phones (removeChild). The app has its own ID/EN. */}
+        <meta name="google" content="notranslate" />
         <script dangerouslySetInnerHTML={{ __html: pageRecoveryScript }} />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
