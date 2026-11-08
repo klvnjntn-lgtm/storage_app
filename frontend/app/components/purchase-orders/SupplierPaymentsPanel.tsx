@@ -7,6 +7,7 @@ import { formatIDR } from '@/lib/format';
 import { formatDMY, toCalendarDateString } from '@/lib/dates';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { ApplyDepositDialog, type OpenDeposit } from '@/app/components/shared/ApplyDepositDialog';
@@ -25,7 +26,16 @@ type BankAccountOption = { id: string; bankName: string; accountNumber: string; 
 
 // What's still owed on this PO, the payments made against it, and recording
 // a new one. Admin-only, like the supplier-payments API behind it.
-export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchaseOrderId: string; refreshKey: number }) {
+export function SupplierPaymentsPanel({
+  purchaseOrderId,
+  refreshKey,
+  onChanged,
+}: {
+  purchaseOrderId: string;
+  refreshKey: number;
+  // After a payment is recorded or voided here, e.g. so a payments list elsewhere on the page reloads.
+  onChanged?: () => void;
+}) {
   const dialog = useDialog();
   const { t } = useLanguage();
   const confirmPastDates = useConfirmPastDates();
@@ -76,6 +86,10 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
       setError(t('purchasing.supplierPayments.amountInvalid'));
       return;
     }
+    if (!form.paidAt) {
+      setError(t('purchasing.supplierPayments.dateRequired'));
+      return;
+    }
     if (form.method !== 'CASH' && !form.bankAccountId) {
       setError(t('purchasing.supplierPayments.bankAccountRequired'));
       return;
@@ -103,6 +117,7 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
     setAdding(false);
     setForm((f) => ({ ...f, amount: '', note: '' }));
     load();
+    onChanged?.();
   }
 
   async function voidPayment(id: string) {
@@ -114,6 +129,7 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
       return;
     }
     load();
+    onChanged?.();
   }
 
   if (!payments) return null;
@@ -122,9 +138,9 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
   const input = 'w-full border-2 border-gray-300 rounded-md px-2 py-1.5 text-sm outline-none focus:border-blue-500';
 
   return (
-    <section className="bg-white border-2 border-gray-200 rounded-md p-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
-        <Wallet size={14} /> {t('purchasing.supplierPayments.title')}
+    <section className="bg-white border-2 border-blue-500/30 rounded-md p-3 shadow-sm">
+      <h2 className="flex items-center gap-1.5 text-sm font-bold text-blue-800 mb-2">
+        <Wallet size={16} /> {t('purchasing.supplierPayments.title')}
       </h2>
 
       <div className="grid grid-cols-2 gap-2 text-center mb-3">
@@ -145,9 +161,8 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
           {payments.map((p) => (
             <li key={p.id} className="py-1.5 flex items-center justify-between gap-2">
               <span className="min-w-0">
-                <span className="text-xs text-gray-500">
-                  {formatDMY(new Date(p.paidAt))} · {t(`purchasing.supplierPayments.methods.${p.method}`)}
-                </span>
+                <span className="text-sm font-medium text-gray-800">{formatDMY(new Date(p.paidAt))}</span>
+                <span className="text-xs text-gray-500"> · {t(`purchasing.supplierPayments.methods.${p.method}`)}</span>
                 {p.externalId && (
                   <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
                     {t('purchasing.supplierPayments.imported')}
@@ -207,7 +222,7 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
         <form onSubmit={record} className="grid grid-cols-2 gap-2">
           <label className="text-xs text-gray-500">
             {t('purchasing.supplierPayments.amount')}
-            <input required inputMode="decimal" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} />
+            <MoneyInput required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} />
           </label>
           <label className="text-xs text-gray-500">
             {t('purchasing.supplierPayments.method')}
@@ -247,8 +262,11 @@ export function SupplierPaymentsPanel({ purchaseOrderId, refreshKey }: { purchas
           </div>
         </form>
       ) : outstanding > 0 ? (
-        <button onClick={openForm} className="flex items-center gap-1 text-sm font-semibold text-blue-700">
-          <Plus size={14} /> {t('purchasing.supplierPayments.record')}
+        <button
+          onClick={openForm}
+          className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={16} /> {t('purchasing.supplierPayments.record')}
         </button>
       ) : (
         payments.length > 0 && <p className="text-xs text-gray-500">{t('purchasing.supplierPayments.nothingOutstanding')}</p>

@@ -19,7 +19,7 @@ import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { errorMessage } from '@/lib/api-error';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -369,6 +369,44 @@ function PurchaseOrderFormPageInner() {
     };
   }
 
+  // Saving a draft creates its "new product" rows in the catalogue. From then on they're ordinary
+  // catalogue lines: sending them as newProduct again would create the same SKU twice, and the
+  // backend refuses that ("SKU already exists") — so the next autosave or Save failed.
+  function absorbCreatedProducts(
+    sent: PONewProductLine[],
+    items: { productId: string | null; product?: { id: string; name: string; sku: string | null } | null }[],
+  ) {
+    const bySku = new Map<string, { id: string; name: string; sku: string | null }>();
+    for (const i of items) if (i.product?.sku) bySku.set(i.product.sku.trim().toLowerCase(), i.product);
+    const moved = new Map<string, { id: string; name: string; sku: string | null }>();
+    for (const l of sent) {
+      const p = bySku.get(l.sku.trim().toLowerCase());
+      if (p) moved.set(l.key, p);
+    }
+    if (moved.size === 0) return;
+    // Rows edited since the request went out keep their current quantity and cost; a row whose SKU
+    // was changed meanwhile stays a new-product row.
+    const current = newProductLinesRef.current.filter((l) => {
+      const p = moved.get(l.key);
+      return p && p.sku?.trim().toLowerCase() === l.sku.trim().toLowerCase();
+    });
+    if (current.length === 0) return;
+    const keys = new Set(current.map((l) => l.key));
+    setNewProductLines((prev) => prev.filter((l) => !keys.has(l.key)));
+    setCart((prev) => {
+      const next = { ...prev };
+      for (const l of current) {
+        const p = moved.get(l.key)!;
+        next[p.id] = {
+          product: { id: p.id, name: p.name, sku: p.sku, barcode: l.barcode ?? null, image: null },
+          quantity: (prev[p.id]?.quantity ?? 0) + l.quantity,
+          unitCost: l.unitCost,
+        };
+      }
+      return next;
+    });
+  }
+
   function adoptId(id: string) {
     setCurrentId(id);
     window.history.replaceState(null, '', `/purchasing/purchase-orders/new?id=${id}`);
@@ -382,23 +420,23 @@ function PurchaseOrderFormPageInner() {
     if (!hasSaveableContent(cartRef.current, newProductLinesRef.current, supplierRef.current)) return;
 
     const payload = buildAutosavePayload();
+    const sentNewLines = newProductLinesRef.current.filter((l) => l.name.trim() && l.sku.trim() && l.category.trim());
     try {
-      if (currentId) {
-        await apiFetch(`/purchase-orders/${currentId}`, {
-          method: 'PATCH',
-          keepalive: useKeepalive,
-          body: JSON.stringify(payload),
-        });
-      } else {
-        const res = await apiFetch('/purchase-orders', {
-          method: 'POST',
-          keepalive: useKeepalive,
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          const draft = await res.json();
-          adoptId(draft.id);
-        }
+      const res = currentId
+        ? await apiFetch(`/purchase-orders/${currentId}`, {
+            method: 'PATCH',
+            keepalive: useKeepalive,
+            body: JSON.stringify(payload),
+          })
+        : await apiFetch('/purchase-orders', {
+            method: 'POST',
+            keepalive: useKeepalive,
+            body: JSON.stringify(payload),
+          });
+      if (res.ok) {
+        const draft = await res.json();
+        if (!currentId) adoptId(draft.id);
+        absorbCreatedProducts(sentNewLines, draft.items ?? []);
       }
     } catch (e) {
       console.error('Draft autosave failed', e);
@@ -620,7 +658,7 @@ function PurchaseOrderFormPageInner() {
           <div className="p-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr] sm:items-end">
             <div>
               <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
-              <NumberInput
+              <MoneyInput
                 min={0}
                 value={discountAmount}
                 onChange={(e) => setDiscountAmount(e.target.value)}

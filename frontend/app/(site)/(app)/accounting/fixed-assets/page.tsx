@@ -17,6 +17,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 
 type FixedAsset = {
@@ -502,9 +503,8 @@ export default function FixedAssetsPage() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.costRp')}</label>
-                <NumberInput
+                <MoneyInput
                   min="0"
-                  step="1"
                   placeholder="0"
                   value={form.cost}
                   onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
@@ -515,9 +515,8 @@ export default function FixedAssetsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.fixedAssets.salvageValueRp')}</label>
-                <NumberInput
+                <MoneyInput
                   min="0"
-                  step="1"
                   value={form.salvageValue}
                   onChange={(e) => setForm((f) => ({ ...f, salvageValue: e.target.value }))}
                   className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
@@ -633,9 +632,8 @@ export default function FixedAssetsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('common.amount')}</label>
-                            <NumberInput
+                            <MoneyInput
                               min="0.01"
-                              step="0.01"
                               max={balance}
                               value={payForm.amount}
                               onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
@@ -721,9 +719,8 @@ export default function FixedAssetsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('accounting.fixedAssets.proceedsRp')}</label>
-                            <NumberInput
+                            <MoneyInput
                               min="0"
-                              step="1"
                               value={disposeForm.proceeds}
                               onChange={(e) => setDisposeForm((f) => ({ ...f, proceeds: e.target.value }))}
                               className="border-2 border-gray-300 rounded-md p-1.5 text-xs outline-none focus:border-blue-500 bg-white"

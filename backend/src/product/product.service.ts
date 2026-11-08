@@ -487,7 +487,8 @@ async create(
   async searchForInvoice(organizationId: string, query: string, locationId?: string) {
     const q = query.trim();
 
-    if (!q && !locationId) return [];
+    // An empty query browses: the first products by name, so the picker can list items as soon
+    // as it opens instead of waiting for something to be typed.
 
     const products = await this.prisma.product.findMany({
       where: {
@@ -517,6 +518,7 @@ async create(
         },
         prices: true,
       },
+      orderBy: { name: 'asc' },
       take: 20,
     });
 

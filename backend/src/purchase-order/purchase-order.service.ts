@@ -243,7 +243,7 @@ export class PurchaseOrderService {
           paymentTerms: dto.paymentTerms ?? null,                    // NEW
           items: { create: lines },
         },
-        include: { items: true },
+        include: { items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
       });
 
       await this.logActivity(tx, {
@@ -304,7 +304,7 @@ export class PurchaseOrderService {
             paymentTerms: dto.paymentTerms !== undefined ? dto.paymentTerms : po.paymentTerms, // NEW
             ...(await this.headerFields(tx, organizationId, dto)),
           },
-          include: { items: true },
+          include: { items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
         });
 
         await this.logActivity(tx, {
@@ -350,7 +350,7 @@ export class PurchaseOrderService {
           ...(await this.headerFields(tx, organizationId, dto)),
           items: { create: lines },
         },
-        include: { items: true },
+        include: { items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
       });
 
       await this.logActivity(tx, {
@@ -387,7 +387,7 @@ export class PurchaseOrderService {
         const updated = await tx.purchaseOrder.update({
           where: { id: po.id },
           data: { status: PurchaseOrderStatus.SENT, poNumber },
-          include: { items: true },
+          include: { items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
         });
 
         await this.logActivity(tx, {
@@ -447,6 +447,7 @@ export class PurchaseOrderService {
       from?: string;
       to?: string;
       search?: string;
+      supplierId?: string;
       page?: number;
       pageSize?: number;
     },
@@ -454,7 +455,11 @@ export class PurchaseOrderService {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const pageSize = filters.pageSize && filters.pageSize > 0 ? Math.min(filters.pageSize, 200) : 20;
 
-    const where: Prisma.PurchaseOrderWhereInput = { organizationId, status: filters.status };
+    const where: Prisma.PurchaseOrderWhereInput = {
+      organizationId,
+      status: filters.status,
+      ...(filters.supplierId && { supplierId: filters.supplierId }),
+    };
 
     if (filters.from && filters.to) {
       const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });

@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 
@@ -153,7 +154,7 @@ export function ThreeWayMatchPanel({ purchaseOrderId, refreshKey }: { purchaseOr
       {adding ? (
         <form onSubmit={addBill} className="grid grid-cols-2 gap-2">
           <input required placeholder={t('purchasing.bills.billNumber')} value={form.billNumber} onChange={(e) => setForm({ ...form, billNumber: e.target.value })} className={input} />
-          <input required inputMode="decimal" placeholder={t('common.amount')} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} />
+          <MoneyInput required placeholder={t('common.amount')} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={input} />
           <label className="text-xs text-gray-500">
             {t('purchasing.bills.billDate')}
             <DatePicker aria-label={t('purchasing.bills.billDate')} value={form.billDate} onChange={(v) => setForm({ ...form, billDate: v })} />

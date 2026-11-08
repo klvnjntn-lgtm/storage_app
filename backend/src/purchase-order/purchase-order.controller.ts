@@ -32,6 +32,7 @@ export class PurchaseOrderController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('search') search?: string,
+    @Query('supplierId') supplierId?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -40,6 +41,7 @@ export class PurchaseOrderController {
       from,
       to,
       search,
+      supplierId,
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });

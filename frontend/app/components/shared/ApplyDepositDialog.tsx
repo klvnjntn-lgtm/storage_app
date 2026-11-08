@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 export type OpenDeposit = { id: string; depositNumber: string; remaining: number };
 
@@ -80,7 +80,7 @@ export function ApplyDepositDialog({
       </label>
       <label className="block">
         <span className="text-sm">{t('sales.invoiceDetail.applyCreditAmount')}</span>
-        <NumberInput
+        <MoneyInput
           min={1}
           max={limit}
           value={amount}

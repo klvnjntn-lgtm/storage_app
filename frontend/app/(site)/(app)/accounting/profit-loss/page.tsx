@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Scale, DollarSign, PackageSearch, Percent, Info, Receipt, MapPin } from 'lucide-react';
+import { AccountBreakdownRow } from '@/app/components/accounting/AccountBreakdown';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useBranches } from '@/lib/hooks/useBranches';
@@ -300,7 +301,9 @@ export default function ProfitAndLossPage() {
               <StatementSection title={t('accounting.profitLoss.revenue')}>
                 {hasMultipleRevenueLines ? (
                   report.revenue.map((line) => (
-                    <StatementRow key={line.accountId} label={`${line.code} ${line.name}`} amount={line.amount} />
+                    <AccountBreakdownRow key={line.accountId} accountId={line.accountId} from={from} to={to}>
+                      <StatementRow label={`${line.code} ${line.name}`} amount={line.amount} />
+                    </AccountBreakdownRow>
                   ))
                 ) : (
                   <StatementRow label={t('accounting.profitLoss.salesRevenue')} amount={report.totalRevenue} />
@@ -316,12 +319,9 @@ export default function ProfitAndLossPage() {
                   <p className="px-4 py-3 text-xs text-gray-400">{t('accounting.profitLoss.noExpensesInPeriod')}</p>
                 ) : (
                   report.operatingExpenses.map((line) => (
-                    <StatementRow
-                      key={line.accountId}
-                      label={`${line.code} ${line.name}`}
-                      amount={line.amount}
-                      negative
-                    />
+                    <AccountBreakdownRow key={line.accountId} accountId={line.accountId} from={from} to={to}>
+                      <StatementRow label={`${line.code} ${line.name}`} amount={line.amount} negative />
+                    </AccountBreakdownRow>
                   ))
                 )}
                 <StatementRow label={t('accounting.profitLoss.totalOperatingExpenses')} amount={report.totalOperatingExpenses} bold negative />

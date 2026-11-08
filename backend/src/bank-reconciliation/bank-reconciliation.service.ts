@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { AccountType, BankStatementLineStatus, JournalEntryStatus, JournalSourceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { JournalService } from '../accounting/journal.service';
@@ -278,6 +278,74 @@ export class BankReconciliationService {
     await this.prisma.$transaction(async (tx) => {
       await tx.bankReconciliationMatch.deleteMany({ where: { statementLineId: lineId } });
       await tx.bankStatementLine.update({ where: { id: lineId }, data: { status: BankStatementLineStatus.UNMATCHED } });
+    });
+    return { ok: true };
+  }
+
+  // Corrects a statement line by hand (a misread date or amount from the file). A matched line's
+  // date and amount are what its match was checked against, so those wait until it's unmatched.
+  async editLine(
+    organizationId: string,
+    lineId: string,
+    patch: { date?: string; description?: string; amount?: number; balance?: number | null },
+  ) {
+    const line = await this.lineOrThrow(organizationId, lineId);
+    const matched = line.status === BankStatementLineStatus.MATCHED;
+    const date = patch.date !== undefined ? parseDateOnly(patch.date, 'date') : undefined;
+    const amount = patch.amount !== undefined ? round2(patch.amount) : undefined;
+    if (matched && ((date && date.getTime() !== line.date.getTime()) || (amount !== undefined && Math.abs(amount - Number(line.amount)) >= EPS))) {
+      throw new BadRequestException('Unmatch this line before changing its date or amount');
+    }
+    if (amount !== undefined && !amount) throw new BadRequestException('A statement line needs an amount');
+    const description = patch.description?.trim().replace(/\s+/g, ' ');
+    await this.prisma.bankStatementLine.update({
+      where: { id: lineId },
+      data: {
+        ...(date && { date }),
+        ...(description !== undefined && { description }),
+        ...(amount !== undefined && { amount }),
+        ...(patch.balance !== undefined && { balance: patch.balance == null ? null : round2(patch.balance) }),
+      },
+    });
+    return { ok: true };
+  }
+
+  // A line typed in rather than imported — for a bank that only gives a printed statement.
+  async addLine(
+    organizationId: string,
+    bankAccountId: string,
+    input: { date: string; description: string; amount: number; balance?: number | null },
+    userId?: string,
+  ) {
+    await this.glAccountOf(organizationId, bankAccountId);
+    if (!input.amount || !Number.isFinite(input.amount)) throw new BadRequestException('A statement line needs an amount');
+    return this.prisma.bankStatementLine.create({
+      data: {
+        organizationId,
+        bankAccountId,
+        date: parseDateOnly(input.date, 'date'),
+        description: input.description.trim().replace(/\s+/g, ' '),
+        amount: round2(input.amount),
+        balance: input.balance == null ? null : round2(input.balance),
+        // Never collides with an import, so a re-imported file doesn't swallow it.
+        dedupeKey: `manual:${randomUUID()}`,
+        createdById: userId ?? null,
+      },
+    });
+  }
+
+  // Saves the closing balance the user read off the statement: it's kept on the period's last
+  // line, which is where the report reads it back from (lastStatementBalance).
+  async saveStatementBalance(organizationId: string, bankAccountId: string, fromValue: string, toValue: string, balance: number | null) {
+    await this.glAccountOf(organizationId, bankAccountId);
+    const last = await this.prisma.bankStatementLine.findFirst({
+      where: { organizationId, bankAccountId, date: { gte: parseDateOnly(fromValue, 'from'), lte: parseDateOnly(toValue, 'to') } },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+    });
+    if (!last) throw new BadRequestException('Import or add a statement line for this period first');
+    await this.prisma.bankStatementLine.update({
+      where: { id: last.id },
+      data: { balance: balance == null ? null : round2(balance) },
     });
     return { ok: true };
   }

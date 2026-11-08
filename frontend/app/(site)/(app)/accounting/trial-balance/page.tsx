@@ -10,6 +10,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { AccountBreakdownRow, ALL_TIME_FROM } from '@/app/components/accounting/AccountBreakdown';
 
 
 type TrialBalanceLine = { accountId: string; code: string; name: string; type: string; debit: number; credit: number };
@@ -197,7 +198,8 @@ export default function TrialBalancePage() {
                       {t(TYPE_LABEL_KEY[type])}
                     </div>
                     {list.map((acc) => (
-                      <div key={acc.accountId} className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-sm border-b border-gray-50 last:border-b-0">
+                      <AccountBreakdownRow key={acc.accountId} accountId={acc.accountId} from={ALL_TIME_FROM} to={asOf} className="border-b border-gray-50 last:border-b-0">
+                      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-sm">
                         <span className="truncate text-gray-700">
                           <span className="text-gray-400 font-mono text-xs mr-2">{acc.code}</span>
                           {acc.name}
@@ -205,6 +207,7 @@ export default function TrialBalancePage() {
                         <span className="text-right w-28 tabular-nums">{acc.debit > 0 ? formatIDR(acc.debit) : ''}</span>
                         <span className="text-right w-28 tabular-nums">{acc.credit > 0 ? formatIDR(acc.credit) : ''}</span>
                       </div>
+                      </AccountBreakdownRow>
                     ))}
                   </div>
                 );

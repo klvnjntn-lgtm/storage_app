@@ -10,7 +10,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { BranchFilter, BranchPicker } from '@/app/components/shared/BranchFilter';
 import DatePicker from '@/app/components/shared/DatePicker';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 import Pagination from '@/app/components/shared/Pagination';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
@@ -250,7 +250,7 @@ export function DepositsManager<P extends Party>({
             </div>
             <label className="block">
               <span className={label}>{tp('amount')}</span>
-              <NumberInput min={1} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={inputCls} />
+              <MoneyInput min={1} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className={inputCls} />
             </label>
             <div>
               <span className={label}>{tp('date')}</span>
@@ -361,7 +361,7 @@ export function DepositsManager<P extends Party>({
                         <form onSubmit={(e) => submitRefund(e, d)} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
                           <label className="block">
                             <span className={label}>{tp('refundAmount')}</span>
-                            <NumberInput min={1} max={d.remaining} value={refund.amount} onChange={(e) => setRefund({ ...refund, amount: e.target.value })} className={inputCls} />
+                            <MoneyInput min={1} max={d.remaining} value={refund.amount} onChange={(e) => setRefund({ ...refund, amount: e.target.value })} className={inputCls} />
                           </label>
                           <label className="block">
                             <span className={label}>{tp('method')}</span>

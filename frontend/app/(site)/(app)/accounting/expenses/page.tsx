@@ -15,7 +15,7 @@ import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 
 type ExpenseCategory = {
@@ -657,9 +657,8 @@ export default function ExpensesPage() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">{t('accounting.expenses.amountRp')}</label>
-                <NumberInput
+                <MoneyInput
                   min="0"
-                  step="1"
                   placeholder="0"
                   value={expenseForm.amount}
                   onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
@@ -883,9 +882,8 @@ export default function ExpensesPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-semibold text-gray-600">{t('common.amount')}</label>
-                            <NumberInput
+                            <MoneyInput
                               min="0.01"
-                              step="0.01"
                               max={Math.max(Number(exp.amount) - Number(exp.amountPaid), 0)}
                               value={payForm.amount}
                               onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}

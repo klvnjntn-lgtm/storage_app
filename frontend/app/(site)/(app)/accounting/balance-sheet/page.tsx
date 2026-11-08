@@ -10,6 +10,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
+import { AccountBreakdownRow, ALL_TIME_FROM } from '@/app/components/accounting/AccountBreakdown';
 
 
 type BSLine = { accountId: string; code: string; name: string; amount: number };
@@ -180,7 +181,11 @@ export default function BalanceSheetPage() {
                 {report.assets.length === 0 ? (
                   <EmptyRow t={t} />
                 ) : (
-                  report.assets.map((a) => <Row key={a.accountId} code={a.code} name={a.name} amount={a.amount} />)
+                  report.assets.map((a) => (
+                    <AccountBreakdownRow key={a.accountId} accountId={a.accountId} from={ALL_TIME_FROM} to={asOf}>
+                      <Row code={a.code} name={a.name} amount={a.amount} />
+                    </AccountBreakdownRow>
+                  ))
                 )}
                 <TotalRow label={t('accounting.balanceSheet.totalAssets')} amount={report.totalAssets} />
               </Section>
@@ -190,7 +195,11 @@ export default function BalanceSheetPage() {
                 {report.liabilities.length === 0 ? (
                   <EmptyRow t={t} />
                 ) : (
-                  report.liabilities.map((l) => <Row key={l.accountId} code={l.code} name={l.name} amount={l.amount} />)
+                  report.liabilities.map((l) => (
+                    <AccountBreakdownRow key={l.accountId} accountId={l.accountId} from={ALL_TIME_FROM} to={asOf}>
+                      <Row code={l.code} name={l.name} amount={l.amount} />
+                    </AccountBreakdownRow>
+                  ))
                 )}
                 <TotalRow label={t('accounting.balanceSheet.totalLiabilities')} amount={report.totalLiabilities} />
               </Section>
@@ -200,7 +209,11 @@ export default function BalanceSheetPage() {
                 {report.statedEquity.length === 0 ? (
                   <p className="px-4 py-2 text-xs text-gray-400">{t('accounting.balanceSheet.noStatedEquity')}</p>
                 ) : (
-                  report.statedEquity.map((e) => <Row key={e.accountId} code={e.code} name={e.name} amount={e.amount} />)
+                  report.statedEquity.map((e) => (
+                    <AccountBreakdownRow key={e.accountId} accountId={e.accountId} from={ALL_TIME_FROM} to={asOf}>
+                      <Row code={e.code} name={e.name} amount={e.amount} />
+                    </AccountBreakdownRow>
+                  ))
                 )}
                 <Row code="" name={t('accounting.balanceSheet.accumulatedEarnings')} amount={report.accumulatedEarnings} muted />
                 <TotalRow label={t('accounting.balanceSheet.totalEquity')} amount={report.totalEquity} />

@@ -7,6 +7,7 @@ import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
 import type { DiscountType } from '@/app/components/invoices/types';
 import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -329,9 +330,7 @@ function PriceInput({ line, onChangePrice, boxed }: { line: TableLine; onChangeP
   }
   const missing = line.unitPrice === null;
   return (
-    <NumberInput
-      min={0}
-      inputMode="decimal"
+    <MoneyInput
       value={line.unitPrice ?? ''}
       placeholder="0"
       title={missing ? t('common.lineTable.priceRequired') : undefined}
@@ -532,6 +531,22 @@ function RowSearch<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
+  async function browse() {
+    const mine = ++seq.current;
+    setSearching(true);
+    try {
+      const list = await search('');
+      if (mine !== seq.current) return;
+      setResults(list.slice(0, 20));
+      setActive(0);
+      setOpen(true);
+    } catch {
+      // nothing to list
+    } finally {
+      if (mine === seq.current) setSearching(false);
+    }
+  }
+
   function pick(result: T) {
     onPick(result);
     seq.current++;
@@ -552,14 +567,13 @@ function RowSearch<T>({
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
-            if (!e.target.value.trim()) {
-              seq.current++;
-              setResults([]);
-              setOpen(false);
-              setSearching(false);
-            }
+            if (!e.target.value.trim()) browse();
           }}
-          onFocus={() => results.length > 0 && setOpen(true)}
+          onFocus={() => {
+            // Empty box: list items straight away, so a pick doesn't need typing first.
+            if (!q.trim()) browse();
+            else if (results.length > 0) setOpen(true);
+          }}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') {
@@ -582,7 +596,7 @@ function RowSearch<T>({
         />
         {searching && <span className="text-[11px] text-gray-400 shrink-0">{t('common.lineTable.searching')}</span>}
       </div>
-      {open && q.trim() && (
+      {open && (
         <ul className="absolute z-30 left-0 mt-1 w-full max-h-72 overflow-y-auto bg-white border border-blue-500/20 rounded-lg shadow-lg">
           {results.length === 0 && !searching && (
             <li className="px-3 py-2 text-sm text-gray-400">{t('common.lineTable.noResults')}</li>

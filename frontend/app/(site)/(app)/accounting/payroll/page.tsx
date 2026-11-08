@@ -14,6 +14,7 @@ import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useBranches } from '@/lib/hooks/useBranches';
 import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 
 
 function formatIDR(amount: number): string {
@@ -1008,7 +1009,7 @@ function EmployeesTab() {
           </div>
           <div className="flex flex-col gap-1 w-full sm:w-1/2">
             <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.baseSalaryPerMonth')}</label>
-            <NumberInput
+            <MoneyInput
               min="0"
               value={form.baseSalary}
               onChange={(e) => setForm((f) => ({ ...f, baseSalary: e.target.value }))}
@@ -1113,7 +1114,7 @@ function EmployeesTab() {
                 </div>
                 <div className="flex flex-col gap-1 w-full sm:w-1/2">
                   <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.baseSalaryRp')}</label>
-                  <NumberInput
+                  <MoneyInput
                     min="0"
                     value={editForm.baseSalary}
                     onChange={(e) => setEditForm((f) => ({ ...f, baseSalary: e.target.value }))}
@@ -1453,7 +1454,7 @@ function ComponentsTab() {
           {form.isFixed ? (
             <div className="flex flex-col gap-1 w-full sm:w-1/2">
               <label className="text-xs font-semibold text-gray-600">{t('accounting.payroll.defaultAmountRp')}</label>
-              <NumberInput
+              <MoneyInput
                 min="0"
                 value={form.defaultAmount}
                 onChange={(e) => setForm((f) => ({ ...f, defaultAmount: e.target.value }))}
@@ -1554,7 +1555,7 @@ function ComponentsTab() {
                 {editForm.isFixed ? (
                   <div className="flex flex-col gap-1 w-full sm:w-1/2">
                     <label className="text-[11px] font-semibold text-gray-600">{t('accounting.payroll.defaultAmountRp')}</label>
-                    <NumberInput
+                    <MoneyInput
                       min="0"
                       value={editForm.defaultAmount}
                       onChange={(e) => setEditForm((f) => ({ ...f, defaultAmount: e.target.value }))}

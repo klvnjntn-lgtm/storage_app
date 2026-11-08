@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ClipboardList, Building2, PackageSearch, Undo2, FileCheck2, HandCoins } from 'lucide-react';
+import { ClipboardList, Building2, PackageSearch, Undo2, FileCheck2, HandCoins, Wallet } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { HubCard, HubGrid, HubPage, HubSection } from '@/app/components/shared/Hub';
 
@@ -47,6 +47,13 @@ export default function PurchasingHome() {
       href: '/purchasing/bills',
       icon: FileCheck2,
       gradient: 'from-sky-400 to-indigo-600',
+    },
+    {
+      title: t('nav.items.supplierPayments'),
+      description: t('purchasing.payments.cardDescription'),
+      href: '/purchasing/payments',
+      icon: Wallet,
+      gradient: 'from-lime-400 to-green-600',
     },
     {
       title: t('nav.items.supplierDeposits'),

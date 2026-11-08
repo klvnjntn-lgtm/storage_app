@@ -2,12 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FileCheck2, Landmark } from 'lucide-react';
+import { FileCheck2, Plus, Wallet } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY } from '@/lib/dates';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
-import { useHasModule } from '@/lib/hooks/useHasModule';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { Card, ErrorNote, PageFrame, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { MATCH_STYLE } from '@/app/components/purchase-orders/ThreeWayMatchPanel';
@@ -25,12 +24,10 @@ type Row = {
 };
 
 // Supplier bills across all POs, filterable by match result — the list to
-// clear before paying suppliers. Bills are recorded on the PO's page.
+// clear before paying suppliers. Bills are recorded with New bill or on the PO's page.
 export default function SupplierBillsPage() {
   const { authorized } = useRequireAdmin();
   const { t } = useLanguage();
-  // The cash & bank statement is an Accounting page.
-  const hasAccounting = useHasModule('ACCOUNTING');
   const [status, setStatus] = useState<MatchStatus | ''>('');
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,15 +50,13 @@ export default function SupplierBillsPage() {
       title={t('purchasing.bills.pageTitle')}
       subtitle={t('purchasing.bills.pageSubtitle')}
       actions={
-        hasAccounting && (
         <Link
-          href="/accounting/cash-statement/new"
-          className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg border border-blue-500/25 text-blue-700 font-semibold hover:bg-blue-50 active:bg-blue-100 transition-colors"
+          href="/purchasing/bills/new"
+          className="flex items-center justify-center gap-1.5 text-sm px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
         >
-          <Landmark size={16} strokeWidth={2} />
-          <span className="hidden sm:inline">{t('accounting.cashStatement.generateButton')}</span>
+          <Plus size={16} strokeWidth={2} />
+          <span>{t('purchasing.billNew.newButton')}</span>
         </Link>
-        )
       }
     >
       <ErrorNote message={error} />
@@ -91,6 +86,7 @@ export default function SupplierBillsPage() {
                   <th className={thCls}>{t('purchasing.bills.dueDate')}</th>
                   <th className={`${thCls} text-right`}>{t('common.amount')}</th>
                   <th className={thCls}>{t('purchasing.bills.matchTitle')}</th>
+                  <th className={thCls} />
                 </tr>
               </thead>
               <tbody>
@@ -110,6 +106,14 @@ export default function SupplierBillsPage() {
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${MATCH_STYLE[r.match.status]}`}>
                         {t(`purchasing.bills.status.${r.match.status}`)}
                       </span>
+                    </td>
+                    <td className={tdCls}>
+                      <Link
+                        href={`/purchasing/payments?po=${r.purchaseOrder.id}`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md border border-blue-500/30 text-blue-700 hover:bg-blue-50"
+                      >
+                        <Wallet size={13} /> {t('purchasing.billNew.pay')}
+                      </Link>
                     </td>
                   </tr>
                 ))}

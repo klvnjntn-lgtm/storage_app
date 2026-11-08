@@ -8,7 +8,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 import { useBranches } from '@/lib/hooks/useBranches';
 import { fileNamePart } from '@/lib/excel-export';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
@@ -344,7 +344,7 @@ export default function BudgetPage() {
                     </td>
                     {budgetOf(a).map((value, i) => (
                       <td key={i} className="px-1 py-1">
-                        <NumberInput
+                        <MoneyInput
                           min={0}
                           value={value || ''}
                           aria-label={`${a.name} ${monthName(i + 1)}`}

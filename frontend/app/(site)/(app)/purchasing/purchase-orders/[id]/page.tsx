@@ -345,10 +345,13 @@ export default function PurchaseOrderDetailPage() {
         )}
         {approvalError && <ApprovalRequiredNotice error={approvalError} />}
 
-        {isAdmin && po.status !== 'DRAFT' && <ThreeWayMatchPanel purchaseOrderId={po.id} refreshKey={refreshKey} />}
+        {/* Payments first: what's owed and when it was paid is what people open a PO to check. */}
         {isAdmin && po.status !== 'DRAFT' && po.status !== 'CANCELLED' && (
-          <SupplierPaymentsPanel purchaseOrderId={po.id} refreshKey={refreshKey} />
+          <div id="payments" className="scroll-mt-24">
+            <SupplierPaymentsPanel purchaseOrderId={po.id} refreshKey={refreshKey} />
+          </div>
         )}
+        {isAdmin && po.status !== 'DRAFT' && <ThreeWayMatchPanel purchaseOrderId={po.id} refreshKey={refreshKey} />}
 
         {returns.length > 0 && (
           <section className="bg-white border-2 border-gray-200 rounded-md p-3">

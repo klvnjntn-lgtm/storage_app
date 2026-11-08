@@ -3,9 +3,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner';
 import {
+  ArrowLeft,
+  RefreshCw,
   ArrowLeftRight,
   HandCoins,
   Target,
@@ -169,6 +171,8 @@ const SIDEBAR_HIDDEN_KEY = 'appShell.sidebarHidden';
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  // Bumped by the Refresh button: the page remounts and loads its data again, without a full reload.
+  const [pageRefreshKey, setPageRefreshKey] = useState(0);
   const { profile, refreshProfile } = useAuth();
   const { t } = useLanguage();
   const { multiBranch } = useBranches();
@@ -506,6 +510,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     ...(isAdminRole(profile?.role)
       ? [
           { href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 },
+          { href: '/purchasing/payments', label: t('nav.items.supplierPayments'), icon: Wallet },
           { href: '/purchasing/deposits', label: t('nav.items.supplierDeposits'), icon: HandCoins },
         ]
       : []),
@@ -1373,7 +1378,37 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Page content */}
         <main className="flex-1 min-w-0 pb-[var(--app-bottom-nav-h)] md:pb-[env(safe-area-inset-bottom)]">
           {profile && <PlanBanner isAdmin={isAdminRole(profile.role)} />}
-          {desktopBlocked ? null : children}
+          {/* Back (on pages below a module's home, e.g. /purchasing/bills, not /purchasing): to where
+              the user came from, or up one level when the page was opened directly. Refresh: reloads
+              the page's data. */}
+          {!desktopBlocked && (
+            <div className="px-4 sm:px-6 pt-2 flex items-center justify-between gap-2 print:hidden">
+              {pathname.split('/').filter(Boolean).length >= 2 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.history.length > 1) router.back();
+                    else router.push(pathname.split('/').slice(0, -1).join('/') || '/');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+                >
+                  <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
+                  {t('appShell.back')}
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                onClick={() => setPageRefreshKey((k) => k + 1)}
+                className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+              >
+                <RefreshCw size={15} strokeWidth={2} aria-hidden="true" />
+                {t('common.refresh')}
+              </button>
+            </div>
+          )}
+          {desktopBlocked ? null : <Fragment key={pageRefreshKey}>{children}</Fragment>}
           {profile && <PlanLimitToast isAdmin={isAdminRole(profile.role)} />}
         </main>
       </div>

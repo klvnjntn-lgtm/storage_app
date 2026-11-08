@@ -74,6 +74,50 @@ class IgnoreDto {
   ignored: boolean;
 }
 
+class EditLineDto {
+  @IsOptional()
+  @Matches(DATE_ONLY)
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  amount?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  balance?: number | null;
+}
+
+class AddLineDto {
+  @IsString()
+  bankAccountId: string;
+
+  @Matches(DATE_ONLY)
+  date: string;
+
+  @IsString()
+  @MaxLength(500)
+  description: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  amount: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  balance?: number | null;
+}
+
+class StatementBalanceDto extends PeriodDto {
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  balance: number | null;
+}
+
 class RecordDto {
   @IsString()
   accountId: string;
@@ -130,6 +174,21 @@ export class BankReconciliationController {
   @Post('lines/:id/ignore')
   ignore(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: IgnoreDto) {
     return this.service.setIgnored(organizationId, id, dto.ignored);
+  }
+
+  @Post('lines')
+  addLine(@CurrentOrg() organizationId: string, @Req() req, @Body() dto: AddLineDto) {
+    return this.service.addLine(organizationId, dto.bankAccountId, dto, req.user.sub);
+  }
+
+  @Post('lines/:id/edit')
+  editLine(@CurrentOrg() organizationId: string, @Param('id') id: string, @Body() dto: EditLineDto) {
+    return this.service.editLine(organizationId, id, dto);
+  }
+
+  @Post('statement-balance')
+  saveStatementBalance(@CurrentOrg() organizationId: string, @Body() dto: StatementBalanceDto) {
+    return this.service.saveStatementBalance(organizationId, dto.bankAccountId, dto.from, dto.to, dto.balance ?? null);
   }
 
   @Post('lines/:id/record')

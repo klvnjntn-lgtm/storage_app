@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeftRight, CheckCircle2, ChevronDown, ChevronRight, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, ChevronDown, ChevronRight, Pencil, Plus, Save, Sparkles, Trash2, Upload } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
+import DatePicker from '@/app/components/shared/DatePicker';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
-import NumberInput from '@/app/components/shared/NumberInput';
+import MoneyInput from '@/app/components/shared/MoneyInput';
 import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, btnDanger, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { guessMapping, monthBounds, readSheetRows, readStatement, type Cell, type StatementMapping } from '@/lib/bank-statement';
 import { fileNamePart } from '@/lib/excel-export';
@@ -92,6 +93,9 @@ export default function BankReconciliationPage() {
   const [picked, setPicked] = useState<string[]>([]);
   const [recordAccount, setRecordAccount] = useState('');
   const [recordMemo, setRecordMemo] = useState('');
+
+  // A statement line being corrected by hand, or typed in (id 'new'). Amount is signed: money in > 0.
+  const [editing, setEditing] = useState<{ id: string; date: string; description: string; amount: string; matched: boolean } | null>(null);
 
   useEffect(() => {
     let stale = false;
@@ -242,6 +246,35 @@ export default function BankReconciliationPage() {
     }
   }
 
+  // The closing balance typed off the statement, kept so it's there next time and the difference stays put.
+  async function saveStatementBalance() {
+    const body = await act('/bank-reconciliation/statement-balance', {
+      bankAccountId,
+      from,
+      to,
+      balance: statementBalance.trim() === '' ? null : Number(statementBalance),
+    });
+    if (body) setNotice(t('accounting.bankRec.balanceSaved'));
+  }
+
+  async function saveLine() {
+    if (!editing) return;
+    const amount = Number(editing.amount);
+    if (!editing.date || !(Math.abs(amount) > 0)) {
+      setError(t('accounting.bankRec.lineInvalid'));
+      return;
+    }
+    const payload = { date: editing.date, description: editing.description, amount };
+    const body =
+      editing.id === 'new'
+        ? await act('/bank-reconciliation/lines', { ...payload, bankAccountId })
+        : await act(`/bank-reconciliation/lines/${editing.id}/edit`, payload);
+    if (body) {
+      setEditing(null);
+      setNotice(t('accounting.bankRec.lineSaved'));
+    }
+  }
+
   async function autoMatch() {
     const body = (await act('/bank-reconciliation/auto-match', { bankAccountId, from, to })) as { matched: number } | null;
     if (body) setNotice(t('accounting.bankRec.autoMatched', { count: body.matched }));
@@ -344,6 +377,52 @@ export default function BankReconciliationPage() {
     </label>
   );
 
+  // The inline form for correcting a statement line or typing a new one, in the statement table.
+  const editorRow = (key: string) =>
+    editing && (
+      <tr key={key} className="bg-blue-50/50 border-t border-blue-100 align-top">
+        <td className="px-3 py-2">
+          <DatePicker
+            value={editing.date}
+            disabled={editing.matched}
+            onChange={(v) => setEditing({ ...editing, date: v })}
+            aria-label={t('accounting.export.date')}
+          />
+        </td>
+        <td className="px-3 py-2">
+          <input
+            value={editing.description}
+            maxLength={500}
+            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            placeholder={t('accounting.export.description')}
+            className={inputCls}
+          />
+        </td>
+        <td colSpan={2} className="px-3 py-2">
+          <MoneyInput
+            allowNegative
+            value={editing.amount}
+            disabled={editing.matched}
+            onChange={(e) => setEditing({ ...editing, amount: e.target.value })}
+            aria-label={t('common.amount')}
+            className={`${inputCls} text-right tabular-nums`}
+          />
+          <span className="block text-[11px] text-gray-500 mt-1">{t('accounting.bankRec.amountHint')}</span>
+        </td>
+        <td colSpan={2} className="px-3 py-2 text-right whitespace-nowrap">
+          <div className="inline-flex gap-2">
+            <button type="button" onClick={() => setEditing(null)} className={btnSecondary}>
+              {t('common.cancel')}
+            </button>
+            <button type="button" onClick={saveLine} disabled={busy} className={btnPrimary}>
+              <Save size={14} />
+              {t('common.save')}
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+
   if (banks && banks.length === 0) {
     return (
       <PageFrame icon={ArrowLeftRight} title={t('nav.items.bankReconciliation')} subtitle={t('accounting.bankRec.subtitle')}>
@@ -382,6 +461,15 @@ export default function BankReconciliationPage() {
           <button type="button" onClick={autoMatch} disabled={!report || busy || report.summary.unmatched === 0} className={btnSecondary}>
             <Sparkles size={14} />
             {t('accounting.bankRec.autoMatch')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing({ id: 'new', date: to, description: '', amount: '', matched: false })}
+            disabled={!bankAccountId || busy}
+            className={btnSecondary}
+          >
+            <Plus size={14} />
+            {t('accounting.bankRec.addLine')}
           </button>
           <button type="button" onClick={() => setImportOpen((o) => !o)} disabled={!bankAccountId} className={btnPrimary}>
             <Upload size={14} />
@@ -495,12 +583,28 @@ export default function BankReconciliationPage() {
                   <tr className="border-t border-gray-100">
                     <td className={tdCls}>{t('accounting.bankRec.statementBalance')}</td>
                     <td className="px-3 py-1 text-right">
-                      <NumberInput
+                      <MoneyInput allowNegative
                         value={statementBalance}
                         aria-label={t('accounting.bankRec.statementBalance')}
                         onChange={(e) => setStatementBalance(e.target.value)}
                         className={`${inputCls.replace('w-full ', '')} w-44 ml-auto text-right tabular-nums`}
                       />
+                    </td>
+                    <td className="py-1 pl-1">
+                      <button
+                        type="button"
+                        onClick={saveStatementBalance}
+                        disabled={
+                          busy ||
+                          report.lines.length === 0 ||
+                          (typedBalance ?? null) === (report.summary.lastStatementBalance ?? null)
+                        }
+                        title={report.lines.length === 0 ? t('accounting.bankRec.balanceNeedsLine') : undefined}
+                        className={btnPrimary}
+                      >
+                        <Save size={14} />
+                        {t('common.save')}
+                      </button>
                     </td>
                   </tr>
                   {difference != null && (
@@ -528,7 +632,7 @@ export default function BankReconciliationPage() {
               ) : undefined
             }
           >
-            {report.lines.length === 0 ? (
+            {report.lines.length === 0 && editing?.id !== 'new' ? (
               <p className="text-sm text-gray-400">{t('accounting.bankRec.noLines')}</p>
             ) : (
               <div className="overflow-x-auto">
@@ -544,8 +648,10 @@ export default function BankReconciliationPage() {
                     </tr>
                   </thead>
                   <tbody>
+                    {editing?.id === 'new' && editorRow('new-line')}
                     {report.lines.map((line) => {
                       const expanded = openLineId === line.id && line.status === 'UNMATCHED';
+                      if (editing?.id === line.id) return editorRow(line.id);
                       return [
                         <tr key={line.id} className="border-t border-gray-100 align-top">
                           <td className={`${tdCls} whitespace-nowrap`}>{showDate(line.date)}</td>
@@ -565,6 +671,23 @@ export default function BankReconciliationPage() {
                             </span>
                           </td>
                           <td className={`${tdCls} text-right whitespace-nowrap`}>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                setEditing({
+                                  id: line.id,
+                                  date: line.date.slice(0, 10),
+                                  description: line.description,
+                                  amount: String(line.amount),
+                                  matched: line.status === 'MATCHED',
+                                })
+                              }
+                              className="inline-flex items-center gap-0.5 text-xs font-semibold text-gray-500 hover:text-blue-700 hover:underline mr-3"
+                            >
+                              <Pencil size={12} />
+                              {t('common.edit')}
+                            </button>
                             {line.status === 'UNMATCHED' && (
                               <div className="inline-flex gap-3 text-xs font-semibold">
                                 <button
