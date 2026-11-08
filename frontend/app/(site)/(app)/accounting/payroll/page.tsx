@@ -10,6 +10,7 @@ import { toCalendarDateString } from '@/lib/dates';
 import Pagination from '@/app/components/shared/Pagination';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { useBranches } from '@/lib/hooks/useBranches';
@@ -1230,6 +1231,7 @@ function EmployeesTab() {
 // ---------------------------------------------------------- Components ----
 
 function ComponentsTab() {
+  const accountName = useAccountName();
   const { t } = useLanguage();
   const [components, setComponents] = useState<SalaryComponent[] | null>(null);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -1485,7 +1487,7 @@ function ComponentsTab() {
               >
                 <option value="">{t('accounting.payroll.payrollDeductionsPayableDefault')}</option>
                 {liabilityAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                  <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                 ))}
               </select>
               <p className="text-[11px] text-gray-400">
@@ -1519,7 +1521,7 @@ function ComponentsTab() {
                 <p className="text-xs text-gray-400">
                   {c.type === 'ALLOWANCE' ? t('accounting.payroll.allowance') : t('accounting.payroll.deduction')} ·{' '}
                   {c.isFixed ? formatIDR(Number(c.defaultAmount ?? 0)) : `${c.defaultPercentage ?? 0}%`}
-                  {c.account && ` · ${c.account.code} ${c.account.name}`}
+                  {c.account && ` · ${c.account.code} ${accountName(c.account.name)}`}
                 </p>
               </div>
               <button
@@ -1585,7 +1587,7 @@ function ComponentsTab() {
                     >
                       <option value="">{t('accounting.payroll.payrollDeductionsPayableDefault')}</option>
                       {liabilityAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                        <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                       ))}
                     </select>
                   </div>

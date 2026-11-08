@@ -86,7 +86,7 @@ export class CreatePurchaseOrderDto {
 
   // The ordering branch; left out on create: the receiving location's, else the first. Branch staff
   // always get their own (the controller pins it).
-  @IsOptional() @IsUUID()
+  @IsOptional() @IsString() @IsNotEmpty()
   branchId?: string;
 
   // No @ArrayMinSize — empty on create is how a supplier-only/no-items
@@ -127,7 +127,7 @@ export class UpdatePurchaseOrderDto {
 
   // The ordering branch; left out on create: the receiving location's, else the first. Branch staff
   // always get their own (the controller pins it).
-  @IsOptional() @IsUUID()
+  @IsOptional() @IsString() @IsNotEmpty()
   branchId?: string;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseOrderItemDto)

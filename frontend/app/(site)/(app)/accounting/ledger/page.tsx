@@ -14,6 +14,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { fileNamePart } from '@/lib/excel-export';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 
 
 type Account = {
@@ -88,6 +89,7 @@ function defaultTo() {
 const ALL_TIME_FROM = '2000-01-01';
 
 export default function AccountLedgerPage() {
+  const accountName = useAccountName();
   const { t, language } = useLanguage();
   // Seeded from the URL so returning here (e.g. via the browser's Back
   // button) restores the same account/range/page instead of resetting to
@@ -213,7 +215,7 @@ export default function AccountLedgerPage() {
       fileName: `buku-besar-${fileNamePart(r.account.code)}-${from}_${to}.xlsx`,
       sheets: [
         {
-          name: `${r.account.code} ${r.account.name}`,
+          name: `${r.account.code} ${accountName(r.account.name)}`,
           rows: [
             [col('date'), col('entry'), col('description'), col('debit'), col('credit'), col('balance')],
             [t('accounting.ledger.openingBalance'), '', '', '', '', r.openingBalance],
@@ -282,7 +284,7 @@ export default function AccountLedgerPage() {
             {cashAndBank.length > 0 && (
               <optgroup label={t('accounting.ledger.cashAndBankAccounts')}>
                 {cashAndBank.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                  <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                 ))}
               </optgroup>
             )}
@@ -292,7 +294,7 @@ export default function AccountLedgerPage() {
               return (
                 <optgroup key={type} label={t(TYPE_LABEL_KEY[type])}>
                   {list.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                    <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                   ))}
                 </optgroup>
               );

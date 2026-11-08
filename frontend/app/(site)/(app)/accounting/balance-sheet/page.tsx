@@ -9,8 +9,9 @@ import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
-import { AccountBreakdownRow, ALL_TIME_FROM } from '@/app/components/accounting/AccountBreakdown';
+import { AccountBreakdownRow, ALL_TIME_FROM, BreakdownExpandAll, BreakdownToggle } from '@/app/components/accounting/AccountBreakdown';
 
 
 type BSLine = { accountId: string; code: string; name: string; amount: number };
@@ -47,9 +48,12 @@ function yearEndISO() {
 }
 
 export default function BalanceSheetPage() {
+  const accountName = useAccountName();
     const { t } = useLanguage();
     const [asOf, setAsOf] = useState(todayISO());
   const [report, setReport] = useState<BalanceSheetReport | null>(null);
+  // Every account line shows what its amount is made of unless switched off.
+  const [showBreakdowns, setShowBreakdowns] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +113,7 @@ export default function BalanceSheetPage() {
   };
 
   return (
+    <BreakdownExpandAll value={showBreakdowns}>
     <main
       className="min-h-screen text-black"
       style={{
@@ -154,7 +159,10 @@ export default function BalanceSheetPage() {
               {t('accounting.balanceSheet.yearEnd')}
             </button>
           </div>
-          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
+          <div className="sm:ml-auto flex flex-wrap gap-2">
+            <BreakdownToggle value={showBreakdowns} onChange={setShowBreakdowns} />
+            <ExportExcelButton disabled={!report || loading} build={buildExcel} />
+          </div>
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}
@@ -183,7 +191,7 @@ export default function BalanceSheetPage() {
                 ) : (
                   report.assets.map((a) => (
                     <AccountBreakdownRow key={a.accountId} accountId={a.accountId} from={ALL_TIME_FROM} to={asOf}>
-                      <Row code={a.code} name={a.name} amount={a.amount} />
+                      <Row code={a.code} name={accountName(a.name)} amount={a.amount} />
                     </AccountBreakdownRow>
                   ))
                 )}
@@ -197,7 +205,7 @@ export default function BalanceSheetPage() {
                 ) : (
                   report.liabilities.map((l) => (
                     <AccountBreakdownRow key={l.accountId} accountId={l.accountId} from={ALL_TIME_FROM} to={asOf}>
-                      <Row code={l.code} name={l.name} amount={l.amount} />
+                      <Row code={l.code} name={accountName(l.name)} amount={l.amount} />
                     </AccountBreakdownRow>
                   ))
                 )}
@@ -211,7 +219,7 @@ export default function BalanceSheetPage() {
                 ) : (
                   report.statedEquity.map((e) => (
                     <AccountBreakdownRow key={e.accountId} accountId={e.accountId} from={ALL_TIME_FROM} to={asOf}>
-                      <Row code={e.code} name={e.name} amount={e.amount} />
+                      <Row code={e.code} name={accountName(e.name)} amount={e.amount} />
                     </AccountBreakdownRow>
                   ))
                 )}
@@ -228,6 +236,7 @@ export default function BalanceSheetPage() {
         )}
       </div>
     </main>
+    </BreakdownExpandAll>
   );
 }
 

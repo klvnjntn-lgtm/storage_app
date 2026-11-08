@@ -14,6 +14,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import { useBranches } from '@/lib/hooks/useBranches';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import MoneyInput from '@/app/components/shared/MoneyInput';
@@ -26,12 +27,14 @@ type ExpenseCategory = {
   account?: { id: string; code: string; name: string } | null;
 };
 
-// Operating expenses (beban operasional) post to accounts 6000–6899; 6900 and up — and a category
-// with no account of its own, which posts to 6900 Uncategorized — are other expenses (beban lain-lain).
+// Operating expenses (beban operasional) post to accounts 5000–5899; 5900 and up — including
+// 5990 Uncategorized, where a category with no account of its own posts — are other expenses
+// (beban lain-lain). Books set up before expenses moved into the 5000s use 6000–6899 / 6900+.
 type ExpenseGroup = 'operating' | 'other';
 function groupOf(cat: ExpenseCategory): ExpenseGroup {
-  const code = cat.account?.code;
-  return code && /^\d+$/.test(code) && Number(code) < 6900 ? 'operating' : 'other';
+  const n = parseFloat(cat.account?.code ?? '');
+  if (!Number.isFinite(n)) return 'other';
+  return (n >= 5000 && n < 5900) || (n >= 6000 && n < 6900) ? 'operating' : 'other';
 }
 const GROUPS: ExpenseGroup[] = ['operating', 'other'];
 
@@ -74,6 +77,7 @@ const STATUS_META: Record<Expense['status'], { labelKey: string; color: string; 
 };
 
 export default function ExpensesPage() {
+  const accountName = useAccountName();
   const dialog = useDialog();
   const { t, language } = useLanguage();
   const confirmPastDates = useConfirmPastDates();
@@ -225,11 +229,13 @@ export default function ExpensesPage() {
         return;
       }
       await Promise.all([loadCategories(), loadAccounts()]);
-      await dialog.alert(
+      const parts = [
         body.created > 0
           ? t('accounting.expenses.standardInstalled', { count: body.created })
           : t('accounting.expenses.standardAlreadyThere'),
-      );
+        body.recoded > 0 ? t('accounting.expenses.recoded', { count: body.recoded }) : '',
+      ];
+      await dialog.alert(parts.filter(Boolean).join(' '));
     } catch {
       setCategoryError(t('accounting.expenses.couldNotReachServer'));
     } finally {
@@ -552,7 +558,7 @@ export default function ExpensesPage() {
                   <div className="px-4 py-2 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <span className="text-sm text-gray-700 truncate">{cat.name}</span>
-                      {cat.account && <span className="text-xs text-gray-400 ml-2">{cat.account.code} {cat.account.name}</span>}
+                      {cat.account && <span className="text-xs text-gray-400 ml-2">{cat.account.code} {accountName(cat.account.name)}</span>}
                     </div>
                     <button
                       onClick={() => (editingCategoryId === cat.id ? setEditingCategoryId(null) : openEditCategory(cat))}
@@ -580,7 +586,7 @@ export default function ExpensesPage() {
                         >
                           <option value="">{t('accounting.expenses.uncategorizedDefault')}</option>
                           {expenseAccounts.map((a) => (
-                            <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                            <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                           ))}
                         </select>
                       </div>
@@ -648,7 +654,7 @@ export default function ExpensesPage() {
                   >
                     <option value="">{t('accounting.expenses.uncategorizedDefault')}</option>
                     {expenseAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                      <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                     ))}
                   </select>
                 </div>

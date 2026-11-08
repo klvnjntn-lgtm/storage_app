@@ -14,6 +14,7 @@ import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/li
 import { useBranches } from '@/lib/hooks/useBranches';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import { isAdminRole } from '@/lib/roles';
@@ -79,6 +80,7 @@ function todayISO() {
 type ManualLine = { accountId: string; side: 'debit' | 'credit'; amount: string; description: string; branchId: string };
 
 export default function JournalPage() {
+  const accountName = useAccountName();
   const dialog = useDialog();
     const { t } = useLanguage();
     const confirmPastDates = useConfirmPastDates();
@@ -351,7 +353,7 @@ export default function JournalPage() {
                   >
                     <option value="">{t('accounting.journal.accountPlaceholder')}</option>
                     {(accounts ?? []).map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                      <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
                     ))}
                   </select>
                   <select
@@ -465,7 +467,7 @@ export default function JournalPage() {
                       <div key={line.id} className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-xs border-b border-gray-50 last:border-b-0">
                         <span className="truncate text-gray-700">
                           <span className="text-gray-400 font-mono mr-2">{line.account.code}</span>
-                          {line.account.name}
+                          {accountName(line.account.name)}
                           {line.description && <span className="text-gray-400"> — {line.description}</span>}
                         </span>
                         <span className="text-right w-24 tabular-nums">{Number(line.debit) > 0 ? formatIDR(Number(line.debit)) : ''}</span>

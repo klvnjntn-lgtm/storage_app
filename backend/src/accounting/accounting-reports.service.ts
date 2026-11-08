@@ -276,6 +276,58 @@ export class AccountingReportsService {
   // always cover the whole range; only `entries` is one page, and each
   // page's runningBalance continues correctly from the previous page.
   // ---------------------------------------------------------------------
+  // What one account's movement in a period is made of, as a short list rather than every line:
+  // grouped by the kind of document that posted it, and — for expenses — by expense category, so
+  // "Beban 13 jt" reads as "Listrik 6 jt, Sewa 4 jt, …". Amounts are signed the way the account
+  // counts (debit-normal accounts: debit − credit).
+  async getAccountSummary(organizationId: string, accountId: string, from: Date, to: Date) {
+    const account = await this.prisma.chartOfAccount.findFirst({
+      where: { id: accountId, organizationId },
+      select: { id: true, code: true, name: true, type: true, normalBalance: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+
+    const rows = await this.prisma.$queryRaw<
+      { sourceType: string; category: string | null; debit: Prisma.Decimal | null; credit: Prisma.Decimal | null; count: number }[]
+    >`
+      SELECT je."sourceType"::text AS "sourceType",
+             COALESCE(c1.name, c2.name) AS category,
+             SUM(l.debit) AS debit,
+             SUM(l.credit) AS credit,
+             COUNT(*)::int AS count
+      FROM "JournalEntryLine" l
+      JOIN "JournalEntry" je ON je.id = l."journalEntryId"
+      LEFT JOIN "Expense" e1 ON je."sourceType" = 'EXPENSE' AND e1.id = je."sourceId"
+      LEFT JOIN "ExpenseCategory" c1 ON c1.id = e1."categoryId"
+      LEFT JOIN "ExpensePayment" ep ON je."sourceType" = 'EXPENSE' AND ep.id = je."sourceId"
+      LEFT JOIN "Expense" e2 ON e2.id = ep."expenseId"
+      LEFT JOIN "ExpenseCategory" c2 ON c2.id = e2."categoryId"
+      WHERE l."accountId" = ${accountId}
+        AND je."organizationId" = ${organizationId}
+        AND je.status = 'POSTED'
+        AND je."entryDate" >= ${from}
+        AND je."entryDate" <= ${to}
+      GROUP BY 1, 2
+    `;
+
+    const sign = (debit: number, credit: number) =>
+      account.normalBalance === 'DEBIT' ? debit - credit : credit - debit;
+    const groups = rows
+      .map((r) => ({
+        sourceType: r.sourceType,
+        category: r.category,
+        count: r.count,
+        amount: this.round2(sign(Number(r.debit ?? 0), Number(r.credit ?? 0))),
+      }))
+      .filter((g) => Math.abs(g.amount) >= 0.005)
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    return {
+      account: { id: account.id, code: account.code, name: account.name, type: account.type },
+      total: this.round2(groups.reduce((s, g) => s + g.amount, 0)),
+      groups,
+    };
+  }
+
   async getAccountLedger(
     organizationId: string,
     accountId: string,

@@ -270,6 +270,23 @@ export class AccountingController {
     });
   }
 
+  // An account's movement in a period, summarised by source (and expense category). Query: accountId, from, to.
+  @Get('reports/account-summary')
+  getAccountSummary(
+    @CurrentOrg() organizationId: string,
+    @Query('accountId', ParseUUIDPipe) accountId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    if (!from || !to) {
+      throw new BadRequestException('from and to query params are required (YYYY-MM-DD)');
+    }
+    const fromDate = parseDateOnly(from, 'from');
+    const toDate = parseDateOnly(to, 'to');
+    if (fromDate > toDate) throw new BadRequestException('"from" must be on or before "to"');
+    return this.reports.getAccountSummary(organizationId, accountId, fromDate, toDate);
+  }
+
   // Query: accountId, from, to (YYYY-MM-DD), page, pageSize (max 500).
   @Get('reports/account-ledger')
   getAccountLedger(

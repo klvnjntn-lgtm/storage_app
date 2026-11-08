@@ -30,16 +30,16 @@ const DEFAULT_ACCOUNTS: SeedAccount[] = [
   { code: '3900', name: 'Retained Earnings', type: AccountType.EQUITY, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.RETAINED_EARNINGS },
   { code: '4000', name: 'Sales Revenue', type: AccountType.REVENUE, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.SALES_REVENUE },
   { code: '5000', name: 'Cost of Goods Sold', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.COST_OF_GOODS_SOLD },
-  { code: '6000', name: 'Salary Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.SALARY_EXPENSE },
-  { code: '6900', name: 'Uncategorized Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.UNCATEGORIZED_EXPENSE },
+  { code: '5100', name: 'Salary Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.SALARY_EXPENSE },
+  { code: '5990', name: 'Uncategorized Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.UNCATEGORIZED_EXPENSE },
   { code: '3100', name: 'Opening Balance Equity', type: AccountType.EQUITY, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.OPENING_BALANCE_EQUITY },
 { code: '5900', name: 'Inventory Adjustments', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.INVENTORY_ADJUSTMENT },
   { code: '1500', name: 'Fixed Assets', type: AccountType.ASSET, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.FIXED_ASSETS },
   { code: '1510', name: 'Accumulated Depreciation', type: AccountType.ASSET, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.ACCUMULATED_DEPRECIATION },
   { code: '2400', name: 'Fixed Asset Payable', type: AccountType.LIABILITY, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.FIXED_ASSET_PAYABLE },
-  { code: '6100', name: 'Depreciation Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.DEPRECIATION_EXPENSE },
+  { code: '5110', name: 'Depreciation Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.DEPRECIATION_EXPENSE },
   { code: '4900', name: 'Gain on Disposal of Assets', type: AccountType.REVENUE, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.GAIN_ON_ASSET_DISPOSAL },
-  { code: '6910', name: 'Loss on Disposal of Assets', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL },
+  { code: '5910', name: 'Loss on Disposal of Assets', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL },
 ];
 
 @Injectable()

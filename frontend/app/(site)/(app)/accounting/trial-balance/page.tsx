@@ -9,8 +9,9 @@ import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
-import { AccountBreakdownRow, ALL_TIME_FROM } from '@/app/components/accounting/AccountBreakdown';
+import { AccountBreakdownRow, ALL_TIME_FROM, BreakdownExpandAll, BreakdownToggle } from '@/app/components/accounting/AccountBreakdown';
 
 
 type TrialBalanceLine = { accountId: string; code: string; name: string; type: string; debit: number; credit: number };
@@ -54,9 +55,12 @@ function yearEndISO() {
 }
 
 export default function TrialBalancePage() {
+  const accountName = useAccountName();
     const { t } = useLanguage();
     const [asOf, setAsOf] = useState(todayISO());
   const [report, setReport] = useState<TrialBalanceReport | null>(null);
+  // Every account line shows what its amount is made of unless switched off.
+  const [showBreakdowns, setShowBreakdowns] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,6 +120,7 @@ export default function TrialBalancePage() {
   };
 
   return (
+    <BreakdownExpandAll value={showBreakdowns}>
     <main
       className="min-h-screen text-black"
       style={{
@@ -161,7 +166,10 @@ export default function TrialBalancePage() {
               {t('accounting.balanceSheet.yearEnd')}
             </button>
           </div>
-          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
+          <div className="sm:ml-auto flex flex-wrap gap-2">
+            <BreakdownToggle value={showBreakdowns} onChange={setShowBreakdowns} />
+            <ExportExcelButton disabled={!report || loading} build={buildExcel} />
+          </div>
         </div>
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 mb-4">{error}</p>}
@@ -202,7 +210,7 @@ export default function TrialBalancePage() {
                       <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 text-sm">
                         <span className="truncate text-gray-700">
                           <span className="text-gray-400 font-mono text-xs mr-2">{acc.code}</span>
-                          {acc.name}
+                          {accountName(acc.name)}
                         </span>
                         <span className="text-right w-28 tabular-nums">{acc.debit > 0 ? formatIDR(acc.debit) : ''}</span>
                         <span className="text-right w-28 tabular-nums">{acc.credit > 0 ? formatIDR(acc.credit) : ''}</span>
@@ -223,5 +231,6 @@ export default function TrialBalancePage() {
         )}
       </div>
     </main>
+    </BreakdownExpandAll>
   );
 }

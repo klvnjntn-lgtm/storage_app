@@ -5,13 +5,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Scale, DollarSign, PackageSearch, Percent, Info, Receipt, MapPin } from 'lucide-react';
-import { AccountBreakdownRow } from '@/app/components/accounting/AccountBreakdown';
+import { AccountBreakdownRow, BreakdownExpandAll, BreakdownToggle } from '@/app/components/accounting/AccountBreakdown';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { useBranches } from '@/lib/hooks/useBranches';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { fileNamePart } from '@/lib/excel-export';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
 
@@ -81,6 +82,7 @@ function defaultTo() {
 const ALL_TIME_FROM = '2000-01-01';
 
 export default function ProfitAndLossPage() {
+  const accountName = useAccountName();
   const { t } = useLanguage();
   const [from, setFrom] = useState(defaultFrom());
   const [to, setTo] = useState(defaultTo());
@@ -89,6 +91,8 @@ export default function ProfitAndLossPage() {
   const { branches, multiBranch } = useBranches();
 
   const [report, setReport] = useState<ProfitAndLossReport | null>(null);
+  // Every account line shows what its amount is made of unless switched off.
+  const [showBreakdowns, setShowBreakdowns] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,6 +169,7 @@ export default function ProfitAndLossPage() {
   };
 
   return (
+    <BreakdownExpandAll value={showBreakdowns}>
     <main
       className="min-h-screen text-black"
       style={{
@@ -220,7 +225,10 @@ export default function ProfitAndLossPage() {
               </select>
             </div>
           )}
-          <ExportExcelButton className="sm:ml-auto" disabled={!report || loading} build={buildExcel} />
+          <div className="sm:ml-auto flex flex-wrap gap-2">
+            <BreakdownToggle value={showBreakdowns} onChange={setShowBreakdowns} />
+            <ExportExcelButton disabled={!report || loading} build={buildExcel} />
+          </div>
         </div>
 
         {error && (
@@ -302,7 +310,7 @@ export default function ProfitAndLossPage() {
                 {hasMultipleRevenueLines ? (
                   report.revenue.map((line) => (
                     <AccountBreakdownRow key={line.accountId} accountId={line.accountId} from={from} to={to}>
-                      <StatementRow label={`${line.code} ${line.name}`} amount={line.amount} />
+                      <StatementRow label={`${line.code} ${accountName(line.name)}`} amount={line.amount} />
                     </AccountBreakdownRow>
                   ))
                 ) : (
@@ -320,7 +328,7 @@ export default function ProfitAndLossPage() {
                 ) : (
                   report.operatingExpenses.map((line) => (
                     <AccountBreakdownRow key={line.accountId} accountId={line.accountId} from={from} to={to}>
-                      <StatementRow label={`${line.code} ${line.name}`} amount={line.amount} negative />
+                      <StatementRow label={`${line.code} ${accountName(line.name)}`} amount={line.amount} negative />
                     </AccountBreakdownRow>
                   ))
                 )}
@@ -342,10 +350,12 @@ export default function ProfitAndLossPage() {
         )}
       </div>
     </main>
+    </BreakdownExpandAll>
   );
 }
 
 function UnallocatedCard({ section, t }: { section: UnallocatedSection; t: (key: string, vars?: Record<string, string | number>) => string }) {
+  const accountName = useAccountName();
   const hasLines = section.revenue.length > 0 || section.operatingExpenses.length > 0;
 
   return (
@@ -364,7 +374,7 @@ function UnallocatedCard({ section, t }: { section: UnallocatedSection; t: (key:
           {section.revenue.length > 0 && (
             <StatementSection title={t('accounting.profitLoss.unallocatedRevenue')}>
               {section.revenue.map((line) => (
-                <StatementRow key={line.accountId} label={`${line.code} ${line.name}`} amount={line.amount} />
+                <StatementRow key={line.accountId} label={`${line.code} ${accountName(line.name)}`} amount={line.amount} />
               ))}
             </StatementSection>
           )}
@@ -372,7 +382,7 @@ function UnallocatedCard({ section, t }: { section: UnallocatedSection; t: (key:
           {section.operatingExpenses.length > 0 && (
             <StatementSection title={t('accounting.profitLoss.unallocatedExpenses')}>
               {section.operatingExpenses.map((line) => (
-                <StatementRow key={line.accountId} label={`${line.code} ${line.name}`} amount={line.amount} negative />
+                <StatementRow key={line.accountId} label={`${line.code} ${accountName(line.name)}`} amount={line.amount} negative />
               ))}
             </StatementSection>
           )}

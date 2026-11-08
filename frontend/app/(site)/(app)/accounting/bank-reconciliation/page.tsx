@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { formatDMY, parseCalendarDate, toCalendarDateString } from '@/lib/dates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -66,6 +67,7 @@ const STATUS_CLS: Record<StatementRow['status'], string> = {
 };
 
 export default function BankReconciliationPage() {
+  const accountName = useAccountName();
   const { t } = useLanguage();
   const dialog = useDialog();
   const initial = monthBounds();
@@ -567,7 +569,7 @@ export default function BankReconciliationPage() {
               <table className="w-full">
                 <tbody>
                   {[
-                    [t('accounting.bankRec.bookBalance', { account: report.ledgerAccount.name }), report.summary.bookBalance],
+                    [t('accounting.bankRec.bookBalance', { account: accountName(report.ledgerAccount.name) }), report.summary.bookBalance],
                     [t('accounting.bankRec.plusStatement'), report.summary.unmatchedStatement],
                     [t('accounting.bankRec.lessBook'), 0 - report.summary.unmatchedBook],
                   ].map(([label, value]) => (
@@ -781,7 +783,7 @@ export default function BankReconciliationPage() {
                                       <select value={recordAccount} onChange={(e) => setRecordAccount(e.target.value)} className={inputCls}>
                                         <option value="">{t('accounting.bankRec.chooseAccount')}</option>
                                         {recordAccounts.map((a) => (
-                                          <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                                          <option key={a.id} value={a.id}>{a.code} · {accountName(a.name)}</option>
                                         ))}
                                       </select>
                                     </label>

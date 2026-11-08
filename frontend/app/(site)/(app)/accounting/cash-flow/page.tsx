@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import DateRangePicker from '@/app/components/shared/DateRangePicker';
 
 
@@ -67,6 +68,7 @@ function defaultTo() {
 const ALL_TIME_FROM = '2000-01-01';
 
 export default function CashFlowPage() {
+  const accountName = useAccountName();
   const { t } = useLanguage();
   const [from, setFrom] = useState(defaultFrom());
   const [to, setTo] = useState(defaultTo());
@@ -279,7 +281,7 @@ export default function CashFlowPage() {
                     <tbody>
                       {report.accounts.map((a) => (
                         <tr key={a.accountId} className="border-t border-gray-100">
-                          <td className="px-4 py-2 text-gray-700">{a.code} {a.name}</td>
+                          <td className="px-4 py-2 text-gray-700">{a.code} {accountName(a.name)}</td>
                           <td className="px-4 py-2 text-right text-gray-500">{formatIDR(a.opening)}</td>
                           <td className={`px-4 py-2 text-right ${a.netChange < 0 ? 'text-red-600' : 'text-gray-700'}`}>
                             {a.netChange < 0 ? '−' : ''}{formatIDR(Math.abs(a.netChange))}

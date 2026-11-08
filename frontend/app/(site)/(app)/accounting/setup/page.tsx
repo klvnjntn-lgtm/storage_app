@@ -4,10 +4,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Landmark, CheckCircle2, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Landmark, CheckCircle2, Plus, X, Loader2, AlertTriangle, CornerDownRight } from 'lucide-react';
+import { toCalendarDateString } from '@/lib/dates';
+import { AccountBreakdownRow, ALL_TIME_FROM } from '@/app/components/accounting/AccountBreakdown';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { useAccountName } from '@/lib/account-names';
 import { isAdminRole } from '@/lib/roles';
 import BankAccountsSection from '@/app/components/accounting/BankAccountsSection';
 
@@ -22,6 +25,7 @@ type Account = {
   // Set on a bank's ledger account (under 1010 Bank): named, archived and restored from its bank account.
   bankAccountId: string | null;
   isActive: boolean;
+  parentId: string | null;
 };
 
 const TYPE_ORDER: Account['type'][] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
@@ -34,6 +38,7 @@ const TYPE_LABEL_KEY: Record<Account['type'], string> = {
 };
 
 export default function AccountingSetupPage() {
+  const accountName = useAccountName();
     const { t } = useLanguage();
     const { profile } = useAuth();
   const isAdmin = isAdminRole(profile?.role);
@@ -47,7 +52,13 @@ export default function AccountingSetupPage() {
   const [saving, setSaving] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState({ code: '', name: '', type: 'EXPENSE' as Account['type'], normalBalance: 'DEBIT' as 'DEBIT' | 'CREDIT' });
+  const [form, setForm] = useState({
+    code: '',
+    name: '',
+    type: 'EXPENSE' as Account['type'],
+    normalBalance: 'DEBIT' as 'DEBIT' | 'CREDIT',
+    parentId: '',
+  });
 
   // silent: refresh in place (after a bank change) without the loading state, which would unmount the list.
   async function loadAccounts(silent = false) {
@@ -126,14 +137,14 @@ export default function AccountingSetupPage() {
       const res = await apiFetch('/accounting/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, parentId: form.parentId || undefined }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setFormError(body?.message ?? t('accounting.setup.requestFailed', { status: res.status }));
         return;
       }
-      setForm({ code: '', name: '', type: 'EXPENSE', normalBalance: 'DEBIT' });
+      setForm({ code: '', name: '', type: 'EXPENSE', normalBalance: 'DEBIT', parentId: '' });
       setShowAddForm(false);
       await loadAccounts();
     } catch {
@@ -142,6 +153,45 @@ export default function AccountingSetupPage() {
       setSaving(false);
     }
   }
+
+  // The next free child code under a parent: 1200 → 1200.1, 1200.2, …
+  function nextChildCode(parent: Account) {
+    const taken = new Set((accounts ?? []).map((a) => a.code));
+    let n = 1;
+    while (taken.has(`${parent.code}.${n}`)) n++;
+    return `${parent.code}.${n}`;
+  }
+
+  // Opens the add form for a child of this account: same type, next code.
+  function startChild(parent: Account) {
+    setFormError(null);
+    setForm({ code: nextChildCode(parent), name: '', type: parent.type, normalBalance: parent.normalBalance, parentId: parent.id });
+    setShowAddForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Each type's accounts as a tree, parents before their children, with each row's depth.
+  const tree = useMemo(() => {
+    if (!accounts) return null;
+    const byParent = new Map<string | null, Account[]>();
+    const ids = new Set(accounts.map((a) => a.id));
+    for (const acc of accounts) {
+      const key = acc.parentId && ids.has(acc.parentId) ? acc.parentId : null;
+      byParent.set(key, [...(byParent.get(key) ?? []), acc]);
+    }
+    for (const list of byParent.values()) list.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+    const out = new Map<Account['type'], { acc: Account; depth: number; hasChildren: boolean }[]>();
+    for (const type of TYPE_ORDER) out.set(type, []);
+    const walk = (acc: Account, depth: number) => {
+      const children = byParent.get(acc.id) ?? [];
+      out.get(acc.type)?.push({ acc, depth, hasChildren: children.length > 0 });
+      for (const c of children) walk(c, depth + 1);
+    };
+    for (const root of byParent.get(null) ?? []) walk(root, 0);
+    return out;
+  }, [accounts]);
+  const today = toCalendarDateString(new Date());
+  const parentOptions = (accounts ?? []).filter((a) => a.isActive && !a.bankAccountId && a.systemKey !== 'BANK');
 
   const grouped = useMemo(() => {
     if (!accounts) return null;
@@ -260,6 +310,35 @@ export default function AccountingSetupPage() {
                     {formError}
                   </p>
                 )}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.parent')}</label>
+                  <select
+                    value={form.parentId}
+                    onChange={(e) => {
+                      const parent = accounts?.find((a) => a.id === e.target.value);
+                      if (!parent) return setForm((f) => ({ ...f, parentId: '' }));
+                      setForm((f) => ({
+                        ...f,
+                        parentId: parent.id,
+                        type: parent.type,
+                        normalBalance: parent.normalBalance,
+                        code: nextChildCode(parent),
+                      }));
+                    }}
+                    className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
+                  >
+                    <option value="">{t('accounting.setup.noParent')}</option>
+                    {TYPE_ORDER.map((type) => (
+                      <optgroup key={type} label={t(TYPE_LABEL_KEY[type])}>
+                        {parentOptions
+                          .filter((a) => a.type === type)
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>{a.code} {accountName(a.name)}</option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.code')}</label>
@@ -287,6 +366,7 @@ export default function AccountingSetupPage() {
                     <label className="text-xs font-semibold text-gray-600">{t('accounting.setup.type')}</label>
                     <select
                       value={form.type}
+                      disabled={!!form.parentId}
                       onChange={(e) => {
                         const type = e.target.value as Account['type'];
                         const normalBalance = type === 'ASSET' || type === 'EXPENSE' ? 'DEBIT' : 'CREDIT';
@@ -327,56 +407,84 @@ export default function AccountingSetupPage() {
               <BankAccountsSection onLoadError={setError} onChanged={() => loadAccounts(true)} />
             </div>
 
+            <p className="text-xs text-gray-500 mb-2">{t('accounting.setup.clickHint')}</p>
             <div className="flex flex-col gap-4">
               {TYPE_ORDER.map((type) => {
-                const list = grouped.get(type) ?? [];
+                const list = tree?.get(type) ?? [];
                 if (list.length === 0) return null;
                 return (
                   <div key={type} className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
                     <div className="px-4 pt-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
                       {t(TYPE_LABEL_KEY[type])}
                     </div>
-                    {list.map((acc) => (
-                      <div
+                    {list.map(({ acc, depth, hasChildren }) => (
+                      <AccountBreakdownRow
                         key={acc.id}
-                        className="px-4 py-2.5 flex items-center justify-between gap-3 border-b border-gray-100 last:border-b-0"
+                        accountId={acc.id}
+                        from={ALL_TIME_FROM}
+                        to={today}
+                        // Children sit further right, one step per level, so the hierarchy reads at a glance.
+                        indent={depth * 28}
+                        className={`border-b border-gray-100 last:border-b-0 ${depth > 0 ? 'bg-gray-50/60' : ''}`}
+                        actions={
+                          <>
+                            {acc.systemKey && (
+                              <span className="hidden sm:inline text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+                                {acc.systemKey.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                            {acc.bankAccountId && (
+                              <a
+                                href="#bank-accounts"
+                                title={t('accounting.setup.bankManagedHint')}
+                                className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 hover:bg-emerald-100"
+                              >
+                                {t('accounting.setup.bankBadge')}
+                              </a>
+                            )}
+                            {/* A bank's sub-accounts are its bank accounts, added with their number and holder. */}
+                            {isAdmin && acc.isActive && !acc.bankAccountId && (
+                              acc.systemKey === 'BANK' ? (
+                                <a href="#bank-accounts" className="text-[11px] font-semibold text-blue-700 hover:underline whitespace-nowrap">
+                                  + {t('accounting.setup.addChild')}
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => startChild(acc)}
+                                  className="text-[11px] font-semibold text-blue-700 hover:underline whitespace-nowrap"
+                                >
+                                  + {t('accounting.setup.addChild')}
+                                </button>
+                              )
+                            )}
+                            {/* System accounts can't be archived — the backend rejects it outright,
+                                since it'd break every document type that posts to it. */}
+                            {isAdmin && !acc.systemKey && !acc.bankAccountId && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleActive(acc)}
+                                disabled={togglingId === acc.id}
+                                className="text-[11px] font-semibold text-gray-400 hover:text-blue-700 disabled:opacity-50"
+                              >
+                                {togglingId === acc.id ? '...' : acc.isActive ? t('accounting.setup.archive') : t('accounting.setup.reactivate')}
+                              </button>
+                            )}
+                          </>
+                        }
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-xs font-mono text-gray-400 shrink-0 w-12">{acc.code}</span>
-                          <span className={`text-sm truncate ${acc.isActive ? 'text-gray-800' : 'text-gray-400 line-through'}`}>
-                            {acc.name}
+                        <div className="px-2 py-2.5 flex items-center gap-2 min-w-0">
+                          {depth > 0 && <CornerDownRight size={14} className="text-gray-300 shrink-0" />}
+                          <span className={`text-xs font-mono shrink-0 min-w-12 ${depth > 0 ? 'text-gray-500' : 'text-gray-400'}`}>{acc.code}</span>
+                          <span
+                            className={`text-sm truncate ${acc.isActive ? 'text-gray-800' : 'text-gray-400 line-through'} ${
+                              hasChildren ? 'font-semibold' : ''
+                            }`}
+                          >
+                            {accountName(acc.name)}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {acc.systemKey && (
-                            <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
-                              {acc.systemKey.replace(/_/g, ' ')}
-                            </span>
-                          )}
-                          {acc.bankAccountId && (
-                            <a
-                              href="#bank-accounts"
-                              title={t('accounting.setup.bankManagedHint')}
-                              className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 hover:bg-emerald-100"
-                            >
-                              {t('accounting.setup.bankBadge')}
-                            </a>
-                          )}
-                          {/* System accounts can't be archived — the backend
-                              rejects it outright, since it'd break every
-                              document type that posts to it. Only custom
-                              accounts get the toggle. */}
-                          {isAdmin && !acc.systemKey && !acc.bankAccountId && (
-                            <button
-                              onClick={() => handleToggleActive(acc)}
-                              disabled={togglingId === acc.id}
-                              className="text-[11px] font-semibold text-gray-400 hover:text-blue-700 disabled:opacity-50"
-                            >
-                              {togglingId === acc.id ? '...' : acc.isActive ? t('accounting.setup.archive') : t('accounting.setup.reactivate')}
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                      </AccountBreakdownRow>
                     ))}
                   </div>
                 );
