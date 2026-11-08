@@ -991,12 +991,15 @@ async getARAging(
     const revenue: ProfitAndLossLine[] = [];
     const operatingExpenses: ProfitAndLossLine[] = [];
     let cogs = 0;
+    // So the report can open COGS to show what it's made of.
+    let cogsAccountId: string | null = null;
 
     for (const [accountId, acc] of byAccount) {
       if (acc.type === AccountType.REVENUE) {
         revenue.push({ accountId, code: acc.code, name: acc.name, amount: acc.amount });
       } else if (acc.systemKey === SystemAccountKey.COST_OF_GOODS_SOLD) {
         cogs += acc.amount;
+        cogsAccountId = accountId;
       } else {
         operatingExpenses.push({ accountId, code: acc.code, name: acc.name, amount: acc.amount });
       }
@@ -1014,6 +1017,7 @@ async getARAging(
       revenue,
       totalRevenue: this.round2(totalRevenue),
       cogs: this.round2(cogs),
+      cogsAccountId,
       grossProfit: this.round2(grossProfit),
       grossMargin: totalRevenue > 0 ? this.round2((grossProfit / totalRevenue) * 100) : 0,
       operatingExpenses,

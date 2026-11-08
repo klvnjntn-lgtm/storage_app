@@ -55,43 +55,19 @@ export function BreakdownToggle({ value, onChange }: { value: boolean; onChange:
 // One account's line on a report (balance sheet, profit & loss, …) that opens to show what makes
 // up its amount: a summary by expense category or kind of transaction with each part's share,
 // then — on request — the transactions themselves and a link to the full ledger.
-export function AccountBreakdownRow({
-  accountId,
-  from,
-  to,
-  className,
-  actions,
-  indent = 0,
-  children,
-}: {
-  accountId: string;
-  from: string;
-  to: string;
-  className?: string;
-  // Buttons beside the row (kept outside the clickable area, so they don't toggle it).
-  actions?: ReactNode;
-  // Left offset in px, for a child account drawn under its parent.
-  indent?: number;
-  // The row as the report draws it (label + amount).
-  children: ReactNode;
-}) {
+// What one account's amount in a period is made of: a summary by expense category or kind of
+// transaction with each part's share and the total, then — on request — the transactions
+// themselves and a link to the full ledger. Shown under a report row once it's opened.
+export function AccountBreakdownPanel({ accountId, from, to }: { accountId: string; from: string; to: string }) {
   const { t } = useLanguage();
-  const expandAll = useContext(ExpandAllContext);
-  const [open, setOpen] = useState(expandAll);
   const key = `${accountId}|${from}|${to}`;
   const [summary, setSummary] = useState<{ key: string; data: Summary } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showEntries, setShowEntries] = useState(false);
   const [ledger, setLedger] = useState<{ key: string; page: LedgerPage } | null>(null);
 
-  // The page's switch opens or closes every row.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setOpen(expandAll);
-  }, [expandAll]);
-
-  useEffect(() => {
-    if (!open || summary?.key === key) return;
+    if (summary?.key === key) return;
     let cancelled = false;
     (async () => {
       setError(null);
@@ -108,10 +84,10 @@ export function AccountBreakdownRow({
     return () => {
       cancelled = true;
     };
-  }, [open, key, accountId, from, to, summary?.key, t]);
+  }, [key, accountId, from, to, summary?.key, t]);
 
   useEffect(() => {
-    if (!open || !showEntries || ledger?.key === key) return;
+    if (!showEntries || ledger?.key === key) return;
     let cancelled = false;
     (async () => {
       const url = (page: number) =>
@@ -128,7 +104,7 @@ export function AccountBreakdownRow({
     return () => {
       cancelled = true;
     };
-  }, [open, showEntries, key, accountId, from, to, ledger?.key]);
+  }, [showEntries, key, accountId, from, to, ledger?.key]);
 
   const sourceLabel = (sourceType: string) => {
     const k = `accounting.breakdown.source.${sourceType}`;
@@ -144,25 +120,7 @@ export function AccountBreakdownRow({
   const gross = data ? data.groups.reduce((s, g) => s + Math.abs(g.amount), 0) : 0;
 
   return (
-    <div className={className}>
-      <div className="flex items-stretch hover:bg-blue-50/60 transition-colors">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          title={t('accounting.breakdown.hint')}
-          style={indent ? { paddingLeft: indent } : undefined}
-          className="flex-1 min-w-0 text-left flex items-stretch"
-        >
-          <span className="pl-2 flex items-center text-gray-400">
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </span>
-          <span className="flex-1 min-w-0">{children}</span>
-        </button>
-        {actions && <div className="shrink-0 flex items-center gap-2 pr-4">{actions}</div>}
-      </div>
-      {open && (
-        <div className="mr-4 mb-3 mt-0.5 border-l-2 border-blue-500/25 pl-3 text-xs" style={{ marginLeft: indent + 32 }}>
+    <>
           {error ? (
             <p className="py-1 text-red-700">{error}</p>
           ) : !data ? (
@@ -245,6 +203,63 @@ export function AccountBreakdownRow({
               )}
             </>
           )}
+    </>
+  );
+}
+
+// One account's line on a report (balance sheet, profit & loss, …) that opens to show
+// AccountBreakdownPanel under it.
+export function AccountBreakdownRow({
+  accountId,
+  from,
+  to,
+  className,
+  actions,
+  indent = 0,
+  children,
+}: {
+  accountId: string;
+  from: string;
+  to: string;
+  className?: string;
+  // Buttons beside the row (kept outside the clickable area, so they don't toggle it).
+  actions?: ReactNode;
+  // Left offset in px, for a child account drawn under its parent.
+  indent?: number;
+  // The row as the report draws it (label + amount).
+  children: ReactNode;
+}) {
+  const { t } = useLanguage();
+  const expandAll = useContext(ExpandAllContext);
+  const [open, setOpen] = useState(expandAll);
+
+  // The page's switch opens or closes every row.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOpen(expandAll);
+  }, [expandAll]);
+
+  return (
+    <div className={className}>
+      <div className="flex items-stretch hover:bg-blue-50/60 transition-colors">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          title={t('accounting.breakdown.hint')}
+          style={indent ? { paddingLeft: indent } : undefined}
+          className="flex-1 min-w-0 text-left flex items-stretch"
+        >
+          <span className="pl-2 flex items-center text-gray-400">
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
+          <span className="flex-1 min-w-0">{children}</span>
+        </button>
+        {actions && <div className="shrink-0 flex items-center gap-2 pr-4">{actions}</div>}
+      </div>
+      {open && (
+        <div className="mr-4 mb-3 mt-0.5 border-l-2 border-blue-500/25 pl-3 text-xs" style={{ marginLeft: indent + 32 }}>
+          <AccountBreakdownPanel accountId={accountId} from={from} to={to} />
         </div>
       )}
     </div>

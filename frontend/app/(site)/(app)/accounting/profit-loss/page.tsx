@@ -32,6 +32,7 @@ type ProfitAndLossReport = {
   revenue: PnlLine[];
   totalRevenue: number;
   cogs: number;
+  cogsAccountId?: string | null;
   grossProfit: number;
   grossMargin: number;
   operatingExpenses: PnlLine[];
@@ -314,12 +315,24 @@ export default function ProfitAndLossPage() {
                     </AccountBreakdownRow>
                   ))
                 ) : (
-                  <StatementRow label={t('accounting.profitLoss.salesRevenue')} amount={report.totalRevenue} />
+                  report.revenue[0] ? (
+                    <AccountBreakdownRow accountId={report.revenue[0].accountId} from={from} to={to}>
+                      <StatementRow label={t('accounting.profitLoss.salesRevenue')} amount={report.totalRevenue} />
+                    </AccountBreakdownRow>
+                  ) : (
+                    <StatementRow label={t('accounting.profitLoss.salesRevenue')} amount={report.totalRevenue} />
+                  )
                 )}
                 <StatementRow label={t('accounting.profitLoss.totalRevenue')} amount={report.totalRevenue} bold />
               </StatementSection>
 
-              <StatementRow label={t('accounting.profitLoss.cogs')} amount={report.cogs} negative muted />
+              {report.cogsAccountId ? (
+                <AccountBreakdownRow accountId={report.cogsAccountId} from={from} to={to}>
+                  <StatementRow label={t('accounting.profitLoss.cogs')} amount={report.cogs} negative muted />
+                </AccountBreakdownRow>
+              ) : (
+                <StatementRow label={t('accounting.profitLoss.cogs')} amount={report.cogs} negative muted />
+              )}
               <StatementRow label={t('accounting.profitLoss.grossProfit')} amount={report.grossProfit} bold divider />
 
               <StatementSection title={t('accounting.profitLoss.operatingExpenses')}>

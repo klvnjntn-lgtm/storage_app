@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, Target } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Target } from 'lucide-react';
+import { AccountBreakdownPanel, BreakdownToggle } from '@/app/components/accounting/AccountBreakdown';
+import { toCalendarDateString } from '@/lib/dates';
+import { useAccountName } from '@/lib/account-names';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -45,6 +48,11 @@ export default function BudgetPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const accountName = useAccountName();
+  // Rows opened to show what their actual figure is made of; all of them while showAll is on.
+  const [showAll, setShowAll] = useState(true);
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const isOpen = (id: string) => opened[id] ?? showAll;
 
   useEffect(() => {
     let stale = false;
@@ -81,6 +89,10 @@ export default function BudgetPage() {
     new Date(2026, m - 1, 1).toLocaleDateString(language === 'id' ? 'id-ID' : 'en-GB', { month: style });
 
   const dirty = Object.keys(draft).length > 0;
+
+  // The compare tab's period as dates, for the breakdown of each account's actual.
+  const periodFrom = toCalendarDateString(new Date(year, period === WHOLE_YEAR ? 0 : period - 1, 1));
+  const periodTo = toCalendarDateString(period === WHOLE_YEAR ? new Date(year, 11, 31) : new Date(year, period, 0));
 
   // Changing year or branch would throw away what's typed.
   async function guarded(change: () => void) {
@@ -189,18 +201,30 @@ export default function BudgetPage() {
             {title}
           </td>
         </tr>
-        {list.map((r) => (
-          <tr key={r.id} className="border-t border-gray-100">
+        {list.map((r) => [
+          <tr key={r.id} className="border-t border-gray-100 hover:bg-blue-50/60 cursor-pointer" onClick={() => setOpened((o) => ({ ...o, [r.id]: !isOpen(r.id) }))}>
             <td className={tdCls}>
-              <span className="text-gray-400 font-mono text-xs mr-2">{r.code}</span>
-              {r.name}
+              <span className="inline-flex items-center gap-1">
+                {isOpen(r.id) ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+                <span className="text-gray-400 font-mono text-xs mr-1">{r.code}</span>
+                {accountName(r.name)}
+              </span>
             </td>
             <td className={`${tdCls} text-right tabular-nums`}>{formatIDR(r.budgetValue)}</td>
             <td className={`${tdCls} text-right tabular-nums`}>{formatIDR(r.actualValue)}</td>
             <td className={`${tdCls} text-right tabular-nums ${diffCls(r.difference)}`}>{formatIDR(r.difference)}</td>
             <td className={`${tdCls} text-right tabular-nums text-gray-500`}>{usedPct(r.budgetValue, r.actualValue)}</td>
-          </tr>
-        ))}
+          </tr>,
+          isOpen(r.id) && (
+            <tr key={`${r.id}-detail`}>
+              <td colSpan={5} className="pb-3 pr-3">
+                <div className="ml-8 border-l-2 border-blue-500/25 pl-3 text-xs">
+                  <AccountBreakdownPanel accountId={r.id} from={periodFrom} to={periodTo} />
+                </div>
+              </td>
+            </tr>
+          ),
+        ])}
         <tr className="border-t border-gray-300 font-semibold">
           <td className={tdCls}>{totalLabel}</td>
           <td className={`${tdCls} text-right tabular-nums`}>{formatIDR(total.budget)}</td>
@@ -258,7 +282,16 @@ export default function BudgetPage() {
           />
           <div className="flex-1" />
           {tab === 'compare' ? (
-            <ExportExcelButton disabled={!accounts || loading} build={buildExcel} />
+            <>
+              <BreakdownToggle
+                value={showAll}
+                onChange={(v) => {
+                  setShowAll(v);
+                  setOpened({});
+                }}
+              />
+              <ExportExcelButton disabled={!accounts || loading} build={buildExcel} />
+            </>
           ) : (
             <button type="button" onClick={save} disabled={!dirty || saving} className={btnPrimary}>
               {saving ? t('accounting.budget.saving') : t('accounting.budget.save')}
