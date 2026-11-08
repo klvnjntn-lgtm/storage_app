@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -46,7 +47,7 @@ export class ReorderLineDto {
 
 export class CreateReorderPosDto {
   @IsOptional()
-  @IsUUID()
+  @IsString() @IsNotEmpty()
   locationId?: string;
 
   @IsArray()

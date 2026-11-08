@@ -236,7 +236,7 @@ export class OrderPartLineDto {
   @IsUUID()
   productId: string;
 
-  @IsUUID()
+  @IsString() @IsNotEmpty()
   locationId: string;
 
   @IsNumber({ maxDecimalPlaces: 2 })

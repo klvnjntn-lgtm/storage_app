@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, MaxLength } from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, MaxLength } from 'class-validator';
 import { DepreciationMethod, PaymentMethod } from '@prisma/client';
 
 export class CreateFixedAssetDto {
@@ -12,7 +12,7 @@ export class CreateFixedAssetDto {
   category?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString() @IsNotEmpty()
   locationId?: string;
 
   // The branch it's booked to (P&L by branch). Left out: unallocated.

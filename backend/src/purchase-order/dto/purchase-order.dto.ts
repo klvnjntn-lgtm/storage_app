@@ -48,7 +48,7 @@ export class PurchaseOrderItemDto {
 }
 
 export class CreatePurchaseOrderDto {
-  @IsOptional() @IsUUID()
+  @IsOptional() @IsString() @IsNotEmpty()
   locationId?: string;
 
   @IsOptional() @IsUUID()
@@ -97,7 +97,7 @@ export class CreatePurchaseOrderDto {
 }
 
 export class UpdatePurchaseOrderDto {
-  @IsOptional() @IsUUID()
+  @IsOptional() @IsString() @IsNotEmpty()
   locationId?: string;
 
   @IsOptional() @IsUUID()
