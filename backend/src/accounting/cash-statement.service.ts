@@ -48,6 +48,7 @@ export type StatementLine = {
       | 'expense'
       | 'payroll'
       | 'fixed-asset'
+      | 'amortization'
       | 'journal';
     id: string;
   } | null;
@@ -106,6 +107,8 @@ const KIND_BY_SOURCE: Partial<Record<JournalSourceType, StatementKind>> = {
   PAYROLL: 'PAYROLL',
   FIXED_ASSET_PURCHASE: 'ASSET_PURCHASE',
   FIXED_ASSET_DISPOSAL: 'ASSET_SALE',
+  INTANGIBLE_ASSET: 'ASSET_PURCHASE',
+  PREPAID_EXPENSE: 'EXPENSE',
 };
 
 type Enriched = Pick<
@@ -542,6 +545,32 @@ export class CashStatementService {
           link: { type: 'fixed-asset', id: asset.id },
         };
       });
+    }
+
+    // Amortisasi payments: an intangible asset or a prepaid expense paid for.
+    const amortizationIds = [
+      ...idsOf(JournalSourceType.INTANGIBLE_ASSET),
+      ...idsOf(JournalSourceType.PREPAID_EXPENSE),
+    ];
+    if (amortizationIds.length) {
+      const amortizationPayments = await this.prisma.amortizationPayment.findMany({
+        where: { id: { in: amortizationIds }, amortization: { organizationId } },
+        select: { id: true, method: true, amortization: { select: { id: true, name: true } } },
+      });
+      const byId = new Map(amortizationPayments.map((p) => [p.id, p]));
+      for (const type of [JournalSourceType.INTANGIBLE_ASSET, JournalSourceType.PREPAID_EXPENSE]) {
+        each(type, (id) => {
+          const p = byId.get(id);
+          if (!p) return null;
+          return {
+            party: null,
+            reference: null,
+            detail: p.amortization.name,
+            method: p.method,
+            link: { type: 'amortization', id: p.amortization.id },
+          };
+        });
+      }
     }
 
     return out;

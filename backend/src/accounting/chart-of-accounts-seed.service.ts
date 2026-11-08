@@ -40,6 +40,11 @@ const DEFAULT_ACCOUNTS: SeedAccount[] = [
   { code: '5110', name: 'Depreciation Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.DEPRECIATION_EXPENSE },
   { code: '4900', name: 'Gain on Disposal of Assets', type: AccountType.REVENUE, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.GAIN_ON_ASSET_DISPOSAL },
   { code: '5910', name: 'Loss on Disposal of Assets', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL },
+  // Amortisasi (amortizations.service.ts)
+  { code: '1450', name: 'Prepaid Expenses', type: AccountType.ASSET, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.PREPAID_EXPENSES },
+  { code: '1600', name: 'Intangible Assets', type: AccountType.ASSET, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.INTANGIBLE_ASSETS },
+  { code: '1610', name: 'Accumulated Amortization', type: AccountType.ASSET, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.ACCUMULATED_AMORTIZATION },
+  { code: '5120', name: 'Amortization Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.AMORTIZATION_EXPENSE },
 ];
 
 @Injectable()

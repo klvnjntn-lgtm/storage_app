@@ -32,6 +32,10 @@ const ID_NAMES: Record<string, string> = {
   'Depreciation Expense': 'Beban Penyusutan',
   'Gain on Disposal of Assets': 'Laba Pelepasan Aset',
   'Loss on Disposal of Assets': 'Rugi Pelepasan Aset',
+  'Prepaid Expenses': 'Biaya Dibayar di Muka',
+  'Intangible Assets': 'Aset Tak Berwujud',
+  'Accumulated Amortization': 'Akumulasi Amortisasi',
+  'Amortization Expense': 'Beban Amortisasi',
 };
 
 export function translateAccountName(name: string, language: string): string {

@@ -53,6 +53,9 @@ const SOURCE_LABEL_KEY: Record<string, string> = {
   EXPENSE: 'accounting.journal.source.expense',
   PAYROLL: 'accounting.journal.source.payroll',
   MANUAL: 'accounting.journal.source.manual',
+  INTANGIBLE_ASSET: 'accounting.journal.source.intangibleAsset',
+  PREPAID_EXPENSE: 'accounting.journal.source.prepaidExpense',
+  AMORTIZATION: 'accounting.journal.source.amortization',
   OPENING_BALANCE: 'accounting.journal.source.openingBalance',
 };
 

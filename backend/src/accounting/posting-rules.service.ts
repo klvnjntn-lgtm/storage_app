@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AccountType, NormalBalance, Prisma, JournalSourceType, PaymentMethod, SystemAccountKey } from '@prisma/client';
+import { AccountType, AmortizationKind, NormalBalance, Prisma, JournalSourceType, PaymentMethod, SystemAccountKey } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from './account-resolver.service';
 import { JournalService } from './journal.service';
@@ -1272,6 +1272,174 @@ export class PostingRulesService {
   // account itself was created) — no silent fallback to a generic "Bank"
   // bucket, since that's exactly the "which bank was this?" information
   // this whole change exists to stop losing.
+  // ---- Amortisasi (amortizations.service.ts) ---------------------------
+  // INTANGIBLE posts as an asset bought (investing in the cash flow); PREPAID as an expense paid
+  // in advance (operating). The debit side of the record entry and the credit side of each
+  // monthly charge is the matching balance-sheet account.
+
+  private amortizationAccounts(kind: AmortizationKind) {
+    return kind === AmortizationKind.INTANGIBLE
+      ? { asset: SystemAccountKey.INTANGIBLE_ASSETS, sourceType: JournalSourceType.INTANGIBLE_ASSET }
+      : { asset: SystemAccountKey.PREPAID_EXPENSES, sourceType: JournalSourceType.PREPAID_EXPENSE };
+  }
+
+  // Recorded: Intangible Assets / Prepaid Expenses (debit) + Expense Payable (credit), the whole
+  // cost — paying it is postAmortizationPayment(), as with fixed assets and expenses.
+  async postAmortizationAcquired(organizationId: string, amortizationId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const item = await db.amortization.findFirstOrThrow({ where: { id: amortizationId, organizationId } });
+    const cost = Number(item.cost);
+    if (cost <= 0) return null;
+    const { asset, sourceType } = this.amortizationAccounts(item.kind);
+    const [assetAccount, payable] = await Promise.all([
+      this.accounts.resolve(organizationId, asset, db),
+      this.accounts.resolve(organizationId, SystemAccountKey.EXPENSE_PAYABLE, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: item.startDate,
+        memo: `${item.kind === AmortizationKind.INTANGIBLE ? 'Intangible asset' : 'Prepaid expense'} recorded: ${item.name}`,
+        sourceType,
+        sourceId: `${item.id}:acquired`,
+        lines: [
+          { accountId: assetAccount, debit: cost, description: item.name, branchId: item.branchId ?? undefined },
+          { accountId: payable, credit: cost, description: 'Payable' },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Paid: Expense Payable (debit) + Cash/Bank (credit), one entry per AmortizationPayment.
+  async postAmortizationPayment(organizationId: string, paymentId: string, tx?: Prisma.TransactionClient) {
+    const db = this.db(tx);
+    const payment = await db.amortizationPayment.findFirstOrThrow({
+      where: { id: paymentId, amortization: { organizationId } },
+      include: { amortization: true },
+    });
+    const { sourceType } = this.amortizationAccounts(payment.amortization.kind);
+    const [payable, cash] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.EXPENSE_PAYABLE, db),
+      this.resolveCashDestination(organizationId, payment.method, payment.bankAccountId, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: payment.paidAt,
+        memo: `Payment: ${payment.amortization.name}`,
+        sourceType,
+        sourceId: payment.id,
+        lines: [
+          { accountId: payable, debit: Number(payment.amount) },
+          { accountId: cash, credit: Number(payment.amount) },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // The expense side of a monthly charge: Amortization Expense for an intangible, the chosen
+  // expense account (e.g. Beban Sewa) for a prepaid expense.
+  private async amortizationExpenseAccount(
+    organizationId: string,
+    item: { kind: AmortizationKind; expenseAccountId: string | null; name: string },
+    db: Db,
+  ) {
+    if (item.kind === AmortizationKind.INTANGIBLE || !item.expenseAccountId) {
+      return this.accounts.resolve(organizationId, SystemAccountKey.AMORTIZATION_EXPENSE, db);
+    }
+    const account = await db.chartOfAccount.findFirst({
+      where: { id: item.expenseAccountId, organizationId },
+      select: { id: true, isActive: true, name: true },
+    });
+    if (!account?.isActive) {
+      throw new BadRequestException(`The expense account for "${item.name}" is archived — choose another one first`);
+    }
+    return account.id;
+  }
+
+  // One month's charge: expense (debit) + Accumulated Amortization / Prepaid Expenses (credit).
+  // AmortizationsService.runAmortization() posts one of these per month, dated at that month's
+  // end of the schedule, and advances the item in the same transaction — that's what makes a
+  // re-run a no-op, along with the per-month sourceId.
+  async postAmortizationCharge(
+    organizationId: string,
+    params: { amortizationId: string; date: Date; sourceId: string; amount: number; monthNumber: number },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const amount = this.round2(params.amount);
+    if (amount <= 0) return null;
+    const item = await db.amortization.findFirstOrThrow({ where: { id: params.amortizationId, organizationId } });
+    const credit =
+      item.kind === AmortizationKind.INTANGIBLE ? SystemAccountKey.ACCUMULATED_AMORTIZATION : SystemAccountKey.PREPAID_EXPENSES;
+    const [expense, creditAccount] = await Promise.all([
+      this.amortizationExpenseAccount(organizationId, item, db),
+      this.accounts.resolve(organizationId, credit, db),
+    ]);
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: `Amortization ${params.monthNumber}/${item.usefulLifeMonths}: ${item.name}`,
+        sourceType: JournalSourceType.AMORTIZATION,
+        sourceId: params.sourceId,
+        lines: [
+          { accountId: expense, debit: amount, description: item.name, branchId: item.branchId ?? undefined },
+          { accountId: creditAccount, credit: amount, description: item.name },
+        ],
+      },
+      tx,
+    );
+  }
+
+  // Ends it early: what's left is expensed at once. An intangible also comes off the books —
+  // its accumulated amortization is cleared against its cost — so the balance sheet no longer
+  // carries an asset that's gone. Reads the item before AmortizationsService marks it written off.
+  async postAmortizationWriteOff(
+    organizationId: string,
+    params: { amortizationId: string; date: Date; remaining: number; accumulatedBefore: number },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const item = await db.amortization.findFirstOrThrow({ where: { id: params.amortizationId, organizationId } });
+    const remaining = this.round2(params.remaining);
+    const accumulated = this.round2(params.accumulatedBefore);
+    const lines: { accountId: string; debit?: number; credit?: number; description?: string; branchId?: string }[] = [];
+
+    if (item.kind === AmortizationKind.INTANGIBLE) {
+      const [expense, accumulatedAcct, intangible] = await Promise.all([
+        this.amortizationExpenseAccount(organizationId, item, db),
+        this.accounts.resolve(organizationId, SystemAccountKey.ACCUMULATED_AMORTIZATION, db),
+        this.accounts.resolve(organizationId, SystemAccountKey.INTANGIBLE_ASSETS, db),
+      ]);
+      if (remaining > 0) lines.push({ accountId: expense, debit: remaining, description: 'Remaining written off', branchId: item.branchId ?? undefined });
+      if (accumulated > 0) lines.push({ accountId: accumulatedAcct, debit: accumulated, description: 'Clear accumulated amortization' });
+      lines.push({ accountId: intangible, credit: this.round2(remaining + accumulated), description: 'Remove intangible asset' });
+    } else {
+      if (remaining <= 0) return null;
+      const [expense, prepaid] = await Promise.all([
+        this.amortizationExpenseAccount(organizationId, item, db),
+        this.accounts.resolve(organizationId, SystemAccountKey.PREPAID_EXPENSES, db),
+      ]);
+      lines.push({ accountId: expense, debit: remaining, description: 'Remaining written off', branchId: item.branchId ?? undefined });
+      lines.push({ accountId: prepaid, credit: remaining, description: item.name });
+    }
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: `Amortization written off: ${item.name}`,
+        sourceType: JournalSourceType.AMORTIZATION,
+        sourceId: `${item.id}:writeoff`,
+        lines,
+      },
+      tx,
+    );
+  }
+
   private async resolveCashDestination(
     organizationId: string,
     method: PaymentMethod,

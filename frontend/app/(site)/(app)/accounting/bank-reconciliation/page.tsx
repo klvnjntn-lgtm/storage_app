@@ -439,7 +439,7 @@ export default function BankReconciliationPage() {
   }
 
   return (
-    <PageFrame icon={ArrowLeftRight} title={t('nav.items.bankReconciliation')} subtitle={t('accounting.bankRec.subtitle')} width="max-w-6xl">
+    <PageFrame icon={ArrowLeftRight} title={t('nav.items.bankReconciliation')} subtitle={t('accounting.bankRec.subtitle')}>
       <Card>
         <div className="flex flex-wrap items-end gap-3">
           <label className="block min-w-56">

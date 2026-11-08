@@ -58,6 +58,10 @@ const SOURCE_CATEGORY: Record<string, Category> = {
   // convention as EXPENSE above.
   FIXED_ASSET_PURCHASE: { section: 'investing', key: 'fixed_asset_purchases', label: 'Purchase of fixed assets' },
   FIXED_ASSET_DISPOSAL: { section: 'investing', key: 'fixed_asset_disposals', label: 'Proceeds from disposal of fixed assets' },
+  // Amortisasi: paying for an intangible asset is investing; paying a prepaid expense (rent,
+  // insurance in advance) is operating. The monthly amortization charge moves no cash.
+  INTANGIBLE_ASSET: { section: 'investing', key: 'intangible_purchases', label: 'Purchase of intangible assets' },
+  PREPAID_EXPENSE: { section: 'operating', key: 'prepaid_expenses', label: 'Prepaid expenses paid' },
 };
 
 const MANUAL_FINANCING_EQUITY: Category = {

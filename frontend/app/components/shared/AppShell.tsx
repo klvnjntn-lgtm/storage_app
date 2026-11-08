@@ -68,6 +68,7 @@ import {
   Navigation,
   Menu,
   Award,
+  FileClock,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { CSRF_HEADERS, clearSession } from '@/lib/session';
@@ -91,6 +92,7 @@ import { isAdminRole, isMasterRole } from '@/lib/roles';
 const BRANCH_ADMIN_ACCOUNTING = new Set([
   '/accounting/expenses',
   '/accounting/fixed-assets',
+  '/accounting/amortization',
   '/accounting/profit-loss',
 ]);
 
@@ -530,6 +532,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/expenses', label: t('nav.items.expenses'), icon: Receipt },
     { href: '/accounting/payroll', label: t('nav.items.payroll'), icon: Users },
     { href: '/accounting/fixed-assets', label: t('nav.items.fixedAssets'), icon: Building2 },
+    { href: '/accounting/amortization', label: t('nav.items.amortization'), icon: FileClock },
     { href: '/accounting/setup', label: t('nav.items.chartOfAccounts'), icon: Landmark },
     { href: '/accounting/bank-reconciliation', label: t('nav.items.bankReconciliation'), icon: ArrowLeftRight },
     { href: '/accounting/budget', label: t('nav.items.budget'), icon: Target },

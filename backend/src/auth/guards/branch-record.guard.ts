@@ -11,6 +11,7 @@ export type BranchRecordModel =
   | 'workOrder'
   | 'expense'
   | 'fixedAsset'
+  | 'amortization'
   | 'salesQuotation'
   | 'salesOrder'
   | 'deliveryOrder';
@@ -24,6 +25,7 @@ const LABEL: Record<BranchRecordModel, string> = {
   workOrder: 'Work order',
   expense: 'Expense',
   fixedAsset: 'Fixed asset',
+  amortization: 'Amortization',
   salesQuotation: 'Quotation',
   salesOrder: 'Sales order',
   deliveryOrder: 'Delivery order',

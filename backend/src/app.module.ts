@@ -69,6 +69,7 @@ import { SupplierPaymentsModule } from './accounting/supplier-payments.module';
 import { ExpensesModule } from './accounting/expenses.module';
 import { PayrollModule } from './accounting/payroll.module';
 import { FixedAssetsModule } from './accounting/fixed-assets.module';
+import { AmortizationsModule } from './accounting/amortizations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { UsersModule } from './users/users.module';
 import { DevicesModule } from './devices/devices.module';
@@ -127,6 +128,7 @@ import { SerialsModule } from './serials/serials.module';
     ExpensesModule,
     PayrollModule,
     FixedAssetsModule,
+    AmortizationsModule,
     SessionsModule,
     LicenseModule,
     OrganizationModule,

@@ -29,12 +29,11 @@ type ExpenseCategory = {
 
 // Operating expenses (beban operasional) post to accounts 5000–5899; 5900 and up — including
 // 5990 Uncategorized, where a category with no account of its own posts — are other expenses
-// (beban lain-lain). Books set up before expenses moved into the 5000s use 6000–6899 / 6900+.
 type ExpenseGroup = 'operating' | 'other';
 function groupOf(cat: ExpenseCategory): ExpenseGroup {
   const n = parseFloat(cat.account?.code ?? '');
   if (!Number.isFinite(n)) return 'other';
-  return (n >= 5000 && n < 5900) || (n >= 6000 && n < 6900) ? 'operating' : 'other';
+  return n >= 5000 && n < 5900 ? 'operating' : 'other';
 }
 const GROUPS: ExpenseGroup[] = ['operating', 'other'];
 

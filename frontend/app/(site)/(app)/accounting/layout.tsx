@@ -18,7 +18,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 //
 // It's also its own module (ACCOUNTING, on top of INVOICE_POS); without it
 // an admin who lands here is told so instead of seeing every call 403.
-const BRANCH_ADMIN_PAGES = ['/accounting/expenses', '/accounting/fixed-assets', '/accounting/profit-loss'];
+const BRANCH_ADMIN_PAGES = ['/accounting/expenses', '/accounting/fixed-assets', '/accounting/amortization', '/accounting/profit-loss'];
 
 export default function AccountingLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

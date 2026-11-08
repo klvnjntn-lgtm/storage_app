@@ -69,6 +69,7 @@ const LINK_PATH: Record<string, (id: string) => string> = {
   expense: () => '/accounting/expenses',
   payroll: () => '/accounting/payroll',
   'fixed-asset': () => '/accounting/fixed-assets',
+  amortization: () => '/accounting/amortization',
   journal: () => '/accounting/journal',
 };
 

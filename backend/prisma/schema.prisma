@@ -93,6 +93,7 @@ model Customer {
   @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
   @@index([organizationId])
   @@index([organizationId, name])
+  @@index([priceLevelId])
 }
 
 // Extra saved delivery sites for a customer (branches, warehouses, job
@@ -324,6 +325,7 @@ model Organization {
   vehicleReminders   VehicleReminder[]
   bankAccounts       OrganizationBankAccount[]
   fixedAssets        FixedAsset[]
+  amortizations      Amortization[]
   mediaAssets        MediaAsset[]
   notifications      Notification[]
   stockImportBatches StockImportBatch[]
@@ -407,6 +409,8 @@ model User {
   expensePaymentsRecorded      ExpensePayment[]
   fixedAssets                  FixedAsset[]
   fixedAssetPaymentsRecorded   FixedAssetPayment[]
+  amortizations                Amortization[]
+  amortizationPaymentsRecorded AmortizationPayment[]
   sessionNotes                 SessionNote[]
   reopenEvents                 SessionReopenEvent[]
   organization                 Organization                  @relation(fields: [organizationId], references: [id])
@@ -696,6 +700,9 @@ model Product {
 
   @@unique([organizationId, barcode])
   @@unique([organizationId, sku])
+  @@index([brandId])
+  @@index([categoryId])
+  @@index([preferredSupplierId])
 }
 
 model Stock {
@@ -1496,6 +1503,7 @@ model RouteStop {
   @@index([routeId])
   @@index([deliveryOrderId])
   @@index([customerId])
+  @@index([customerAddressId])
 }
 
 // The unit routes are planned for: one team = one driver = one route per
@@ -1564,6 +1572,7 @@ model OrganizationBankAccount {
   expensePayments    ExpensePayment[]
   supplierPayments   SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
   fixedAssetPayments FixedAssetPayment[]
+  amortizationPayments AmortizationPayment[]
   statementLines     BankStatementLine[]
   customerDeposits   CustomerDeposit[]
   supplierDeposits   SupplierDeposit[]
@@ -1691,6 +1700,8 @@ model Invoice {
   @@index([organizationId, employeeId]) // NEW
   @@index([organizationId, mechanicId])
   @@index([workOrderId])
+  @@index([salesOrderId])
+  @@index([quotationId])
 }
 
 enum PurchaseOrderStatus {
@@ -1751,6 +1762,7 @@ model PurchaseOrder {
   @@unique([organizationId, poNumber])
   @@unique([organizationId, externalId]) // NEW
   @@index([workOrderId])
+  @@index([supplierId])
 }
 
 model PurchaseOrderItem {
@@ -1779,6 +1791,7 @@ model PurchaseOrderItem {
   product       Product?      @relation(fields: [productId], references: [id])
 
   @@unique([purchaseOrderId, externalSeq]) // NEW — nullable externalSeq is fine, Postgres allows many NULLs in a unique index
+  @@index([productId])
 }
 
 model PurchaseOrderActivityEvent {
@@ -1921,6 +1934,8 @@ model InvoiceItem {
   priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
 
   @@index([quotationItemId])
+  @@index([invoiceId])
+  @@index([productId])
 }
 
 enum SalesQuotationActivityEventType {
@@ -2619,6 +2634,78 @@ model FixedAssetPayment {
   @@index([fixedAssetId])
 }
 
+// ---- Amortisasi (src/accounting/amortizations.service.ts) ----------------
+// A cost paid once and spread over the months it benefits, straight-line:
+//  - INTANGIBLE: an intangible asset (software licence, trademark, franchise).
+//    Recorded Dr Intangible Assets / Cr Expense Payable; each month
+//    Dr Amortization Expense / Cr Accumulated Amortization.
+//  - PREPAID: an expense paid in advance (rent, insurance, a yearly subscription).
+//    Recorded Dr Prepaid Expenses / Cr Expense Payable; each month
+//    Dr expenseAccount (e.g. Beban Sewa) / Cr Prepaid Expenses.
+// Paying it is a separate step (AmortizationPayment), the same record-then-pay
+// split as Expense and FixedAsset.
+enum AmortizationKind {
+  INTANGIBLE
+  PREPAID
+}
+
+enum AmortizationStatus {
+  ACTIVE
+  COMPLETED // fully amortized
+  WRITTEN_OFF // what was left was expensed at once (licence cancelled, lease ended early)
+}
+
+model Amortization {
+  id                      String             @id @default(uuid())
+  organizationId          String
+  kind                    AmortizationKind
+  name                    String
+  category                String?
+  branchId                String?
+  // The month the benefit starts; month 1 of the schedule ends one month after it.
+  startDate               DateTime           @db.Date
+  cost                    Decimal            @db.Decimal(14, 2)
+  usefulLifeMonths        Int
+  // PREPAID: the expense it turns into each month. INTANGIBLE: null (Amortization Expense).
+  expenseAccountId        String?
+  accumulatedAmortization Decimal            @default(0) @db.Decimal(14, 2)
+  lastAmortizedThrough    DateTime?          @db.Date
+  amountPaid              Decimal            @default(0) @db.Decimal(14, 2)
+  status                  AmortizationStatus @default(ACTIVE)
+  writtenOffAt            DateTime?          @db.Date
+  notes                   String?
+  userId                  String?
+  createdAt               DateTime           @default(now())
+
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  branch         Branch?               @relation(fields: [branchId], references: [id])
+  expenseAccount ChartOfAccount?       @relation(fields: [expenseAccountId], references: [id])
+  user           User?                 @relation(fields: [userId], references: [id])
+  payments       AmortizationPayment[]
+
+  @@index([organizationId, status])
+  @@index([branchId])
+  @@index([expenseAccountId])
+}
+
+model AmortizationPayment {
+  id             String        @id @default(cuid())
+  amortizationId String
+  amount         Decimal       @db.Decimal(14, 2)
+  method         PaymentMethod @default(CASH)
+  paidAt         DateTime      @db.Date
+  note           String?
+  recordedById   String?
+  bankAccountId  String?
+  createdAt      DateTime      @default(now())
+
+  amortization Amortization             @relation(fields: [amortizationId], references: [id])
+  recordedBy   User?                    @relation(fields: [recordedById], references: [id])
+  bankAccount  OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  @@index([amortizationId])
+}
+
 enum AccountType {
   ASSET
   LIABILITY
@@ -2663,6 +2750,11 @@ enum SystemAccountKey {
   DEPRECIATION_EXPENSE // EXPENSE, debit-normal
   GAIN_ON_ASSET_DISPOSAL // REVENUE, credit-normal: proceeds > net book value at disposal
   LOSS_ON_ASSET_DISPOSAL // EXPENSE, debit-normal: proceeds < net book value at disposal
+  // Amortisasi (src/accounting/amortizations.service.ts)
+  PREPAID_EXPENSES
+  INTANGIBLE_ASSETS
+  ACCUMULATED_AMORTIZATION
+  AMORTIZATION_EXPENSE
 }
 
 model ChartOfAccount {
@@ -2687,6 +2779,7 @@ model ChartOfAccount {
   expenseCategories    ExpenseCategory[]
   salaryComponentTypes SalaryComponentType[]
   budgets              AccountBudget[]
+  amortizations        Amortization[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, systemKey]) // nullable field, many NULLs allowed — only one row per systemKey per org
@@ -2736,6 +2829,11 @@ enum JournalSourceType {
   // A down payment paid to a supplier, or refunded by them (src/supplier-deposits).
   // Setting one against a PO posts as a SUPPLIER_PAYMENT, keyed by its payment row.
   SUPPLIER_DEPOSIT
+  // Amortisasi: an intangible asset bought or paid for (investing), a prepaid expense paid
+  // (operating), and the monthly charge that turns either into expense (no cash).
+  INTANGIBLE_ASSET
+  PREPAID_EXPENSE
+  AMORTIZATION
 }
 
 enum JournalEntryStatus {
@@ -3004,6 +3102,7 @@ model SupplierBill {
   @@unique([organizationId, externalId])
   @@index([organizationId, purchaseOrderId])
   @@index([organizationId, dueDate])
+  @@index([purchaseOrderId])
 }
 
 // ---- Stock transfers (src/stock-transfer) ------------------------------
@@ -3522,6 +3621,7 @@ model Branch {
   invoices        Invoice[]
   expenses        Expense[]
   fixedAssets     FixedAsset[]
+  amortizations   Amortization[]
   journalLines    JournalEntryLine[]
   workOrders      WorkOrder[]
   users           User[]

@@ -4,12 +4,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, X, Loader2, ChevronDown, ChevronUp, Wallet, Trash2, Send, SlidersHorizontal, Undo2, Printer } from 'lucide-react';
+import { Users, CalendarCheck, Layers, Plus, X, Loader2, ChevronDown, ChevronUp, Wallet, Trash2, Send, SlidersHorizontal, Undo2, Printer } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { toCalendarDateString } from '@/lib/dates';
 import Pagination from '@/app/components/shared/Pagination';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { TabBar } from '@/app/components/shared/PageFrame';
 import { useAccountName } from '@/lib/account-names';
 import DatePicker from '@/app/components/shared/DatePicker';
 import { useDialog } from '@/app/components/shared/DialogProvider';
@@ -104,7 +105,7 @@ export default function PayrollPage() {
     >
       <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-4 sm:px-6 py-4 sm:py-5 border-b border-blue-500/15 shadow-[0_1px_0_0_rgba(37,99,235,0.06)]">
         <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-2.5 mb-4">
+          <div className="flex items-center gap-2.5 mb-3">
             <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-600/20 shrink-0">
               <Users size={18} strokeWidth={2} className="text-blue-700" />
             </span>
@@ -114,21 +115,16 @@ export default function PayrollPage() {
             </div>
           </div>
 
-          <div className="flex gap-1.5">
-            {([['runs', t('accounting.payroll.tabRuns')], ['employees', t('accounting.payroll.tabEmployees')], ['components', t('accounting.payroll.tabComponents')]] as [Tab, string][]).map(
-              ([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setTab(key)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
-                    tab === key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-blue-50'
-                  }`}
-                >
-                  {label}
-                </button>
-              ),
-            )}
-          </div>
+          <TabBar
+            className=""
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { key: 'runs', label: t('accounting.payroll.tabRuns'), icon: CalendarCheck },
+              { key: 'employees', label: t('accounting.payroll.tabEmployees'), icon: Users },
+              { key: 'components', label: t('accounting.payroll.tabComponents'), icon: Layers },
+            ]}
+          />
         </div>
       </div>
 
@@ -1512,8 +1508,10 @@ function ComponentsTab() {
         <p className="text-sm text-gray-400 text-center py-8">{t('accounting.payroll.noComponentsYet')}</p>
       )}
 
+      {/* Only once there's something to list — an empty bordered box showed as a stray line. */}
+      {!!components?.length && (
       <div className="border-2 border-gray-300 rounded-md bg-white overflow-hidden">
-        {(components ?? []).map((c) => (
+        {components.map((c) => (
           <div key={c.id} className="border-b border-gray-100 last:border-b-0">
             <div className="px-4 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1605,6 +1603,7 @@ function ComponentsTab() {
           </div>
         ))}
       </div>
+      )}
     </>
   );
 }

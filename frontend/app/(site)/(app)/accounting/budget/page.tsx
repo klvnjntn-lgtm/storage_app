@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Target } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronRight, Copy, Pencil, Target } from 'lucide-react';
 import { AccountBreakdownPanel, BreakdownToggle } from '@/app/components/accounting/AccountBreakdown';
 import { toCalendarDateString } from '@/lib/dates';
 import { useAccountName } from '@/lib/account-names';
@@ -14,7 +14,7 @@ import { ExportExcelButton } from '@/app/components/shared/ExportExcelButton';
 import MoneyInput from '@/app/components/shared/MoneyInput';
 import { useBranches } from '@/lib/hooks/useBranches';
 import { fileNamePart } from '@/lib/excel-export';
-import { PageFrame, Card, ErrorNote, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { PageFrame, Card, ErrorNote, TabBar, btnPrimary, btnSecondary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 
 type BudgetAccount = {
   id: string;
@@ -236,24 +236,19 @@ export default function BudgetPage() {
     );
 
   const tabs = (
-    <div className="flex gap-1.5 mt-3">
-      {([['compare', t('accounting.budget.tabCompare')], ['edit', t('accounting.budget.tabEdit')]] as const).map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => setTab(key)}
-          className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
-            tab === key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-blue-50'
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <TabBar
+      className="mt-3"
+      value={tab}
+      onChange={setTab}
+      tabs={[
+        { key: 'compare', label: t('accounting.budget.tabCompare'), icon: BarChart3 },
+        { key: 'edit', label: t('accounting.budget.tabEdit'), icon: Pencil },
+      ]}
+    />
   );
 
   return (
-    <PageFrame icon={Target} title={t('nav.items.budget')} subtitle={t('accounting.budget.subtitle')} width="max-w-6xl" below={tabs}>
+    <PageFrame icon={Target} title={t('nav.items.budget')} subtitle={t('accounting.budget.subtitle')} below={tabs}>
       <Card>
         <div className="flex flex-wrap items-end gap-3">
           <label className="block">
