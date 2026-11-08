@@ -5,7 +5,8 @@ import { BranchFilter } from '@/app/components/shared/BranchFilter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Receipt, Plus, X, Loader2, Tag, Calendar, CheckCircle2, Clock, Wallet } from 'lucide-react';
+import { Receipt, Plus, X, Loader2, Tag, Calendar, CheckCircle2, Clock, Wallet, ListPlus } from 'lucide-react';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { apiFetch } from '@/lib/apifetch';
 import Pagination from '@/app/components/shared/Pagination';
 import { toCalendarDateString } from '@/lib/dates';
@@ -24,6 +25,15 @@ type ExpenseCategory = {
   accountId: string | null;
   account?: { id: string; code: string; name: string } | null;
 };
+
+// Operating expenses (beban operasional) post to accounts 6000–6899; 6900 and up — and a category
+// with no account of its own, which posts to 6900 Uncategorized — are other expenses (beban lain-lain).
+type ExpenseGroup = 'operating' | 'other';
+function groupOf(cat: ExpenseCategory): ExpenseGroup {
+  const code = cat.account?.code;
+  return code && /^\d+$/.test(code) && Number(code) < 6900 ? 'operating' : 'other';
+}
+const GROUPS: ExpenseGroup[] = ['operating', 'other'];
 
 type Expense = {
   id: string;
@@ -188,6 +198,44 @@ export default function ExpensesPage() {
     () => (accounts ?? []).filter((a) => a.type === 'EXPENSE').sort((a, b) => a.code.localeCompare(b.code)),
     [accounts],
   );
+
+  const { user: currentUser } = useCurrentUser();
+  const [installingStandard, setInstallingStandard] = useState(false);
+  const grouped = useMemo(
+    () => GROUPS.map((g) => ({ group: g, list: (categories ?? []).filter((c) => groupOf(c) === g) })).filter((g) => g.list.length > 0),
+    [categories],
+  );
+  const categoryOptions = grouped.map(({ group, list }) => (
+    <optgroup key={group} label={t(`accounting.expenses.group.${group}`)}>
+      {list.map((c) => (
+        <option key={c.id} value={c.id}>{c.name}</option>
+      ))}
+    </optgroup>
+  ));
+
+  // Adds the standard expense heads (rent, utilities, transport, …) with their own accounts.
+  async function installStandardCategories() {
+    setCategoryError(null);
+    setInstallingStandard(true);
+    try {
+      const res = await apiFetch('/expenses/categories/standard', { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setCategoryError(body?.message ?? t('accounting.expenses.requestFailed', { status: res.status }));
+        return;
+      }
+      await Promise.all([loadCategories(), loadAccounts()]);
+      await dialog.alert(
+        body.created > 0
+          ? t('accounting.expenses.standardInstalled', { count: body.created })
+          : t('accounting.expenses.standardAlreadyThere'),
+      );
+    } catch {
+      setCategoryError(t('accounting.expenses.couldNotReachServer'));
+    } finally {
+      setInstallingStandard(false);
+    }
+  }
 
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
@@ -495,7 +543,11 @@ export default function ExpensesPage() {
 
           {hasCategories && (
             <div className="border-t border-gray-100">
-              {(categories ?? []).map((cat) => (
+              {grouped.map(({ group, list }) => [
+                <div key={`h-${group}`} className="px-4 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-50/60 border-b border-gray-100">
+                  {t(`accounting.expenses.group.${group}`)}
+                </div>,
+                ...list.map((cat) => (
                 <div key={cat.id} className="border-b border-gray-50 last:border-b-0">
                   <div className="px-4 py-2 flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -543,7 +595,25 @@ export default function ExpensesPage() {
                     </div>
                   )}
                 </div>
-              ))}
+                )),
+              ])}
+            </div>
+          )}
+
+          {/* MASTER only: it adds ledger accounts, which are business-wide. */}
+          {currentUser?.role === 'MASTER' && (
+            <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 bg-blue-50/40">
+              <p className="text-xs text-gray-600">{t('accounting.expenses.standardHint')}</p>
+              {categoryError && !showAddCategory && <p className="w-full text-xs text-red-600">{categoryError}</p>}
+              <button
+                type="button"
+                onClick={installStandardCategories}
+                disabled={installingStandard}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-blue-600/30 text-blue-700 text-xs font-semibold hover:bg-blue-50 disabled:opacity-60 transition-colors"
+              >
+                {installingStandard ? <Loader2 size={12} className="animate-spin" /> : <ListPlus size={14} />}
+                {t('accounting.expenses.installStandard')}
+              </button>
             </div>
           )}
 
@@ -612,9 +682,7 @@ export default function ExpensesPage() {
             className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
           >
             <option value="">{t('accounting.expenses.allCategories')}</option>
-            {(categories ?? []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
+            {categoryOptions}
           </select>
           <BranchFilter
             value={branchFilter}
@@ -650,9 +718,7 @@ export default function ExpensesPage() {
                   className="border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500 bg-white"
                 >
                   <option value="">{t('accounting.expenses.chooseEllipsis')}</option>
-                  {(categories ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
+                  {categoryOptions}
                 </select>
               </div>
               <div className="flex flex-col gap-1">

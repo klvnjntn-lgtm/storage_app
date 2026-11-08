@@ -45,6 +45,14 @@ export class ExpensesController {
     return this.categoriesService.create(organizationId, dto);
   }
 
+  // Creates ledger accounts, which are business-wide — so MASTER, not a branch admin.
+  @UseGuards(RolesGuard)
+  @Roles('MASTER')
+  @Post('categories/standard')
+  installStandardCategories(@CurrentOrg() organizationId: string) {
+    return this.categoriesService.installStandard(organizationId);
+  }
+
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @Patch('categories/:id')

@@ -416,6 +416,11 @@ export const accounting = {
         },
       },
       expenses: {
+        group: { operating: 'Operating expenses', other: 'Other expenses' },
+        installStandard: 'Add standard categories',
+        standardHint: 'Rent, utilities, internet, transport, office supplies, repairs, promotion, bank fees and more — each with its own expense account.',
+        standardInstalled: '{count} standard categories added.',
+        standardAlreadyThere: 'The standard categories are already there.',
         subtitle: 'Rent, electricity, and every other operating cost',
         requestFailed: 'Request failed ({status})',
         couldNotReachServer: 'Could not reach the server.',
@@ -1230,6 +1235,11 @@ export const accounting = {
         },
       },
       expenses: {
+        group: { operating: 'Beban operasional', other: 'Beban lain-lain' },
+        installStandard: 'Pasang kategori standar',
+        standardHint: 'Sewa, listrik & air, internet, transportasi, ATK, perbaikan, promosi, admin bank, dll — masing-masing dengan akun bebannya sendiri.',
+        standardInstalled: '{count} kategori standar ditambahkan.',
+        standardAlreadyThere: 'Kategori standar sudah ada semua.',
         subtitle: 'Sewa, listrik, dan biaya operasional lainnya',
         requestFailed: 'Permintaan gagal ({status})',
         couldNotReachServer: 'Tidak dapat menghubungi server.',
