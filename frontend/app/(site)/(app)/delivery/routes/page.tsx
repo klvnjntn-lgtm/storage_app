@@ -505,7 +505,7 @@ function DeliveryRoutesPageInner() {
               className="w-full text-left bg-white rounded-lg border border-gray-200 p-3 hover:border-blue-300 transition-colors flex items-center justify-between gap-3"
             >
               <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{route.name ?? route.team.name}</div>
+                <div className="text-sm font-semibold break-words">{route.name ?? route.team.name}</div>
                 <div className="text-xs text-gray-500 truncate">
                   {teamLabel(route.team, noDriver)} · {t('delivery.routes.stopsCount', { count: route._count.stops })}
                 </div>

@@ -134,8 +134,8 @@ export default function CustomerStopPicker({
                     <MapPinOff size={14} className="text-amber-500 shrink-0 mt-0.5" />
                   )}
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium truncate">{c.name}</span>
-                    {c.address && <span className="block text-xs text-gray-500 truncate">{c.address}</span>}
+                    <span className="block text-sm font-medium break-words">{c.name}</span>
+                    {c.address && <span className="block text-xs text-gray-500 break-words">{c.address}</span>}
                     {!hasPin(c) && (
                       <span className="block text-xs text-amber-700">{t('delivery.routeDetail.customerNoPinOptional')}</span>
                     )}

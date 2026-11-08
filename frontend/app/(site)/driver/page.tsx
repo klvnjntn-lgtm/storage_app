@@ -449,9 +449,9 @@ function StopSearch({
             >
               <StopMarker stop={stop} current={false} />
               <span className="min-w-0 flex-1">
-                <span className="block text-base font-semibold truncate">{stop.label}</span>
+                <span className="block text-base font-semibold break-words">{stop.label}</span>
                 {(stop.addressLabel || stop.address) && (
-                  <span className="block text-sm text-gray-500 truncate">{stop.addressLabel || stop.address}</span>
+                  <span className="block text-sm text-gray-500 break-words">{stop.addressLabel || stop.address}</span>
                 )}
               </span>
               {stop.status !== 'PENDING' && (
@@ -538,9 +538,9 @@ function StopRecord({
       >
         <StopMarker stop={stop} current={false} />
         <div className="min-w-0 flex-1">
-          <div className="text-base font-semibold truncate text-gray-700">{stop.label}</div>
+          <div className="text-base font-semibold break-words text-gray-700">{stop.label}</div>
           {!open && stop.status === 'FAILED' && stop.failureReason && (
-            <div className="text-sm text-red-600 truncate">{stop.failureReason}</div>
+            <div className="text-sm text-red-600 break-words">{stop.failureReason}</div>
           )}
         </div>
         <span className={`text-sm font-semibold shrink-0 text-right ${tone}`}>

@@ -1079,18 +1079,17 @@ export default function DeliveryRouteDetailPage() {
                     #{stop.sequence}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate flex items-center gap-1.5">
+                    <div className="text-sm font-semibold flex items-start gap-1.5 min-w-0">
                       {stop.kind === 'CUSTOMER' ? (
                         <Store size={13} className="text-blue-500 shrink-0" aria-label={t('delivery.routeDetail.customerStopBadge')} />
                       ) : (
                         stop.doNumber && <span className="text-[10px] font-mono text-gray-400 shrink-0">{stop.doNumber}</span>
                       )}
-                      <span className="truncate">{stop.label}</span>
+                      <span className="min-w-0 break-words">{stop.label}</span>
                     </div>
                     {(stop.addressLabel || stop.address) && (
-                      // Wraps on phones where a truncated address is useless;
-                      // single-line on wider screens where the row has room.
-                      <div className="text-xs text-gray-500 line-clamp-2 sm:truncate">
+                      // Wraps in full: a cut-off name or address is useless to whoever drives there.
+                      <div className="text-xs text-gray-500 break-words">
                         {stop.addressLabel && <span className="font-semibold text-gray-700">{stop.addressLabel}{stop.address ? ' · ' : ''}</span>}
                         {stop.address}
                       </div>

@@ -552,7 +552,7 @@ function CompletionTimeline({ timeline }: { timeline: TimelineEntry[] }) {
                 className={`shrink-0 ${entry.status === 'FAILED' ? 'text-red-500' : 'text-green-600'}`}
                 aria-label={t(`delivery.routeDetail.statusLabel.${entry.status}`)}
               />
-              <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+              <span className="min-w-0 flex-1 break-words">{entry.label}</span>
               <span className="shrink-0 tabular-nums text-gray-500">{clock(entry.at)}</span>
               <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-gray-800">
                 {entry.durationSeconds != null ? duration(entry.durationSeconds) : '—'}
@@ -579,7 +579,7 @@ function UnfinishedStops({ stops }: { stops: UnfinishedStop[] }) {
           <li key={stop.stopId} className="flex items-center gap-2 py-1 text-xs">
             <span className="w-7 shrink-0 font-medium text-gray-400">#{stop.sequence}</span>
             <Circle size={12} className="shrink-0 text-amber-500" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{stop.label}</span>
+            <span className="min-w-0 flex-1 break-words">{stop.label}</span>
             {stop.unconfirmed && (
               <span className="shrink-0 font-medium text-amber-700">{t('delivery.monitoring.unconfirmed')}</span>
             )}

@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useLanguage } from '@/app/context/LanguageContext';
-import { Card, ErrorNote, PageFrame, btnPrimary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
+import { Card, ErrorNote, PageFrame, Switch, btnPrimary, inputCls, thCls, tdCls } from '@/app/components/shared/PageFrame';
 import { ProductPicker, useLocations, useSuppliers, type PickedProduct } from '@/app/components/shared/ProductPicker';
 import { useWarehouseOps } from '@/lib/hooks/useWarehouseOps';
 import { defaultLocation } from '@/lib/locations';
@@ -177,10 +177,10 @@ export default function ReorderPage() {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-          {t('reorder.showAll')}
-        </label>
+        <div className="flex items-center gap-2.5 text-sm">
+          <Switch checked={showAll} onChange={setShowAll} label={t('reorder.showAll')} />
+          <span>{t('reorder.showAll')}</span>
+        </div>
         <div className="flex items-center gap-2">
           {warehouseOps && (
             <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className={`${inputCls} w-auto`} aria-label={t('reorder.deliverTo')}>
@@ -224,7 +224,7 @@ export default function ReorderPage() {
                   return (
                     <tr key={r.productId} className="border-t border-gray-100">
                       <td className={tdCls}>
-                        <input type="checkbox" checked={p.selected} onChange={(e) => setPick(r.productId, { selected: e.target.checked })} aria-label={r.name} />
+                        <Switch checked={p.selected} onChange={(selected) => setPick(r.productId, { selected })} label={r.name} />
                       </td>
                       <td className={tdCls}>
                         <span className={low ? 'font-semibold text-red-700' : ''}>{r.name}</span>

@@ -261,7 +261,7 @@ export default function PurchaseOrderDetailPage() {
                 <>
                   <button
                     onClick={() => router.push(`/purchasing/purchase-orders/new?id=${po.id}`)}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg border border-blue-500/30 bg-white text-blue-700 font-semibold shadow-sm hover:bg-blue-50 transition-colors"
                   >
                     <Pencil size={14} strokeWidth={2} />
                     {t('purchasing.purchaseOrderDetail.edit')}
@@ -269,7 +269,7 @@ export default function PurchaseOrderDetailPage() {
                   <button
                     disabled={actionLoading === 'send'}
                     onClick={handleSend}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-blue-600 text-white font-semibold shadow-sm shadow-blue-600/20 hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
                     <Send size={14} strokeWidth={2} />
                     {t('purchasing.purchaseOrderDetail.send')}
@@ -280,7 +280,7 @@ export default function PurchaseOrderDetailPage() {
               {(po.status === 'SENT' || po.status === 'PARTIALLY_RECEIVED') && (
                 <button
                   onClick={() => setReceiveOpen(true)}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-blue-600 text-white font-semibold shadow-sm shadow-blue-600/20 hover:bg-blue-700 transition-colors"
                 >
                   <PackageCheck size={14} strokeWidth={2} />
                   {t('purchasing.purchaseOrderDetail.receive')}
@@ -290,7 +290,7 @@ export default function PurchaseOrderDetailPage() {
               {receipts.length > 0 && (
                 <button
                   onClick={() => setReturnOpen(true)}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50"
+                  className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg border border-red-300 bg-white text-red-600 font-semibold shadow-sm hover:bg-red-50"
                 >
                   <Undo2 size={14} strokeWidth={2} />
                   {t('purchasing.returns.button')}
@@ -301,7 +301,7 @@ export default function PurchaseOrderDetailPage() {
                 <button
                   disabled={actionLoading === 'cancel'}
                   onClick={handleCancel}
-                  className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-red-300 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg border border-red-300 bg-white text-red-600 font-semibold shadow-sm hover:bg-red-50 disabled:opacity-50"
                 >
                   <XCircle size={14} strokeWidth={2} />
                   {t('purchasing.purchaseOrderDetail.cancel')}
@@ -312,7 +312,7 @@ export default function PurchaseOrderDetailPage() {
                 <>
                   <button
                     onClick={() => setShareOpen(true)}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 transition-colors"
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg border border-blue-500/30 bg-white text-blue-700 font-semibold shadow-sm hover:bg-blue-50 transition-colors"
                   >
                     <Mail size={14} strokeWidth={2} />
                     {t('messaging.sendToSupplier')}
@@ -320,14 +320,14 @@ export default function PurchaseOrderDetailPage() {
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border-2 border-blue-600/30 text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg border border-blue-500/30 bg-white text-blue-700 font-semibold shadow-sm hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     <Download size={14} strokeWidth={2} />
                     {pdfGenerating ? t('purchasing.purchaseOrderDetail.generating') : t('purchasing.purchaseOrderDetail.downloadPdf')}
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-blue-600 text-white font-semibold shadow-sm shadow-blue-600/20 hover:bg-blue-700 transition-colors"
                   >
                     <Printer size={14} strokeWidth={2} />
                     {t('purchasing.purchaseOrderDetail.print')}

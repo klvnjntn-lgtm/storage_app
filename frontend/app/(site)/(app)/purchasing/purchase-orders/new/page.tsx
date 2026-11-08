@@ -4,7 +4,8 @@
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { CalendarClock, ClipboardList } from 'lucide-react';
+import { CalendarClock, ClipboardList, Loader2, Save } from 'lucide-react';
+import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
 import { SupplierPicker } from '@/app/components/purchase-orders/SupplierPicker';
 import { DocumentHeader } from '@/app/components/shared/DocumentHeader';
@@ -655,30 +656,40 @@ function PurchaseOrderFormPageInner() {
             totals={{ subtotal, discount: clampedDiscount, total }}
           />
 
-          <div className="p-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr] sm:items-end">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
-              <MoneyInput
-                min={0}
-                value={discountAmount}
-                onChange={(e) => setDiscountAmount(e.target.value)}
-                className="w-full border border-blue-500/20 rounded-lg p-2 text-sm outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-              />
+          {/* Footer: the discount on the left, the total and Save on the right. */}
+          <div className="p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+              <div className="sm:w-56">
+                <label className="block text-xs text-gray-500 mb-1">{t('purchasing.purchaseOrderNew.discount')}</label>
+                <MoneyInput
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(e.target.value)}
+                  className="w-full border border-blue-500/20 rounded-lg p-2 text-sm text-right tabular-nums outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
+                />
+              </div>
+              <div className="sm:ml-auto flex items-center justify-between sm:justify-end gap-5">
+                <div className="sm:text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{t('common.total')}</p>
+                  <p className={`${display.className} text-xl font-bold tabular-nums`}>{formatIDR(total)}</p>
+                </div>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || itemCount === 0}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm shadow-blue-600/20 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-600/40 disabled:shadow-none disabled:cursor-not-allowed transition-colors"
+                >
+                  {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} strokeWidth={2} />}
+                  {saving
+                    ? t('purchasing.purchaseOrderNew.saving')
+                    : currentId
+                      ? t('purchasing.purchaseOrderNew.saveChanges')
+                      : t('purchasing.purchaseOrderNew.saveDraft')}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={handleSave}
-              disabled={saving || itemCount === 0}
-              className="w-full bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-3 text-sm font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            >
-              {saving
-                ? t('purchasing.purchaseOrderNew.saving')
-                : currentId
-                  ? t('purchasing.purchaseOrderNew.saveChanges')
-                  : t('purchasing.purchaseOrderNew.saveDraft')}
-            </button>
-            {error && (
-              <p className="sm:col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>
+            {itemCount === 0 && !error && (
+              <p className="text-xs text-gray-500 sm:text-right">{t('purchasing.purchaseOrderNew.addAtLeastOneItem')}</p>
             )}
+            {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}
           </div>
         </div>
       </div>
