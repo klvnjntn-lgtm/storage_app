@@ -41,7 +41,7 @@ import { completionTimeline } from './completion-timeline';
 import { highPriorityFirst, priorityInversions } from './priority-order';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
-import { backfillCustomerPin } from '../customers/customer-pin-backfill';
+import { backfillCustomerPin, releaseCustomerPin } from '../customers/customer-pin-backfill';
 import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
@@ -282,6 +282,39 @@ const stopLabel = (stop: TargetSource) => {
   const t = stopTarget(stop);
   return t.customerName ?? t.doNumber ?? stop.deliveryOrder?.id ?? stop.id;
 };
+
+// What a delivery attempt recorded, kept in the history when the result is
+// reset or moved off a stop: the photo files stay in storage and these keys
+// find them again (DeliveryRoutesService.getHistoryPhotoKey).
+type EvidenceSource = {
+  proofPhotoKey: string | null;
+  proofPhotoTakenAt: Date | null;
+  proofPhotoLatitude: Prisma.Decimal | null;
+  proofPhotoLongitude: Prisma.Decimal | null;
+  proofPhotoAccuracy: number | null;
+  failurePhotoKey: string | null;
+  completedLatitude: Prisma.Decimal | null;
+  completedLongitude: Prisma.Decimal | null;
+  completedAccuracy: number | null;
+  failureLatitude: Prisma.Decimal | null;
+  failureLongitude: Prisma.Decimal | null;
+};
+const num = (v: Prisma.Decimal | null) => (v == null ? null : Number(v));
+function keptEvidence(source: EvidenceSource) {
+  return {
+    proofPhotoKey: source.proofPhotoKey,
+    failurePhotoKey: source.failurePhotoKey,
+    photoTakenAt: source.proofPhotoTakenAt?.toISOString() ?? null,
+    photoLatitude: num(source.proofPhotoLatitude),
+    photoLongitude: num(source.proofPhotoLongitude),
+    photoAccuracy: source.proofPhotoAccuracy,
+    completedLatitude: num(source.completedLatitude),
+    completedLongitude: num(source.completedLongitude),
+    completedAccuracy: source.completedAccuracy,
+    failureLatitude: num(source.failureLatitude),
+    failureLongitude: num(source.failureLongitude),
+  };
+}
 
 @Injectable()
 export class DeliveryRoutesService {
@@ -1738,10 +1771,12 @@ export class DeliveryRoutesService {
   }
 
   // Undoes what was recorded on a stop, for a slip like the wrong photo or
-  // "delivered" tapped by mistake: back to still-to-do, with nothing left of the
-  // attempt but the history entry. Works for both stop kinds, and for a photo
-  // sent but never confirmed. Returns what StopProofService must then delete
-  // from storage. A driver can only do this on their own team's open route.
+  // "delivered" tapped by mistake: back to still-to-do. Works for both stop
+  // kinds, and for a photo sent but never confirmed. The attempt itself is
+  // evidence, so nothing of it is deleted: its photos stay in storage and the
+  // history entry keeps them, with where and when they were taken, for the
+  // office to open (getHistoryPhotoKey). A customer pin the delivery set goes
+  // back with it. A driver can only do this on their own team's open route.
   async resetStopResult(
     organizationId: string,
     routeId: string,
@@ -1749,7 +1784,7 @@ export class DeliveryRoutesService {
     requester: Requester,
   ) {
     const isDriver = requester.role === 'DRIVER';
-    const { stop, view, photoKeys, reopened } = await this.prisma.$transaction(
+    const { stop, view, evidence, reopened } = await this.prisma.$transaction(
       async (tx) => {
         await lockRoute(tx, routeId);
         const stop = await tx.routeStop.findFirst({
@@ -1831,12 +1866,7 @@ export class DeliveryRoutesService {
           await tx.route.update({ where: { id: routeId }, data: { status: RouteStatus.ACTIVE } });
         }
         const source = d ?? stop;
-        return {
-          stop,
-          view,
-          reopened,
-          photoKeys: [source.proofPhotoKey, source.failurePhotoKey].filter((k): k is string => !!k),
-        };
+        return { stop, view, reopened, evidence: keptEvidence(source) };
       },
       { timeout: LONG_TX_MS },
     );
@@ -1849,7 +1879,7 @@ export class DeliveryRoutesService {
       signedAt: view.signedAt,
       failedAt: view.failedAt,
       failureReason: view.failureReason,
-      photosDeleted: photoKeys.length,
+      evidence,
       byRole: requester.role,
     });
     if (reopened) {
@@ -1859,6 +1889,19 @@ export class DeliveryRoutesService {
       });
     }
     // The change has saved; none of this may fail it.
+    try {
+      const d = stop.deliveryOrder;
+      await releaseCustomerPin(this.prisma, {
+        organizationId,
+        customerId: d ? d.customerId : stop.customerId,
+        customerAddressId: d ? null : stop.customerAddressId,
+        deliveryAddress: d ? d.deliveryAddress : stop.address,
+        latitude: evidence.completedLatitude,
+        longitude: evidence.completedLongitude,
+      });
+    } catch (err) {
+      this.logger.warn(`Could not release the pin of reset stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       const title = `A delivery result was reset: ${view.label}`;
       if (isDriver) {
@@ -1874,7 +1917,250 @@ export class DeliveryRoutesService {
     } catch (err) {
       this.logger.warn(`Could not follow up reset of stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return { photoKeys, landmarkSource: stop.deliveryOrder?.id ?? stop.id };
+    return { landmarkSource: stop.deliveryOrder?.id ?? stop.id };
+  }
+
+  // For a driver who recorded a delivery on the wrong stop: everything the
+  // attempt recorded (receiver, times, GPS, photos, or the failure) moves to
+  // the stop it belonged to, on the same route, and the wrong stop is to-do
+  // again. When the right stop has a result of its own, the two swap (photos
+  // switched between two stops). Nothing is deleted or retaken: the photos
+  // keep the time and place they were taken. Customer stops only — a delivery
+  // order's result belongs to that order and its goods.
+  // The customer location photo copied from the proof follows when the right
+  // customer has none of their own (else it's dropped: StopProofService
+  // deletes deleteKeys), and so does the GPS pin the delivery set.
+  // Same permissions as resetStopResult.
+  async moveStopResult(
+    organizationId: string,
+    routeId: string,
+    fromStopId: string,
+    toStopId: string,
+    requester: Requester,
+  ) {
+    if (fromStopId === toStopId) throw new BadRequestException('Pick a different stop');
+    const isDriver = requester.role === 'DRIVER';
+    const { from, to, fromView, toView, swapped, reopened, deleteKeys, teamId, routeStatus } =
+      await this.prisma.$transaction(
+        async (tx) => {
+          await lockRoute(tx, routeId);
+          const rows = await tx.routeStop.findMany({
+            where: {
+              id: { in: [fromStopId, toStopId] },
+              routeId,
+              route: { organizationId, ...this.routeScope(requester) },
+            },
+            select: {
+              ...stopSelect,
+              deliveryOrderId: true,
+              completedByUserId: true,
+              route: {
+                select: {
+                  status: true,
+                  teamId: true,
+                  routeDate: true,
+                  organization: { select: { timezone: true } },
+                },
+              },
+            },
+          });
+          const from = rows.find((r) => r.id === fromStopId);
+          const to = rows.find((r) => r.id === toStopId);
+          if (!from || !to) throw new NotFoundException('Stop not found');
+          const route = from.route;
+          if (route.status === RouteStatus.CANCELLED) {
+            throw new BadRequestException('This route was cancelled');
+          }
+          if (isDriver && route.status === RouteStatus.COMPLETED) {
+            throw new BadRequestException('This route is closed — ask the office to move this result');
+          }
+          assertDriverCatchUpWindow(route, requester.role);
+          for (const s of [from, to]) {
+            if (s.deliveryOrderId) {
+              throw new BadRequestException(
+                "Only customer stops can be moved — a delivery order's result belongs to that order",
+              );
+            }
+            if (s.supersededAt) {
+              throw new BadRequestException('One of these stops was rescheduled — use the new stop instead');
+            }
+          }
+          const fromView = this.presentStop(from);
+          const toView = this.presentStop(to);
+          const hasResult = (v: typeof fromView) =>
+            v.status !== 'PENDING' || v.hasProofPhoto || !!v.pendingReceivedBy;
+          if (!hasResult(fromView)) throw new BadRequestException('This stop has nothing to move');
+          const swapped = hasResult(toView);
+
+          const result = (s: typeof from) => ({
+            receivedBy: s.receivedBy,
+            signedAt: s.signedAt,
+            proofPhotoKey: s.proofPhotoKey,
+            proofPhotoTakenAt: s.proofPhotoTakenAt,
+            proofPhotoLatitude: s.proofPhotoLatitude,
+            proofPhotoLongitude: s.proofPhotoLongitude,
+            proofPhotoAccuracy: s.proofPhotoAccuracy,
+            pendingReceivedBy: s.pendingReceivedBy,
+            completedByUserId: s.completedByUserId,
+            completedLatitude: s.completedLatitude,
+            completedLongitude: s.completedLongitude,
+            completedAccuracy: s.completedAccuracy,
+            failedAt: s.failedAt,
+            failureReason: s.failureReason,
+            failureLatitude: s.failureLatitude,
+            failureLongitude: s.failureLongitude,
+            failurePhotoKey: s.failurePhotoKey,
+          });
+          const empty = Object.fromEntries(Object.keys(result(from)).map((k) => [k, null]));
+
+          // Location photos first, while each still says which proof it came from.
+          const pair = [from.id, to.id];
+          const landmarks = await tx.customerLocationPhoto.findMany({
+            where: { organizationId, fromProofOf: { in: pair } },
+            select: { id: true, storageKey: true, fromProofOf: true },
+          });
+          const deleteKeys: string[] = [];
+          const moves: [typeof from, typeof from][] = swapped ? [[from, to], [to, from]] : [[from, to]];
+          for (const [src, dst] of moves) {
+            const landmark = landmarks.find((l) => l.fromProofOf === src.id);
+            if (!landmark) continue;
+            const ownPhotos = dst.customerId
+              ? await tx.customerLocationPhoto.count({
+                  where: {
+                    organizationId,
+                    customerId: dst.customerId,
+                    OR: [{ fromProofOf: null }, { fromProofOf: { notIn: pair } }],
+                  },
+                })
+              : 1;
+            if (ownPhotos === 0) {
+              await tx.customerLocationPhoto.update({
+                where: { id: landmark.id },
+                data: { customerId: dst.customerId!, fromProofOf: dst.id },
+              });
+            } else {
+              await tx.customerLocationPhoto.delete({ where: { id: landmark.id } });
+              deleteKeys.push(landmark.storageKey);
+            }
+          }
+
+          await tx.routeStop.update({ where: { id: to.id }, data: result(from) });
+          await tx.routeStop.update({
+            where: { id: from.id },
+            data: swapped
+              ? result(to)
+              : { ...empty, atRiskNotifiedAt: null, lateNotifiedAt: null },
+          });
+          // A closed route with work on it again would never get done.
+          const reopened = !swapped && route.status === RouteStatus.COMPLETED;
+          if (reopened) {
+            await tx.route.update({ where: { id: routeId }, data: { status: RouteStatus.ACTIVE } });
+          }
+          return {
+            from,
+            to,
+            fromView,
+            toView,
+            swapped,
+            reopened,
+            deleteKeys,
+            teamId: route.teamId,
+            routeStatus: route.status,
+          };
+        },
+        { timeout: LONG_TX_MS },
+      );
+
+    await this.recordHistory(routeId, RouteHistoryEventType.STOP_RESULT_MOVED, requester.sub, {
+      fromStopId: from.id,
+      label: fromView.label,
+      toStopId: to.id,
+      toLabel: toView.label,
+      swapped,
+      movedStatus: fromView.status,
+      receivedBy: fromView.receivedBy ?? fromView.pendingReceivedBy,
+      evidence: keptEvidence(from),
+      ...(swapped ? { swappedEvidence: keptEvidence(to) } : {}),
+      byRole: requester.role,
+    });
+    if (reopened) {
+      await this.recordHistory(routeId, RouteHistoryEventType.STATUS_CHANGED, requester.sub, {
+        to: RouteStatus.ACTIVE,
+        reason: 'stop result moved',
+      });
+    }
+    // The change has saved; none of this may fail it.
+    const travels: [typeof from, typeof from][] = swapped ? [[from, to], [to, from]] : [[from, to]];
+    for (const [src] of travels) {
+      try {
+        await releaseCustomerPin(this.prisma, {
+          organizationId,
+          customerId: src.customerId,
+          customerAddressId: src.customerAddressId,
+          deliveryAddress: src.address,
+          latitude: src.completedLatitude,
+          longitude: src.completedLongitude,
+        });
+      } catch (err) {
+        this.logger.warn(`Could not release the pin of stop ${src.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    for (const [src, dst] of travels) {
+      if (src.completedLatitude == null || src.completedLongitude == null) continue;
+      try {
+        await backfillCustomerPin(this.prisma, {
+          organizationId,
+          customerId: dst.customerId,
+          customerAddressId: dst.customerAddressId,
+          deliveryAddress: dst.address,
+          latitude: Number(src.completedLatitude),
+          longitude: Number(src.completedLongitude),
+          accuracy: src.completedAccuracy ?? undefined,
+        });
+      } catch (err) {
+        this.logger.warn(`Could not pin stop ${dst.id} from moved result: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    try {
+      const title = swapped
+        ? `Delivery results swapped: ${fromView.label} ⇄ ${toView.label}`
+        : `A delivery result was moved: ${fromView.label} → ${toView.label}`;
+      if (isDriver) {
+        await this.notifications.notifyOrgStaff(organizationId, 'ROUTE_STOPS_CHANGED', title, {
+          link: `/delivery/routes/${routeId}`,
+          payload: { routeId },
+        });
+      } else if (routeStatus === RouteStatus.ACTIVE || reopened) {
+        await this.notifyTeam(organizationId, teamId, 'ROUTE_STOPS_CHANGED', title, routeId);
+      }
+      await this.putHighPriorityFirst(routeId);
+      await this.refreshEtas(routeId);
+    } catch (err) {
+      this.logger.warn(`Could not follow up move of stop ${fromStopId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { deleteKeys };
+  }
+
+  // The storage key of a photo a history entry kept (a reset or moved
+  // result), checked to be this organization's delivery photo.
+  async getHistoryPhotoKey(
+    organizationId: string,
+    routeId: string,
+    eventId: string,
+    kind: 'proof' | 'failure',
+  ) {
+    const event = await this.prisma.routeHistoryEvent.findFirst({
+      where: { id: eventId, routeId, route: { organizationId } },
+      select: { metadata: true },
+    });
+    if (!event) throw new NotFoundException('History entry not found');
+    const evidence = (event.metadata as { evidence?: Record<string, unknown> } | null)?.evidence;
+    const key = evidence?.[kind === 'failure' ? 'failurePhotoKey' : 'proofPhotoKey'];
+    const ours =
+      typeof key === 'string' &&
+      (key.startsWith(`stop-proofs/${organizationId}/`) || key.startsWith(`delivery-proofs/${organizationId}/`));
+    if (!ours) throw new NotFoundException('This history entry has no such photo');
+    return key;
   }
 
   async recordCustomerStopProof(

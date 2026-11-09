@@ -114,41 +114,85 @@ export class StopProofService {
     return { hasPhoto: true };
   }
 
-  // See DeliveryRoutesService.resetStopResult. The files go after it commits,
-  // including a landmark the customer got from this proof, since the photo may
-  // be the very mistake being undone. A file that won't delete only logs.
+  // See DeliveryRoutesService.resetStopResult: the delivery's own photos are
+  // kept (the history points at them). The customer's location photo copied
+  // from this proof goes, though — it may show the wrong place, and it's only
+  // a copy.
   async resetStop(
     organizationId: string,
     routeId: string,
     stopId: string,
     requester: Requester,
   ) {
-    const { photoKeys, landmarkSource } = await this.routes.resetStopResult(
+    const { landmarkSource } = await this.routes.resetStopResult(
       organizationId,
       routeId,
       stopId,
       requester,
     );
+    await this.dropLandmarks(organizationId, [landmarkSource], stopId);
+    return this.routes.getRoute(organizationId, routeId, requester);
+  }
+
+  // Moves what was recorded on one customer stop to another on the same route
+  // (the driver marked the wrong one); swaps when the other has a result too.
+  // See DeliveryRoutesService.moveStopResult.
+  async moveResult(
+    organizationId: string,
+    routeId: string,
+    fromStopId: string,
+    toStopId: string,
+    requester: Requester,
+  ) {
+    const { deleteKeys } = await this.routes.moveStopResult(
+      organizationId,
+      routeId,
+      fromStopId,
+      toStopId,
+      requester,
+    );
+    for (const key of deleteKeys) {
+      await this.storage
+        .delete(key)
+        .catch((err: unknown) =>
+          this.logger.warn(`Could not delete location photo ${key}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+    }
+    return this.routes.getRoute(organizationId, routeId, requester);
+  }
+
+  // A file that won't delete only logs.
+  private async dropLandmarks(organizationId: string, sources: string[], stopId: string) {
     try {
       const landmarks = await this.prisma.customerLocationPhoto.findMany({
-        where: { organizationId, fromProofOf: landmarkSource },
+        where: { organizationId, fromProofOf: { in: sources } },
         select: { id: true, storageKey: true },
       });
       await this.prisma.customerLocationPhoto.deleteMany({
         where: { id: { in: landmarks.map((l) => l.id) } },
       });
-      photoKeys.push(...landmarks.map((l) => l.storageKey));
+      for (const l of landmarks) {
+        await this.storage
+          .delete(l.storageKey)
+          .catch((err: unknown) =>
+            this.logger.warn(`Could not delete location photo ${l.storageKey}: ${err instanceof Error ? err.message : String(err)}`),
+          );
+      }
     } catch (err) {
       this.logger.warn(`Could not remove landmark from reset stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`);
     }
-    for (const key of photoKeys) {
-      await this.storage
-        .delete(key)
-        .catch((err: unknown) =>
-          this.logger.warn(`Could not delete photo ${key} of reset stop ${stopId}: ${err instanceof Error ? err.message : String(err)}`),
-        );
-    }
-    return this.routes.getRoute(organizationId, routeId, requester);
+  }
+
+  // A photo kept in the route history from a reset or moved result.
+  async historyPhotoLink(
+    organizationId: string,
+    routeId: string,
+    eventId: string,
+    kind: 'proof' | 'failure',
+  ) {
+    const key = await this.routes.getHistoryPhotoKey(organizationId, routeId, eventId, kind);
+    const { path, expiresAt } = this.signer.sign(key);
+    return { kind: 'signed' as const, path, expiresAt };
   }
 
   // The receiver name as the driver types it, so the office sees it even

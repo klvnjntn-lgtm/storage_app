@@ -10,11 +10,14 @@ import { useLanguage } from '@/app/context/LanguageContext';
 
 type ConfirmOptions = { danger?: boolean; confirmLabel?: string };
 type PromptOptions = { defaultValue?: string; confirmLabel?: string };
+// One row per choice; a disabled one shows why it can't be picked (hint).
+export type ChooseOption = { value: string; label: string; hint?: string; disabled?: boolean };
 
 type Request = { id: number; message: string } & (
   | { kind: 'confirm'; opts: ConfirmOptions; resolve: (v: boolean) => void }
   | { kind: 'alert'; resolve: () => void }
   | { kind: 'prompt'; opts: PromptOptions; resolve: (v: string | null) => void }
+  | { kind: 'choose'; options: ChooseOption[]; resolve: (v: string | null) => void }
 );
 type NewRequest = Request extends infer R ? (R extends Request ? Omit<R, 'id'> : never) : never;
 
@@ -24,6 +27,8 @@ type DialogApi = {
   confirm: (message: string, opts?: ConfirmOptions) => Promise<boolean>;
   alert: (message: string) => Promise<void>;
   prompt: (message: string, opts?: PromptOptions) => Promise<string | null>;
+  // Tap a row to pick it; null when cancelled.
+  choose: (message: string, options: ChooseOption[]) => Promise<string | null>;
 };
 
 const DialogContext = createContext<DialogApi | null>(null);
@@ -43,6 +48,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
       confirm: (message, opts = {}) => new Promise((resolve) => push({ kind: 'confirm', message, opts, resolve })),
       alert: (message) => new Promise((resolve) => push({ kind: 'alert', message, resolve })),
       prompt: (message, opts = {}) => new Promise((resolve) => push({ kind: 'prompt', message, opts, resolve })),
+      choose: (message, options) => new Promise((resolve) => push({ kind: 'choose', message, options, resolve })),
     };
   });
 
@@ -66,7 +72,13 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
   function finish(ok: boolean) {
     if (request.kind === 'confirm') request.resolve(ok);
     else if (request.kind === 'alert') request.resolve();
-    else request.resolve(ok ? value : null);
+    else if (request.kind === 'prompt') request.resolve(ok ? value : null);
+    else request.resolve(null);
+    onDone();
+  }
+
+  function pick(v: string) {
+    if (request.kind === 'choose') request.resolve(v);
     onDone();
   }
 
@@ -78,7 +90,9 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
   const confirmLabel =
     request.kind === 'alert'
       ? t('common.ok')
-      : (request.opts.confirmLabel ?? (request.kind === 'prompt' ? t('common.ok') : t('common.confirm')));
+      : request.kind === 'choose'
+        ? ''
+        : (request.opts.confirmLabel ?? (request.kind === 'prompt' ? t('common.ok') : t('common.confirm')));
 
   return (
     <div
@@ -101,6 +115,23 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
         <p id="app-dialog-message" className="text-sm text-gray-800 whitespace-pre-line">
           {request.message}
         </p>
+        {request.kind === 'choose' && (
+          <ul className="mt-3 max-h-[60vh] overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded-md">
+            {request.options.map((o) => (
+              <li key={o.value}>
+                <button
+                  type="button"
+                  disabled={o.disabled}
+                  onClick={() => pick(o.value)}
+                  className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 disabled:opacity-50 disabled:hover:bg-transparent"
+                >
+                  <span className="block font-medium text-gray-900 break-words">{o.label}</span>
+                  {o.hint && <span className="block text-xs text-gray-500">{o.hint}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         {request.kind === 'prompt' && (
           <input
             ref={inputRef}
@@ -121,6 +152,7 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
               {t('common.cancel')}
             </button>
           )}
+          {request.kind !== 'choose' && (
           <button
             ref={confirmRef}
             onClick={() => finish(true)}
@@ -130,6 +162,7 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
           >
             {confirmLabel}
           </button>
+          )}
         </div>
       </div>
     </div>

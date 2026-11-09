@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, RotateCcw, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, RotateCcw, ArrowLeftRight, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -95,8 +95,13 @@ type HistoryEvent = {
   metadata: {
     version?: number;
     stops?: { sequence: number; label: string | null; superseded: boolean }[];
-    // On STOP_RESET: which stop.
+    // On STOP_RESET and STOP_RESULT_MOVED: which stop (moved: from which).
     label?: string;
+    // On STOP_RESULT_MOVED: the stop it went to, and whether the two swapped.
+    toLabel?: string;
+    swapped?: boolean;
+    // The photos of a reset or moved result, kept (opened via photo-link).
+    evidence?: { proofPhotoKey?: string | null; failurePhotoKey?: string | null };
   } | null;
 };
 
@@ -490,6 +495,55 @@ export default function DeliveryRouteDetailPage() {
     setListError(null);
     try {
       const res = await apiFetch(`/delivery-routes/${id}/stops/${stop.id}/reset`, { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setListError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        await load(true);
+        return;
+      }
+      if (body) setRoute(body);
+      if (showHistory) await loadHistory();
+    } catch {
+      setListError(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // A result the driver recorded on the wrong stop goes to the right one, its
+  // photo, receiver, time and GPS together. A stop with a result of its own
+  // swaps with it.
+  async function handleMoveResult(stop: Stop) {
+    if (!route) return;
+    const options = route.stops
+      .filter((s) => s.id !== stop.id && !s.deliveryOrder && !s.superseded)
+      .map((s) => ({
+        value: s.id,
+        label: `${s.sequence}. ${s.label}`,
+        hint:
+          s.status === 'PENDING' && !s.hasProofPhoto && !s.pendingReceivedBy
+            ? undefined
+            : t('delivery.routeDetail.moveSwapHint', { status: statusLabels[s.status] }),
+      }));
+    const toId = await dialog.choose(t('delivery.routeDetail.movePick', { name: stop.label }), options);
+    if (!toId) return;
+    const to = route.stops.find((s) => s.id === toId)!;
+    const swap = to.status !== 'PENDING' || to.hasProofPhoto || !!to.pendingReceivedBy;
+    if (
+      !(await dialog.confirm(
+        t(swap ? 'delivery.routeDetail.confirmSwap' : 'delivery.routeDetail.confirmMove', { from: stop.label, to: to.label }),
+        { confirmLabel: t('delivery.routeDetail.moveResult') },
+      ))
+    ) {
+      return;
+    }
+    setBusy(stop.id);
+    setListError(null);
+    try {
+      const res = await apiFetch(`/delivery-routes/${id}/stops/${stop.id}/move-result`, {
+        method: 'POST',
+        body: JSON.stringify({ toStopId: toId }),
+      });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         setListError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
@@ -1270,6 +1324,17 @@ export default function DeliveryRouteDetailPage() {
                       {t('delivery.routeDetail.resetStop')}
                     </button>
                   )}
+                  {canReset && !stop.deliveryOrder && (
+                    <button
+                      disabled={rowBusy || orderSaving}
+                      onClick={() => handleMoveResult(stop)}
+                      title={t('delivery.routeDetail.moveResultHint')}
+                      className="inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
+                    >
+                      <ArrowLeftRight size={12} />
+                      {t('delivery.routeDetail.moveResult')}
+                    </button>
+                  )}
                   {(stop.deliveryOrder || (stop.status === 'PENDING' && routeOpen && !isDriver)) && (
                     <button
                       onClick={() => openEditDetails(stop)}
@@ -1380,6 +1445,9 @@ export default function DeliveryRouteDetailPage() {
                         )}
                         {t(`delivery.routeDetail.historyType.${h.type}`)}
                         {h.type === 'STOP_RESET' && h.metadata?.label && ` · ${h.metadata.label}`}
+                        {h.type === 'STOP_RESULT_MOVED' &&
+                          h.metadata?.label &&
+                          ` · ${h.metadata.label} ${h.metadata.swapped ? '⇄' : '→'} ${h.metadata.toLabel ?? '—'}`}
                         {snapshot && (
                           <button
                             onClick={() => setExpandedVersion(open ? null : h.id)}
@@ -1393,6 +1461,18 @@ export default function DeliveryRouteDetailPage() {
                         {h.createdBy ? driverLabel(h.createdBy) : '—'} · {formatDMYTime(new Date(h.createdAt))}
                       </span>
                     </div>
+                    {/* A reset keeps the photo here; a move's photo went with
+                        the result, and this is what it was. */}
+                    {h.metadata?.evidence?.proofPhotoKey && (
+                      <div className="mt-1.5">
+                        <ProofPhoto linkPath={`/delivery-routes/${id}/history/${h.id}/photo-link`} />
+                      </div>
+                    )}
+                    {h.metadata?.evidence?.failurePhotoKey && (
+                      <div className="mt-1.5">
+                        <ProofPhoto linkPath={`/delivery-routes/${id}/history/${h.id}/photo-link?kind=failure`} />
+                      </div>
+                    )}
                     {open && snapshot && (
                       <ol className="mt-1.5 ml-2 pl-3 border-l-2 border-blue-100 space-y-0.5">
                         {snapshot.length === 0 && <li className="text-gray-400">{t('delivery.routeDetail.noStops')}</li>}

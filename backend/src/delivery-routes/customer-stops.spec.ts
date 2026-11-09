@@ -1073,7 +1073,7 @@ describe('Team routes & customer stops', () => {
       return { stop, customer };
     };
 
-    it('puts a delivered stop back to pending, removing its photo and the landmark made from it', async () => {
+    it('puts a delivered stop back to pending, keeping its photo in the history but dropping the landmark made from it', async () => {
       const route = await mkStartedRoute();
       const { stop, customer } = await delivered(route.id);
       const { proofPhotoKey } = await savedStop(stop.id);
@@ -1085,14 +1085,70 @@ describe('Team routes & customer stops', () => {
       expect(view.stops.find((s) => s.id === stop.id)!.status).toBe('PENDING');
       const after = await savedStop(stop.id);
       expect(after).toMatchObject({ signedAt: null, receivedBy: null, proofPhotoKey: null, completedLatitude: null });
-      expect(await storage().exists(proofPhotoKey!)).toBe(false);
+      expect(await storage().exists(proofPhotoKey!)).toBe(true);
       expect(await storage().exists(landmark!.storageKey)).toBe(false);
       expect(await prisma.customerLocationPhoto.count({ where: { customerId: customer.id } })).toBe(0);
       const event = await prisma.routeHistoryEvent.findFirst({
         where: { routeId: route.id, type: 'STOP_RESET' },
       });
       expect(event?.createdByUserId).toBe(adminId);
-      expect(event?.metadata).toMatchObject({ previousStatus: 'DELIVERED', receivedBy: 'Ani', photosDeleted: 1 });
+      expect(event?.metadata).toMatchObject({
+        previousStatus: 'DELIVERED',
+        receivedBy: 'Ani',
+        evidence: { proofPhotoKey },
+      });
+      const link = await proofs.historyPhotoLink(orgId, route.id, event!.id, 'proof');
+      expect(link.path).toContain(encodeURIComponent(proofPhotoKey!).slice(0, 10));
+      await expect(proofs.historyPhotoLink(orgId, route.id, event!.id, 'failure')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it("takes back the customer pin the delivery set, and the open stops' copy of it", async () => {
+      const route = await mkStartedRoute();
+      const customer = await mkCustomer(`Reset pin ${randomUUID()}`, false);
+      const stop = await routes.addStop(orgId, route.id, { customerId: customer.id });
+      const later = await routes.addStop(orgId, (await mkStartedRoute()).id, { customerId: customer.id });
+      await proofs.uploadPhoto(orgId, route.id, stop.id, photo, admin());
+      await routes.recordCustomerStopProof(
+        orgId,
+        route.id,
+        stop.id,
+        { receivedBy: 'Ani', latitude: 1.1559, longitude: 104.0198, accuracy: 8 },
+        admin(),
+      );
+      expect(Number((await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).latitude)).toBe(1.1559);
+      expect(Number((await savedStop(later.id)).destinationLatitude)).toBe(1.1559);
+
+      await proofs.resetStop(orgId, route.id, stop.id, admin());
+
+      expect(await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).toMatchObject({
+        latitude: null,
+        pinSource: null,
+      });
+      expect((await savedStop(later.id)).destinationLatitude).toBeNull();
+    });
+
+    it('leaves a pin the office set alone', async () => {
+      const route = await mkStartedRoute();
+      const customer = await mkCustomer(`Reset manual ${randomUUID()}`);
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: { latitude: 1.2, longitude: 104.1, pinSource: 'MANUAL' },
+      });
+      const stop = await routes.addStop(orgId, route.id, { customerId: customer.id });
+      await proofs.uploadPhoto(orgId, route.id, stop.id, photo, admin());
+      await routes.recordCustomerStopProof(
+        orgId,
+        route.id,
+        stop.id,
+        { receivedBy: 'Ani', latitude: 1.2, longitude: 104.1, accuracy: 5 },
+        admin(),
+      );
+      await proofs.resetStop(orgId, route.id, stop.id, admin());
+      expect(await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).toMatchObject({
+        pinSource: 'MANUAL',
+      });
     });
 
     it('lets the stop be delivered again afterwards', async () => {
@@ -1177,6 +1233,113 @@ describe('Team routes & customer stops', () => {
 
       expect(view.status).toBe(RouteStatus.ACTIVE);
       expect(view.stops[0].id).toBe(stop.id);
+    });
+  });
+
+  describe('moving a result to the right stop', () => {
+    const savedStop = (id: string) => prisma.routeStop.findUniqueOrThrow({ where: { id } });
+    const deliver = async (routeId: string, stopId: string, receivedBy: string, at?: [number, number]) => {
+      await proofs.uploadPhoto(orgId, routeId, stopId, photo, admin(), {}, photo);
+      await routes.recordCustomerStopProof(
+        orgId,
+        routeId,
+        stopId,
+        { receivedBy, ...(at ? { latitude: at[0], longitude: at[1], accuracy: 6 } : {}) },
+        admin(),
+      );
+    };
+    const customerStop = async (routeId: string, name: string) => {
+      const customer = await mkCustomer(`${name} ${randomUUID()}`, false);
+      const stop = await routes.addStop(orgId, routeId, { customerId: customer.id });
+      return { customer, stop };
+    };
+
+    it('moves the photo, receiver, GPS, landmark and pin to an open stop, which leaves the wrong one to do', async () => {
+      const route = await mkStartedRoute();
+      const wrong = await customerStop(route.id, 'Fanindo');
+      const right = await customerStop(route.id, 'Yudi Kencana');
+      await deliver(route.id, wrong.stop.id, 'PT Yudi', [1.156, 104.0197]);
+      const { proofPhotoKey, signedAt } = await savedStop(wrong.stop.id);
+
+      const view = await proofs.moveResult(orgId, route.id, wrong.stop.id, right.stop.id, admin());
+
+      expect(view.stops.find((s) => s.id === right.stop.id)!.status).toBe('DELIVERED');
+      expect(view.stops.find((s) => s.id === wrong.stop.id)!.status).toBe('PENDING');
+      expect(await savedStop(right.stop.id)).toMatchObject({ proofPhotoKey, signedAt, receivedBy: 'PT Yudi' });
+      expect(await savedStop(wrong.stop.id)).toMatchObject({ proofPhotoKey: null, signedAt: null, receivedBy: null });
+      const landmark = await prisma.customerLocationPhoto.findFirst({ where: { fromProofOf: right.stop.id } });
+      expect(landmark?.customerId).toBe(right.customer.id);
+      expect(await prisma.customer.findUniqueOrThrow({ where: { id: wrong.customer.id } })).toMatchObject({
+        latitude: null,
+      });
+      expect(
+        Number((await prisma.customer.findUniqueOrThrow({ where: { id: right.customer.id } })).latitude),
+      ).toBe(1.156);
+      const event = await prisma.routeHistoryEvent.findFirst({
+        where: { routeId: route.id, type: 'STOP_RESULT_MOVED' },
+      });
+      expect(event?.metadata).toMatchObject({
+        fromStopId: wrong.stop.id,
+        toStopId: right.stop.id,
+        swapped: false,
+        receivedBy: 'PT Yudi',
+      });
+    });
+
+    it('swaps two results recorded on each other\'s stops', async () => {
+      const route = await mkStartedRoute();
+      const a = await customerStop(route.id, 'Swap A');
+      const b = await customerStop(route.id, 'Swap B');
+      await deliver(route.id, a.stop.id, 'Bob at B');
+      await deliver(route.id, b.stop.id, 'Ann at A');
+      const keyA = (await savedStop(a.stop.id)).proofPhotoKey;
+      const keyB = (await savedStop(b.stop.id)).proofPhotoKey;
+
+      await proofs.moveResult(orgId, route.id, a.stop.id, b.stop.id, admin());
+
+      expect(await savedStop(a.stop.id)).toMatchObject({ receivedBy: 'Ann at A', proofPhotoKey: keyB });
+      expect(await savedStop(b.stop.id)).toMatchObject({ receivedBy: 'Bob at B', proofPhotoKey: keyA });
+    });
+
+    it("drops the landmark when the right customer has a location photo of their own", async () => {
+      const route = await mkStartedRoute();
+      const wrong = await customerStop(route.id, 'Wrong LM');
+      const right = await customerStop(route.id, 'Right LM');
+      await prisma.customerLocationPhoto.create({
+        data: { organizationId: orgId, customerId: right.customer.id, storageKey: `customer-locations/${orgId}/x.webp` },
+      });
+      await deliver(route.id, wrong.stop.id, 'Ani');
+      const landmark = await prisma.customerLocationPhoto.findFirstOrThrow({ where: { fromProofOf: wrong.stop.id } });
+
+      await proofs.moveResult(orgId, route.id, wrong.stop.id, right.stop.id, admin());
+
+      expect(await prisma.customerLocationPhoto.findUnique({ where: { id: landmark.id } })).toBeNull();
+      expect(await prisma.customerLocationPhoto.count({ where: { customerId: right.customer.id } })).toBe(1);
+    });
+
+    it('refuses an empty stop, the same stop, a delivery order stop, and holds a driver to their open route', async () => {
+      const route = await mkStartedRoute();
+      const a = await customerStop(route.id, 'Move A');
+      const b = await customerStop(route.id, 'Move B');
+      await expect(proofs.moveResult(orgId, route.id, a.stop.id, b.stop.id, admin())).rejects.toThrow(/nothing to move/);
+      await deliver(route.id, a.stop.id, 'Ani');
+      await expect(proofs.moveResult(orgId, route.id, a.stop.id, a.stop.id, admin())).rejects.toThrow(/different stop/);
+
+      const order = await prisma.deliveryOrder.create({
+        data: { organizationId: orgId, customerName: 'Move DO', status: DeliveryOrderStatus.SHIPPED },
+      });
+      const doStop = await routes.addStop(orgId, route.id, { deliveryOrderId: order.id });
+      await expect(proofs.moveResult(orgId, route.id, a.stop.id, doStop.id, admin())).rejects.toThrow(/customer stops/);
+
+      await expect(
+        proofs.moveResult(orgId, route.id, a.stop.id, b.stop.id, { sub: otherDriverId, role: 'DRIVER' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.COMPLETED } });
+      await expect(proofs.moveResult(orgId, route.id, a.stop.id, b.stop.id, driver())).rejects.toThrow(/ask the office/);
+      await prisma.route.update({ where: { id: route.id }, data: { status: RouteStatus.ACTIVE } });
+
+      await proofs.moveResult(orgId, route.id, a.stop.id, b.stop.id, driver());
+      expect((await savedStop(b.stop.id)).receivedBy).toBe('Ani');
     });
   });
 

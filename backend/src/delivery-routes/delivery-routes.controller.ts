@@ -43,6 +43,7 @@ import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
   ApplyStopAddressDto,
+  MoveStopResultDto,
 } from './dto/customer-stop-actions.dto';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import { ProofDraftDto, ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
@@ -264,6 +265,24 @@ export class DeliveryRoutesController {
     @Param('id') routeId: string,
   ) {
     return this.deliveryRoutesService.getHistory(organizationId, routeId);
+  }
+
+  // A photo a history entry kept from a reset or moved delivery result.
+  @Get(':id/history/:eventId/photo-link')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  historyPhotoLink(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('eventId') eventId: string,
+    @Query('kind') kind?: string,
+  ) {
+    return this.stopProof.historyPhotoLink(
+      organizationId,
+      routeId,
+      eventId,
+      kind === 'failure' ? 'failure' : 'proof',
+    );
   }
 
   // Route-mutation endpoints (and create, monitoring, drivers, history
@@ -547,6 +566,20 @@ export class DeliveryRoutesController {
     @Req() req,
   ) {
     return this.stopProof.resetStop(organizationId, routeId, stopId, req.user);
+  }
+
+  // Drivers too, like reset: the result was recorded on the wrong stop.
+  @Post(':id/stops/:stopId/move-result')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER', 'DRIVER')
+  moveStopResult(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: MoveStopResultDto,
+  ) {
+    return this.stopProof.moveResult(organizationId, routeId, stopId, dto.toStopId, req.user);
   }
 
   @Post(':id/stops/:stopId/failure')

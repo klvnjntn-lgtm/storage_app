@@ -17,6 +17,7 @@ import {
   LocateFixed,
   LocateOff,
   RotateCcw,
+  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -508,6 +509,7 @@ function StopRecord({
   jumpedTo,
   resetting,
   onReset,
+  onMove,
 }: {
   routeId: string;
   stop: Stop;
@@ -515,6 +517,8 @@ function StopRecord({
   jumpedTo: boolean;
   resetting: boolean;
   onReset: () => void;
+  // Customer stops only: the result belongs on another stop.
+  onMove?: () => void;
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -631,6 +635,17 @@ function StopRecord({
             >
               <RotateCcw size={18} />
               {t('delivery.driver.resetStop')}
+            </button>
+          )}
+          {onMove && !stop.superseded && (stop.status !== 'PENDING' || stop.hasProofPhoto) && (
+            <button
+              type="button"
+              disabled={resetting}
+              onClick={onMove}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2.5 text-base font-semibold text-blue-800 disabled:opacity-50"
+            >
+              <ArrowLeftRight size={18} />
+              {t('delivery.driver.moveResult')}
             </button>
           )}
         </div>
@@ -1134,6 +1149,49 @@ export default function DriverRoutePage() {
     return sent;
   }
 
+  // A result recorded on the wrong stop goes to the right one on this route:
+  // photo, receiver, time and GPS together, nothing retaken. Picking a stop
+  // that has a result of its own swaps the two.
+  async function handleMoveResult(routeId: string, stop: Stop, all: Stop[]) {
+    const options = all
+      .filter((s) => s.id !== stop.id && !s.deliveryOrder && !s.superseded)
+      .map((s) => ({
+        value: s.id,
+        label: `${s.sequence}. ${s.label}`,
+        hint:
+          s.status === 'PENDING' && !s.hasProofPhoto
+            ? undefined
+            : t('delivery.driver.moveSwapHint', { status: statusLabels[s.status] }),
+      }));
+    if (options.length === 0) return;
+    const toId = await dialog.choose(t('delivery.driver.movePick', { name: stop.label }), options);
+    if (!toId) return;
+    const to = all.find((s) => s.id === toId)!;
+    const swap = to.status !== 'PENDING' || to.hasProofPhoto;
+    const confirmed = await dialog.confirm(
+      t(swap ? 'delivery.driver.confirmSwap' : 'delivery.driver.confirmMove', { from: stop.label, to: to.label }),
+      { confirmLabel: t('delivery.driver.moveResult') },
+    );
+    if (!confirmed) return;
+    setActionLoading(stop.id);
+    try {
+      const res = await apiFetch(`/delivery-routes/${routeId}/stops/${stop.id}/move-result`, {
+        method: 'POST',
+        body: JSON.stringify({ toStopId: toId }),
+        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        await dialog.alert(body?.message ?? t('delivery.driver.requestFailed', { status: res.status }));
+      }
+    } catch (err) {
+      await dialog.alert(t(isAbort(err) ? 'delivery.driver.slowConnection' : 'delivery.driver.couldNotReachServer'));
+    } finally {
+      setActionLoading(null);
+      await load({ quiet: true });
+    }
+  }
+
   // Undo a stop recorded by mistake. The server keeps who did it and tells the
   // office; nothing kept on this phone may bring the old attempt back.
   async function handleResetStop(routeId: string, stop: Stop) {
@@ -1412,7 +1470,7 @@ export default function DriverRoutePage() {
             // Finished stops collapse to one line so the remaining work
             // stands out; a day too far back shows every stop that way.
             if (stop.status !== 'PENDING' || !canAct) {
-              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} jumpedTo={jumpedToStop === stop.id} resetting={actionLoading === stop.id} onReset={() => handleResetStop(route.id, stop)} />;
+              return <StopRecord key={stop.id} routeId={route.id} stop={stop} statusLabel={statusLabels[stop.status]} jumpedTo={jumpedToStop === stop.id} resetting={actionLoading === stop.id} onReset={() => handleResetStop(route.id, stop)} onMove={stop.deliveryOrder ? undefined : () => handleMoveResult(route.id, stop, route.stops)} />;
             }
 
             return (

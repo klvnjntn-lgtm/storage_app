@@ -129,6 +129,124 @@ export async function backfillCustomerPin(
   }
 }
 
+// The undo of backfillCustomerPin, for a delivery whose result was reset or
+// moved to another stop (the driver had marked the wrong one). Only a GPS pin
+// still holding exactly that delivery's fix is cleared — one the office set,
+// or a later driver fix, has nothing to do with this delivery and stays.
+// What the cleared pin replaced isn't known, so the address goes back to
+// unpinned, and the next delivery there fills it in. Open stops and delivery
+// orders that copied the pin lose it with the customer.
+// Same choice of address as backfillCustomerPin.
+export async function releaseCustomerPin(
+  prisma: PrismaService,
+  params: {
+    organizationId: string;
+    customerId: string | null;
+    customerAddressId?: string | null;
+    deliveryAddress: string | null;
+    latitude: Prisma.Decimal | number | null;
+    longitude: Prisma.Decimal | number | null;
+  },
+): Promise<void> {
+  const { organizationId, customerId, latitude, longitude } = params;
+  if (!customerId || latitude == null || longitude == null) return;
+  const held = { pinSource: PinSource.GPS, latitude, longitude };
+  const cleared = { latitude: null, longitude: null, pinSource: null, pinAccuracy: null, pinSetAt: null };
+
+  let addressId: string | null = null;
+  let address: string | null | undefined;
+  if (params.customerAddressId) {
+    const { count } = await prisma.customerAddress.updateMany({
+      where: { id: params.customerAddressId, organizationId, customerId, ...held },
+      data: cleared,
+    });
+    if (!count) return;
+    addressId = params.customerAddressId;
+    address = (
+      await prisma.customerAddress.findFirst({ where: { id: addressId }, select: { address: true } })
+    )?.address;
+  } else {
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, organizationId },
+      select: { address: true },
+    });
+    if (!customer) return;
+    const target = normalizeAddress(params.deliveryAddress);
+    if (!target || target === normalizeAddress(customer.address)) {
+      const { count } = await prisma.customer.updateMany({
+        where: { id: customerId, organizationId, ...held },
+        data: cleared,
+      });
+      if (!count) return;
+      address = customer.address;
+    } else {
+      const saved = await prisma.customerAddress.findMany({
+        where: { organizationId, customerId },
+        select: { id: true, address: true },
+      });
+      const match = saved.find((a) => normalizeAddress(a.address) === target);
+      if (!match) return;
+      const { count } = await prisma.customerAddress.updateMany({
+        where: { id: match.id, ...held },
+        data: cleared,
+      });
+      if (!count) return;
+      addressId = match.id;
+      address = match.address;
+    }
+  }
+
+  const main = normalizeAddress(address);
+  const stops = await prisma.routeStop.findMany({
+    where: {
+      customerId,
+      customerAddressId: addressId,
+      destinationLatitude: latitude,
+      destinationLongitude: longitude,
+      signedAt: null,
+      failedAt: null,
+      supersededAt: null,
+      route: { organizationId, status: { in: [RouteStatus.PLANNED, RouteStatus.ACTIVE] } },
+    },
+    select: { id: true, address: true },
+  });
+  const stopIds = stops
+    .filter((s) => {
+      if (addressId) return true;
+      const a = normalizeAddress(s.address);
+      return !a || a === main;
+    })
+    .map((s) => s.id);
+  if (stopIds.length) {
+    await prisma.routeStop.updateMany({
+      where: { id: { in: stopIds }, destinationLatitude: latitude, destinationLongitude: longitude },
+      data: { destinationLatitude: null, destinationLongitude: null },
+    });
+  }
+  const orders = await prisma.deliveryOrder.findMany({
+    where: {
+      organizationId,
+      customerId,
+      ...openDeliveryOrderWhere,
+      destinationLatitude: latitude,
+      destinationLongitude: longitude,
+    },
+    select: { id: true, deliveryAddress: true },
+  });
+  const orderIds = orders
+    .filter((o) => {
+      const a = normalizeAddress(o.deliveryAddress);
+      return addressId ? a != null && a === main : !a || a === main;
+    })
+    .map((o) => o.id);
+  if (orderIds.length) {
+    await prisma.deliveryOrder.updateMany({
+      where: { id: { in: orderIds }, destinationLatitude: latitude, destinationLongitude: longitude },
+      data: { destinationLatitude: null, destinationLongitude: null },
+    });
+  }
+}
+
 // For a pin that changed on its own (a driver's fix, a photo's location), as
 // opposed to an office edit (customer-stop-sync.ts). Stops and delivery orders
 // still to be delivered copied the customer's pin when they were made, so they

@@ -96,3 +96,11 @@ export class ApplyStopAddressDto {
   @IsString()
   customerAddressId?: string;
 }
+
+// The stop a result recorded on the wrong one belongs to (moveStopResult).
+export class MoveStopResultDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  toStopId: string;
+}

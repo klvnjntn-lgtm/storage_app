@@ -1535,6 +1535,7 @@ enum RouteHistoryEventType {
   STATUS_CHANGED
   STOP_RESCHEDULED
   STOP_RESET
+  STOP_RESULT_MOVED
 }
 
 // Append-only audit trail of route changes — spec's "route version, time
