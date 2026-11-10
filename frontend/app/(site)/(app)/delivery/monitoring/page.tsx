@@ -8,7 +8,7 @@ import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DeliveryMap, { type MapDriver, type MapStop } from '@/app/components/delivery/DeliveryMap';
 import DatePicker from '@/app/components/shared/DatePicker';
-import TeamPicker, { teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
+import TeamPicker, { compareTeamNames, teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { TEAM_COLORS } from '@/app/components/delivery/teamColors';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { toCalendarDateString } from '@/lib/dates';
@@ -22,6 +22,7 @@ type Whereabouts = {
   lastStop: {
     label: string;
     status: 'DELIVERED' | 'FAILED';
+    failureReason: string | null;
     at: string;
     plannedEta: string | null;
     latitude: number | null;
@@ -37,6 +38,7 @@ type TimelineEntry = {
   sequence: number;
   label: string;
   status: 'DELIVERED' | 'FAILED';
+  failureReason: string | null;
   at: string;
   durationSeconds: number | null;
 };
@@ -55,13 +57,14 @@ type TeamProgress = Summary &
 type MapStopRaw = {
   id: string;
   status: MapStop['status'];
+  failureReason: string | null;
   latitude: string;
   longitude: string;
   label: string;
   routeId: string;
   team: PickerTeam;
 };
-type MonitoringMapStop = MapStop & { team: PickerTeam };
+type MonitoringMapStop = MapStop & { team: PickerTeam; failureReason: string | null };
 
 function todayIso() {
   // Local calendar date — toISOString() is UTC, still yesterday before 07:00 WIB.
@@ -250,11 +253,8 @@ export default function DeliveryMonitoringPage() {
       }));
   }, [byTeam, mapTeamId, noDriver, t, now, teamColor]);
 
-  // Teams with no stops that day go last; the order is otherwise unchanged.
-  const teamCards = useMemo(
-    () => [...byTeam.filter((d) => d.total > 0), ...byTeam.filter((d) => d.total === 0)],
-    [byTeam],
-  );
+  // Team 1, Team 2 … in name order.
+  const teamCards = useMemo(() => [...byTeam].sort((a, b) => compareTeamNames(a.team, b.team)), [byTeam]);
 
   // Popup shows the stop, then its team/driver and status.
   const visibleMapStops = useMemo<MapStop[]>(
@@ -265,7 +265,9 @@ export default function DeliveryMonitoringPage() {
           ...s,
           color: teamColor(s.team.id),
           showOutcome: true,
-          detail: `${teamLabel(s.team, noDriver)} · ${t(`delivery.routeDetail.statusLabel.${s.status}`)}`,
+          detail: `${teamLabel(s.team, noDriver)} · ${t(`delivery.routeDetail.statusLabel.${s.status}`)}${
+            s.failureReason ? ` · ${t('delivery.routeDetail.failureReasonLabel')}: ${s.failureReason}` : ''
+          }`,
         })),
     [mapStops, mapTeamId, noDriver, t, teamColor],
   );
@@ -468,6 +470,11 @@ function Whereabouts({ d, isToday, now }: { d: TeamProgress; isToday: boolean; n
               : t('delivery.monitoring.notStarted')}
         </span>
       </div>
+      {d.lastStop?.status === 'FAILED' && d.lastStop.failureReason && (
+        <div className="pl-[18px] text-red-600 break-words">
+          {t('delivery.routeDetail.failureReasonLabel')}: {d.lastStop.failureReason}
+        </div>
+      )}
       <div className="flex items-center gap-1.5 min-w-0">
         <Navigation size={12} className="shrink-0 text-gray-400" />
         <span className="truncate">
@@ -552,7 +559,12 @@ function CompletionTimeline({ timeline }: { timeline: TimelineEntry[] }) {
                 className={`shrink-0 ${entry.status === 'FAILED' ? 'text-red-500' : 'text-green-600'}`}
                 aria-label={t(`delivery.routeDetail.statusLabel.${entry.status}`)}
               />
-              <span className="min-w-0 flex-1 break-words">{entry.label}</span>
+              <span className="min-w-0 flex-1 break-words">
+                {entry.label}
+                {entry.status === 'FAILED' && entry.failureReason && (
+                  <span className="block text-red-600">{entry.failureReason}</span>
+                )}
+              </span>
               <span className="shrink-0 tabular-nums text-gray-500">{clock(entry.at)}</span>
               <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-gray-800">
                 {entry.durationSeconds != null ? duration(entry.durationSeconds) : '—'}

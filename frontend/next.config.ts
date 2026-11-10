@@ -66,6 +66,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Dev only: lets a phone test `next dev` through a Cloudflare quick tunnel
+  // (`cloudflared tunnel --url http://localhost:3001`), which GPS and the
+  // camera need since they only work over HTTPS.
+  allowedDevOrigins: ['*.trycloudflare.com'],
   deploymentId: isDesktopBuild ? undefined : deploymentId(),
   ...(isDesktopBuild && {
     // Own build folder, so it never clobbers a dev or Docker build in .next.

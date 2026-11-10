@@ -2866,6 +2866,7 @@ export class DeliveryRoutesService {
       ? {
           label: last.stop.label,
           status: last.stop.status,
+          failureReason: last.stop.status === 'FAILED' ? last.stop.failureReason : null,
           at: last.at,
           plannedEta: last.stop.plannedEta,
           ...latLng(
@@ -2912,6 +2913,7 @@ export class DeliveryRoutesService {
           sequence: stop.sequence,
           label: stop.label,
           status: stop.status,
+          failureReason: stop.status === 'FAILED' ? stop.failureReason : null,
           at,
         })),
         route.plannedDepartureAt,
@@ -2947,6 +2949,7 @@ export class DeliveryRoutesService {
           routeId: stop.route.id,
           team: presentTeam(stop.route.team),
           status: view.status,
+          failureReason: view.status === 'FAILED' ? view.failureReason : null,
           latitude:
             view.destinationLatitude ?? view.completedLatitude ?? view.failureLatitude,
           longitude:

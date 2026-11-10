@@ -1,15 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { display } from '@/lib/fonts';
-import { FileSpreadsheet, Download, Upload, AlertTriangle, CheckCircle2, Trash2 } from 'lucide-react';
+import { FileSpreadsheet, Download, Upload, AlertTriangle, CheckCircle2, Trash2, CopyX } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { useHasModule } from '@/lib/hooks/useHasModule';
 import { usePriceLevels } from '@/lib/price-levels';
+import { checkCustomerDuplicates, type DuplicateCheck, type DuplicateMatch } from '@/app/components/customers/CustomerDuplicates';
 
 type Field =
   | 'name'
@@ -71,6 +72,10 @@ type Row = {
   longitude: number | null;
   deliveryNotes: string;
   problems: string[];
+  // Existing customers this row matches; null until the check has run.
+  dup: DuplicateCheck | null;
+  // Similar (not exact) matches: the importer ticked "import anyway".
+  confirmSimilar: boolean;
 };
 
 type Skipped = { excelRow: number; name: string; reason: string };
@@ -90,6 +95,10 @@ export default function CustomerImportPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
+  // Results of a check started for an earlier file are dropped.
+  const checkRun = useRef(0);
 
   const templateFields: Field[] = [
     'name',
@@ -125,7 +134,7 @@ export default function CustomerImportPage() {
     XLSX.writeFile(book, 'customer-import-template.xlsx');
   }
 
-  function validate(r: Omit<Row, 'problems'>, rawLat: string, rawLng: string, rawCoords: string): string[] {
+  function validate(r: Omit<Row, 'problems' | 'dup' | 'confirmSimilar'>, rawLat: string, rawLng: string, rawCoords: string): string[] {
     const p: string[] = [];
     if (!r.name) p.push(t('customers.importPage.problem.nameRequired'));
     for (const [f, max] of Object.entries(MAX_LEN) as [Field, number][]) {
@@ -153,6 +162,7 @@ export default function CustomerImportPage() {
     setFileError(null);
     setResult(null);
     setImportError(null);
+    setCheckFailed(false);
 
     let raw: Record<string, unknown>[];
     try {
@@ -221,7 +231,7 @@ export default function CustomerImportPage() {
         longitude,
         deliveryNotes: cell(r, 'deliveryNotes'),
       };
-      parsed.push({ ...base, problems: validate(base, rawLat, rawLng, rawCoords) });
+      parsed.push({ ...base, problems: validate(base, rawLat, rawLng, rawCoords), dup: null, confirmSimilar: false });
     });
 
     if (parsed.length === 0) {
@@ -233,17 +243,56 @@ export default function CustomerImportPage() {
       return;
     }
     setRows(parsed);
+    void checkExisting(parsed);
   }
 
+  // Which rows already exist (skipped on import) or look like an existing
+  // customer (imported only when ticked). Same batching as the import.
+  async function checkExisting(parsed: Row[]) {
+    const run = ++checkRun.current;
+    setChecking(true);
+    try {
+      const results: DuplicateCheck[] = [];
+      for (let i = 0; i < parsed.length; i += BATCH_MAX_ROWS) {
+        const batch = parsed.slice(i, i + BATCH_MAX_ROWS).map((r) => ({
+          name: r.name.slice(0, MAX_LEN.name) || '-',
+          address: r.address.slice(0, MAX_LEN.address) || undefined,
+          phone: r.phone.slice(0, MAX_LEN.phone) || undefined,
+          npwp: r.npwp.slice(0, MAX_LEN.npwp) || undefined,
+        }));
+        results.push(...(await checkCustomerDuplicates(batch)));
+      }
+      if (run !== checkRun.current) return;
+      const byRow = new Map(parsed.map((r, i) => [r.excelRow, results[i]]));
+      setRows((current) => current.map((r) => ({ ...r, dup: byRow.get(r.excelRow) ?? r.dup })));
+    } catch {
+      if (run === checkRun.current) setCheckFailed(true);
+    } finally {
+      if (run === checkRun.current) setChecking(false);
+    }
+  }
+
+  const isExact = (r: Row) => (r.dup?.exact.length ?? 0) > 0;
+  const isSimilar = (r: Row) => !isExact(r) && (r.dup?.similar.length ?? 0) > 0;
+  const setConfirm = (match: (r: Row) => boolean, value: boolean) =>
+    setRows((rs) => rs.map((r) => (match(r) ? { ...r, confirmSimilar: value } : r)));
+
   const problemCount = rows.filter((r) => r.problems.length > 0).length;
+  const exactCount = rows.filter(isExact).length;
+  const similarRows = rows.filter(isSimilar);
+  const unconfirmedSimilar = similarRows.filter((r) => !r.confirmSimilar).length;
+  const toImport = rows.length - exactCount - unconfirmedSimilar;
+  // Problems first, then rows that need a decision, then existing ones.
+  const rank = (r: Row) => (r.problems.length > 0 ? 0 : isSimilar(r) ? 1 : isExact(r) ? 2 : 3);
   const preview = useMemo(
-    () => [...rows].sort((a, b) => Number(b.problems.length > 0) - Number(a.problems.length > 0)).slice(0, PREVIEW_LIMIT),
+    () => [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, PREVIEW_LIMIT),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows],
   );
   const showDeliveryCols = rows.some((r) => r.latitude != null || r.deliveryNotes);
 
   async function handleImport() {
-    if (rows.length === 0 || problemCount > 0) return;
+    if (rows.length === 0 || problemCount > 0 || checking) return;
     setImportError(null);
     const payload = rows.map((r) => ({
       name: r.name,
@@ -255,6 +304,7 @@ export default function CustomerImportPage() {
       latitude: r.latitude ?? undefined,
       longitude: r.longitude ?? undefined,
       deliveryNotes: r.deliveryNotes || undefined,
+      ...(r.confirmSimilar ? { confirmSimilar: true } : {}),
     }));
 
     // Batches by size, remembering where each starts in `rows`.
@@ -439,7 +489,30 @@ export default function CustomerImportPage() {
                   {t('customers.importPage.allGood')}
                 </span>
               )}
+              {checking && <span className="text-xs text-gray-500">{t('customers.importPage.checking')}</span>}
+              {exactCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">
+                  <CopyX size={12} />
+                  {t('customers.importPage.exactCount', { count: exactCount })}
+                </span>
+              )}
+              {similarRows.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                  <AlertTriangle size={12} />
+                  {t('customers.importPage.similarCount', { count: similarRows.length })}
+                </span>
+              )}
               <div className="flex flex-wrap gap-2 sm:ml-auto">
+                {similarRows.length > 0 && (
+                  <button
+                    onClick={() => setConfirm(isSimilar, unconfirmedSimilar > 0)}
+                    className="text-sm px-3 py-2 rounded-md border border-amber-200 text-amber-800 bg-white font-medium hover:bg-amber-50"
+                  >
+                    {unconfirmedSimilar > 0
+                      ? t('customers.importPage.confirmAllSimilar')
+                      : t('customers.importPage.unconfirmAllSimilar')}
+                  </button>
+                )}
                 {problemCount > 0 && (
                   <button
                     onClick={() => setRows((rs) => rs.filter((r) => r.problems.length === 0))}
@@ -450,19 +523,24 @@ export default function CustomerImportPage() {
                   </button>
                 )}
                 <button
-                  disabled={problemCount > 0 || progress !== null}
+                  disabled={problemCount > 0 || progress !== null || checking || toImport === 0}
                   onClick={handleImport}
                   className="text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
                 >
                   {progress
                     ? t('customers.importPage.importing', { done: progress.done, total: progress.total })
-                    : t('customers.importPage.importButton', { count: rows.length })}
+                    : t('customers.importPage.importButton', { count: toImport })}
                 </button>
               </div>
             </div>
             <p className="px-3 sm:px-4 py-2 text-xs text-gray-500 bg-gray-50 border-b border-gray-100">
               {t('customers.importPage.dupeNote')}
             </p>
+            {checkFailed && (
+              <p className="px-3 sm:px-4 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-100">
+                {t('customers.importPage.checkFailed')}
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 text-gray-500 text-left">
@@ -472,12 +550,24 @@ export default function CustomerImportPage() {
                     <th className="px-3 py-2 font-medium">{header('phone')}</th>
                     <th className="px-3 py-2 font-medium">{header('address')}</th>
                     {showDeliveryCols && <th className="px-3 py-2 font-medium">{header('latitude')} / {header('longitude')}</th>}
+                    <th className="px-3 py-2 font-medium">{t('customers.importPage.colExisting')}</th>
                     <th className="px-3 py-2 font-medium">{t('customers.importPage.colProblem')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {preview.map((r) => (
-                    <tr key={r.excelRow} className={r.problems.length > 0 ? 'bg-red-50/60' : ''}>
+                    <tr
+                      key={r.excelRow}
+                      className={
+                        r.problems.length > 0
+                          ? 'bg-red-50/60'
+                          : isExact(r)
+                            ? 'bg-gray-50 text-gray-500'
+                            : isSimilar(r) && !r.confirmSimilar
+                              ? 'bg-amber-50/60'
+                              : ''
+                      }
+                    >
                       <td className="px-3 py-2 text-gray-400">{r.excelRow}</td>
                       <td className="px-3 py-2 font-medium">
                         {r.name || <span className="text-red-600">—</span>}
@@ -490,6 +580,24 @@ export default function CustomerImportPage() {
                           {r.latitude != null && r.longitude != null ? `${r.latitude}, ${r.longitude}` : ''}
                         </td>
                       )}
+                      <td className="px-3 py-2 min-w-[200px]">
+                        {isExact(r) ? (
+                          <ExistingMatch label={t('customers.importPage.exactLabel')} matches={r.dup!.exact} tone="text-gray-600" />
+                        ) : isSimilar(r) ? (
+                          <div className="space-y-1">
+                            <ExistingMatch label={t('customers.importPage.similarLabel')} matches={r.dup!.similar} tone="text-amber-800" />
+                            <label className="inline-flex items-center gap-1.5 font-medium text-gray-800 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={r.confirmSimilar}
+                                onChange={(e) => setConfirm((x) => x.excelRow === r.excelRow, e.target.checked)}
+                                className="accent-blue-600"
+                              />
+                              {t('customers.importPage.importAnyway')}
+                            </label>
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2 text-red-700">{r.problems.join(' · ')}</td>
                     </tr>
                   ))}
@@ -505,5 +613,18 @@ export default function CustomerImportPage() {
         )}
       </div>
     </main>
+  );
+}
+
+// "Already exists: Toko Abadi · Jl. Merdeka 1 (+1 more)" for one import row.
+function ExistingMatch({ label, matches, tone }: { label: string; matches: DuplicateMatch[]; tone: string }) {
+  const { t } = useLanguage();
+  const [first, ...rest] = matches;
+  return (
+    <div className={tone}>
+      <span className="font-semibold">{label}:</span> {first.name}
+      {first.address && <span className="opacity-80"> · {first.address}</span>}
+      {rest.length > 0 && <span className="opacity-80"> {t('customers.importPage.moreMatches', { count: rest.length })}</span>}
+    </div>
   );
 }

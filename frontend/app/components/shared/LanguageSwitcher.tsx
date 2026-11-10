@@ -9,16 +9,19 @@ import { locales } from '@/app/i18n/translations';
  * `dark` styles it for the landing page (whose colours follow the landing
  * tokens in theme.css). `inline` renders the choices as a row of buttons
  * instead of a dropdown — for containers that clip overflow, like the
- * landing page's collapsing mobile menu.
+ * landing page's collapsing mobile menu. `compact` is a 30×30 globe button
+ * matching ThemeToggle, for tight rows like the app sidebar's header.
  */
 export default function LanguageSwitcher({
   className = '',
   dark = false,
   inline = false,
+  compact = false,
 }: {
   className?: string;
   dark?: boolean;
   inline?: boolean;
+  compact?: boolean;
 }) {
   const { language, setLanguage } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -79,15 +82,20 @@ export default function LanguageSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="true"
-        className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors ${
+        className={`${
+          compact
+            ? 'grid place-items-center h-[30px] w-[30px] shrink-0'
+            : 'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5'
+        } rounded-md border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
           dark
             ? 'border-white/15 text-white/75 hover:bg-white/10 hover:border-white/30'
             : 'border-blue-500/20 text-gray-600 hover:bg-blue-50 hover:border-blue-500/40'
         }`}
         aria-label="Change language"
+        title={compact ? current.label : undefined}
       >
-        <Globe size={14} strokeWidth={2} />
-        <span>{language.toUpperCase()}</span>
+        <Globe size={compact ? 15 : 14} strokeWidth={2} aria-hidden="true" />
+        {!compact && <span>{language.toUpperCase()}</span>}
       </button>
 
       {open && (

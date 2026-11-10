@@ -19,6 +19,11 @@ export function toPickerTeam(team: { id: string; name: string; members?: PickerD
   return { id: team.id, name: team.name, driver: team.driver ?? team.members?.[0] ?? null };
 }
 
+// Team 1, Team 2 … Team 10 — numbers in a name compare as numbers.
+export function compareTeamNames(a: { name: string }, b: { name: string }) {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 export function teamLabel(team: PickerTeam, noDriver: string) {
   return `${team.name} · ${team.driver ? driverLabel(team.driver) : noDriver}`;
 }

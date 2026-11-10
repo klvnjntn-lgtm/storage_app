@@ -264,40 +264,41 @@ function isAbort(err: unknown): boolean {
 const FAIR_ACCURACY_M = WEAK_PIN_ACCURACY_M;
 const GOOD_ACCURACY_M = GOOD_GPS_ACCURACY_M;
 
-// Location quality the driver sees before tapping Mark delivered.
+// Location quality the driver sees before tapping Mark delivered: one quiet
+// line, only the icon carries the colour.
 function GpsChip({ status, best }: { status: GpsStatus; best: GpsFix | null }) {
   const { t } = useLanguage();
   if (status === 'denied' || status === 'insecure' || status === 'unsupported') {
     return (
-      <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 text-sm font-semibold">
-        <LocateOff size={20} className="shrink-0" />
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-red-700">
+        <LocateOff size={16} className="shrink-0" />
         {t('delivery.driver.gps.blockedTitle')}
-      </div>
+      </p>
     );
   }
   if (!best) {
     return (
-      <div className="flex items-center gap-2 rounded-xl bg-gray-100 border border-gray-200 text-gray-600 px-3 py-2.5 text-sm font-medium">
-        <LocateFixed size={20} className="shrink-0 animate-pulse motion-reduce:animate-none" />
+      <p className="flex items-center gap-1.5 text-sm text-gray-500">
+        <LocateFixed size={16} className="shrink-0 animate-pulse motion-reduce:animate-none" />
         {t('delivery.driver.gps.searching')}
-      </div>
+      </p>
     );
   }
   const m = Math.round(best.accuracy ?? Infinity);
   const tone =
     m <= GOOD_ACCURACY_M
-      ? { box: 'bg-green-50 border-green-200 text-green-800', label: t('delivery.driver.gps.good') }
+      ? { icon: 'text-green-600', label: t('delivery.driver.gps.good') }
       : m <= FAIR_ACCURACY_M
-        ? { box: 'bg-amber-50 border-amber-200 text-amber-800', label: t('delivery.driver.gps.fair') }
-        : { box: 'bg-red-50 border-red-200 text-red-700', label: t('delivery.driver.gps.weak') };
+        ? { icon: 'text-amber-600', label: t('delivery.driver.gps.fair') }
+        : { icon: 'text-red-600', label: t('delivery.driver.gps.weak') };
   return (
-    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm ${tone.box}`}>
-      <LocateFixed size={20} className="shrink-0" />
+    <p className="flex items-center gap-1.5 text-sm text-gray-600">
+      <LocateFixed size={16} className={`shrink-0 ${tone.icon}`} />
       <span className="font-semibold">
         {Number.isFinite(m) ? t('delivery.driver.gps.accuracy', { m }) : t('delivery.driver.gps.fair')}
       </span>
-      <span className="text-xs opacity-80">· {tone.label}</span>
-    </div>
+      <span className="text-xs text-gray-500 truncate">· {tone.label}</span>
+    </p>
   );
 }
 
@@ -353,7 +354,7 @@ function PhotoThumb({ file }: { file: File }) {
       <PhotoZoom
         src={url}
         alt={t('delivery.driver.proofPhotoAlt')}
-        className="h-16 w-16 rounded-lg object-contain bg-gray-100 border border-gray-200"
+        className="h-10 w-10 rounded-md object-cover bg-gray-100 border border-gray-200"
       />
     </div>
   );
@@ -361,12 +362,12 @@ function PhotoThumb({ file }: { file: File }) {
 
 // Big numbered circle: the stop's place in the route, or its outcome.
 function StopMarker({ stop, current }: { stop: Stop; current: boolean }) {
-  if (stop.status === 'DELIVERED') return <CheckCircle2 size={32} className="text-green-600 shrink-0" />;
-  if (stop.status === 'FAILED') return <XCircle size={32} className="text-red-600 shrink-0" />;
+  if (stop.status === 'DELIVERED') return <CheckCircle2 size={28} className="text-green-600 shrink-0" />;
+  if (stop.status === 'FAILED') return <XCircle size={28} className="text-red-600 shrink-0" />;
   return (
     <span
-      className={`${display.className} flex items-center justify-center w-9 h-9 rounded-full text-base font-bold shrink-0 ${
-        current ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 border border-blue-200'
+      className={`${display.className} flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
+        current ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 border border-gray-200'
       }`}
     >
       {stop.sequence}
@@ -378,9 +379,8 @@ function StopMarker({ stop, current }: { stop: Stop; current: boolean }) {
 const JUMPED_TO_RING = 'border-2 border-amber-400 ring-4 ring-amber-200';
 const JUMPED_TO_MS = 2500;
 
-// Sits under the driver layout's sticky header (65px tall) and stays in reach
-// on a long route; stop cards' scroll-mt-36 keeps them clear of both. Results
-// push nothing around while the driver scrolls, and picking one closes them.
+// Lives in the page's sticky progress bar, so it stays in reach on a long
+// route. Picking a result closes the list.
 function StopSearch({
   stops,
   statusLabels,
@@ -402,7 +402,7 @@ function StopSearch({
   }
 
   return (
-    <div className="sticky top-[65px] z-20 space-y-2">
+    <div className="space-y-2">
       <div className="relative">
         <Search size={20} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         <input
@@ -419,7 +419,7 @@ function StopSearch({
           }}
           placeholder={t('delivery.driver.searchPlaceholder')}
           aria-label={t('delivery.driver.searchPlaceholder')}
-          className="w-full h-12 rounded-xl border-2 border-blue-200 bg-white pl-11 pr-12 text-base text-ellipsis shadow-sm focus:border-blue-600 focus:outline-none"
+          className="w-full h-11 rounded-xl border border-gray-300 bg-white pl-11 pr-12 text-base text-ellipsis focus:border-blue-600 focus:outline-none"
         />
         {query && (
           <button
@@ -429,7 +429,7 @@ function StopSearch({
               input.current?.focus();
             }}
             aria-label={t('delivery.driver.searchClear')}
-            className="absolute right-0 top-0 h-12 w-12 flex items-center justify-center text-gray-500"
+            className="absolute right-0 top-0 h-11 w-12 flex items-center justify-center text-gray-500"
           >
             <X size={20} />
           </button>
@@ -437,7 +437,7 @@ function StopSearch({
       </div>
 
       {query.trim() && (
-        <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-blue-500/15 bg-white shadow-lg divide-y divide-gray-100">
+        <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg divide-y divide-gray-100">
           {matches.length === 0 && (
             <p className="px-4 py-3 text-base text-gray-500">{t('delivery.driver.searchNoResults')}</p>
           )}
@@ -446,7 +446,7 @@ function StopSearch({
               key={stop.id}
               type="button"
               onClick={() => pick(stop.id)}
-              className="w-full min-h-14 flex items-center gap-3 px-3 py-2 text-left active:bg-blue-50"
+              className="w-full min-h-14 flex items-center gap-3 px-3 py-2 text-left active:bg-gray-50"
             >
               <StopMarker stop={stop} current={false} />
               <span className="min-w-0 flex-1">
@@ -532,7 +532,7 @@ function StopRecord({
   return (
     <div
       id={`stop-${stop.id}`}
-      className={`rounded-xl border bg-white/70 scroll-mt-36 ${jumpedTo ? JUMPED_TO_RING : 'border-gray-200'}`}
+      className={`rounded-xl border bg-white/70 scroll-mt-44 ${jumpedTo ? JUMPED_TO_RING : 'border-gray-200'}`}
     >
       <button
         type="button"
@@ -1378,7 +1378,7 @@ export default function DriverRoutePage() {
   const doneCount = allStops.filter((s) => s.status !== 'PENDING').length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -1414,8 +1414,26 @@ export default function DriverRoutePage() {
         </button>
       </div>
 
-      {/* Above the banners: results opening low on the screen land under the keyboard. */}
-      {allStops.length > 1 && <StopSearch stops={allStops} statusLabels={statusLabels} onPick={jumpToStop} />}
+      {/* Stays under the layout's header (65px) while scrolling. Above the
+          banners: search results opening low land under the keyboard. */}
+      {hasAnyStops && (
+        <div
+          className="sticky top-[65px] z-20 -mx-4 px-4 pt-2 pb-2.5 space-y-2 border-b border-gray-200"
+          style={{ backgroundColor: 'var(--page-bg)' }}
+        >
+          <div className="flex items-center gap-3">
+            <p className={`${display.className} text-base font-bold shrink-0`}>
+              {doneCount < allStops.length
+                ? t('delivery.driver.progress', { done: doneCount, total: allStops.length })
+                : t('delivery.driver.allDone')}
+            </p>
+            <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden" aria-hidden="true">
+              <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${(doneCount / allStops.length) * 100}%` }} />
+            </div>
+          </div>
+          {allStops.length > 1 && <StopSearch stops={allStops} statusLabels={statusLabels} onPick={jumpToStop} />}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-2 bg-red-50 border-2 border-red-200 text-red-700 text-base font-medium rounded-xl px-4 py-3">
@@ -1434,22 +1452,9 @@ export default function DriverRoutePage() {
         </div>
       )}
 
-      {hasAnyStops && (
-        <div className="rounded-2xl border border-blue-500/15 bg-white shadow-sm p-4 space-y-2">
-          <p className={`${display.className} text-lg font-bold`}>
-            {doneCount < allStops.length
-              ? t('delivery.driver.progress', { done: doneCount, total: allStops.length })
-              : t('delivery.driver.allDone')}
-          </p>
-          <div className="h-3 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
-            <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${(doneCount / allStops.length) * 100}%` }} />
-          </div>
-        </div>
-      )}
-
       {shownRoutes.map((route) => (
-        <div key={route.id} className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-blue-900/50">
+        <div key={route.id} className="space-y-2.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
             {route.team.name}{route.name ? ` · ${route.name}` : ''}
           </p>
           {route.stops.map((stop) => {
@@ -1466,6 +1471,7 @@ export default function DriverRoutePage() {
             const proofMissing = !stop.deliveryOrder && (!receivedByDraft[doId]?.trim() || !hasPhoto);
             const info = stop.customerInfo;
             const mapsUrl = googleMapsUrl(stop);
+            const hasLocationPhotos = !!info && info.locationPhotos.length > 0;
 
             // Finished stops collapse to one line so the remaining work
             // stands out; a day too far back shows every stop that way.
@@ -1477,161 +1483,150 @@ export default function DriverRoutePage() {
               <div
                 key={stop.id}
                 id={`stop-${stop.id}`}
-                className={`rounded-2xl bg-white shadow-sm overflow-hidden scroll-mt-36 ${
+                className={`rounded-2xl bg-white shadow-sm scroll-mt-44 ${
                   jumpedToStop === stop.id
                     ? JUMPED_TO_RING
                     : isCurrent
-                      ? 'border-2 border-blue-600 ring-4 ring-blue-100'
-                      : 'border border-blue-500/15'
+                      ? 'border-2 border-blue-600'
+                      : 'border border-gray-200'
                 }`}
               >
-                {isCurrent && (
-                  <div className="bg-blue-600 text-white text-xs font-bold tracking-widest px-4 py-1.5">
-                    {t('delivery.driver.nextStop')}
-                  </div>
-                )}
-                <div className="p-4 space-y-3">
-                  <div className="flex items-start gap-3">
+                <div className="p-3 space-y-2.5">
+                  <div className="flex items-start gap-2.5">
                     <StopMarker stop={stop} current={isCurrent} />
                     <div className="min-w-0 flex-1">
-                      <div className={`${display.className} text-xl font-bold leading-tight break-words`}>{stop.label}</div>
+                      {isCurrent && (
+                        <div className="text-[11px] font-bold tracking-widest text-blue-700">{t('delivery.driver.nextStop')}</div>
+                      )}
+                      <div className={`${display.className} text-base font-bold leading-snug break-words`}>{stop.label}</div>
                       {(stop.addressLabel || stop.address) && (
-                        <div className="text-base text-gray-600 flex items-start gap-1.5 mt-1">
-                          <MapPin size={18} className="shrink-0 mt-0.5 text-blue-600" />
+                        <div className="text-sm text-gray-600 flex items-start gap-1 mt-0.5">
+                          <MapPin size={15} className="shrink-0 mt-0.5 text-gray-400" />
                           <span className="break-words">
-                            {stop.addressLabel && (
-                              <span className="block font-semibold text-gray-900">{stop.addressLabel}</span>
-                            )}
+                            {stop.addressLabel && <span className="font-semibold text-gray-800">{stop.addressLabel}</span>}
+                            {stop.addressLabel && stop.address && ' · '}
                             {stop.address}
                           </span>
                         </div>
                       )}
-                      <div className="flex flex-wrap items-center gap-2 mt-2">
-                        {stop.plannedEta && (
-                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700 bg-gray-100 rounded-full px-2.5 py-1">
-                            <Clock size={14} />
-                            {t('delivery.driver.eta')} {formatTime(stop.plannedEta)}
-                          </span>
-                        )}
-                        {stop.late && (
-                          <span className="inline-flex items-center gap-1 text-sm font-bold text-white bg-red-600 rounded-full px-2.5 py-1">
-                            <AlertTriangle size={14} />
-                            {t('delivery.driver.late')}
-                          </span>
-                        )}
-                        {stop.atRisk && (
-                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">
-                            <AlertTriangle size={14} />
-                            {t('delivery.driver.atRisk')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {info && (info.deliveryNotes || info.locationPhotos.length > 0) && (
-                    <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 space-y-2">
-                      {info.deliveryNotes && (
-                        <p className="text-base text-blue-900 flex gap-2 whitespace-pre-line">
-                          <StickyNote size={18} className="shrink-0 mt-0.5" />
-                          {info.deliveryNotes}
-                        </p>
-                      )}
-                      {info.locationPhotos.length > 0 && (
-                        <div className="flex gap-2 overflow-x-auto">
-                          {info.locationPhotos.map((p) => (
-                            <div key={p.id} className="shrink-0">
-                              <PhotoZoom
-                                src={`/api${p.path}`}
-                                alt={t('delivery.driver.locationPhotoAlt')}
-                                className="h-24 w-32 object-contain bg-gray-100 rounded-lg border border-blue-200"
-                              />
-                            </div>
-                          ))}
+                      {(stop.plannedEta || stop.late || stop.atRisk) && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-sm">
+                          {stop.plannedEta && (
+                            <span className="inline-flex items-center gap-1 text-gray-600">
+                              <Clock size={14} />
+                              {t('delivery.driver.eta')} {formatTime(stop.plannedEta)}
+                            </span>
+                          )}
+                          {stop.late && (
+                            <span className="inline-flex items-center gap-1 font-bold text-red-700">
+                              <AlertTriangle size={14} />
+                              {t('delivery.driver.late')}
+                            </span>
+                          )}
+                          {stop.atRisk && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-amber-700">
+                              <AlertTriangle size={14} />
+                              {t('delivery.driver.atRisk')}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  {info?.deliveryNotes && (
+                    <p className="rounded-lg bg-gray-50 border border-gray-200 p-2 text-sm text-gray-700 flex gap-1.5 whitespace-pre-line">
+                      <StickyNote size={15} className="shrink-0 mt-0.5 text-gray-400" />
+                      {info.deliveryNotes}
+                    </p>
                   )}
 
                   {!mapsUrl && (
-                    <p className="flex items-start gap-2 text-base text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                      <MapPinOff size={20} className="shrink-0 mt-0.5" />
+                    <p className="flex items-start gap-1.5 text-sm text-amber-800">
+                      <MapPinOff size={16} className="shrink-0 mt-0.5" />
                       {t('delivery.driver.noPin')}
                     </p>
                   )}
 
-                  {(mapsUrl || info?.phone) && (
-                    <div className="flex gap-2">
-                      {mapsUrl && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (needsMapsWebLink()) setMapsWebLinkFor(stop.id);
-                            announceThenNavigate(
-                              t('delivery.driver.startingRoute', {
-                                name: stop.customerName ?? stop.address ?? stop.label,
-                              }),
-                              language === 'id' ? 'id-ID' : 'en-US',
-                              mapsUrl,
-                            );
-                          }}
-                          className="flex-1 h-14 flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white text-lg font-semibold shadow-sm active:bg-blue-700"
-                        >
-                          <Navigation size={22} />
-                          {t('delivery.driver.navigate')}
-                        </button>
+                  {/* Location photos on the left, Navigate / Call stacked on
+                      their right; without photos the two buttons share the row. */}
+                  {(hasLocationPhotos || mapsUrl || info?.phone) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {hasLocationPhotos && (
+                        <div className={`grid gap-1.5 ${info!.locationPhotos.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} ${mapsUrl || info?.phone ? '' : 'col-span-2'}`}>
+                          {info!.locationPhotos.map((p) => (
+                            <PhotoZoom
+                              key={p.id}
+                              src={`/api${p.path}`}
+                              alt={t('delivery.driver.locationPhotoAlt')}
+                              className="w-full h-full min-h-24 object-cover bg-gray-100 rounded-xl border border-gray-200"
+                            />
+                          ))}
+                        </div>
                       )}
-                      {info?.phone && (
-                        <a
-                          href={`tel:${info.phone}`}
-                          aria-label={info.phone}
-                          className={`h-14 flex items-center justify-center gap-2 rounded-xl border-2 border-blue-200 bg-white text-blue-700 text-lg font-semibold ${
-                            mapsUrl ? 'px-5' : 'flex-1'
-                          }`}
-                        >
-                          <Phone size={22} />
-                          {t('delivery.driver.callCustomer')}
-                        </a>
+                      {(mapsUrl || info?.phone) && (
+                        <div className={`flex gap-2 ${hasLocationPhotos ? 'flex-col justify-center' : 'col-span-2'}`}>
+                          {mapsUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (needsMapsWebLink()) setMapsWebLinkFor(stop.id);
+                                announceThenNavigate(
+                                  t('delivery.driver.startingRoute', {
+                                    name: stop.customerName ?? stop.address ?? stop.label,
+                                  }),
+                                  language === 'id' ? 'id-ID' : 'en-US',
+                                  mapsUrl,
+                                );
+                              }}
+                              className={`${hasLocationPhotos ? '' : 'flex-1'} h-12 flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white text-base font-semibold active:bg-blue-700`}
+                            >
+                              <Navigation size={20} />
+                              {t('delivery.driver.navigate')}
+                            </button>
+                          )}
+                          {info?.phone && (
+                            <a
+                              href={`tel:${info.phone}`}
+                              aria-label={info.phone}
+                              className={`${hasLocationPhotos ? '' : 'flex-1'} h-12 flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white text-gray-800 text-base font-semibold`}
+                            >
+                              <Phone size={20} />
+                              {t('delivery.driver.callCustomer')}
+                            </a>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
 
                   {mapsUrl && mapsWebLinkFor === stop.id && (
-                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="block text-center text-base text-blue-700 underline">
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="block text-center text-sm text-blue-700 underline">
                       {t('delivery.driver.mapsDidNotOpen')}
                     </a>
                   )}
 
                   {awaitingDispatch && (
-                    <p className="flex items-start gap-2 text-base text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                      <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+                    <p className="flex items-start gap-1.5 text-sm text-amber-800">
+                      <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                       {t('delivery.driver.awaitingDispatch')}
                     </p>
                   )}
 
                   {actionable && (
-                    <div className="space-y-3 pt-3 border-t border-gray-100">
-                      <input
-                        id={`received-by-${doId}`}
-                        type="text"
-                        placeholder={t(stop.deliveryOrder ? 'delivery.driver.receivedByLabel' : 'delivery.driver.receivedByRequired')}
-                        value={receivedByDraft[doId] ?? ''}
-                        onChange={(e) => onReceivedByChange(route.id, stop, e.target.value)}
-                        className="w-full h-12 border-2 border-gray-300 rounded-xl px-3 text-base focus:border-blue-600 focus:outline-none"
-                      />
-
+                    <div className="space-y-2 pt-2.5 border-t border-gray-100">
                       {hasPhoto ? (
-                        <div className="flex items-center gap-3 rounded-xl border-2 border-green-200 bg-green-50 p-2">
+                        <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-1 pl-1.5">
                           {photoDraft[doId] && <PhotoThumb file={photoDraft[doId]} />}
-                          <div className="flex-1 min-w-0 flex items-center gap-1.5 text-base font-semibold text-green-800">
-                            <CheckCircle2 size={20} className="shrink-0" />
+                          <div className="flex-1 min-w-0 flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+                            <CheckCircle2 size={18} className="shrink-0 text-green-600" />
                             {t(photoDraft[doId] ? 'delivery.driver.photoTaken' : 'delivery.driver.photoAlreadySent')}
                           </div>
                           <button
                             type="button"
                             disabled={gpsBlocked}
                             onClick={() => openCamera(route.id, stop)}
-                            className="shrink-0 h-12 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                            className="shrink-0 h-10 px-3 flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white text-sm font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <RotateCcw size={16} />
                             {t('delivery.driver.retakePhoto')}
@@ -1642,36 +1637,45 @@ export default function DriverRoutePage() {
                           type="button"
                           disabled={gpsBlocked}
                           onClick={() => openCamera(route.id, stop)}
-                          className={`w-full flex flex-col items-center justify-center gap-1 h-24 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 text-blue-700 text-base font-semibold ${
-                            gpsBlocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer active:bg-blue-50'
+                          className={`w-full flex items-center justify-center gap-2 h-12 rounded-xl border-2 border-dashed border-gray-300 bg-white text-gray-800 text-base font-semibold ${
+                            gpsBlocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer active:bg-gray-50'
                           }`}
                         >
-                          <Camera size={30} />
+                          <Camera size={22} />
                           {t(stop.deliveryOrder ? 'delivery.driver.photoLabel' : 'delivery.driver.photoRequired')}
                         </button>
                       )}
                       {preparingPhotoFor === doId && (
-                        <p className="text-base text-gray-500">{t('delivery.driver.preparingPhoto')}</p>
+                        <p className="text-sm text-gray-500">{t('delivery.driver.preparingPhoto')}</p>
                       )}
                       {photoQueuedFor[doId] && photoDraft[doId] && uploadingPhotoFor !== doId && (
                         <p className="text-sm text-amber-700">{t('delivery.driver.photoQueued')}</p>
                       )}
                       {photoGpsFailedFor === doId && (
-                        <p className="flex items-start gap-2 rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2.5 text-base font-medium text-red-700">
-                          <LocateOff size={20} className="shrink-0 mt-0.5" />
+                        <p className="flex items-start gap-1.5 text-sm font-medium text-red-700">
+                          <LocateOff size={16} className="shrink-0 mt-0.5" />
                           {t('delivery.driver.photoNeedsGps')}
                         </p>
                       )}
                       {uploadingPhotoFor === doId && (
-                        <p className="text-base text-gray-500">{t('delivery.driver.uploadingPhoto')}</p>
+                        <p className="text-sm text-gray-500">{t('delivery.driver.uploadingPhoto')}</p>
                       )}
+
+                      <input
+                        id={`received-by-${doId}`}
+                        type="text"
+                        placeholder={t(stop.deliveryOrder ? 'delivery.driver.receivedByLabel' : 'delivery.driver.receivedByRequired')}
+                        value={receivedByDraft[doId] ?? ''}
+                        onChange={(e) => onReceivedByChange(route.id, stop, e.target.value)}
+                        className="w-full h-11 border border-gray-300 rounded-xl px-3 text-base focus:border-blue-600 focus:outline-none"
+                      />
 
                       <GpsChip status={gps.status} best={gps.best} />
 
                       {failingStopId === doId ? (
-                        <div className="space-y-2 rounded-xl border-2 border-red-200 bg-red-50/50 p-3">
-                          <p className="flex items-start gap-1.5 text-sm text-red-800">
-                            <Camera size={18} className="shrink-0 mt-0.5" />
+                        <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
+                          <p className="flex items-start gap-1.5 text-sm text-gray-700">
+                            <Camera size={16} className="shrink-0 mt-0.5" />
                             {t('delivery.driver.failurePhotoHint')}
                           </p>
                           <input
@@ -1680,7 +1684,7 @@ export default function DriverRoutePage() {
                             placeholder={t('delivery.driver.failureReasonPlaceholder')}
                             value={failureDraft[doId] ?? ''}
                             onChange={(e) => setFailureDraft((d) => ({ ...d, [doId]: e.target.value }))}
-                            className="w-full h-12 border-2 border-gray-300 bg-white rounded-xl px-3 text-base focus:border-red-500 focus:outline-none"
+                            className="w-full h-11 border border-gray-300 bg-white rounded-xl px-3 text-base focus:border-red-500 focus:outline-none"
                           />
                           <div className="flex gap-2">
                             <button
@@ -1694,14 +1698,14 @@ export default function DriverRoutePage() {
                             <button
                               disabled={busy}
                               onClick={() => setFailingStopId(null)}
-                              className="flex-1 h-12 border-2 border-gray-300 bg-white text-base font-semibold rounded-xl"
+                              className="flex-1 h-12 border border-gray-300 bg-white text-base font-semibold rounded-xl"
                             >
                               {t('delivery.driver.cancel')}
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="flex gap-2">
                           <button
                             disabled={busy || preparingPhotoFor === doId}
                             // Not greyed out while the name or photo is
@@ -1718,26 +1722,26 @@ export default function DriverRoutePage() {
                                 setStopError(doId, t('delivery.driver.needPhoto'));
                               }
                             }}
-                            className={`w-full h-14 flex items-center justify-center gap-2 bg-green-600 text-white text-lg font-bold rounded-xl shadow-sm disabled:opacity-40 active:bg-green-700 ${
+                            className={`flex-1 min-w-0 h-14 flex items-center justify-center gap-1.5 bg-green-600 text-white text-sm font-bold rounded-xl leading-tight px-2 disabled:opacity-40 active:bg-green-700 ${
                               proofMissing ? 'opacity-60' : ''
                             }`}
                           >
-                            <CheckCircle2 size={24} />
+                            <CheckCircle2 size={18} className="shrink-0" />
                             {busy ? t('delivery.driver.marking') : t('delivery.driver.markDelivered')}
                           </button>
                           <button
                             disabled={busy}
                             onClick={() => setFailingStopId(doId)}
-                            className="w-full h-12 flex items-center justify-center gap-2 bg-white text-red-700 border-2 border-red-200 text-base font-semibold rounded-xl disabled:opacity-50"
+                            className="flex-1 min-w-0 h-14 flex items-center justify-center gap-1.5 bg-red-600 text-white text-sm font-bold rounded-xl leading-tight px-2 disabled:opacity-50 active:bg-red-700"
                           >
-                            <XCircle size={20} />
+                            <XCircle size={18} className="shrink-0" />
                             {t('delivery.driver.markFailed')}
                           </button>
                         </div>
                       )}
                       {stopErrors[doId] && (
-                        <div role="alert" className="flex items-start gap-2 bg-red-50 border-2 border-red-200 text-red-700 text-base font-medium rounded-xl px-3 py-2.5">
-                          <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+                        <div role="alert" className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm font-medium rounded-xl px-3 py-2">
+                          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
                           {stopErrors[doId]}
                         </div>
                       )}

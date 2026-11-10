@@ -4,8 +4,8 @@ import {
 } from '@nestjs/common';
 import { ModuleKey } from '@prisma/client';
 import { CustomersService } from './customers.service';
-import { CreateCustomerDto } from './dto/create-customer.dto';
-import { ImportCustomersDto } from './dto/import-customers.dto';
+import { CreateCustomerRequestDto } from './dto/create-customer.dto';
+import { CheckCustomerDuplicatesDto, ImportCustomersDto } from './dto/import-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import {
   CreateCustomerAddressDto,
@@ -50,6 +50,8 @@ export class CustomersController {
     @Query('pageSize') pageSize?: string,
     @Query('limit') limit?: string,
     @Query('pin') pin?: string,
+    @Query('vehicles') vehicles?: string,
+    @Query('priceLevel') priceLevel?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
   ) {
@@ -59,6 +61,8 @@ export class CustomersController {
       pageSize: num(pageSize),
       limit: num(limit),
       pin,
+      vehicles,
+      priceLevel,
       sort,
       dir,
     });
@@ -70,8 +74,15 @@ export class CustomersController {
   }
 
   @Post()
-  create(@CurrentOrg() organizationId: string, @Body() dto: CreateCustomerDto) {
+  create(@CurrentOrg() organizationId: string, @Body() dto: CreateCustomerRequestDto) {
     return this.customersService.create(organizationId, dto);
+  }
+
+  // Existing customers that match what's being typed or imported: exact
+  // copies (refused on save) and similar ones (saved after confirming).
+  @Post('check-duplicates')
+  checkDuplicates(@CurrentOrg() organizationId: string, @Body() dto: CheckCustomerDuplicatesDto) {
+    return this.customersService.checkDuplicates(organizationId, dto.rows, dto.excludeId);
   }
 
   // Spreadsheet import — rows parsed client-side, see ImportCustomersDto.

@@ -6,7 +6,14 @@ import { CustomerLocationService } from './customer-location.service';
 import { manualPinData } from './customer-pin-backfill';
 import { syncCustomerToOpenStops } from './customer-stop-sync';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
-import { CreateCustomerDto } from './dto/create-customer.dto';
+import { CreateCustomerRequestDto } from './dto/create-customer.dto';
+import {
+  addressKey,
+  CustomerDuplicateIndex,
+  nameKey,
+  npwpKey,
+  type DuplicateCandidate,
+} from './customer-duplicates';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ImportCustomerRowDto } from './dto/import-customers.dto';
 import {
@@ -58,6 +65,10 @@ export class CustomersService {
       pageSize?: number;
       limit?: number;
       pin?: string;
+      // WORKSHOP_RMS: 'YES' = has a vehicle on file, 'NO' = none yet.
+      vehicles?: string;
+      // INVOICE_POS: a price level id, or 'DEFAULT' for the org's default.
+      priceLevel?: string;
       sort?: string;
       dir?: string;
     } = {},
@@ -67,6 +78,13 @@ export class CustomersService {
       organizationId,
       AND: [
         pinFilter(opts.pin),
+        opts.vehicles === 'YES' ? { vehicles: { some: {} } } : opts.vehicles === 'NO' ? { vehicles: { none: {} } } : {},
+        // No level set means the org's default level, so DEFAULT covers both.
+        opts.priceLevel === 'DEFAULT'
+          ? { OR: [{ priceLevelId: null }, { priceLevel: { isDefault: true } }] }
+          : opts.priceLevel
+            ? { priceLevelId: opts.priceLevel }
+            : {},
         search
           ? {
               OR: [
@@ -162,44 +180,75 @@ export class CustomersService {
     };
   }
 
-// src/customers/customers.service.ts — only create() and update() changed from last version
-async create(organizationId: string, dto: CreateCustomerDto) {
-  await this.assertPriceLevel(organizationId, dto.priceLevelId);
+// Every customer of the org, indexed for duplicate lookups (see
+// customer-duplicates.ts). Loaded per request: a check must see customers
+// added a moment ago.
+private async duplicateIndex(organizationId: string) {
+  const customers = await this.prisma.customer.findMany({
+    where: { organizationId },
+    select: { id: true, name: true, address: true, phone: true, npwp: true },
+  });
+  return new CustomerDuplicateIndex(customers);
+}
+
+// Exact copies and similar customers for each candidate, in order — what
+// the New form shows while typing and the import preview shows per row.
+async checkDuplicates(organizationId: string, rows: DuplicateCandidate[], excludeId?: string) {
+  const index = await this.duplicateIndex(organizationId);
+  return rows.map((r) => index.check(r, excludeId));
+}
+
+// An exact copy (same name and address, or same NPWP) is refused. A similar
+// customer only goes in with confirmSimilar — the caller shows the matches
+// and asks first. Both errors carry the matches so the form can list them.
+async create(organizationId: string, dto: CreateCustomerRequestDto) {
+  const { confirmSimilar, ...data } = dto;
+  await this.assertPriceLevel(organizationId, data.priceLevelId);
+  const { exact, similar } = (await this.duplicateIndex(organizationId)).check(data);
+  if (exact.length > 0) {
+    throw new ConflictException({ message: 'This customer already exists', code: 'CUSTOMER_EXISTS', matches: exact });
+  }
+  if (similar.length > 0 && !confirmSimilar) {
+    throw new ConflictException({
+      message: 'A similar customer already exists — confirm to add this one anyway',
+      code: 'SIMILAR_CUSTOMERS',
+      matches: similar,
+    });
+  }
   return this.prisma.customer.create({
-    data: { ...dto, organizationId, ...manualPinData(dto.latitude, dto.longitude) },
+    data: { ...data, organizationId, ...manualPinData(data.latitude, data.longitude) },
   });
 }
 
-// Bulk create from a spreadsheet. Never updates an existing customer: a
-// row that matches one (same NPWP, or same name + phone + address) is
-// skipped and reported, as is a repeat of an earlier row in the file.
-// A batch's accepted rows are written in one transaction. Because matches
-// are skipped, re-running a file after a failed batch is safe: rows that
-// already went in come back as DUPLICATE_EXISTING. `row` in skipped is
-// the index into `rows`.
+// Bulk create from a spreadsheet. Never updates an existing customer: a row
+// that is an exact copy of one (same NPWP, or same name and address) is
+// skipped and reported, as is a repeat of an earlier row in the file. A row
+// similar to an existing customer is skipped unless it carries
+// confirmSimilar (the import page asks first). A batch's accepted rows are
+// written in one transaction. Because copies are skipped, re-running a file
+// after a failed batch is safe: rows that already went in come back as
+// DUPLICATE_EXISTING. `row` in skipped is the index into `rows`.
 async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
   const clean = (s?: string) => s?.trim().replace(/\s+/g, ' ') || undefined;
-  const npwpKey = (s?: string) => s?.replace(/\D/g, '') || null;
-  const identityKey = (c: { name: string; phone?: string | null; address?: string | null }) =>
-    [c.name.trim().toLowerCase(), c.phone?.replace(/\D/g, '') ?? '', c.address?.trim().replace(/\s+/g, ' ').toLowerCase() ?? ''].join('|');
 
-  const [existing, levels] = await Promise.all([
-    this.prisma.customer.findMany({
-      where: { organizationId },
-      select: { name: true, phone: true, address: true, npwp: true },
-    }),
+  const [index, levels] = await Promise.all([
+    this.duplicateIndex(organizationId),
     this.prisma.priceLevel.findMany({
       where: { organizationId, archivedAt: null },
       select: { id: true, name: true },
     }),
   ]);
-  const seenNpwp = new Set(existing.map((c) => npwpKey(c.npwp ?? undefined)).filter(Boolean));
-  const seenIdentity = new Set(existing.map(identityKey));
   const fileNpwp = new Set<string>();
   const fileIdentity = new Set<string>();
   const levelByName = new Map(levels.map((l) => [l.name.trim().toLowerCase(), l.id]));
 
-  type Reason = 'DUPLICATE_NPWP' | 'DUPLICATE_EXISTING' | 'DUPLICATE_IN_FILE' | 'UNKNOWN_PRICE_LEVEL' | 'INCOMPLETE_LOCATION';
+  type Reason =
+    | 'DUPLICATE_NPWP'
+    | 'DUPLICATE_EXISTING'
+    | 'DUPLICATE_IN_FILE'
+    | 'SIMILAR_NOT_CONFIRMED'
+    | 'UNKNOWN_PRICE_LEVEL'
+    | 'INCOMPLETE_LOCATION';
   const skipped: { row: number; name: string; reason: Reason }[] = [];
   const data: Prisma.CustomerCreateManyInput[] = [];
 
@@ -211,11 +260,13 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
     const skip = (reason: Reason) => skipped.push({ row, name, reason });
 
     const nKey = npwpKey(npwp);
-    const iKey = identityKey({ name, phone, address });
+    const iKey = `${nameKey(name)}|${addressKey(address)}`;
     if (nKey && fileNpwp.has(nKey)) return skip('DUPLICATE_IN_FILE');
     if (fileIdentity.has(iKey)) return skip('DUPLICATE_IN_FILE');
-    if (nKey && seenNpwp.has(nKey)) return skip('DUPLICATE_NPWP');
-    if (seenIdentity.has(iKey)) return skip('DUPLICATE_EXISTING');
+    const { exact, similar } = index.check({ name, address, phone, npwp });
+    if (exact.some((m) => m.reason === 'SAME_NPWP')) return skip('DUPLICATE_NPWP');
+    if (exact.length > 0) return skip('DUPLICATE_EXISTING');
+    if (similar.length > 0 && !r.confirmSimilar) return skip('SIMILAR_NOT_CONFIRMED');
     if ((r.latitude == null) !== (r.longitude == null)) return skip('INCOMPLETE_LOCATION');
 
     let priceLevelId: string | undefined;

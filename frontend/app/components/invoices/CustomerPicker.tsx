@@ -6,6 +6,13 @@ import { apiFetch } from '@/lib/apifetch';
 import { Customer } from './types';
 import { useLanguage } from '@/app/context/LanguageContext';
 import { errorMessage } from '@/lib/api-error';
+import { useDialog } from '@/app/components/shared/DialogProvider';
+import {
+  DuplicateCustomerNotice,
+  duplicateConflict,
+  similarConfirmMessage,
+  useCustomerDuplicates,
+} from '@/app/components/customers/CustomerDuplicates';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -32,6 +39,11 @@ export function CustomerPicker({
   const [newNpwp, setNewNpwp] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const dialog = useDialog();
+  const duplicates = useCustomerDuplicates(
+    { name: newName, address: newAddress, phone: newPhone, npwp: newNpwp },
+    quickAddOpen,
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -98,21 +110,52 @@ export function CustomerPicker({
       setSaveError(t('sales.customerPicker.nameRequired'));
       return;
     }
+    // A copy is refused by the server anyway; say so before trying.
+    if (duplicates.exact.length > 0) {
+      setSaveError(t('customers.duplicates.existsTitle'));
+      return;
+    }
+    let confirmSimilar = false;
+    if (duplicates.similar.length > 0) {
+      if (!(await dialog.confirm(similarConfirmMessage(t, duplicates.similar), { confirmLabel: t('customers.duplicates.saveAnyway') }))) {
+        return;
+      }
+      confirmSimilar = true;
+    }
     setSaving(true);
     setSaveError('');
     try {
-      const res = await apiFetch('/customers', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newName.trim(),
-          phone: newPhone.trim() || undefined,
-          address: newAddress.trim() || undefined,
-          npwp: newNpwp.trim() || undefined,
-        }),
-      });
+      const post = (confirm: boolean) =>
+        apiFetch('/customers', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: newName.trim(),
+            phone: newPhone.trim() || undefined,
+            address: newAddress.trim() || undefined,
+            npwp: newNpwp.trim() || undefined,
+            ...(confirm ? { confirmSimilar: true } : {}),
+          }),
+        });
+      let res = await post(confirmSimilar);
       if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message || t('sales.customerPicker.failedToCreateCustomer', { status: res.status }));
+        let body = await res.json().catch(() => null);
+        // Someone added a similar customer since the live check ran.
+        const conflict = duplicateConflict(body);
+        if (conflict?.code === 'SIMILAR_CUSTOMERS' && !confirmSimilar) {
+          if (!(await dialog.confirm(similarConfirmMessage(t, conflict.matches), { confirmLabel: t('customers.duplicates.saveAnyway') }))) {
+            return;
+          }
+          res = await post(true);
+          body = res.ok ? null : await res.json().catch(() => null);
+        }
+        if (!res.ok) {
+          const exists = duplicateConflict(body);
+          throw new Error(
+            exists?.code === 'CUSTOMER_EXISTS'
+              ? `${t('customers.duplicates.existsTitle')}: ${exists.matches.map((m) => m.name).join(', ')}`
+              : body?.message || t('sales.customerPicker.failedToCreateCustomer', { status: res.status }),
+          );
+        }
       }
       const created: Customer = await res.json();
       onChange(created);
@@ -214,10 +257,15 @@ export function CustomerPicker({
                 placeholder={t('sales.customerPicker.npwpPlaceholder')}
                 className="w-full border border-blue-500/20 rounded-lg p-2 text-sm mb-2 outline-none focus:border-blue-500/50 focus:shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
               />
+              {(duplicates.exact.length > 0 || duplicates.similar.length > 0) && (
+                <div className="mb-2">
+                  <DuplicateCustomerNotice check={duplicates} />
+                </div>
+              )}
               {saveError && <p className="text-xs text-red-600 mb-2">{saveError}</p>}
               <button
                 onClick={submitQuickAdd}
-                disabled={saving}
+                disabled={saving || duplicates.exact.length > 0}
                 className="w-full flex items-center justify-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg p-2 text-sm font-semibold disabled:bg-gray-300 transition-colors"
               >
                 <Check size={14} strokeWidth={2} />

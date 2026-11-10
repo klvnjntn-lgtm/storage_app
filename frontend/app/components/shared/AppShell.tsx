@@ -884,7 +884,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         className={`${sidebarHidden ? 'hidden' : 'hidden md:flex'} md:flex-col w-64 shrink-0 border-r border-blue-500/15 bg-white/80 backdrop-blur-md h-dvh sticky top-0`}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-blue-500/15">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-blue-500/15">
           <h1 className="min-w-0 flex-1">
             <Image
               src="/waresys-logo.webp"
@@ -893,12 +893,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               width={1600}
               height={442}
               priority
-              className="app-logo h-8 w-auto max-w-full"
+              className="app-logo h-7 w-auto max-w-full object-contain object-left"
             />
           </h1>
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Three compact 30px controls, so the logo keeps its proportions. */}
+          <div className="flex items-center gap-1 shrink-0">
             <ThemeToggle />
-            <LanguageSwitcher />
+            <LanguageSwitcher compact />
             <button
               type="button"
               onClick={toggleSidebar}
@@ -966,7 +967,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 width={1600}
                 height={442}
                 priority
-                className="app-logo h-8 w-auto max-w-full"
+                className="app-logo h-8 w-auto max-w-full object-contain object-left"
               />
             </h1>
 

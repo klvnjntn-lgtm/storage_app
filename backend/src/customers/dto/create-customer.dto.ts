@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsLatitude, IsLongitude, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsLatitude, IsLongitude, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -57,4 +57,13 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsString()
   priceLevelId?: string | null;
+}
+
+// POST /customers only (not inherited by UpdateCustomerDto): the person saw
+// the similar customers the server listed and wants this one saved anyway.
+// An exact copy is refused whatever this says.
+export class CreateCustomerRequestDto extends CreateCustomerDto {
+  @IsOptional()
+  @IsBoolean()
+  confirmSimilar?: boolean;
 }

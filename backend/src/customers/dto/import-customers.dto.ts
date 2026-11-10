@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsLatitude,
   IsLongitude,
   IsOptional,
@@ -63,6 +64,12 @@ export class ImportCustomerRowDto {
   @IsString()
   @MaxLength(100)
   priceLevel?: string;
+
+  // The importer looked at the similar customers this row matched (see
+  // POST /customers/check-duplicates) and wants it added anyway.
+  @IsOptional()
+  @IsBoolean()
+  confirmSimilar?: boolean;
 }
 
 export class ImportCustomersDto {
@@ -72,4 +79,40 @@ export class ImportCustomersDto {
   @ValidateNested({ each: true })
   @Type(() => ImportCustomerRowDto)
   rows!: ImportCustomerRowDto[];
+}
+
+// One customer to look up before saving it — name required, the rest helps.
+export class DuplicateCandidateDto {
+  @IsString()
+  @MaxLength(200)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  npwp?: string;
+}
+
+export class CheckCustomerDuplicatesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_CUSTOMER_IMPORT_ROWS)
+  @ValidateNested({ each: true })
+  @Type(() => DuplicateCandidateDto)
+  rows!: DuplicateCandidateDto[];
+
+  // Editing an existing customer: don't report it as its own duplicate.
+  @IsOptional()
+  @IsString()
+  excludeId?: string;
 }

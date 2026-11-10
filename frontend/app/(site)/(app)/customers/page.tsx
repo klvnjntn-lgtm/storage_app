@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet, MapPinOff } from 'lucide-react';
+import { Users, Plus, Search, Pencil, Trash2, X, Check, FileSpreadsheet, MapPin, MapPinOff, Car, Tag } from 'lucide-react';
+import FilterMenu from '@/app/components/shared/FilterMenu';
 import { apiFetch } from '@/lib/apifetch';
 import { Customer } from '@/app/components/invoices/types';
 import { getInitialParam, getInitialNumberParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -24,6 +25,12 @@ import LandmarkPhotos, {
 } from '@/app/components/delivery/LandmarkPhotos';
 import { PinStatusBadge, WEAK_PIN_ACCURACY_M, type PinStatus } from '@/app/components/delivery/PinStatus';
 import { useDialog } from '@/app/components/shared/DialogProvider';
+import {
+  DuplicateCustomerNotice,
+  duplicateConflict,
+  similarConfirmMessage,
+  useCustomerDuplicates,
+} from '@/app/components/customers/CustomerDuplicates';
 import { errorMessage } from '@/lib/api-error';
 import { useEscapeToClose } from '@/lib/hooks/useEscapeToClose';
 import { isAdminRole } from '@/lib/roles';
@@ -77,6 +84,7 @@ export default function CustomersPage() {
   const isAdmin = isAdminRole(profile?.role);
   // Location pin + driver directions only matter with the delivery module.
   const hasDelivery = useHasModule('DELIVERY_DMS');
+  const hasWorkshop = useHasModule('WORKSHOP_RMS');
   const { levels: priceLevels, defaultLevelId } = usePriceLevels();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -87,8 +95,17 @@ export default function CustomersPage() {
   // resetting to page 1 with no search.
   const [query, setQuery] = useState<string>(() => getInitialParam('query', ''));
   const [pinFilter, setPinFilter] = useState<PinStatus | ''>(() => getInitialParam('pin', '') as PinStatus | '');
+  // WORKSHOP_RMS: '' | 'YES' | 'NO' — has a vehicle on file.
+  const [vehicleFilter, setVehicleFilter] = useState<string>(() => getInitialParam('vehicles', ''));
+  // INVOICE_POS: '' | 'DEFAULT' | a price level id.
+  const [levelFilter, setLevelFilter] = useState<string>(() => getInitialParam('level', ''));
 
   const [editing, setEditing] = useState<EditState | null>(null);
+  // New customers only: existing customers that match what's typed so far.
+  const duplicates = useCustomerDuplicates(
+    { name: editing?.name ?? '', address: editing?.address, phone: editing?.phone },
+    !!editing && !editing.id,
+  );
   // Landmark photos picked in the New customer dialog — uploaded once the
   // customer exists. (Editing saves each photo straight away.)
   const [pendingPhotos, setPendingPhotos] = useState<PendingLandmarkPhoto[]>([]);
@@ -101,6 +118,8 @@ export default function CustomersPage() {
   useSyncQueryParams({
     query: query.trim(),
     pin: pinFilter || null,
+    vehicles: vehicleFilter || null,
+    level: levelFilter || null,
     page: page !== 1 ? page : null,
     pageSize: pageSize !== 20 ? pageSize : null,
   });
@@ -135,9 +154,13 @@ export default function CustomersPage() {
       return;
     }
     setPage(1);
-  }, [debouncedQuery, pinFilter]);
+  }, [debouncedQuery, pinFilter, vehicleFilter, levelFilter]);
 
+  // A filter only applies while its module is on (a bookmarked URL may
+  // still carry one from before).
   const effectivePin = hasDelivery ? pinFilter : '';
+  const effectiveVehicles = hasWorkshop ? vehicleFilter : '';
+  const effectiveLevel = priceLevels.length > 1 ? levelFilter : '';
   const requestIdRef = useRef(0);
   const load = useCallback(async () => {
     const thisRequest = ++requestIdRef.current;
@@ -146,6 +169,8 @@ export default function CustomersPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedQuery) params.set('q', debouncedQuery);
       if (effectivePin) params.set('pin', effectivePin);
+      if (effectiveVehicles) params.set('vehicles', effectiveVehicles);
+      if (effectiveLevel) params.set('priceLevel', effectiveLevel);
       if (sort) {
         params.set('sort', sort.key);
         params.set('dir', sort.direction);
@@ -161,7 +186,7 @@ export default function CustomersPage() {
     } finally {
       if (thisRequest === requestIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, debouncedQuery, effectivePin, sort]);
+  }, [page, pageSize, debouncedQuery, effectivePin, effectiveVehicles, effectiveLevel, sort]);
 
   useEffect(() => {
     load();
@@ -205,6 +230,18 @@ export default function CustomersPage() {
       setError(t('customers.listPage.nameRequired'));
       return;
     }
+    // A copy is refused by the server anyway; say so before trying.
+    if (!editing.id && duplicates.exact.length > 0) {
+      setError(t('customers.duplicates.existsTitle'));
+      return;
+    }
+    let confirmSimilar = false;
+    if (!editing.id && duplicates.similar.length > 0) {
+      if (!(await dialog.confirm(similarConfirmMessage(t, duplicates.similar), { confirmLabel: t('customers.duplicates.saveAnyway') }))) {
+        return;
+      }
+      confirmSimilar = true;
+    }
     setSaving(true);
     setError('');
     // New customer: the pin comes from a pending photo, uploaded below.
@@ -216,7 +253,7 @@ export default function CustomersPage() {
       editing.position?.lng === editing.photoPin.lng &&
       pendingPhotos.some((p) => p.fix?.latitude === editing.photoPin?.lat && p.fix?.longitude === editing.photoPin?.lng);
     try {
-      const body = JSON.stringify({
+      const payload = {
         name: editing.name.trim(),
         companyName: editing.companyName.trim() || undefined,
         phone: editing.phone.trim() || undefined,
@@ -239,15 +276,33 @@ export default function CustomersPage() {
               deliveryNotes: editing.id ? editing.deliveryNotes.trim() : editing.deliveryNotes.trim() || undefined,
             }
           : {}),
-      });
+      };
 
-      const res = editing.id
-        ? await apiFetch(`/customers/${editing.id}`, { method: 'PATCH', body })
-        : await apiFetch('/customers', { method: 'POST', body });
+      const post = (confirm: boolean) =>
+        apiFetch('/customers', { method: 'POST', body: JSON.stringify({ ...payload, ...(confirm ? { confirmSimilar: true } : {}) }) });
+      let res = editing.id
+        ? await apiFetch(`/customers/${editing.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+        : await post(confirmSimilar);
 
       if (!res.ok) {
         const err = await res.json().catch(() => null);
-        throw new Error(err?.message || `Failed to save (${res.status})`);
+        const conflict = duplicateConflict(err);
+        // Someone added a similar customer since the live check ran.
+        if (conflict?.code === 'SIMILAR_CUSTOMERS' && !confirmSimilar) {
+          if (!(await dialog.confirm(similarConfirmMessage(t, conflict.matches), { confirmLabel: t('customers.duplicates.saveAnyway') }))) {
+            return;
+          }
+          res = await post(true);
+        }
+        if (!res.ok) {
+          const again = res.bodyUsed ? err : await res.json().catch(() => null);
+          const exists = duplicateConflict(again);
+          throw new Error(
+            exists?.code === 'CUSTOMER_EXISTS'
+              ? `${t('customers.duplicates.existsTitle')}: ${exists.matches.map((m) => m.name).join(', ')}`
+              : again?.message || `Failed to save (${res.status})`,
+          );
+        }
       }
 
       // The customer exists now; a photo that fails is reported, not
@@ -370,21 +425,64 @@ export default function CustomersPage() {
               placeholder={t('customers.listPage.searchPlaceholder')}
               className="flex-1 min-w-0 text-sm outline-none placeholder:text-gray-400 bg-transparent"
             />
-            {hasDelivery && (
-              <select
-                value={pinFilter}
-                onChange={(e) => setPinFilter(e.target.value as PinStatus | '')}
-                aria-label={t('customers.listPage.locationColumn')}
-                className="shrink-0 max-w-[45%] text-sm border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700"
-              >
-                <option value="">{t('delivery.pin.filterAll')}</option>
-                <option value="NONE">{t('delivery.pin.filterNone')}</option>
-                <option value="WEAK_GPS">{t('delivery.pin.filterWeak', { m: WEAK_PIN_ACCURACY_M })}</option>
-                <option value="GPS">{t('delivery.pin.filterGps')}</option>
-                <option value="MANUAL">{t('delivery.pin.filterManual')}</option>
-              </select>
-            )}
           </div>
+
+          {/* One filter menu per enabled module, wrapping under the search. */}
+          {(hasDelivery || hasWorkshop || priceLevels.length > 1) && (
+            <div role="group" aria-label={t('common.filterMenu.label')} className="mt-3 flex flex-wrap items-center gap-2">
+              {hasDelivery && (
+                <FilterMenu
+                  label={t('customers.listPage.locationColumn')}
+                  icon={MapPin}
+                  value={pinFilter}
+                  onChange={(v) => setPinFilter(v as PinStatus | '')}
+                  allLabel={t('delivery.pin.filterAll')}
+                  options={[
+                    { value: 'NONE', label: t('delivery.pin.filterNone') },
+                    { value: 'WEAK_GPS', label: t('delivery.pin.filterWeak', { m: WEAK_PIN_ACCURACY_M }) },
+                    { value: 'GPS', label: t('delivery.pin.filterGps') },
+                    { value: 'MANUAL', label: t('delivery.pin.filterManual') },
+                  ]}
+                />
+              )}
+              {hasWorkshop && (
+                <FilterMenu
+                  label={t('customers.listPage.vehicleFilter')}
+                  icon={Car}
+                  value={vehicleFilter}
+                  onChange={setVehicleFilter}
+                  allLabel={t('customers.listPage.vehicleFilterAll')}
+                  options={[
+                    { value: 'YES', label: t('customers.listPage.vehicleFilterYes') },
+                    { value: 'NO', label: t('customers.listPage.vehicleFilterNo') },
+                  ]}
+                />
+              )}
+              {priceLevels.length > 1 && (
+                <FilterMenu
+                  label={t('customers.listPage.priceLevelLabel')}
+                  icon={Tag}
+                  value={levelFilter}
+                  onChange={setLevelFilter}
+                  allLabel={t('customers.listPage.levelFilterAll')}
+                  options={priceLevels.map((l) => ({ value: l.id === defaultLevelId ? 'DEFAULT' : l.id, label: l.name }))}
+                />
+              )}
+              {(effectivePin || effectiveVehicles || effectiveLevel) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinFilter('');
+                    setVehicleFilter('');
+                    setLevelFilter('');
+                  }}
+                  className="h-10 sm:h-9 px-2 text-sm font-medium text-blue-700 hover:underline cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                >
+                  {t('common.filterMenu.reset')}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -616,6 +714,7 @@ export default function CustomersPage() {
                 placeholder={t('customers.listPage.addressPlaceholder')}
                 className="w-full border-2 border-gray-300 rounded-md p-2 text-sm outline-none focus:border-blue-500"
               />
+              {!editing.id && <DuplicateCustomerNotice check={duplicates} />}
               {hasDelivery && (
                 <div className="border-t border-gray-200 pt-2.5 mt-1 space-y-2">
                   <p className="text-xs font-semibold text-gray-600">{t('customers.listPage.deliveryLocation')}</p>
@@ -687,7 +786,7 @@ export default function CustomersPage() {
 
             <button
               onClick={save}
-              disabled={saving}
+              disabled={saving || (!editing.id && duplicates.exact.length > 0)}
               className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-md p-2.5 text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
             >
               <Check size={16} strokeWidth={2} />

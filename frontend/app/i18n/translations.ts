@@ -27,6 +27,7 @@ const base = {
   en: {
     common: {
       documentLayout: { label: 'Layout', office: 'Office', retail: 'Cashier' },
+      filterMenu: { label: 'Filters', reset: 'Reset filters', clearOne: 'Clear {name} filter' },
       excel: { download: 'Excel', preparing: 'Preparing...', failed: 'Could not prepare the Excel file. Please try again.' },
       pastDate: {
         confirm: 'This date has already passed — {list}. Continue anyway?',
@@ -417,6 +418,7 @@ const base = {
   id: {
     common: {
       documentLayout: { label: 'Tata letak', office: 'Kantor', retail: 'Kasir' },
+      filterMenu: { label: 'Filter', reset: 'Hapus filter', clearOne: 'Hapus filter {name}' },
       excel: { download: 'Excel', preparing: 'Menyiapkan...', failed: 'File Excel tidak dapat disiapkan. Silakan coba lagi.' },
       pastDate: {
         confirm: 'Tanggal ini sudah lewat — {list}. Tetap lanjutkan?',

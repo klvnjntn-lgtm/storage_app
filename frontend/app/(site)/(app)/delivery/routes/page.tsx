@@ -10,7 +10,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useAuth } from '@/app/context/AuthContext';
 import DatePicker from '@/app/components/shared/DatePicker';
 import DriverPicker, { DriverAvatar, driverLabel } from '@/app/components/delivery/DriverPicker';
-import TeamPicker, { teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
+import TeamPicker, { compareTeamNames, teamLabel, toPickerTeam, type PickerTeam } from '@/app/components/delivery/TeamPicker';
 import { toCalendarDateString } from '@/lib/dates';
 import { useSyncQueryParams } from '@/lib/useQuerySync';
 import { isAdminRole } from '@/lib/roles';
@@ -111,7 +111,7 @@ function DeliveryRoutesPageInner() {
 
   async function loadTeams() {
     const res = await apiFetch('/teams').catch(() => null);
-    if (res?.ok) setTeams(await res.json());
+    if (res?.ok) setTeams(((await res.json()) as Team[]).sort(compareTeamNames));
   }
 
   async function handleCreateTeam() {
@@ -181,7 +181,12 @@ function DeliveryRoutesPageInner() {
         setRoutes([]);
         return;
       }
-      setRoutes(await res.json());
+      // Newest date first, then Team 1, Team 2 … within a date.
+      setRoutes(
+        ((await res.json()) as RouteListItem[]).sort(
+          (a, b) => b.routeDate.localeCompare(a.routeDate) || compareTeamNames(a.team, b.team),
+        ),
+      );
     } catch {
       setError(t('delivery.routes.couldNotReachServer'));
     } finally {
