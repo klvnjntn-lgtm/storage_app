@@ -14,8 +14,14 @@ export default function ProofPhoto({ linkPath }: { linkPath: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Hiding keeps the link, so showing it again needs no new request.
+  const [open, setOpen] = useState(false);
 
   async function show() {
+    if (src) {
+      setOpen(true);
+      return;
+    }
     setLoading(true);
     setFailed(false);
     try {
@@ -26,6 +32,7 @@ export default function ProofPhoto({ linkPath }: { linkPath: string }) {
         return;
       }
       setSrc(body.kind === 'signed' ? `/api${body.path}` : body.path);
+      setOpen(true);
     } catch {
       setFailed(true);
     } finally {
@@ -40,23 +47,23 @@ export default function ProofPhoto({ linkPath }: { linkPath: string }) {
           <p className="font-semibold text-sm">{t('sales.deliveryOrderDetail.proofPhoto')}</p>
           <p className="text-xs text-gray-500">{t('sales.deliveryOrderDetail.proofPhotoPrivate')}</p>
         </div>
-        {!src && (
-          <button
-            onClick={show}
-            disabled={loading}
-            className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 disabled:opacity-50 shrink-0"
-          >
-            {t('sales.deliveryOrderDetail.showProofPhoto')}
-          </button>
-        )}
+        <button
+          onClick={open ? () => setOpen(false) : show}
+          disabled={loading}
+          aria-expanded={open}
+          className="text-xs px-2.5 py-1.5 rounded-md border-2 border-gray-300 bg-white font-semibold hover:border-blue-500/40 disabled:opacity-50 shrink-0"
+        >
+          {t(open ? 'sales.deliveryOrderDetail.hideProofPhoto' : 'sales.deliveryOrderDetail.showProofPhoto')}
+        </button>
       </div>
       {failed && <p className="text-xs text-red-600">{t('sales.deliveryOrderDetail.proofPhotoFailed')}</p>}
-      {src && (
+      {src && open && (
         <PhotoZoom
           src={src}
           alt={t('sales.deliveryOrderDetail.proofPhoto')}
           onError={() => {
             setSrc(null);
+            setOpen(false);
             setFailed(true);
           }}
           className="max-h-[480px] min-w-40 max-w-full w-auto rounded-md border border-gray-200"

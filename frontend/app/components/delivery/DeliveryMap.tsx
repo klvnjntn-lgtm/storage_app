@@ -14,4 +14,4 @@ const DeliveryMap = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   : dynamic(() => import('./DeliveryMapInner'), { ssr: false, loading });
 
 export default DeliveryMap;
-export type { MapStop, MapDriver, MapStartPoint, StopStatus } from './DeliveryMapInner';
+export type { MapStop, MapDriver, MapTrail, MapStartPoint, StopStatus } from './DeliveryMapInner';

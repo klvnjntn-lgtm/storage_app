@@ -488,13 +488,14 @@ function DeliveryRoutesPageInner() {
                 type="text"
                 value={newRouteName}
                 onChange={(e) => setNewRouteName(e.target.value)}
-                className="w-full sm:w-auto border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
+                // Same size and border as the team picker beside it.
+                className="w-full sm:w-56 border-2 border-gray-300 rounded-md px-3 py-2 text-base sm:text-sm hover:border-blue-500/40 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
             <button
               disabled={creatingRoute || !newRouteTeamId}
               onClick={handleCreateRoute}
-              className="bg-blue-600 text-white text-sm font-medium rounded-md px-3 py-2.5 sm:py-1.5 disabled:opacity-50"
+              className="bg-blue-600 text-white text-sm font-medium rounded-md px-4 py-2.5 disabled:opacity-50"
             >
               {creatingRoute ? t('delivery.routes.creating') : t('delivery.routes.createRoute')}
             </button>

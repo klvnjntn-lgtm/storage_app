@@ -69,6 +69,7 @@ import {
   Menu,
   Award,
   FileClock,
+  LayoutTemplate,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { CSRF_HEADERS, clearSession } from '@/lib/session';
@@ -486,6 +487,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/sales/orders', label: t('nav.items.salesOrder'), icon: ClipboardList },
     { href: '/sales/invoices', label: t('nav.items.invoice'), icon: Receipt },
     { href: '/sales/deposits', label: t('nav.items.customerDeposits'), icon: HandCoins },
+    ...(isAdminRole(profile?.role) ? [{ href: '/sales/settlements', label: t('nav.items.settlements'), icon: Wallet }] : []),
     { href: '/sales/delivery-orders', label: t('nav.items.deliveryOrder'), icon: Truck },
   ];
 
@@ -509,6 +511,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ? [
           { href: '/purchasing/bills', label: t('nav.items.supplierBills'), icon: FileCheck2 },
           { href: '/purchasing/payments', label: t('nav.items.supplierPayments'), icon: Wallet },
+          { href: '/sales/settlements?tab=payable', label: t('nav.items.settlements'), icon: HandCoins },
           { href: '/purchasing/deposits', label: t('nav.items.supplierDeposits'), icon: HandCoins },
         ]
       : []),
@@ -640,6 +643,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // One branch: no Branches item — General settings links to it for
       // adding the second.
       ...(isMaster && multiBranch ? [{ href: '/settings/branches', label: t('nav.items.branches'), icon: Store }] : []),
+      ...(isAdminRole(profile?.role) && (hasInvoicePos || hasWorkshopRms)
+        ? [{ href: '/settings/print-designs', label: t('nav.items.printDesigns'), icon: LayoutTemplate }]
+        : []),
       { href: '/admin', label: t('nav.items.admin'), icon: ShieldCheck },
       ...(isMaster ? [{ href: '/settings/billing', label: t('nav.items.billing'), icon: CreditCard }] : []),
       { href: '/settings/whatsapp', label: t('nav.items.whatsapp'), icon: MessageCircle },

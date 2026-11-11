@@ -11,6 +11,8 @@ import { driverLabel, DriverAvatar, type PickerDriver } from './DriverPicker';
 export type PickerTeam = {
   id: string;
   name: string;
+  // Map color (see teamColorOf).
+  colorIndex?: number;
   driver: PickerDriver | null;
 };
 

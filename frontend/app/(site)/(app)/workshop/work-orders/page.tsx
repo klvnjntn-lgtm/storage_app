@@ -2,9 +2,9 @@
 
 import { useMechanics } from '@/app/components/workshop/WorkOrderForm';
 import { BranchFilter } from '@/app/components/shared/BranchFilter';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ClipboardList, Plus, Search, Car, User, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { formatIDR } from '@/lib/format';
@@ -19,16 +19,29 @@ import {
   type WorkOrderStatus,
 } from '@/app/components/workshop/workOrders';
 
-// Open jobs first: everything not done or cancelled.
-type Filter = 'OPEN' | WorkOrderStatus | 'ALL';
+// Open jobs first: everything not done or cancelled. UNBILLED: done, but no
+// issued invoice — the parts were used and not billed.
+type Filter = 'OPEN' | 'UNBILLED' | WorkOrderStatus | 'ALL';
 
+
+// useSearchParams needs a Suspense boundary.
 export default function WorkOrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkOrdersList />
+    </Suspense>
+  );
+}
+
+function WorkOrdersList() {
   const router = useRouter();
+  // The reminder notification links here with ?filter=UNBILLED.
+  const params0 = useSearchParams();
   const { t } = useLanguage();
   const [rows, setRows] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('ALL');
+  const [filter, setFilter] = useState<Filter>(params0.get('filter') === 'UNBILLED' ? 'UNBILLED' : 'ALL');
   const [q, setQ] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   // The mechanic responsible for the job.
@@ -43,7 +56,8 @@ export default function WorkOrdersPage() {
       try {
         const params = new URLSearchParams();
         if (q.trim()) params.set('q', q.trim());
-        if (filter !== 'OPEN' && filter !== 'ALL') params.set('status', filter);
+        if (filter === 'UNBILLED') params.set('unbilled', '1');
+        else if (filter !== 'OPEN' && filter !== 'ALL') params.set('status', filter);
         if (branchFilter) params.set('branchId', branchFilter);
         if (mechanicFilter) params.set('mechanicId', mechanicFilter);
         const res = await apiFetch(`/work-orders?${params}`);
@@ -71,7 +85,7 @@ export default function WorkOrdersPage() {
   }, [filter, q, branchFilter, mechanicFilter, t]);
 
   // Same order as the other sales lists: All first, then shortcuts.
-  const filters: Filter[] = ['ALL', 'OPEN', ...WORK_ORDER_STATUSES];
+  const filters: Filter[] = ['ALL', 'OPEN', 'UNBILLED', ...WORK_ORDER_STATUSES];
 
   return (
     <PageFrame

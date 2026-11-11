@@ -12,6 +12,7 @@ export type {
 
 export type QuotationItemView = {
   productName: string;
+  sku?: string | null;
   quantity: number;
   unitPrice: number;
   itemDiscount: number;

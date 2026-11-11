@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { START_ICON_HEIGHT, START_ICON_HTML, START_ICON_WIDTH } from './startPointIcon';
@@ -36,6 +36,14 @@ export type MapDriver = {
   // Grey when we only know the depot, not a stop they've reached.
   muted?: boolean;
   // Instead of the default blue (e.g. the driver's team color).
+  color?: string;
+};
+
+// The way a driver has come so far (see DeliveryRoutesService.whereabouts):
+// a line through the stops they finished, in the order they finished them.
+export type MapTrail = {
+  id: string;
+  points: [number, number][];
   color?: string;
 };
 
@@ -84,13 +92,21 @@ const startIcon = L.divIcon({
   popupAnchor: [0, -START_ICON_HEIGHT],
 });
 
+// Lucide's "truck", inline: a divIcon is an HTML string, not React.
+const TRUCK_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>';
+
+// A truck and the team's initials, centred on where the driver was last
+// seen. Zero-size icon with a centred child, so the badge can be as wide as
+// its text and still sit exactly on the spot.
 function driverIcon(badge: string, muted: boolean, color = '#1d4ed8') {
   const safe = badge.replace(/[&<>"']/g, '');
   return L.divIcon({
     className: '',
-    html: `<div style="background:${muted ? '#6b7280' : color};color:white;font:600 11px/1 system-ui,sans-serif;min-width:28px;height:28px;padding:0 6px;border-radius:14px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35)">${safe}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    html: `<div style="position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:${muted ? '#6b7280' : color};color:white;font:600 11px/1 system-ui,sans-serif;height:28px;padding:0 8px 0 7px;gap:4px;border-radius:14px;display:flex;align-items:center;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35)">${TRUCK_SVG}${safe ? `<span>${safe}</span>` : ''}</div>`,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+    popupAnchor: [0, -16],
   });
 }
 
@@ -156,6 +172,7 @@ function ClickToPick({ onPick }: { onPick: (lat: number, lng: number) => void })
 export default function DeliveryMapInner({
   stops,
   drivers = [],
+  trails = [],
   startPoint = null,
   height = 320,
   pickMode = false,
@@ -165,6 +182,7 @@ export default function DeliveryMapInner({
 }: {
   stops: MapStop[];
   drivers?: MapDriver[];
+  trails?: MapTrail[];
   startPoint?: MapStartPoint | null;
   height?: number;
   pickMode?: boolean;
@@ -193,6 +211,24 @@ export default function DeliveryMapInner({
         <FitBounds positions={pickedPosition ? [...positions, [pickedPosition.lat, pickedPosition.lng]] : positions} />
         <FocusStop focus={focus} stops={stops} markers={markers} />
         {pickMode && onPick && <ClickToPick onPick={onPick} />}
+        {/* Under the markers: a white casing, then the team's color on top,
+            so the line reads on any map tiles. */}
+        {trails
+          .filter((trail) => trail.points.length > 1)
+          .flatMap((trail) => [
+            <Polyline
+              key={`trail-casing-${trail.id}`}
+              positions={trail.points}
+              pathOptions={{ color: '#ffffff', weight: 7, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+              interactive={false}
+            />,
+            <Polyline
+              key={`trail-${trail.id}`}
+              positions={trail.points}
+              pathOptions={{ color: trail.color ?? '#1d4ed8', weight: 4, opacity: 0.85, lineCap: 'round', lineJoin: 'round' }}
+              interactive={false}
+            />,
+          ])}
         {stops.map((stop) => (
           <Marker
             key={stop.id}

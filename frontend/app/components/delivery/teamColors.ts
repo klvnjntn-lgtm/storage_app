@@ -4,6 +4,12 @@ import type { MapStop } from './DeliveryMapInner';
 // but eight clearly different ones matter more; outcomes are marked separately.
 export const TEAM_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#4b5563'];
 
+// A team's color, the same on every page and every date: the index is stored
+// on the team (Team.colorIndex, picked once when the team is made).
+export function teamColorOf(team: { colorIndex?: number | null }) {
+  return TEAM_COLORS[(team.colorIndex ?? 0) % TEAM_COLORS.length];
+}
+
 // The mark on a finished stop's dot when its color says something else, so the
 // team color doesn't hide whether it was delivered. Kept out of the map files:
 // the Google one must not import the Leaflet one, which touches `window`.

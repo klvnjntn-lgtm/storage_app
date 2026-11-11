@@ -618,6 +618,7 @@ export const purchasingWorkshop = {
         allMechanics: 'All mechanics',
         filter: {
           OPEN: 'Open',
+          UNBILLED: 'Done, not invoiced',
           ESTIMATE: 'Estimate',
           QUEUED: 'Queued',
           IN_PROGRESS: 'In progress',
@@ -1451,6 +1452,7 @@ export const purchasingWorkshop = {
         allMechanics: 'Semua mekanik',
         filter: {
           OPEN: 'Terbuka',
+          UNBILLED: 'Selesai, belum ditagih',
           ESTIMATE: 'Estimasi',
           QUEUED: 'Antre',
           IN_PROGRESS: 'Dikerjakan',

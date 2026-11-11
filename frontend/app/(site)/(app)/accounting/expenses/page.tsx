@@ -27,8 +27,8 @@ type ExpenseCategory = {
   account?: { id: string; code: string; name: string } | null;
 };
 
-// Operating expenses (beban operasional) post to accounts 5000–5899; 5900 and up — including
-// 5990 Uncategorized, where a category with no account of its own posts — are other expenses
+// Operating expenses (beban operasional) post to accounts 5000–5899; 5900 and up are other
+// expenses. A category with no account of its own (it posts to 5600 Beban Tanpa Kategori) is other.
 type ExpenseGroup = 'operating' | 'other';
 function groupOf(cat: ExpenseCategory): ExpenseGroup {
   const n = parseFloat(cat.account?.code ?? '');

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
+import { PrintDesignPicker, usePrintDesign } from '@/app/components/print-designer/PrintDesignPicker';
+import { DESIGN_PAGE_CSS, DesignedQuotation } from '@/app/components/print-designer/DesignedPrint';
 import { Send, CheckCircle2, XCircle, Printer, Download, ArrowRightCircle, FileText, Pencil, Trash2, Link2, Wrench, FilePlus2, Car } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { parseCalendarDate, formatDMY } from '@/lib/dates';
@@ -65,6 +67,8 @@ export default function QuotationDetailPage() {
   // the nested getOne() shape (`quotation`) driving the header/actions.
   const [printView, setPrintView] = useState<QuotationPrintView | null>(null);
   const [previewError, setPreviewError] = useState(false);
+  const printDesign = usePrintDesign('QUOTATION', printView ? (printView.branchId ?? null) : undefined, null);
+  const design = printDesign.effective;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -193,7 +197,7 @@ export default function QuotationDetailPage() {
     setPdfGenerating(true);
     setError(null);
     try {
-      const res = await apiFetch(`/sales-quotations/${quotation.id}/pdf`);
+      const res = await apiFetch(`/sales-quotations/${quotation.id}/pdf?templateId=${printDesign.templateParam}`);
       if (!res.ok) {
         throw new Error(t('sales.quotationDetail.pdfGenerationFailed', { status: res.status }));
       }
@@ -234,6 +238,7 @@ export default function QuotationDetailPage() {
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
       <style>{`
+        ${design ? DESIGN_PAGE_CSS : ''}
         @media print {
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
@@ -371,6 +376,7 @@ export default function QuotationDetailPage() {
               )}
               {quotation.status !== 'DRAFT' && (
                 <>
+                  <PrintDesignPicker templates={printDesign.templates} effective={design} onChange={printDesign.setChoice} />
                   <button
                     onClick={handleDownloadPdf}
                     disabled={pdfGenerating}
@@ -534,9 +540,13 @@ export default function QuotationDetailPage() {
           {printView ? (
             <div
               id="print-area"
-              className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none"
+              className={`${design ? '' : 'bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)]'} print:shadow-none`}
             >
-              <QuotationA4Template quotation={toQuotationView(printView)} />
+              {design ? (
+                <DesignedQuotation design={design} quotation={toQuotationView(printView)} pageGap={6} />
+              ) : (
+                <QuotationA4Template quotation={toQuotationView(printView)} />
+              )}
             </div>
           ) : (
             <div

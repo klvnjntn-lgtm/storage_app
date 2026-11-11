@@ -11,6 +11,8 @@ import { tour } from './modules/tour';
 import { platform } from './modules/platform';
 import { orgTransfer } from './modules/org-transfer';
 import { saas } from './modules/saas';
+import { printDesigner } from './modules/print-designer';
+import { settlements } from './modules/settlements';
 
 export type Locale = 'en' | 'id';
 
@@ -246,6 +248,7 @@ const base = {
         admin: 'Admin',
         settings: 'Settings',
         settingsGeneral: 'General',
+        printDesigns: 'Print designs',
         branches: 'Branches',
         inventory: 'Inventory',
         workshop: 'Workshop',
@@ -258,6 +261,7 @@ const base = {
         purchaseReturns: 'Purchase returns',
         supplierBills: 'Supplier bills',
         supplierPayments: 'Supplier payments',
+        settlements: 'Settlements',
         transfers: 'Move stock',
         reorder: 'Reorder',
         batches: 'Batches & expiry',
@@ -638,6 +642,7 @@ const base = {
         admin: 'Admin',
         settings: 'Pengaturan',
         settingsGeneral: 'Umum',
+        printDesigns: 'Desain cetak',
         branches: 'Cabang',
         inventory: 'Inventaris',
         workshop: 'Bengkel',
@@ -650,6 +655,7 @@ const base = {
         purchaseReturns: 'Retur pembelian',
         supplierBills: 'Tagihan pemasok',
         supplierPayments: 'Pembayaran pemasok',
+        settlements: 'Pelunasan',
         transfers: 'Pindah stok',
         reorder: 'Pemesanan ulang',
         batches: 'Batch & kedaluwarsa',
@@ -827,6 +833,8 @@ export const translations = {
     ...platform.en,
     ...orgTransfer.en,
     ...saas.en,
+    ...printDesigner.en,
+    ...settlements.en,
     sales: {
       ...salesQuotations.en.sales,
       ...salesInvoices.en.sales,
@@ -845,6 +853,8 @@ export const translations = {
     ...platform.id,
     ...orgTransfer.id,
     ...saas.id,
+    ...printDesigner.id,
+    ...settlements.id,
     sales: {
       ...salesQuotations.id.sales,
       ...salesInvoices.id.sales,

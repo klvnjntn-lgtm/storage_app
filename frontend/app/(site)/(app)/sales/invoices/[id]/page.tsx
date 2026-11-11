@@ -19,6 +19,8 @@ import { InvoiceFormat } from '@/app/components/invoices/types';
 import { InvoicePrintView, toInvoiceView } from '@/lib/mappers/invoice-mapper';
 import { parseCalendarDate, toCalendarDateString, formatDMY, formatDMYTime } from '@/lib/dates';
 import { PAGE_CSS, MARGIN_MM } from '@/lib/mappers/invoice-format';
+import { PrintDesignPicker, usePrintDesign } from '@/app/components/print-designer/PrintDesignPicker';
+import { DESIGN_PAGE_CSS, DesignedInvoice } from '@/app/components/print-designer/DesignedPrint';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
 import DatePicker from '@/app/components/shared/DatePicker';
@@ -248,6 +250,10 @@ export default function InvoiceDetailPage() {
   // (and now previews) this invoice on A4 paper without changing
   // invoice.format in the DB.
   const [printFormat, setPrintFormat] = useState<InvoiceFormat>('RECEIPT');
+  // The branch's print designs for A4/A5 (receipts keep their fixed layout).
+  const designPaper = printFormat === 'A4' || printFormat === 'A5' ? printFormat : null;
+  const printDesign = usePrintDesign('INVOICE', invoice ? (invoice.branchId ?? null) : undefined, designPaper ?? 'A4');
+  const design = designPaper ? printDesign.effective : null;
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
@@ -417,7 +423,9 @@ export default function InvoiceDetailPage() {
     setPdfGenerating(true);
     setError(null);
     try {
-      const res = await apiFetch(`/invoices/${invoice.id}/pdf?format=${printFormat}`);
+      const res = await apiFetch(
+        `/invoices/${invoice.id}/pdf?format=${printFormat}` + (designPaper ? `&templateId=${printDesign.templateParam}` : ''),
+      );
       if (!res.ok) {
         throw new Error(t('sales.invoiceDetail.failedToGeneratePdf', { status: res.status }));
       }
@@ -457,7 +465,7 @@ export default function InvoiceDetailPage() {
   return (
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
       <style>{`
-  ${PAGE_CSS[printFormat] ?? PAGE_CSS.A4}
+  ${design ? DESIGN_PAGE_CSS : (PAGE_CSS[printFormat] ?? PAGE_CSS.A4)}
   @media print {
     body * { visibility: hidden; }
     #print-area, #print-area * { visibility: visible; }
@@ -528,6 +536,9 @@ export default function InvoiceDetailPage() {
                   </button>
                 ))}
               </div>
+              {designPaper && (
+                <PrintDesignPicker templates={printDesign.templates} effective={printDesign.effective} onChange={printDesign.setChoice} />
+              )}
 
               {/* Same rule as the backend: nothing paid and no returns. A
                   0-total invoice counts as settled (PAID) yet has no money
@@ -1016,14 +1027,18 @@ export default function InvoiceDetailPage() {
           <div className="mx-auto w-fit">
             <div
               id="print-area"
-              style={{ padding: `${MARGIN_MM[printFormat] ?? 0}mm` }}
-              className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none print:p-0"
+              style={{ padding: design ? 0 : `${MARGIN_MM[printFormat] ?? 0}mm` }}
+              className={`${design ? 'bg-gray-50' : 'bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)]'} print:shadow-none print:p-0`}
             >
-              <InvoicePrintArea
-                format={printFormat}
-                invoice={toInvoiceView(invoice)}
-                alwaysVisible
-              />
+              {design ? (
+                <DesignedInvoice design={design} invoice={toInvoiceView(invoice)} pageGap={6} />
+              ) : (
+                <InvoicePrintArea
+                  format={printFormat}
+                  invoice={toInvoiceView(invoice)}
+                  alwaysVisible
+                />
+              )}
             </div>
           </div>
         </div>

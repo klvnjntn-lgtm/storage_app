@@ -19,7 +19,8 @@ export type NotificationType =
   | 'ACCOUNT_LOCKED'
   | 'ACCOUNT_UNLOCKED'
   | 'WORK_ORDER_APPROVED'
-  | 'WORK_ORDER_DECLINED';
+  | 'WORK_ORDER_DECLINED'
+  | 'WORK_ORDER_UNBILLED';
 
 export type AppNotification = {
   id: string;

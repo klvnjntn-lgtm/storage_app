@@ -7,6 +7,8 @@ import { Printer, ArrowLeft } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { SpkA4Template, type SpkPrintView } from '@/app/components/workshop/SpkA4Template';
 import { useLanguage } from '@/app/context/LanguageContext';
+import { PrintDesignPicker, usePrintDesign } from '@/app/components/print-designer/PrintDesignPicker';
+import { DESIGN_PAGE_CSS, DesignedWorkOrder } from '@/app/components/print-designer/DesignedPrint';
 
 // Printable SPK for a work order — browser print, same as the payslip.
 export default function WorkOrderPrintPage() {
@@ -17,6 +19,8 @@ export default function WorkOrderPrintPage() {
   const [view, setView] = useState<SpkPrintView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const printDesign = usePrintDesign('WORK_ORDER', view ? (view.workOrder.branchId ?? null) : undefined, null);
+  const design = printDesign.effective;
 
   useEffect(() => {
     (async () => {
@@ -40,7 +44,7 @@ export default function WorkOrderPrintPage() {
     <main className="min-h-screen print:min-h-0 bg-gray-50 text-black">
       <style>{`
         @media print {
-          @page { size: A4; margin: 0; }
+          ${design ? DESIGN_PAGE_CSS : '@page { size: A4; margin: 0; }'}
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area {
@@ -68,6 +72,8 @@ export default function WorkOrderPrintPage() {
           </div>
 
           {view && (
+            <div className="flex items-center gap-2">
+            <PrintDesignPicker templates={printDesign.templates} effective={design} onChange={printDesign.setChoice} />
             <button
               onClick={() => window.print()}
               className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors shrink-0"
@@ -75,6 +81,7 @@ export default function WorkOrderPrintPage() {
               <Printer size={14} strokeWidth={2} />
               {t('common.print')}
             </button>
+            </div>
           )}
         </div>
       </div>
@@ -90,9 +97,9 @@ export default function WorkOrderPrintPage() {
           {view ? (
             <div
               id="print-area"
-              className="bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)] print:shadow-none"
+              className={`${design ? '' : 'bg-white shadow-[0_1px_3px_rgba(0,0,0,0.1),0_8px_24px_rgba(0,0,0,0.12)]'} print:shadow-none`}
             >
-              <SpkA4Template view={view} />
+              {design ? <DesignedWorkOrder design={design} view={view} pageGap={6} /> : <SpkA4Template view={view} />}
             </div>
           ) : (
             <div

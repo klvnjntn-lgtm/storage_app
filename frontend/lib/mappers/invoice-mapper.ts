@@ -19,6 +19,8 @@ export type InvoicePrintView = {
   businessAddress: string | null;
   businessPhone: string | null;
   branchName?: string | null;
+  // The booked branch: whose print designs it uses.
+  branchId?: string | null;
   // The documents it was made from (shown as "Related documents").
   quotation?: { id: string; quotationNumber: string | null; status: string } | null;
   salesOrder?: { id: string; orderNumber: string | null; status: string } | null;
@@ -123,6 +125,7 @@ export function toInvoiceView(invoice: InvoicePrintView): InvoiceView {
     items: invoice.items.map((item) => ({
       id: item.id,
       productName: item.productName ?? '',
+      sku: item.sku ?? null,
       serialNumbers: item.serialNumbers ?? [],
       quantity: item.quantity,
       unit: item.unit ?? null,

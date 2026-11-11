@@ -34,7 +34,7 @@ export type PlanPreview = {
   routeDate: string;
   depot: { latitude: number; longitude: number };
   routes: {
-    team: { id: string; name: string; driver: { id: string; email: string; displayName: string | null } | null };
+    team: { id: string; name: string; colorIndex?: number; driver: { id: string; email: string; displayName: string | null } | null };
     hours: string | null;
     offDuty: boolean;
     departureAt: string;

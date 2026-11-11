@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { display } from '@/lib/fonts';
-import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, RotateCcw, ArrowLeftRight, AlertTriangle, Check, Users, Store, Truck } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, XCircle, Circle, MapPin, MapPinOff, X, Navigation, RotateCcw, ArrowLeftRight, AlertTriangle, Check, Users, Store, Truck, Lock, Pencil, FileText } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -12,6 +13,7 @@ import DeliveryMap, { type MapStop } from '@/app/components/delivery/DeliveryMap
 import CoordinateInputs from '@/app/components/delivery/CoordinateInputs';
 import RescheduleStopDialog from '@/app/components/delivery/RescheduleStopDialog';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
+import CopyStopButton from '@/app/components/delivery/CopyStopButton';
 import ProofPhoto from '@/app/components/delivery/ProofPhoto';
 import { DeliveryFixBadge } from '@/app/components/delivery/PinStatus';
 import type { UnscheduledReason } from '@/app/components/delivery/plan-types';
@@ -82,7 +84,15 @@ type Stop = {
   completedLongitude: string | null;
   completedAccuracy: number | null;
   failureReason: string | null;
+  // An admin set this result from the office, not the driver on site.
+  markedByOffice: boolean;
+  // The admin's note from marking it ("confirmed by phone").
+  officeNote: string | null;
   deliveryOrder: { id: string } | null;
+  // The customer's directions (DO stops: the DO's customer); null without one.
+  customerInfo: { phone: string | null; deliveryNotes: string | null; locationPhotos: { id: string }[] } | null;
+  // Public page with the customer's landmark photos; null when there are none.
+  shareToken: string | null;
 };
 
 type HistoryEvent = {
@@ -158,11 +168,27 @@ function priorityInversions(stops: Stop[]) {
   return inversions;
 }
 
+// Stop actions vs. status: a status is a flat, borderless pill (rounded-full,
+// tinted, no shadow); an action is a raised rectangle (white surface, border,
+// shadow, hover/press/focus states), so the two never read alike.
+const stopActionBase =
+  'inline-flex items-center justify-center gap-1 rounded border text-xs sm:text-[11px] font-medium px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 shadow-sm cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 hover:shadow active:translate-y-px active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:active:translate-y-0';
+const stopAction = {
+  // The one filled button: the main thing an admin does on a pending stop.
+  primary: `${stopActionBase} border-green-700 bg-green-600 text-white hover:bg-green-700`,
+  // Destructive outcome: red text on a white surface.
+  danger: `${stopActionBase} border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-400`,
+  // Something missing that needs doing (no location pin yet).
+  warning: `${stopActionBase} border-amber-300 bg-white text-amber-800 hover:bg-amber-50 hover:border-amber-400`,
+  // Everything else: neutral white surface.
+  secondary: `${stopActionBase} border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400`,
+};
+
 function statusBadge(status: StopStatus, label: string) {
   const styles: Record<StopStatus, string> = {
-    PENDING: 'bg-amber-100 text-amber-800 border-amber-300',
-    DELIVERED: 'bg-green-100 text-green-800 border-green-300',
-    FAILED: 'bg-red-100 text-red-800 border-red-300',
+    PENDING: 'bg-amber-100 text-amber-800',
+    DELIVERED: 'bg-green-100 text-green-800',
+    FAILED: 'bg-red-100 text-red-800',
   };
   const icons: Record<StopStatus, typeof CheckCircle2> = {
     PENDING: Circle,
@@ -171,7 +197,7 @@ function statusBadge(status: StopStatus, label: string) {
   };
   const Icon = icons[status];
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${styles[status]}`}>
+    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full select-none ${styles[status]}`}>
       <Icon size={12} />
       {label}
     </span>
@@ -188,6 +214,8 @@ export default function DeliveryRouteDetailPage() {
   // server-side (see delivery-routes.controller.ts) — hide those controls for
   // DRIVER so the UI doesn't offer actions that would now 403.
   const isDriver = user?.role === 'DRIVER';
+  // Only admins may settle a stop from the office (no photo or GPS).
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'MASTER';
   // With INVOICE_POS every stop is a delivery order; without it, stops
   // are picked from the customer list (DOs still allowed if the org has any).
   const hasInvoicePos = useHasModule('INVOICE_POS');
@@ -246,6 +274,11 @@ export default function DeliveryRouteDetailPage() {
   const [savingTeam, setSavingTeam] = useState(false);
 
   const [rescheduleStop, setRescheduleStop] = useState<Stop | null>(null);
+  // "Tandai Terkirim/Gagal" from the office: its own dialog, so the
+  // receiver's name and the admin's note are separate, labelled fields.
+  const [officeMark, setOfficeMark] = useState<{ stop: Stop; result: 'DELIVERED' | 'FAILED' } | null>(null);
+  const [officeReceivedBy, setOfficeReceivedBy] = useState('');
+  const [officeNote, setOfficeNote] = useState('');
 
   // silent: swap the data in without the page's loading screen.
   async function load(silent = false) {
@@ -503,6 +536,44 @@ export default function DeliveryRouteDetailPage() {
       }
       if (body) setRoute(body);
       if (showHistory) await loadHistory();
+    } catch {
+      setListError(t('delivery.routeDetail.couldNotReachServer'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // An admin settles a stop from the office, for when the driver couldn't.
+  // No photo or GPS; the stop then shows "Set by office" everywhere.
+  function openOfficeMark(stop: Stop, result: 'DELIVERED' | 'FAILED') {
+    setOfficeReceivedBy('');
+    setOfficeNote('');
+    setOfficeMark({ stop, result });
+  }
+
+  async function handleOfficeResult() {
+    if (!officeMark) return;
+    const { stop, result } = officeMark;
+    const note = officeNote.trim() || undefined;
+    setOfficeMark(null);
+    setBusy(stop.id);
+    setListError(null);
+    try {
+      const res = await apiFetch(`/delivery-routes/${id}/stops/${stop.id}/office-result`, {
+        method: 'POST',
+        body: JSON.stringify(
+          result === 'DELIVERED'
+            ? { result, receivedBy: officeReceivedBy.trim() || undefined, note }
+            : { result, reason: note },
+        ),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setListError(body?.message ?? t('delivery.routeDetail.requestFailed', { status: res.status }));
+        await load(true);
+        return;
+      }
+      if (body) setRoute(body);
     } catch {
       setListError(t('delivery.routeDetail.couldNotReachServer'));
     } finally {
@@ -1121,26 +1192,60 @@ export default function DeliveryRouteDetailPage() {
                   if (!onMap || (e.target as HTMLElement).closest('button, a, input, select, textarea, label, [data-no-map-focus]')) return;
                   focusStopOnMap(stop.id);
                 }}
-                className={`bg-white rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 ${
+                // From sm: the name and the buttons share the top row, and the
+                // address and everything else go on a full-width row below, so a
+                // long address never shifts the buttons. Phones: name, details,
+                // then the buttons, all past the #sequence column.
+                className={`bg-white rounded-lg border p-3 grid grid-cols-[1.5rem_minmax(0,1fr)] sm:grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-3 gap-y-1 ${
                   focused ? 'border-blue-600 ring-2 ring-blue-200' : isCurrent ? 'border-blue-400 ring-1 ring-blue-100' : 'border-gray-200'
                 } ${onMap ? 'cursor-pointer hover:border-blue-300' : ''}`}
               >
                 {(handle) => (
                 <>
-                <div className="flex items-start sm:items-center gap-3 min-w-0">
-                  <div className="text-xs text-gray-400 font-medium w-6 shrink-0 flex flex-col items-start gap-1">
+                <div className="contents">
+                  <div className="col-start-1 row-[1/span_3] sm:row-[1/span_2] text-xs text-gray-400 font-medium w-6 flex flex-col items-start gap-1">
                     {handle}
                     #{stop.sequence}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold flex items-start gap-1.5 min-w-0">
+                  <div className="contents">
+                    <div className="col-start-2 row-start-1 self-center text-sm font-semibold flex items-start gap-1.5 min-w-0">
+                      {/* What kind of stop, at a glance: a house for a customer
+                          visit, a truck for a delivery order. */}
                       {stop.kind === 'CUSTOMER' ? (
-                        <Store size={13} className="text-blue-500 shrink-0" aria-label={t('delivery.routeDetail.customerStopBadge')} />
+                        <Store size={13} className="text-blue-500 shrink-0 mt-[3px]" aria-label={t('delivery.routeDetail.customerStopBadge')} />
                       ) : (
-                        stop.doNumber && <span className="text-[10px] font-mono text-gray-400 shrink-0">{stop.doNumber}</span>
+                        <Truck size={13} className="text-blue-500 shrink-0 mt-[3px]" aria-label={t('delivery.routeDetail.deliveryOrderStopBadge')} />
                       )}
                       <span className="min-w-0 break-words">{stop.label}</span>
+                      {stop.markedByOffice && (
+                        // Same look as the customer page's "Diatur kantor" pin label.
+                        <span className="shrink-0 inline-flex items-center gap-1 text-xs font-normal text-gray-600 mt-px">
+                          <Lock size={13} className="shrink-0" aria-hidden="true" />
+                          {t('delivery.routeDetail.markedByOfficeBadge')}
+                        </span>
+                      )}
                     </div>
+                    <div className="col-[2] sm:col-[2/span_2] row-start-2 min-w-0 empty:hidden">
+                    {/* The DO number on its own line under the customer, so the
+                        name reads first and the number doesn't push it around. */}
+                    {stop.kind === 'DELIVERY_ORDER' && stop.doNumber && (
+                      <div className="mt-0.5 mb-0.5">
+                        {stop.deliveryOrder && !isDriver ? (
+                          <Link
+                            href={`/sales/delivery-orders/${stop.deliveryOrder.id}`}
+                            className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-px text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700"
+                          >
+                            <FileText size={11} aria-hidden="true" />
+                            <span className="font-mono">{stop.doNumber}</span>
+                          </Link>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-px text-[11px] font-medium text-gray-600">
+                            <FileText size={11} aria-hidden="true" />
+                            <span className="font-mono">{stop.doNumber}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {(stop.addressLabel || stop.address) && (
                       // Wraps in full: a cut-off name or address is useless to whoever drives there.
                       <div className="text-xs text-gray-500 break-words">
@@ -1150,6 +1255,11 @@ export default function DeliveryRouteDetailPage() {
                     )}
                     {stop.status === 'DELIVERED' && stop.receivedBy && (
                       <div className="text-xs text-green-700">{t('delivery.routeDetail.receivedByLabel')}: {stop.receivedBy}</div>
+                    )}
+                    {stop.status === 'DELIVERED' && stop.officeNote && (
+                      <div className="text-xs text-green-700 break-words">
+                        {t('delivery.routeDetail.officeNoteShown')}: {stop.officeNote}
+                      </div>
                     )}
                     {stop.status === 'DELIVERED' && (
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1166,7 +1276,9 @@ export default function DeliveryRouteDetailPage() {
                       />
                     )}
                     {stop.status === 'FAILED' && stop.failureReason && (
-                      <div className="text-xs text-red-600">{stop.failureReason}</div>
+                      <div className="text-xs text-red-600 break-words">
+                        {t('delivery.routeDetail.officeNoteShown')}: {stop.failureReason}
+                      </div>
                     )}
                     {stop.status === 'FAILED' && stop.hasFailurePhoto && (
                       <ProofPhoto
@@ -1288,6 +1400,15 @@ export default function DeliveryRouteDetailPage() {
                             className="w-full sm:w-auto"
                           />
                         </div>
+                        {stop.status === 'PENDING' && routeOpen && !isDriver && stop.destinationLatitude && (
+                          <button
+                            onClick={() => openLocationPicker(stop)}
+                            className="col-span-2 inline-flex items-center justify-center gap-1 text-sm sm:text-xs font-medium border border-gray-300 rounded-md px-2 py-2 sm:py-1"
+                          >
+                            <MapPin size={12} aria-hidden="true" />
+                            {t('delivery.routeDetail.changeLocation')}
+                          </button>
+                        )}
                         <button
                           onClick={() => setEditingStop(null)}
                           className="text-sm sm:text-xs font-medium border border-gray-300 rounded-md px-2 py-2 sm:py-1"
@@ -1303,14 +1424,36 @@ export default function DeliveryRouteDetailPage() {
                         </button>
                       </div>
                     )}
+                    </div>
                   </div>
                 </div>
 
-                {/* On phones the actions drop to their own line (indented past
-                    the #sequence column) with larger tap targets, instead of
-                    squeezing the stop details down to nothing beside them. */}
-                <div className="flex items-center gap-2 flex-wrap pl-9 sm:pl-0 sm:flex-nowrap sm:shrink-0">
+                {/* Phones: their own line under the details, with larger tap
+                    targets. From sm: one row on the right, beside the name. */}
+                <div className="col-start-2 row-start-3 sm:col-start-3 sm:row-start-1 self-center mt-1.5 sm:mt-0 flex items-center gap-2 flex-wrap sm:flex-nowrap sm:justify-end">
                   {statusBadge(stop.status, statusLabels[stop.status])}
+                  {isAdmin && stop.status === 'PENDING' && !stop.superseded && route.status !== 'CANCELLED' && (
+                    <>
+                      <button
+                        disabled={rowBusy || orderSaving}
+                        onClick={() => openOfficeMark(stop, 'DELIVERED')}
+                        title={t('delivery.routeDetail.officeMarkHint')}
+                        className={stopAction.primary}
+                      >
+                        <CheckCircle2 size={12} aria-hidden="true" />
+                        {t('delivery.routeDetail.officeMarkDelivered')}
+                      </button>
+                      <button
+                        disabled={rowBusy || orderSaving}
+                        onClick={() => openOfficeMark(stop, 'FAILED')}
+                        title={t('delivery.routeDetail.officeMarkHint')}
+                        className={stopAction.danger}
+                      >
+                        <XCircle size={12} aria-hidden="true" />
+                        {t('delivery.routeDetail.officeMarkFailed')}
+                      </button>
+                    </>
+                  )}
                   {/* Beside the status it undoes, in words and away from the
                       delete-stop bin, which only a pending stop has. */}
                   {canReset && (
@@ -1318,9 +1461,9 @@ export default function DeliveryRouteDetailPage() {
                       disabled={rowBusy || orderSaving}
                       onClick={() => handleResetStop(stop)}
                       title={t('delivery.routeDetail.resetStopHint')}
-                      className="inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium text-amber-800 border border-amber-300 bg-amber-50 hover:bg-amber-100 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
+                      className={stopAction.secondary}
                     >
-                      <RotateCcw size={12} />
+                      <RotateCcw size={12} aria-hidden="true" />
                       {t('delivery.routeDetail.resetStop')}
                     </button>
                   )}
@@ -1329,51 +1472,49 @@ export default function DeliveryRouteDetailPage() {
                       disabled={rowBusy || orderSaving}
                       onClick={() => handleMoveResult(stop)}
                       title={t('delivery.routeDetail.moveResultHint')}
-                      className="inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
+                      className={stopAction.secondary}
                     >
-                      <ArrowLeftRight size={12} />
+                      <ArrowLeftRight size={12} aria-hidden="true" />
                       {t('delivery.routeDetail.moveResult')}
-                    </button>
-                  )}
-                  {(stop.deliveryOrder || (stop.status === 'PENDING' && routeOpen && !isDriver)) && (
-                    <button
-                      onClick={() => openEditDetails(stop)}
-                      className="text-xs sm:text-[11px] font-medium text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5"
-                    >
-                      {t('delivery.routeDetail.editDetails')}
                     </button>
                   )}
                   {stop.status === 'FAILED' && !stop.superseded && !isDriver && (
                     <button
                       onClick={() => setRescheduleStop(stop)}
-                      className="text-xs sm:text-[11px] font-medium text-amber-700 border border-amber-300 rounded px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:opacity-50"
+                      className={stopAction.secondary}
                     >
                       {t('delivery.routeDetail.reschedule')}
                     </button>
                   )}
-                  {/* A finished stop that had no pin was placed by the
-                      driver's GPS (shown with the proof), and the customer
-                      was pinned from it — "No location" there misleads. */}
-                  {(stop.status === 'PENDING' || stop.destinationLatitude) && (
-                    <>
-                      <button
-                        onClick={() => openLocationPicker(stop)}
-                        disabled={isDriver || !routeOpen || stop.status !== 'PENDING'}
-                        title={t('delivery.routeDetail.setLocation')}
-                        className={`inline-flex items-center gap-1 text-xs sm:text-[11px] font-medium rounded border px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 disabled:cursor-default ${
-                          stop.destinationLatitude
-                            ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100 disabled:hover:bg-green-50'
-                            : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:hover:bg-amber-50'
-                        }`}
-                      >
-                        {stop.destinationLatitude ? <MapPin size={12} /> : <MapPinOff size={12} />}
-                        {stop.destinationLatitude
-                          ? t('delivery.routeDetail.locationSet')
-                          : t('delivery.routeDetail.noLocation')}
-                      </button>
-                    </>
+                  {/* Only a pending stop with no pin: a pinned one already has
+                      its Google Maps link, and its pin is changed from the
+                      edit (pencil) panel. A finished stop without a pin was
+                      placed by the driver's GPS — "No location" would mislead. */}
+                  {stop.status === 'PENDING' && !stop.destinationLatitude && (
+                    <button
+                      onClick={() => openLocationPicker(stop)}
+                      disabled={isDriver || !routeOpen}
+                      title={t('delivery.routeDetail.setLocation')}
+                      className={stopAction.warning}
+                    >
+                      <MapPinOff size={12} aria-hidden="true" />
+                      {t('delivery.routeDetail.noLocation')}
+                    </button>
                   )}
                   <GoogleMapsLink lat={mapsAt.lat} lng={mapsAt.lng} />
+                  <CopyStopButton
+                    stop={{
+                      sequence: stop.sequence,
+                      label: stop.label,
+                      addressLabel: stop.addressLabel,
+                      address: stop.address,
+                      destinationLatitude: stop.destinationLatitude,
+                      destinationLongitude: stop.destinationLongitude,
+                      deliveryNotes: stop.customerInfo?.deliveryNotes ?? null,
+                      phone: stop.customerInfo?.phone ?? null,
+                      shareToken: stop.shareToken ?? null,
+                    }}
+                  />
                   {!ENABLE_DRAG_REORDER && !isDriver && routeOpen && stop.status === 'PENDING' && (
                     <>
                       <button
@@ -1407,6 +1548,23 @@ export default function DeliveryRouteDetailPage() {
                         <Trash2 size={14} />
                       </button>
                     </>
+                  )}
+                  {/* Edit, as an icon in the card's corner rather than a word
+                      in the middle of the actions. */}
+                  {(stop.deliveryOrder || (stop.status === 'PENDING' && routeOpen && !isDriver)) && (
+                    <button
+                      onClick={() => (editingStop?.id === stop.id ? setEditingStop(null) : openEditDetails(stop))}
+                      aria-label={t('delivery.routeDetail.editDetails')}
+                      aria-expanded={editingStop?.id === stop.id}
+                      title={t('delivery.routeDetail.editDetails')}
+                      className={`p-2 sm:p-1 rounded border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                        editingStop?.id === stop.id
+                          ? 'border-blue-300 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                    </button>
                   )}
                 </div>
                 </>
@@ -1490,6 +1648,88 @@ export default function DeliveryRouteDetailPage() {
           )}
         </div>
       </div>
+
+      {officeMark && (
+        <div className="fixed inset-0 bg-black/25 flex items-end sm:items-center justify-center z-[60] sm:p-4">
+          <form
+            role="dialog"
+            aria-modal="true"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleOfficeResult();
+            }}
+            className="bg-white rounded-t-2xl sm:rounded-xl shadow-lg w-full max-w-md p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-semibold break-words">
+                {t(officeMark.result === 'DELIVERED' ? 'delivery.routeDetail.officeDeliveredTitle' : 'delivery.routeDetail.officeFailedTitle', {
+                  name: officeMark.stop.label,
+                })}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOfficeMark(null)}
+                aria-label={t('common.cancel')}
+                className="p-2 -m-2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="flex items-start gap-1.5 text-xs text-gray-600">
+              <Lock size={13} className="shrink-0 mt-px" aria-hidden="true" />
+              {t('delivery.routeDetail.officeMarkExplain')}
+            </p>
+            {officeMark.result === 'DELIVERED' && (
+              <label className="block">
+                <span className="block text-xs font-semibold text-gray-600 mb-1">{t('delivery.routeDetail.officeReceivedByLabel')}</span>
+                <input
+                  autoFocus
+                  value={officeReceivedBy}
+                  onChange={(e) => setOfficeReceivedBy(e.target.value)}
+                  maxLength={200}
+                  placeholder={t('delivery.routeDetail.officeReceivedByPlaceholder')}
+                  className="w-full border border-gray-300 rounded-md px-2.5 py-2 text-base sm:text-sm"
+                />
+              </label>
+            )}
+            <label className="block">
+              <span className="block text-xs font-semibold text-gray-600 mb-1">
+                {t(officeMark.result === 'DELIVERED' ? 'delivery.routeDetail.officeNoteLabel' : 'delivery.routeDetail.officeReasonLabel')}
+              </span>
+              <textarea
+                autoFocus={officeMark.result === 'FAILED'}
+                value={officeNote}
+                onChange={(e) => setOfficeNote(e.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder={t(
+                  officeMark.result === 'DELIVERED'
+                    ? 'delivery.routeDetail.officeNotePlaceholder'
+                    : 'delivery.routeDetail.officeReasonPlaceholder',
+                )}
+                className="w-full border border-gray-300 rounded-md px-2.5 py-2 text-base sm:text-sm"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOfficeMark(null)}
+                className="text-sm font-medium border border-gray-300 rounded-md px-3 py-2"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="submit"
+                className={`text-sm font-medium text-white rounded-md px-3 py-2 ${
+                  officeMark.result === 'DELIVERED' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {t(officeMark.result === 'DELIVERED' ? 'delivery.routeDetail.officeMarkDelivered' : 'delivery.routeDetail.officeMarkFailed')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {rescheduleStop && (
         <RescheduleStopDialog

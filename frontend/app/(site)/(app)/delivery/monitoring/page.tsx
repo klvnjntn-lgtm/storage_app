@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { display } from '@/lib/fonts';
-import { BarChart3, RefreshCw, AlertTriangle, MapPin, Navigation, CheckCircle2, XCircle, Circle } from 'lucide-react';
+import { BarChart3, RefreshCw, AlertTriangle, MapPin, Navigation, CheckCircle2, XCircle, Circle, Lock, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
-import DeliveryMap, { type MapDriver, type MapStop } from '@/app/components/delivery/DeliveryMap';
+import DeliveryMap, { type MapDriver, type MapStop, type MapTrail } from '@/app/components/delivery/DeliveryMap';
 import DatePicker from '@/app/components/shared/DatePicker';
 import TeamPicker, { compareTeamNames, teamLabel, type PickerTeam } from '@/app/components/delivery/TeamPicker';
-import { TEAM_COLORS } from '@/app/components/delivery/teamColors';
+import { teamColorOf } from '@/app/components/delivery/teamColors';
 import { useRequireAdmin } from '@/lib/hooks/useRequireAdmin';
 import { toCalendarDateString } from '@/lib/dates';
 import { getInitialParam, useSyncQueryParams } from '@/lib/useQuerySync';
@@ -31,6 +31,8 @@ type Whereabouts = {
   nextStop: { label: string; plannedEta: string | null } | null;
   plannedDepartureAt: string | null;
   position: { latitude: number; longitude: number; source: 'LAST_STOP' | 'DEPOT' } | null;
+  // Where the driver finished each stop, in the order they did them.
+  trail: { latitude: number; longitude: number }[];
 };
 // Finished stops in the order they were done; sequence stays the route's number.
 type TimelineEntry = {
@@ -39,6 +41,11 @@ type TimelineEntry = {
   label: string;
   status: 'DELIVERED' | 'FAILED';
   failureReason: string | null;
+  // Note left when an admin marked it delivered from the office.
+  note: string | null;
+  receivedBy: string | null;
+  // An admin set this result from the office: no duration, not the driver's.
+  markedByOffice: boolean;
   at: string;
   durationSeconds: number | null;
 };
@@ -202,25 +209,6 @@ export default function DeliveryMonitoringPage() {
 
   const noDriver = t('delivery.teams.noDriver');
 
-  // A team keeps its color from day to day: numbered among all the business's
-  // teams, not just those with a route on the day shown. The day's teams are
-  // the fallback if that list can't load.
-  const [allTeamIds, setAllTeamIds] = useState<string[]>([]);
-  useEffect(() => {
-    if (!authorized) return;
-    apiFetch('/teams')
-      .then((res) => (res.ok ? res.json() : []))
-      .then((teams: { id: string; name: string }[]) =>
-        setAllTeamIds(
-          [...teams].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map((team) => team.id),
-        ),
-      )
-      .catch(() => {});
-  }, [authorized]);
-  const teamColor = useMemo(() => {
-    const ids = [...allTeamIds, ...byTeam.map((d) => d.team.id).filter((id) => !allTeamIds.includes(id)).sort()];
-    return (teamId: string) => TEAM_COLORS[Math.max(0, ids.indexOf(teamId)) % TEAM_COLORS.length];
-  }, [allTeamIds, byTeam]);
 
   // Teams that have stops on the map today, for the map's team filter.
   const mapTeams = useMemo(() => {
@@ -243,7 +231,7 @@ export default function DeliveryMonitoringPage() {
         badge: initials(d.team),
         label: teamLabel(d.team, noDriver),
         muted: d.position!.source === 'DEPOT',
-        color: teamColor(d.team.id),
+        color: teamColorOf(d.team),
         detail: d.lastStop
           ? t('delivery.monitoring.lastStopAgo', {
               n: minutesSince(d.lastStop.at, now),
@@ -251,7 +239,24 @@ export default function DeliveryMonitoringPage() {
             })
           : t('delivery.monitoring.atDepot'),
       }));
-  }, [byTeam, mapTeamId, noDriver, t, now, teamColor]);
+  }, [byTeam, mapTeamId, noDriver, t, now]);
+
+  // The way each driver has come: from the depot through every stop they
+  // finished, in the order they finished them, in the team's color.
+  const mapTrails = useMemo<MapTrail[]>(
+    () =>
+      byTeam
+        .filter((d) => d.trail.length > 0 && (!mapTeamId || d.team.id === mapTeamId))
+        .map((d) => ({
+          id: d.routeId,
+          color: teamColorOf(d.team),
+          points: [
+            ...(startPoint ? [[startPoint.latitude, startPoint.longitude] as [number, number]] : []),
+            ...d.trail.map((p): [number, number] => [p.latitude, p.longitude]),
+          ],
+        })),
+    [byTeam, mapTeamId, startPoint],
+  );
 
   // Team 1, Team 2 … in name order.
   const teamCards = useMemo(() => [...byTeam].sort((a, b) => compareTeamNames(a.team, b.team)), [byTeam]);
@@ -263,13 +268,13 @@ export default function DeliveryMonitoringPage() {
         .filter((s) => !mapTeamId || s.team.id === mapTeamId)
         .map((s) => ({
           ...s,
-          color: teamColor(s.team.id),
+          color: teamColorOf(s.team),
           showOutcome: true,
           detail: `${teamLabel(s.team, noDriver)} · ${t(`delivery.routeDetail.statusLabel.${s.status}`)}${
             s.failureReason ? ` · ${t('delivery.routeDetail.failureReasonLabel')}: ${s.failureReason}` : ''
           }`,
         })),
-    [mapStops, mapTeamId, noDriver, t, teamColor],
+    [mapStops, mapTeamId, noDriver, t],
   );
 
   if (!authorized) return null;
@@ -363,6 +368,7 @@ export default function DeliveryMonitoringPage() {
             <DeliveryMap
               stops={visibleMapStops}
               drivers={mapDrivers}
+              trails={mapTrails}
               startPoint={startPoint && { ...startPoint, label: t('delivery.routeDetail.startPointLabel') }}
             />
             <p className="text-xs text-gray-500">{t('delivery.monitoring.pinHint')}</p>
@@ -385,7 +391,7 @@ export default function DeliveryMonitoringPage() {
                 key={d.routeId}
                 className="bg-white rounded-lg border border-gray-200 border-l-4 hover:border-blue-300 transition-colors"
                 // Inline so hovering can't override it: the bar matches this team's pins.
-                style={{ borderLeftColor: teamColor(d.team.id) }}
+                style={{ borderLeftColor: teamColorOf(d.team) }}
               >
                 <Link
                   href={`/delivery/routes/${d.routeId}`}
@@ -393,7 +399,7 @@ export default function DeliveryMonitoringPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-medium truncate min-w-0 flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: teamColor(d.team.id) }} aria-hidden="true" />
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: teamColorOf(d.team) }} aria-hidden="true" />
                       <span className="truncate">{teamLabel(d.team, t('delivery.teams.noDriver'))}</span>
                     </span>
                     <span className="text-xs text-gray-600 shrink-0 flex items-center gap-2">
@@ -499,12 +505,40 @@ function Whereabouts({ d, isToday, now }: { d: TeamProgress; isToday: boolean; n
 // gets in the way, so a list shows its start with a button for the rest.
 const LIST_PREVIEW = 8;
 
-function ExpandableList<T>({ items, children }: { items: T[]; children: (item: T) => React.ReactNode }) {
+// title: when given, the list's heading also opens and closes it, so a
+// long list can be folded back without scrolling down to "Show less".
+function ExpandableList<T>({
+  items,
+  children,
+  title,
+}: {
+  items: T[];
+  children: (item: T) => React.ReactNode;
+  title?: React.ReactNode;
+}) {
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const hidden = items.length - LIST_PREVIEW;
   return (
     <>
+      {title != null &&
+        (hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-gray-800 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            {title}
+            <ChevronDown
+              size={12}
+              aria-hidden="true"
+              className={`shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+            />
+          </button>
+        ) : (
+          <div className="text-[11px] font-semibold text-gray-500">{title}</div>
+        ))}
       <ol className="mt-1 divide-y divide-gray-100">
         {(expanded ? items : items.slice(0, LIST_PREVIEW)).map(children)}
       </ol>
@@ -535,8 +569,10 @@ function CompletionTimeline({ timeline }: { timeline: TimelineEntry[] }) {
     return t('delivery.monitoring.durationHours', { h: Math.floor(minutes / 60), m: minutes % 60 });
   };
   // Without the first stop's time a total would come up short, so don't show one.
+  // Office-set results have no time of their own, so they don't count.
+  const firstByDriver = timeline.find((entry) => !entry.markedByOffice);
   const total =
-    timeline[0].durationSeconds != null
+    firstByDriver?.durationSeconds != null
       ? timeline.reduce((sum, entry) => sum + (entry.durationSeconds ?? 0), 0)
       : null;
 
@@ -561,8 +597,26 @@ function CompletionTimeline({ timeline }: { timeline: TimelineEntry[] }) {
               />
               <span className="min-w-0 flex-1 break-words">
                 {entry.label}
+                {entry.markedByOffice && (
+                  <span className="ml-1.5 inline-flex items-center gap-1 whitespace-nowrap align-middle text-gray-600">
+                    <Lock size={12} className="shrink-0" aria-hidden="true" />
+                    {t('delivery.monitoring.markedByOffice')}
+                  </span>
+                )}
                 {entry.status === 'FAILED' && entry.failureReason && (
-                  <span className="block text-red-600">{entry.failureReason}</span>
+                  <span className="block text-red-600">
+                    {t('delivery.routeDetail.officeNoteShown')}: {entry.failureReason}
+                  </span>
+                )}
+                {entry.status === 'DELIVERED' && entry.receivedBy && (
+                  <span className="block text-green-700">
+                    {t('delivery.routeDetail.receivedByLabel')}: {entry.receivedBy}
+                  </span>
+                )}
+                {entry.status === 'DELIVERED' && entry.note && (
+                  <span className="block text-green-700">
+                    {t('delivery.routeDetail.officeNoteShown')}: {entry.note}
+                  </span>
                 )}
               </span>
               <span className="shrink-0 tabular-nums text-gray-500">{clock(entry.at)}</span>
@@ -583,10 +637,7 @@ function UnfinishedStops({ stops }: { stops: UnfinishedStop[] }) {
   if (stops.length === 0) return null;
   return (
     <div className="border-t border-gray-100 px-3 py-2">
-      <div className="text-[11px] font-semibold text-gray-500">
-        {t('delivery.monitoring.unfinishedTitle', { n: stops.length })}
-      </div>
-      <ExpandableList items={stops}>
+      <ExpandableList items={stops} title={t('delivery.monitoring.unfinishedTitle', { n: stops.length })}>
         {(stop) => (
           <li key={stop.stopId} className="flex items-center gap-2 py-1 text-xs">
             <span className="w-7 shrink-0 font-medium text-gray-400">#{stop.sequence}</span>

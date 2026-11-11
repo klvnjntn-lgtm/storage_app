@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Truck } from 'lucide-react';
 import { AdvancedMarker, APIProvider, InfoWindow, Map, useMap } from '@vis.gl/react-google-maps';
-import type { MapDriver, MapStartPoint, MapStop, StopStatus } from './DeliveryMapInner';
+import type { MapDriver, MapStartPoint, MapStop, MapTrail, StopStatus } from './DeliveryMapInner';
 import { outcomeMark } from './teamColors';
 import { START_ICON_HEIGHT, START_ICON_HTML } from './startPointIcon';
 
@@ -49,6 +50,30 @@ function FitBounds({ positions }: { positions: google.maps.LatLngLiteral[] }) {
   return null;
 }
 
+// The way each driver has come so far. @vis.gl/react-google-maps has no
+// polyline component, so these are plain google.maps.Polylines, removed again
+// when the trails change. A white casing under the team's color keeps the
+// line readable over any map.
+function Trails({ trails }: { trails: MapTrail[] }) {
+  const map = useMap();
+  const key = JSON.stringify(trails);
+  useEffect(() => {
+    if (!map) return;
+    const lines: google.maps.Polyline[] = [];
+    for (const trail of trails) {
+      if (trail.points.length < 2) continue;
+      const path = trail.points.map(([lat, lng]) => ({ lat, lng }));
+      lines.push(
+        new google.maps.Polyline({ map, path, clickable: false, strokeColor: '#ffffff', strokeOpacity: 0.9, strokeWeight: 7, zIndex: 1 }),
+        new google.maps.Polyline({ map, path, clickable: false, strokeColor: trail.color ?? '#1d4ed8', strokeOpacity: 0.85, strokeWeight: 4, zIndex: 2 }),
+      );
+    }
+    return () => lines.forEach((line) => line.setMap(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, key]);
+  return null;
+}
+
 // Pans to the focused stop and opens its popup. `nonce` changes on every
 // request so focusing the same stop twice still re-centers the map.
 function FocusStop({
@@ -85,6 +110,7 @@ const dotStyle = (color: string, size: number, border: number) => ({
 export default function GoogleDeliveryMap({
   stops,
   drivers = [],
+  trails = [],
   startPoint = null,
   height = 320,
   pickMode = false,
@@ -94,6 +120,7 @@ export default function GoogleDeliveryMap({
 }: {
   stops: MapStop[];
   drivers?: MapDriver[];
+  trails?: MapTrail[];
   startPoint?: MapStartPoint | null;
   height?: number;
   pickMode?: boolean;
@@ -129,6 +156,7 @@ export default function GoogleDeliveryMap({
         >
           <FitBounds positions={positions} />
           <FocusStop focus={focus} stops={stops} onOpen={setPopup} />
+          <Trails trails={trails} />
           {stops.map((stop) => (
             <AdvancedMarker
               key={stop.id}
@@ -186,18 +214,20 @@ export default function GoogleDeliveryMap({
                   background: driver.muted ? '#6b7280' : (driver.color ?? '#1d4ed8'),
                   color: 'white',
                   font: '600 11px/1 system-ui, sans-serif',
-                  minWidth: 28,
+                  whiteSpace: 'nowrap',
                   height: 28,
-                  padding: '0 6px',
+                  padding: '0 8px 0 7px',
+                  gap: 4,
                   borderRadius: 14,
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
                   border: '2px solid white',
                   boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
                 }}
               >
-                {driver.badge}
+                {/* Where the driver was last seen: a truck and the team's initials. */}
+                <Truck size={15} strokeWidth={2.25} aria-hidden="true" />
+                {driver.badge && <span>{driver.badge}</span>}
               </div>
             </AdvancedMarker>
           ))}

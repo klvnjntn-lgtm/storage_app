@@ -1,6 +1,6 @@
 'use client';
 
-import { TEAM_COLORS } from '@/app/components/delivery/teamColors';
+import { teamColorOf } from '@/app/components/delivery/teamColors';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
@@ -178,9 +178,10 @@ function RoutePlanInner() {
     }
   }
 
+  // The team's own color, the same one monitoring uses.
   const colorOf = (teamId: string) => {
-    const i = preview?.routes.findIndex((r) => r.team.id === teamId) ?? -1;
-    return TEAM_COLORS[Math.max(0, i) % TEAM_COLORS.length];
+    const team = preview?.routes.find((r) => r.team.id === teamId)?.team;
+    return teamColorOf(team ?? {});
   };
 
   const previewMapStops: MapStop[] = (preview?.routes ?? []).flatMap((r) =>

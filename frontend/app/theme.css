@@ -9,7 +9,8 @@
      • white/black and the neutral grays swap ends of the scale;
      • pale tints (50–300) become dim tints of the same hue;
      • deep shades (700–950) become light enough to read on dark.
-   Screen only — printing always uses the light palette.
+   Screen only — printing always uses the light palette. Pages that
+   contain a .force-light element (print designs) stay light too.
 
    The landing page is the opposite: designed dark, with a light variant
    built the same way (see "Landing" below). */
@@ -98,7 +99,7 @@ html[data-theme='dark'] .theme-icon-moon {
 
 /* ─── App: dark ───────────────────────────────────────────────────── */
 @media screen {
-  html[data-theme='dark']:not(:has(.landing)) {
+  html[data-theme='dark']:not(:has(.landing, .force-light)) {
     --background: #0b0f17;
     --foreground: #e8edf4;
     --page-bg: #0b0f17;
@@ -163,7 +164,7 @@ html[data-theme='dark'] .theme-icon-moon {
 
   /* text-white always sits on a coloured fill (buttons, badges, gradient
      icons), so it stays white even though --color-white is now dark… */
-  html[data-theme='dark']:not(:has(.landing)) {
+  html[data-theme='dark']:not(:has(.landing, .force-light)) {
     & .text-white,
     & .hover\:text-white:hover {
       color: #fff;
@@ -200,7 +201,7 @@ html[data-theme='dark'] .theme-icon-moon {
    options a surface; in the base layer so bg-* utilities still win. */
 @layer base {
   @media screen {
-    html[data-theme='dark']:not(:has(.landing)) {
+    html[data-theme='dark']:not(:has(.landing, .force-light)) {
       & select {
         background-color: var(--color-white);
         color: var(--color-gray-900);

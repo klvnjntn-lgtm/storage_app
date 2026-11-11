@@ -137,6 +137,7 @@ export type InvoiceView = {
   items: {
     id: string;
     productName: string;
+    sku?: string | null;
     // Serial-tracked products: the units sold, printed under the name.
     serialNumbers?: string[];
     quantity: number;

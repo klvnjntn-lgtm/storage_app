@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Boxes, Hash, Tag, Wallet, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Hash, PackageSearch, Tag, Wallet, X } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { errorMessage } from '@/lib/api-error';
 import { formatIDR } from '@/lib/format';
@@ -10,6 +10,7 @@ import { usePriceLevels } from '@/lib/price-levels';
 import { useLanguage } from '@/app/context/LanguageContext';
 import ComboBox from '@/app/components/shared/ComboBox';
 import NumberInput from '@/app/components/shared/NumberInput';
+import { useSuppliers } from '@/app/components/shared/ProductPicker';
 
 export type EditableProduct = {
   id: string;
@@ -153,6 +154,36 @@ export default function ProductEditorDrawer({
   const [saving, setSaving] = useState(false);
   const [skuTaken, setSkuTaken] = useState(false);
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  // Business-wide reorder settings (src/reorder). Loaded when editing; stays
+  // null — and the section hidden — when the reorder API isn't available here.
+  const suppliers = useSuppliers();
+  const [reorderLoaded, setReorderLoaded] = useState<{ point: string; qty: string; supplierId: string } | null>(null);
+  const [reorderPoint, setReorderPoint] = useState('');
+  const [reorderQty, setReorderQty] = useState('');
+  const [reorderSupplierId, setReorderSupplierId] = useState('');
+
+  useEffect(() => {
+    if (!product) return;
+    let cancelled = false;
+    apiFetch(`/reorder/products/${product.id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((s: { reorderPoint: number | null; reorderQuantity: number | null; preferredSupplierId: string | null } | null) => {
+        if (cancelled || !s) return;
+        const loaded = {
+          point: s.reorderPoint != null ? String(s.reorderPoint) : '',
+          qty: s.reorderQuantity != null ? String(s.reorderQuantity) : '',
+          supplierId: s.preferredSupplierId ?? '',
+        };
+        setReorderLoaded(loaded);
+        setReorderPoint(loaded.point);
+        setReorderQty(loaded.qty);
+        setReorderSupplierId(loaded.supplierId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [product]);
 
   // Default level first, then the others in their configured order. With
   // no levels set up at all there's still the one selling price.
@@ -254,6 +285,27 @@ export default function ProductEditorDrawer({
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.message || t(isNew ? 'admin.products.createFailed' : 'admin.products.updateFailed'));
+      }
+
+      if (
+        !isNew &&
+        reorderLoaded &&
+        (reorderPoint !== reorderLoaded.point || reorderQty !== reorderLoaded.qty || reorderSupplierId !== reorderLoaded.supplierId)
+      ) {
+        const toNum = (v: string) => (v.trim() === '' ? null : Number(v.replace(',', '.')));
+        const reorderRes = await apiFetch(`/reorder/products/${product.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reorderPoint: toNum(reorderPoint),
+            reorderQuantity: toNum(reorderQty),
+            preferredSupplierId: reorderSupplierId || null,
+          }),
+        });
+        if (!reorderRes.ok) {
+          const data = await reorderRes.json().catch(() => null);
+          throw new Error(data?.message || t('reorder.saveFailed'));
+        }
       }
 
       // Same endpoint as the Stock page, so it shows on the product's
@@ -496,6 +548,44 @@ export default function ProductEditorDrawer({
               {otherLevels.length > 0 ? t('admin.products.levelsHint') : t('admin.products.levelPrices.noLevels')}
             </p>
           </Section>
+
+          {!isNew && reorderLoaded && (
+            <Section icon={<PackageSearch size={12} strokeWidth={2.5} />} title={t('reorder.drawerTitle')}>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={t('reorder.reorderPoint')}>
+                  <NumberInput
+                    min="0"
+                    inputMode="decimal"
+                    value={reorderPoint}
+                    onChange={(e) => setReorderPoint(e.target.value)}
+                    placeholder={t('reorder.notWatched')}
+                    className={`${fieldClass()} text-right tabular-nums`}
+                  />
+                </Field>
+                <Field label={t('reorder.reorderQuantity')}>
+                  <NumberInput
+                    min="0"
+                    inputMode="decimal"
+                    value={reorderQty}
+                    onChange={(e) => setReorderQty(e.target.value)}
+                    placeholder={t('reorder.auto')}
+                    className={`${fieldClass()} text-right tabular-nums`}
+                  />
+                </Field>
+              </div>
+              <Field label={t('reorder.preferredSupplier')}>
+                <select value={reorderSupplierId} onChange={(e) => setReorderSupplierId(e.target.value)} className={fieldClass()}>
+                  <option value="">—</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <p className="text-xs text-gray-400">{t('reorder.drawerHint')}</p>
+            </Section>
+          )}
 
           <Section icon={<Boxes size={12} strokeWidth={2.5} />} title={t('admin.products.stockSection')}>
             {isNew ? (

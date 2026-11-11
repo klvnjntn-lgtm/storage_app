@@ -4,6 +4,8 @@ import { QuotationView } from '@/app/components/quotations/types';
 // after the quotationDate / termsAndConditions / bank-details fixes.
 export type QuotationPrintView = {
   id: string;
+  // The booked branch: whose print designs it uses.
+  branchId?: string | null;
   quotationNumber: string | null;
   vehiclePlateNumber?: string | null;
   vehicleModel?: string | null;
@@ -82,6 +84,7 @@ export function toQuotationView(quotation: QuotationPrintView): QuotationView {
 
     items: quotation.items.map((item) => ({
       productName: item.productName ?? '',
+      sku: item.sku ?? null,
       quantity: item.quantity,
       unit: item.unit ?? null,          
       unitPrice: Number(item.unitPrice),
