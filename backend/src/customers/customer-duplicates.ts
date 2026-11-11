@@ -3,11 +3,18 @@
 //
 // Two levels:
 // - exact copy: same name and same address (both compared loosely, see
-//   below), or the same NPWP. Never saved twice.
-// - similar: same name at another address, a name that reads almost the
-//   same, or the same phone number. Saved only after someone confirms —
-//   branches of one business (LB Technologies Kantin B 05 / B 08) are real
-//   separate customers, and so are two "Toko Abadi"s across town.
+//   below). With no address on either, the phone number decides: the same
+//   one is a copy. Never saved twice.
+// - similar: same name at another address, same name with nothing else to
+//   tell them apart, a name that reads almost the same, the same phone
+//   number, or the same NPWP. Saved only after someone confirms — branches
+//   of one business (LB Technologies Kantin B 05 / B 08) are real separate
+//   customers, and so are two "Toko Abadi"s across town, or two people
+//   called Budi who walked in with nothing but a name.
+//
+// NPWP is "similar", not a copy: since Coretax a company's branches all
+// carry the head office's number (they differ by NITKU), and each branch
+// can be a customer here.
 //
 // Names compare without case, punctuation, word order or legal-form words,
 // so "Bumi Indoneisa, PT" and "PT Bumi Indoneisa" are the same name.
@@ -60,10 +67,14 @@ function words(s: string): string[] {
 }
 
 export function nameKey(name: string): string {
-  return words(name)
+  const key = words(name)
     .filter((w) => !LEGAL_FORMS.has(w))
     .sort()
     .join(' ');
+  // A name with nothing in a-z/0-9 (Chinese, Arabic, …) or made only of
+  // legal-form words would come out empty, and every such name would look
+  // the same. Those compare as typed.
+  return key || name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 export function addressKey(address?: string | null): string {
@@ -78,8 +89,20 @@ export function phoneKey(phone?: string | null): string {
   return digits.length >= 8 ? digits : '';
 }
 
+// The 15-digit NPWP and its 16-digit form (a leading 0 added in 2024) are
+// the same number. All zeros is what gets typed for "has none".
 export function npwpKey(npwp?: string | null): string {
-  return (npwp ?? '').replace(/\D/g, '');
+  let digits = (npwp ?? '').replace(/\D/g, '');
+  if (digits.length === 15) digits = `0${digits}`;
+  return /^0*$/.test(digits) ? '' : digits;
+}
+
+// What makes two rows the same customer: name and address, or name and
+// phone when neither has an address. Used for repeats inside one import
+// file as well as against saved customers.
+export function identityKey(c: { name: string; address?: string | null; phone?: string | null }): string {
+  const address = addressKey(c.address);
+  return `${nameKey(c.name)}|${address}|${address ? '' : phoneKey(c.phone)}`;
 }
 
 function bigrams(s: string): Set<string> {
@@ -100,7 +123,7 @@ function distinctiveWords(key: string): string[] {
   return key.split(' ').filter((w) => w.length >= 3 && !COMMON_WORDS.has(w));
 }
 
-type Entry = Existing & { nameKey: string; addressKey: string; grams: Set<string> };
+type Entry = Existing & { nameKey: string; addressKey: string; phoneKey: string; grams: Set<string> };
 
 export class CustomerDuplicateIndex {
   private readonly byName = new Map<string, Entry[]>();
@@ -114,10 +137,10 @@ export class CustomerDuplicateIndex {
 
   add(c: Existing) {
     const key = nameKey(c.name);
-    const entry: Entry = { ...c, nameKey: key, addressKey: addressKey(c.address), grams: bigrams(key) };
+    const phone = phoneKey(c.phone);
+    const entry: Entry = { ...c, nameKey: key, addressKey: addressKey(c.address), phoneKey: phone, grams: bigrams(key) };
     push(this.byName, key, entry);
     for (const w of new Set(distinctiveWords(key))) push(this.byWord, w, entry);
-    const phone = phoneKey(c.phone);
     if (phone) push(this.byPhone, phone, entry);
     const npwp = npwpKey(c.npwp);
     if (npwp) push(this.byNpwp, npwp, entry);
@@ -142,14 +165,14 @@ export class CustomerDuplicateIndex {
       if (!prev || prev.score < score) similar.set(e.id, { ...match(e, reason), score });
     };
 
-    const npwp = npwpKey(input.npwp);
-    for (const e of npwp ? (this.byNpwp.get(npwp) ?? []) : []) {
-      if (e.id !== excludeId) exact.set(e.id, match(e, 'SAME_NPWP'));
-    }
+    const phone = phoneKey(input.phone);
     if (key) {
       for (const e of this.byName.get(key) ?? []) {
-        if (e.id === excludeId || exact.has(e.id)) continue;
-        if (e.addressKey === address) exact.set(e.id, match(e, 'SAME_NAME_ADDRESS'));
+        if (e.id === excludeId) continue;
+        // Two blank addresses aren't "the same address": only a shared
+        // phone number makes those one customer.
+        const same = address ? e.addressKey === address : !e.addressKey && !!phone && e.phoneKey === phone;
+        if (same) exact.set(e.id, match(e, 'SAME_NAME_ADDRESS'));
         else addSimilar(e, 'SAME_NAME', 1);
       }
       const seen = new Set<string>();
@@ -162,7 +185,9 @@ export class CustomerDuplicateIndex {
         }
       }
     }
-    const phone = phoneKey(input.phone);
+    const npwp = npwpKey(input.npwp);
+    // Ahead of everything but a same-name match in the list shown.
+    for (const e of npwp ? (this.byNpwp.get(npwp) ?? []) : []) addSimilar(e, 'SAME_NPWP', 0.9);
     for (const e of phone ? (this.byPhone.get(phone) ?? []) : []) addSimilar(e, 'SAME_PHONE', 0.5);
 
     return {

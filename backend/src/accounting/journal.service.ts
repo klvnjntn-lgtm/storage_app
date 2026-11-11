@@ -45,6 +45,17 @@ export type ListJournalEntriesFilters = {
 // that compound silently over many entries with nothing else catching it.
 const EPSILON = 0.005; // rounding tolerance for Decimal(14,2) sums
 
+// An entry that still counts for its source document: posted, and not one
+// half of a reversal. Two kinds of undone entry exist — a pair voided
+// inside an open period (both VOID), and an original from a closed period
+// with its reversal posted later (both stay POSTED so the closed period's
+// figures don't move; reversedBy / reversalOfId mark them).
+const LIVE: Prisma.JournalEntryWhereInput = {
+  status: JournalEntryStatus.POSTED,
+  reversalOfId: null,
+  reversedBy: { is: null },
+};
+
 // The only service that writes JournalEntry/JournalEntryLine rows. Every
 // document-specific posting rule builds a set of lines and calls
 // postEntry() — it never touches the ledger tables directly.
@@ -166,8 +177,8 @@ export class JournalService {
     const entryDate = toBusinessDate(input.date, resolveTimezone(org));
     const fiscalPeriod = await this.getOrCreateOpenFiscalPeriod(tx, organizationId, entryDate);
 
-    // Only POSTED entries count as duplicates. A voided original AND its
-    // (also VOID) reversal are both ignored, so a source document can be
+    // Only live entries count as duplicates. A voided or reversed original
+    // and its reversal are both ignored, so a source document can be
     // reposted after a void.
     if (input.sourceId) {
       const existing = await tx.journalEntry.findFirst({
@@ -175,7 +186,7 @@ export class JournalService {
           organizationId,
           sourceType: input.sourceType,
           sourceId: input.sourceId,
-          status: JournalEntryStatus.POSTED,
+          ...LIVE,
         },
         select: { id: true },
       });
@@ -231,9 +242,16 @@ export class JournalService {
   }
 
   // Never mutate or delete a POSTED entry. To undo one, post its mirror
-  // image and link the pair. BOTH the original and the reversal end up VOID
-  // so they leave every POSTED-only report together (net effect: zero, not
-  // negative). The audit trail stays in the table via reversalOfId.
+  // image and link the pair (reversalOfId).
+  //
+  // While the original's period is still OPEN, both the original and the
+  // reversal end up VOID, so they leave every POSTED-only report together —
+  // as if the entry had never been made.
+  //
+  // Once that period is CLOSED or LOCKED its figures have been reported and
+  // must not move. The original then stays exactly as it is, and the
+  // reversal is posted today, in the current open period, where it shows as
+  // a correction. Both stay POSTED; over the two periods they net to zero.
   async voidEntry(
     organizationId: string,
     journalEntryId: string,
@@ -265,48 +283,46 @@ export class JournalService {
   ) {
     const original = await tx.journalEntry.findFirst({
       where: { id: journalEntryId, organizationId },
-      include: { lines: true, fiscalPeriod: true },
+      include: { lines: true, reversedBy: { select: { id: true } } },
     });
     if (!original) throw new BadRequestException('Journal entry not found');
     if (original.status === JournalEntryStatus.VOID) {
       throw new BadRequestException('Journal entry is already void');
     }
-    if (original.fiscalPeriod.status !== FiscalPeriodStatus.OPEN) {
-      const { month, year, status } = original.fiscalPeriod;
-      const hint =
-        status === FiscalPeriodStatus.LOCKED
-          ? 'Locked periods cannot be reopened.'
-          : 'Ask an admin to reopen the period first, then try again.';
-      throw new BadRequestException(
-        `Cannot void this entry — its fiscal period (${month}/${year}) is ${status}. ${hint}`,
-      );
+    if (original.reversalOfId || original.reversedBy) {
+      throw new BadRequestException('Journal entry is already reversed');
     }
 
+    // Read under the same lock a posting takes, so a close in progress has
+    // either landed or waits for this void.
+    const originalPeriod = await this.lockPeriodForPosting(tx, original.fiscalPeriodId);
+    const inOpenPeriod = originalPeriod.status === FiscalPeriodStatus.OPEN;
+    // A closed period keeps its entry; the correction goes in today's.
+    const period = inOpenPeriod
+      ? originalPeriod
+      : await this.getOrCreateOpenFiscalPeriod(tx, organizationId, await this.today(tx, organizationId));
+    const entryDate = inOpenPeriod ? original.entryDate : await this.today(tx, organizationId);
+
     const entryNumber = this.buildEntryNumber(
-      original.fiscalPeriod.year,
-      original.fiscalPeriod.month,
-      await this.nextEntrySeq(
-        tx,
-        organizationId,
-        original.fiscalPeriodId,
-        original.fiscalPeriod.year,
-        original.fiscalPeriod.month,
-      ),
+      period.year,
+      period.month,
+      await this.nextEntrySeq(tx, organizationId, period.id, period.year, period.month),
     );
 
     const reversal = await tx.journalEntry.create({
       data: {
         organizationId,
         entryNumber,
-        // Same date as the original, so the reversal sits inside the fiscal
-        // period it's filed under (it used to get "now" while being filed
-        // under the original's period).
-        entryDate: original.entryDate,
+        // Open period: the original's date, so the pair sits together in
+        // the period they both leave. Closed period: today.
+        entryDate,
         memo: reason ? `Reversal: ${reason}` : `Reversal of ${original.entryNumber ?? original.id}`,
         sourceType: original.sourceType,
         sourceId: original.sourceId,
-        status: JournalEntryStatus.VOID, // must leave reports together with the original
-        fiscalPeriodId: original.fiscalPeriodId,
+        // VOID leaves reports together with the original; POSTED is the
+        // correction a closed period's entry gets instead.
+        status: inOpenPeriod ? JournalEntryStatus.VOID : JournalEntryStatus.POSTED,
+        fiscalPeriodId: period.id,
         userId,
         reversalOfId: original.id,
         lines: {
@@ -322,9 +338,25 @@ export class JournalService {
       },
     });
 
-    await tx.journalEntry.update({ where: { id: original.id }, data: { status: JournalEntryStatus.VOID } });
+    if (inOpenPeriod) {
+      await tx.journalEntry.update({ where: { id: original.id }, data: { status: JournalEntryStatus.VOID } });
+    }
 
     return reversal;
+  }
+
+  private async today(tx: Prisma.TransactionClient, organizationId: string) {
+    const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+    return toBusinessDate(new Date(), resolveTimezone(org));
+  }
+
+  // The period row, share-locked until this transaction ends. Postings and
+  // voids read the status through here; closing or locking a period updates
+  // the row, which waits for every share lock. So a close can no longer
+  // slip in between a posting's "is it open?" check and its commit.
+  private async lockPeriodForPosting(tx: Prisma.TransactionClient, fiscalPeriodId: string) {
+    await tx.$queryRaw`SELECT id FROM "FiscalPeriod" WHERE id = ${fiscalPeriodId} FOR SHARE`;
+    return tx.fiscalPeriod.findUniqueOrThrow({ where: { id: fiscalPeriodId } });
   }
 
   async findPostedBySource(
@@ -334,39 +366,86 @@ export class JournalService {
     tx: Db = this.prisma,
   ) {
     return tx.journalEntry.findFirst({
-      where: { organizationId, sourceType, sourceId, status: JournalEntryStatus.POSTED },
+      where: { organizationId, sourceType, sourceId, ...LIVE },
     });
+  }
+
+  // Every live entry whose sourceId starts with `prefix` — for documents
+  // that post a run of entries under generated ids (an invoice's cost
+  // corrections, `${invoiceId}:cogs:recost:…`).
+  async findPostedBySourcePrefix(
+    organizationId: string,
+    sourceType: JournalSourceType,
+    prefix: string,
+    tx: Db = this.prisma,
+  ) {
+    return tx.journalEntry.findMany({
+      where: { organizationId, sourceType, sourceId: { startsWith: prefix }, ...LIVE },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async voidAllForSourcePrefix(
+    organizationId: string,
+    sourceType: JournalSourceType,
+    prefix: string,
+    userId: string | undefined,
+    reason: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const entries = await this.findPostedBySourcePrefix(organizationId, sourceType, prefix, tx);
+    for (const entry of entries) {
+      await this.voidEntryInner(tx, organizationId, entry.id, userId, reason);
+    }
+    return entries.length;
   }
 
 async closePeriod(organizationId: string, year: number, month: number) {
-  const existing = await this.prisma.fiscalPeriod.findUnique({
-    where: { organizationId_year_month: { organizationId, year, month } },
-  });
-  if (existing?.status === FiscalPeriodStatus.LOCKED) {
-    throw new BadRequestException('LOCKED periods cannot be changed');
-  }
-  if (existing?.status === FiscalPeriodStatus.CLOSED) {
-    throw new BadRequestException('Fiscal period is already closed');
-  }
-
-  return this.prisma.fiscalPeriod.upsert({
-    where: { organizationId_year_month: { organizationId, year, month } },
-    update: { status: FiscalPeriodStatus.CLOSED, closedAt: new Date() },
-    create: { organizationId, year, month, status: FiscalPeriodStatus.CLOSED, closedAt: new Date() },
-  });
+  return this.setPeriodStatus(organizationId, year, month, FiscalPeriodStatus.CLOSED);
 }
 
   async reopenPeriod(organizationId: string, year: number, month: number) {
-    const period = await this.prisma.fiscalPeriod.findUnique({
-      where: { organizationId_year_month: { organizationId, year, month } },
-    });
-    if (!period) throw new BadRequestException('Fiscal period not found');
-    if (period.status === FiscalPeriodStatus.LOCKED) {
-      throw new BadRequestException('LOCKED periods cannot be reopened');
-    }
-    return this.prisma.fiscalPeriod.update({
-      where: { id: period.id },
-      data: { status: FiscalPeriodStatus.OPEN, closedAt: null },
+    return this.setPeriodStatus(organizationId, year, month, FiscalPeriodStatus.OPEN);
+  }
+
+  // Permanent: for a period whose figures have gone to the tax office or
+  // an auditor. Nothing can be posted to it or reopen it afterwards; a
+  // correction to one of its documents posts in the current period instead
+  // (see voidEntry).
+  async lockPeriod(organizationId: string, year: number, month: number) {
+    return this.setPeriodStatus(organizationId, year, month, FiscalPeriodStatus.LOCKED);
+  }
+
+  // One transaction, with the row made first and then updated: the UPDATE
+  // waits for every posting that holds the period share-locked (see
+  // lockPeriodForPosting), so the status never changes underneath one.
+  private async setPeriodStatus(organizationId: string, year: number, month: number, to: FiscalPeriodStatus) {
+    return this.prisma.$transaction(async (tx) => {
+      if (to !== FiscalPeriodStatus.OPEN) {
+        await tx.$executeRaw`
+          INSERT INTO "FiscalPeriod" (id, "organizationId", year, month)
+          VALUES (${randomUUID()}, ${organizationId}, ${year}, ${month})
+          ON CONFLICT ("organizationId", year, month) DO NOTHING
+        `;
+      }
+      const [row] = await tx.$queryRaw<{ id: string; status: FiscalPeriodStatus }[]>`
+        SELECT id, status FROM "FiscalPeriod"
+        WHERE "organizationId" = ${organizationId} AND year = ${year} AND month = ${month}
+        FOR UPDATE
+      `;
+      if (!row) throw new BadRequestException('Fiscal period not found');
+      if (row.status === FiscalPeriodStatus.LOCKED) {
+        throw new BadRequestException(
+          to === FiscalPeriodStatus.OPEN ? 'LOCKED periods cannot be reopened' : 'LOCKED periods cannot be changed',
+        );
+      }
+      if (to === FiscalPeriodStatus.CLOSED && row.status === FiscalPeriodStatus.CLOSED) {
+        throw new BadRequestException('Fiscal period is already closed');
+      }
+      return tx.fiscalPeriod.update({
+        where: { id: row.id },
+        data: { status: to, closedAt: to === FiscalPeriodStatus.OPEN ? null : new Date() },
+      });
     });
   }
 
@@ -388,9 +467,11 @@ async closePeriod(organizationId: string, year: number, month: number) {
       VALUES (${randomUUID()}, ${organizationId}, ${year}, ${month})
       ON CONFLICT ("organizationId", year, month) DO NOTHING
     `;
-    const period = await tx.fiscalPeriod.findUniqueOrThrow({
+    const { id } = await tx.fiscalPeriod.findUniqueOrThrow({
       where: { organizationId_year_month: { organizationId, year, month } },
+      select: { id: true },
     });
+    const period = await this.lockPeriodForPosting(tx, id);
 
     if (period.status !== FiscalPeriodStatus.OPEN) {
       const hint =

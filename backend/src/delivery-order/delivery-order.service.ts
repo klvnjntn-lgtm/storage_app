@@ -32,7 +32,8 @@ import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { backfillCustomerPin } from '../customers/customer-pin-backfill';
-import { currentCosts, receiveAtCost } from '../accounting/inventory-costing';
+import { currentCosts, lockCosts, lockProducts, receiveAtCost } from '../accounting/inventory-costing';
+import { normalizeSerials, requiredSaleSerials, takeSerials } from '../serials/serial-moves';
 
 import puppeteer from 'puppeteer';
 import { withPdfRenderSlot } from '../common/print/pdf-render-limiter';
@@ -343,7 +344,16 @@ export class DeliveryOrderService {
   // productId/quantity/unitCost — postCogs() groups by location itself,
   // which is what makes per-location P&L work correctly instead of every
   // COGS/Inventory line landing with locationId: null.
-  async ship(organizationId: string, id: string, userId: string) {
+  // serials: for serial-tracked products leaving stock here, which units —
+  // one list per delivery line. Left out (or short), the reply is a 400
+  // with code SERIALS_REQUIRED listing what each line still needs, so the
+  // page can ask and send again.
+  async ship(
+    organizationId: string,
+    id: string,
+    userId: string,
+    serials: { itemId: string; serialNumbers: string[] }[] = [],
+  ) {
     const deliveryOrder = await this.prisma.deliveryOrder.findFirst({
       where: { id, organizationId },
       include: { items: true },
@@ -393,11 +403,66 @@ export class DeliveryOrderService {
         // cost copied from the sales order line when this delivery was
         // planned. Stamped on the delivery line so a return reverses
         // exactly what was booked.
-        const costNow = await currentCosts(
+        // Under the products' row locks: see lockProducts.
+        const costNow = await lockCosts(
           tx,
           organizationId,
-          deliveryOrder.items.filter((i) => i.productId).map((i) => i.productId!),
+          deliveryOrder.items.map((i) => i.productId),
         );
+        // Serial-tracked units leave for good here: name them, unless the
+        // invoice already did when it was issued.
+        const tracked = new Set(
+          (
+            await tx.product.findMany({
+              where: {
+                id: { in: deliveryOrder.items.map((i) => i.productId).filter((x): x is string => !!x) },
+                organizationId,
+                trackSerials: true,
+              },
+              select: { id: true },
+            })
+          ).map((p) => p.id),
+        );
+        const namedByItem = new Map(serials.map((l) => [l.itemId, normalizeSerials(l.serialNumbers)]));
+        const stillNeeded: { itemId: string; productId: string; productName: string; locationId: string; required: number }[] = [];
+        for (const item of deliveryOrder.items) {
+          if (!item.productId || !item.locationId || !tracked.has(item.productId)) continue;
+          const required = await requiredSaleSerials(tx, {
+            organizationId,
+            productId: item.productId,
+            quantity: Number(item.quantity),
+            invoiceId,
+          });
+          const named = namedByItem.get(item.id) ?? [];
+          if (named.length !== required) {
+            stillNeeded.push({
+              itemId: item.id,
+              productId: item.productId,
+              productName: item.productName,
+              locationId: item.locationId,
+              required,
+            });
+            continue;
+          }
+          // Taken as each line is checked, so the next line of the same
+          // product counts them as already sold.
+          await takeSerials(tx, {
+            organizationId,
+            productId: item.productId,
+            locationId: item.locationId,
+            serials: named,
+            to: 'SOLD',
+            refs: { invoiceId: invoiceId ?? undefined },
+          });
+        }
+        if (stillNeeded.length > 0) {
+          throw new BadRequestException({
+            message: 'Serial numbers are needed before this delivery can ship',
+            code: 'SERIALS_REQUIRED',
+            lines: stillNeeded,
+          });
+        }
+
         for (const item of deliveryOrder.items) {
           if (!item.productId || !item.locationId) continue;
           const unitCost = costNow.get(item.productId) ?? (item.unitCost != null ? Number(item.unitCost) : null);
@@ -1014,6 +1079,14 @@ export class DeliveryOrderService {
       // order used to both pass the "not yet returned" check below and both
       // put the stock back.
       await tx.$queryRaw`SELECT id FROM "DeliveryOrder" WHERE id = ${id} FOR UPDATE`;
+      // The returned units change each product's average cost — see lockProducts.
+      await lockProducts(
+        tx,
+        organizationId,
+        (await tx.deliveryOrderItem.findMany({ where: { deliveryOrderId: id }, select: { productId: true } })).map(
+          (i) => i.productId,
+        ),
+      );
       const deliveryOrder = await tx.deliveryOrder.findFirst({
         where: { id, organizationId },
         include: { items: true },

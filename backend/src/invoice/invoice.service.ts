@@ -35,7 +35,7 @@ import { PostingRulesService } from '../accounting/posting-rules.service';
 import { JournalService } from '../accounting/journal.service';
 import { businessDayBounds, orgToday, resolveTimezone, todayBusinessDate } from '../accounting/business-date';
 import { deriveStatus } from '../payments/payment-status.util';
-import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
+import { blendLineCost, lockCosts, lockProducts, receiveAtCost } from '../accounting/inventory-costing';
 import { PlanLimitsService } from '../billing/plan-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assertSerialCount, normalizeSerials, restoreInvoiceSerials, takeSerials } from '../serials/serial-moves';
@@ -653,15 +653,17 @@ async issue(
         // COGS at the weighted-average cost as of now, when the stock
         // leaves — not the cost copied onto the line when it was drafted,
         // which a goods receipt since then may have moved.
-        const costNow = await currentCosts(
+        // Read under the products' row locks, so a goods receipt can't
+        // move the average between this read and the stock leaving.
+        const costNow = await lockCosts(
           tx,
           organizationId,
-          invoice.items.filter((i) => i.productId).map((i) => i.productId!),
+          invoice.items.map((i) => i.productId),
         );
         for (const item of invoice.items) {
           if (!item.productId) continue;
           const unitCost = costNow.get(item.productId) ?? (item.unitCost != null ? Number(item.unitCost) : null);
-          const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
+          const { fulfilledQuantity, oversoldQuantity } = await this.stockService.fulfill(
             organizationId,
             item.productId,
             item.locationId as string,
@@ -672,12 +674,16 @@ async issue(
             stockPolicy,
           );
           if (fulfilledQuantity > 0) {
+            // Units whose real cost isn't known yet: the ones sold below
+            // zero, or all of them when the product has no cost at all (no
+            // COGS can be booked for those until someone sets one).
+            const provisional = unitCost == null ? fulfilledQuantity : oversoldQuantity;
             await tx.invoiceItem.update({
               where: { id: item.id },
               data: {
                 fulfilledQuantity: { increment: fulfilledQuantity },
                 unitCost,
-                ...(oversold ? { costProvisional: true } : {}),
+                ...(provisional > 0 ? { costProvisional: true, provisionalQuantity: provisional } : {}),
               },
             });
             // Actual fulfilled qty, not ordered: oversold units haven't shipped.
@@ -1344,6 +1350,8 @@ async issue(
         kind: p.kind,
         note: p.note,
         createdAt: p.createdAt,
+        // The day the money moved, when it was recorded later.
+        paymentDate: p.paymentDate,
       })),
     };
   }
@@ -1812,15 +1820,18 @@ async editIssuedInvoice(
     // line added during this edit has no history and takes today's.
     const productNameByLineIndex = new Map<number, string | null>();
     const skuByLineIndex = new Map<number, string | null>();
-    const costProvisionalByLineIndex = new Map<number, boolean>();
+    // Units per line still at a provisional cost (see InvoiceItem.provisionalQuantity).
+    const provisionalQtyByLineIndex = new Map<number, number>();
 
     const productIds = dto.items.filter((i) => i.productId).map((i) => i.productId!);
     const products = productIds.length
       ? await tx.product.findMany({ where: { id: { in: productIds }, organizationId } })
       : [];
     const productInfoById = new Map(products.map((p) => [p.id, p]));
-    // Units fulfilled by this edit leave stock now, at today's average.
-    const costNow = await currentCosts(tx, organizationId, productIds);
+    // Units fulfilled by this edit leave stock now, at today's average —
+    // read under the row locks of every product this edit takes or puts
+    // back (removed lines return theirs further down).
+    const costNow = await lockCosts(tx, organizationId, [...productIds, ...invoice.items.map((i) => i.productId)]);
 
     for (let idx = 0; idx < lines.length; idx++) {
       const l = lines[idx];
@@ -1837,7 +1848,13 @@ async editIssuedInvoice(
       unitCostByLineIndex.set(idx, oldUnitCost ?? l.unitCost);
       productNameByLineIndex.set(idx, identity?.productName ?? identity?.product?.name ?? currentProduct?.name ?? null);
       skuByLineIndex.set(idx, identity?.sku ?? identity?.product?.sku ?? currentProduct?.sku ?? null);
-      if (oldItem?.costProvisional) costProvisionalByLineIndex.set(idx, true);
+      if (oldItem?.costProvisional) {
+        // A line flagged before provisionalQuantity existed counts in full.
+        provisionalQtyByLineIndex.set(
+          idx,
+          oldItem.provisionalQuantity != null ? Number(oldItem.provisionalQuantity) : Number(oldItem.fulfilledQuantity),
+        );
+      }
       const oldFulfilled = oldItem ? Number(oldItem.fulfilledQuantity) : 0;
       const oldQty = oldItem ? Number(oldItem.quantity) : 0;
 
@@ -1856,20 +1873,26 @@ async editIssuedInvoice(
       if (movesStockDirectly) {
         const addedDemand = this.round2(l.quantity - oldQty);
         if (addedDemand > 0) {
-          const { fulfilledQuantity, oversold } = await this.stockService.fulfill(
+          const { fulfilledQuantity, oversoldQuantity } = await this.stockService.fulfill(
             organizationId, l.productId, l.locationId!, addedDemand, userId,
             { type: EventType.SALE, invoiceId: invoice.id }, tx, stockPolicy,
           );
           fulfilledForThisLine = this.round2(fulfilledForThisLine + fulfilledQuantity);
-          if (oversold) costProvisionalByLineIndex.set(idx, true);
           // Units already fulfilled keep the cost they left at; the new ones
           // are at today's average. The line carries the blend of the two,
           // which is what the COGS repost below books for the whole line.
           if (fulfilledQuantity > 0) {
+            const newCost = costNow.get(l.productId) ?? l.unitCost;
+            const hadNoCost = oldFulfilled > 0 && oldUnitCost == null;
             unitCostByLineIndex.set(
               idx,
-              blendLineCost(oldFulfilled, oldItem ? oldUnitCost : null, fulfilledQuantity, costNow.get(l.productId) ?? l.unitCost),
+              blendLineCost(oldFulfilled, oldItem ? oldUnitCost : null, fulfilledQuantity, newCost),
             );
+            // The blend prices earlier uncosted units at the new cost, so
+            // once there is one they're no longer waiting for it.
+            const carried = hadNoCost && newCost != null ? 0 : (provisionalQtyByLineIndex.get(idx) ?? 0);
+            const added = newCost == null ? fulfilledQuantity : oversoldQuantity;
+            provisionalQtyByLineIndex.set(idx, this.round2(carried + added));
           }
         }
       }
@@ -1961,7 +1984,8 @@ async editIssuedInvoice(
             unitCost: unitCostByLineIndex.get(idx) ?? l.unitCost,
             productName: productNameByLineIndex.get(idx) ?? null,
             sku: skuByLineIndex.get(idx) ?? null,
-            costProvisional: costProvisionalByLineIndex.get(idx) ?? false,
+            costProvisional: (provisionalQtyByLineIndex.get(idx) ?? 0) > 0,
+            provisionalQuantity: (provisionalQtyByLineIndex.get(idx) ?? 0) > 0 ? provisionalQtyByLineIndex.get(idx) : null,
             unit: l.unit,
             lineTotal: l.lineTotal,
             discountType: l.discountType,
@@ -2002,6 +2026,11 @@ async editIssuedInvoice(
         if (priorCogs) {
           await this.journal.voidEntry(organizationId, priorCogs.id, userId, voidReason, tx);
         }
+        // Cost corrections are already inside each line's unitCost, which
+        // the repost below books in full — left posted, they counted twice.
+        await this.journal.voidAllForSourcePrefix(
+          organizationId, JournalSourceType.INVOICE, this.postingRules.invoiceRecostSourcePrefix(invoice.id), userId, voidReason, tx,
+        );
 
         const costedLines = result.items
           .filter((i) => i.productId && Number(i.fulfilledQuantity) > 0)
@@ -2206,13 +2235,31 @@ async recostInvoiceItem(
 
     const oldUnitCost = item.unitCost != null ? Number(item.unitCost) : 0;
     const fulfilledQuantity = Number(item.fulfilledQuantity);
-    const deltaAmount = (resolvedUnitCost - oldUnitCost) * fulfilledQuantity;
+    // Only the units that left at a provisional cost are corrected. The
+    // rest of the line came off the shelf at a real cost; re-pricing those
+    // too took more out of Inventory than the stock was ever worth.
+    const provisionalQuantity = Math.min(
+      fulfilledQuantity,
+      item.provisionalQuantity != null
+        ? Number(item.provisionalQuantity)
+        : await this.legacyOversoldQuantity(tx, organizationId, invoiceId, item, fulfilledQuantity),
+    );
+    const deltaAmount = this.round2((resolvedUnitCost - oldUnitCost) * provisionalQuantity);
+    // What the line's fulfilled units cost on average after the correction —
+    // what a later return or void puts back, and an edit reposts.
+    const blendedUnitCost =
+      fulfilledQuantity > 0
+        ? this.round2(
+            (oldUnitCost * (fulfilledQuantity - provisionalQuantity) + resolvedUnitCost * provisionalQuantity) /
+              fulfilledQuantity,
+          )
+        : resolvedUnitCost;
 
     if (deltaAmount !== 0) {
       await this.postingRules.postCogsCorrection(
         organizationId,
         {
-          sourceId: `${invoiceId}:cogs:recost:${itemId}:${Date.now()}`,
+          sourceId: `${this.postingRules.invoiceRecostSourcePrefix(invoiceId)}${itemId}:${Date.now()}`,
           date: new Date(),
           memo: `Cost correction for invoice item ${itemId}`,
           deltaAmount,
@@ -2225,7 +2272,7 @@ async recostInvoiceItem(
 
     const updated = await tx.invoiceItem.update({
       where: { id: itemId },
-      data: { unitCost: resolvedUnitCost, costProvisional: false },
+      data: { unitCost: blendedUnitCost, costProvisional: false, provisionalQuantity: null },
     });
 
     await tx.invoiceActivityEvent.create({
@@ -2234,12 +2281,41 @@ async recostInvoiceItem(
         organizationId,
         userId,
         eventType: InvoiceActivityEventType.COST_CORRECTED,
-        changes: { itemId, oldUnitCost, newUnitCost: resolvedUnitCost, deltaAmount, fulfilledQuantity },
+        changes: { itemId, oldUnitCost, newUnitCost: resolvedUnitCost, lineUnitCost: blendedUnitCost, deltaAmount, fulfilledQuantity, provisionalQuantity },
       },
     });
 
     return updated;
   });
+}
+
+// Lines flagged provisional before provisionalQuantity was recorded: work
+// the oversold units out from the stock movements, which stamp how far below
+// zero each sale left the shelf. With nothing to go on, the whole line.
+private async legacyOversoldQuantity(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  invoiceId: string,
+  item: { productId: string | null; locationId: string | null; unitCost: Prisma.Decimal | null },
+  fulfilledQuantity: number,
+) {
+  if (item.unitCost == null || !item.productId) return fulfilledQuantity;
+  const sales = await tx.event.findMany({
+    where: {
+      organizationId,
+      invoiceId,
+      productId: item.productId,
+      ...(item.locationId && { fromLocationId: item.locationId }),
+      type: EventType.SALE,
+      oversold: true,
+      balanceAfter: { not: null },
+    },
+    select: { quantity: true, balanceAfter: true },
+  });
+  if (sales.length === 0) return fulfilledQuantity;
+  return this.round2(
+    sales.reduce((sum, e) => sum + Math.min(Math.abs(Number(e.quantity)), -Number(e.balanceAfter)), 0),
+  );
 }
 
 async voidInvoice(
@@ -2386,6 +2462,7 @@ async voidInvoice(
     // those two booleans were only ever meant to decide behavior at
     // issue() time, not to be recomputed later.
     if (invoice.fulfillmentPath === 'DIRECT_ISSUE') {
+      await lockProducts(tx, organizationId, invoice.items.map((i) => i.productId));
       for (const item of invoice.items) {
         if (!item.productId || !item.locationId) continue;
         const fulfilled = Number(item.fulfilledQuantity);
@@ -2418,6 +2495,17 @@ async voidInvoice(
       organizationId,
       JournalSourceType.INVOICE,
       this.postingRules.invoiceJournalSourceIds(invoice.id),
+      userId,
+      `Invoice voided: ${reason.trim()}`,
+      tx,
+    );
+    // And its cost corrections (recostInvoiceItem), posted under generated
+    // ids: the units come back at the corrected cost above, so a correction
+    // left posted was cost of sales for a sale that no longer exists.
+    await this.journal.voidAllForSourcePrefix(
+      organizationId,
+      JournalSourceType.INVOICE,
+      this.postingRules.invoiceRecostSourcePrefix(invoice.id),
       userId,
       `Invoice voided: ${reason.trim()}`,
       tx,

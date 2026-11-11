@@ -149,6 +149,34 @@ export async function takeSerials(
   }
 }
 
+// How many serial numbers a movement that ships sold units still has to
+// name. With an invoice behind it, units the invoice already named when it
+// was issued don't need naming again: what's left is the invoice's
+// quantity of the product less the serials already sold on it. With no
+// invoice yet (a sales order delivered before invoicing), every unit.
+export async function requiredSaleSerials(
+  tx: Tx,
+  p: { organizationId: string; productId: string; quantity: number; invoiceId?: string | null },
+): Promise<number> {
+  const units = Math.round(p.quantity);
+  if (!p.invoiceId) return units;
+  const [lines, sold] = await Promise.all([
+    tx.invoiceItem.aggregate({
+      where: { invoiceId: p.invoiceId, productId: p.productId },
+      _sum: { quantity: true },
+    }),
+    tx.productSerial.count({
+      where: {
+        organizationId: p.organizationId,
+        productId: p.productId,
+        invoiceId: p.invoiceId,
+        status: SerialStatus.SOLD,
+      },
+    }),
+  ]);
+  return Math.max(0, Math.min(units, Math.round(Number(lines._sum.quantity ?? 0)) - sold));
+}
+
 // A voided invoice puts its units back where they were sold from.
 export async function restoreInvoiceSerials(
   tx: Tx,

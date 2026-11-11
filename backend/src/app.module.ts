@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { BranchRecordGuard } from './auth/guards/branch-record.guard';
+import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
 import { SentryModule } from '@sentry/nestjs/setup';
 import { TranslatingExceptionFilter } from './i18n/translating-exception.filter';
 import { TranslateMessageInterceptor } from './i18n/translate-message.interceptor';
@@ -212,6 +213,11 @@ import { SerialsModule } from './serials/serials.module';
     {
       provide: APP_GUARD,
       useClass: LicenseGuard, // 3. confirms the license is valid
+    },
+    {
+      // First, so it wraps the others and keeps the reply as it is sent.
+      provide: APP_INTERCEPTOR,
+      useClass: IdempotencyInterceptor, // a write repeated with the same Idempotency-Key runs once
     },
     {
       provide: APP_INTERCEPTOR,

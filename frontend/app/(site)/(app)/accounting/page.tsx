@@ -37,6 +37,7 @@ const ACCENTS: Record<string, { iconBg: string; iconBorder: string; iconText: st
   '/accounting/ar-aging': { iconBg: 'bg-amber-50', iconBorder: 'border-amber-200', iconText: 'text-amber-700', hex: '#eda100' },
   '/accounting/ap-aging': { iconBg: 'bg-purple-50', iconBorder: 'border-purple-200', iconText: 'text-purple-700', hex: '#9333ea' },
   '/accounting/trial-balance': { iconBg: 'bg-gray-100', iconBorder: 'border-gray-200', iconText: 'text-gray-500', hex: '#94a3b8' },
+  '/accounting/stock-check': { iconBg: 'bg-gray-100', iconBorder: 'border-gray-200', iconText: 'text-gray-500', hex: '#94a3b8' },
   '/accounting/ledger': { iconBg: 'bg-gray-100', iconBorder: 'border-gray-200', iconText: 'text-gray-500', hex: '#94a3b8' },
 };
 
@@ -554,6 +555,15 @@ export default function AccountingHome() {
             description={t('accounting.overview.trialBalanceDescription')}
             href="/accounting/trial-balance"
             icon={Rows3}
+            span="normal"
+            viewAllLabel={viewAllLabel}
+            onNavigate={router.push}
+          />
+          <ReportCard
+            title={t('nav.items.stockValueCheck')}
+            description={t('accounting.overview.stockCheckDescription')}
+            href="/accounting/stock-check"
+            icon={PackageSearch}
             span="normal"
             viewAllLabel={viewAllLabel}
             onNavigate={router.push}

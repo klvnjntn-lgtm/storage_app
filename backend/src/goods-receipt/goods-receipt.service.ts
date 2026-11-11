@@ -5,7 +5,7 @@ import { TenantOwnershipService } from '../shared/documents/tenant-ownership.ser
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
 import { PurchaseOrderStatus, EventType, Prisma, CostChangeSource } from '@prisma/client';
-import { receiveAtCost } from '../accounting/inventory-costing';
+import { lockProducts, receiveAtCost } from '../accounting/inventory-costing';
 import { ReceiveGoodsDto } from './dto/goods-receipt.dto';
 import { BatchesService } from '../batches/batches.service';
 import { parseDateOnly } from '../accounting/business-date';
@@ -158,6 +158,10 @@ export class GoodsReceiptService {
       }
 
       assertWithinRemaining(await this.receivedQuantitiesByPoItem(purchaseOrderId, tx));
+
+      // Every product on the receipt, in id order, before any stock moves
+      // (receiveAtCost below re-takes them one by one) — see lockProducts.
+      await lockProducts(tx, organizationId, productIds);
 
       const receiptNumber = await this.numbering.nextSequential(tx, organizationId, 'GOODS_RECEIPT', 'GR');
 

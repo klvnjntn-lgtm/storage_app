@@ -160,6 +160,9 @@ export class OpeningBalanceService {
           sourceType: JournalSourceType.OPENING_BALANCE,
           sourceId: SOURCE_ID[side],
           status: JournalEntryStatus.POSTED,
+          // Not one half of a closed-period reversal (see JournalService.voidEntry).
+          reversalOfId: null,
+          reversedBy: { is: null },
         },
         include: { lines: true },
       });

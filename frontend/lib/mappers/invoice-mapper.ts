@@ -89,6 +89,8 @@ export type InvoicePrintView = {
     kind?: 'PAYMENT' | 'REFUND' | 'CREDIT_OUT' | 'CREDIT_IN' | 'DEPOSIT_IN';
     note: string | null;
     createdAt: string;
+    // The day the money moved, when it was recorded on a later day.
+    paymentDate?: string | null;
   }[];
 };
 

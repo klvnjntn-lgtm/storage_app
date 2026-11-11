@@ -304,6 +304,39 @@ describe('Invoice flows across documents', () => {
     });
   });
 
+  describe('serial numbers on a delivery', () => {
+    it('ships only once the units are named, and marks them sold', async () => {
+      const productId = await product({ [rackA]: 10 });
+      await prisma.product.update({ where: { id: productId }, data: { trackSerials: true } });
+      await prisma.productSerial.createMany({
+        data: ['D1', 'D2', 'D3'].map((serialNumber) => ({
+          organizationId: orgId,
+          productId,
+          serialNumber,
+          locationId: rackA,
+        })),
+      });
+      const order = await orders.createFromQuotation(orgId, adminId, await sentQuotation(productId));
+      await orders.confirm(orgId, order.id, adminId);
+      const soItem = await prisma.salesOrderItem.findFirstOrThrow({ where: { salesOrderId: order.id } });
+      const delivery = await deliveries.create(orgId, adminId, {
+        salesOrderId: order.id,
+        locationId: rackA,
+        items: [{ salesOrderItemId: soItem.id, quantity: 2 }],
+      } as any);
+      const doItem = await prisma.deliveryOrderItem.findFirstOrThrow({ where: { deliveryOrderId: delivery.id } });
+
+      const refusal = await deliveries.ship(orgId, delivery.id, adminId).catch((e) => e.getResponse());
+      expect(refusal).toMatchObject({ code: 'SERIALS_REQUIRED', lines: [{ itemId: doItem.id, required: 2 }] });
+      expect(await qtyAt(productId, rackA)).toBe(10);
+
+      await deliveries.ship(orgId, delivery.id, adminId, [{ itemId: doItem.id, serialNumbers: ['D1', 'D3'] }]);
+      expect(await qtyAt(productId, rackA)).toBe(8);
+      const left = await prisma.productSerial.findMany({ where: { productId, status: 'IN_STOCK' } });
+      expect(left.map((s) => s.serialNumber)).toEqual(['D2']);
+    });
+  });
+
   describe('stock import', () => {
     it('accepts numeric SKU and location cells', async () => {
       const sku = Math.floor(Math.random() * 1e9);

@@ -290,8 +290,8 @@ export class StockService {
     context: StockMovementContext,
     tx?: Prisma.TransactionClient,
     policy: { mode: StockPolicy; confirmOversell?: boolean } = { mode: StockPolicy.BLOCK },
-  ): Promise<{ fulfilledQuantity: number; shortfall: number; oversold: boolean }> {
-    if (requestedQty <= 0) return { fulfilledQuantity: 0, shortfall: 0, oversold: false };
+  ): Promise<{ fulfilledQuantity: number; shortfall: number; oversold: boolean; oversoldQuantity: number }> {
+    if (requestedQty <= 0) return { fulfilledQuantity: 0, shortfall: 0, oversold: false, oversoldQuantity: 0 };
 
     const run = async (client: Prisma.TransactionClient) => {
       await this.assertProductActive(orgId, productId, client);
@@ -364,7 +364,12 @@ export class StockService {
       // The shortfall is read straight off InvoiceItem.quantity -
       // fulfilledQuantity by whoever needs it.
 
-      return { fulfilledQuantity, shortfall: requestedQty - fulfilledQuantity, oversold };
+      // The units of this movement that came from below zero — the ones
+      // whose real cost isn't known until the stock that covers them arrives.
+      const oversoldQuantity = oversold
+        ? Math.round(Math.min(fulfilledQuantity, -balanceAfter) * 100) / 100
+        : 0;
+      return { fulfilledQuantity, shortfall: requestedQty - fulfilledQuantity, oversold, oversoldQuantity };
     };
 
     return tx ? run(tx) : this.prisma.$transaction(run);

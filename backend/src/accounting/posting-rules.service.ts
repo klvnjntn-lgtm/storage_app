@@ -101,6 +101,13 @@ export class PostingRulesService {
     return [invoiceId, `${invoiceId}:cogs:issue`];
   }
 
+  // Cost corrections (InvoiceService.recostInvoiceItem) post under
+  // `${prefix}${itemId}:${timestamp}`, one entry each. An invoice void or
+  // edit reverses every entry under this prefix.
+  invoiceRecostSourcePrefix(invoiceId: string): string {
+    return `${invoiceId}:cogs:recost:`;
+  }
+
   // Centralizes the sourceId convention for a payroll run's journal entries
   // (postPayrollRun's `payrollId` + postPayrollPaid's `${payrollId}:paid`,
   // which only exists once the run reached PAID). voidAllForSource no-ops
@@ -258,7 +265,8 @@ export class PostingRulesService {
     return this.journal.postEntry(
       organizationId,
       {
-        date: payment.createdAt,
+        // The day the money moved, when that was recorded; else when it was typed in.
+        date: payment.paymentDate ?? payment.createdAt,
         memo: `Payment received for invoice ${payment.invoice.invoiceNumber ?? payment.invoice.id}`,
         sourceType: JournalSourceType.PAYMENT,
         sourceId: payment.id,
@@ -514,7 +522,7 @@ export class PostingRulesService {
     return this.journal.postEntry(
       organizationId,
       {
-        date: refund.createdAt,
+        date: refund.paymentDate ?? refund.createdAt,
         memo: `Refund to customer for invoice ${refund.invoice.invoiceNumber ?? refund.invoice.id}`,
         sourceType: JournalSourceType.PAYMENT,
         sourceId: refund.id,
@@ -1092,6 +1100,52 @@ export class PostingRulesService {
               { accountId: counterAccount, debit: amount, description: 'Adjustment offset', locationId },
               { accountId: inventory, credit: amount, description: 'Inventory decrease', locationId },
             ],
+      },
+      tx,
+    );
+  }
+
+  // A product's cost was changed by hand while stock was on the shelf: the
+  // stock is now worth `amount` more (positive) or less (negative), and the
+  // Inventory account follows. Against Inventory Adjustments (a gain or
+  // loss) — or Opening Balance Equity when the stock had no cost before,
+  // since it was never in the ledger at all.
+  async postInventoryRevaluation(
+    organizationId: string,
+    params: { sourceId: string; date: Date; memo: string; amount: number; firstCost: boolean; userId?: string },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const amount = this.round2(Math.abs(params.amount));
+    if (amount === 0) return null;
+
+    const [inventory, counterAccount] = await Promise.all([
+      this.accounts.resolve(organizationId, SystemAccountKey.INVENTORY, db),
+      this.accounts.resolve(
+        organizationId,
+        params.firstCost ? SystemAccountKey.OPENING_BALANCE_EQUITY : SystemAccountKey.INVENTORY_ADJUSTMENT,
+        db,
+      ),
+    ]);
+
+    return this.journal.postEntry(
+      organizationId,
+      {
+        date: params.date,
+        memo: params.memo,
+        sourceType: JournalSourceType.STOCK_ADJUSTMENT,
+        sourceId: params.sourceId,
+        userId: params.userId,
+        lines:
+          params.amount > 0
+            ? [
+                { accountId: inventory, debit: amount, description: 'Stock revalued up' },
+                { accountId: counterAccount, credit: amount, description: 'Revaluation offset' },
+              ]
+            : [
+                { accountId: counterAccount, debit: amount, description: 'Revaluation offset' },
+                { accountId: inventory, credit: amount, description: 'Stock revalued down' },
+              ],
       },
       tx,
     );

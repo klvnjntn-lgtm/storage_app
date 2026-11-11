@@ -540,6 +540,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/accounting/profit-loss', label: t('nav.items.profitLoss'), icon: TrendingUp },
     { href: '/accounting/balance-sheet', label: t('nav.items.balanceSheet'), icon: Scale },
     { href: '/accounting/trial-balance', label: t('nav.items.trialBalance'), icon: Rows3 },
+    { href: '/accounting/stock-check', label: t('nav.items.stockValueCheck'), icon: PackageSearch },
     { href: '/accounting/cash-flow', label: t('nav.items.cashFlow'), icon: Banknote },
     { href: '/accounting/ar-aging', label: t('nav.items.arAging'), icon: Wallet },
     { href: '/accounting/ap-aging', label: t('nav.items.apAging'), icon: ShoppingCart },

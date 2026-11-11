@@ -887,7 +887,7 @@ export default function InvoiceDetailPage() {
                           )}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {formatDMYTime(new Date(p.createdAt))}
+                          {p.paymentDate ? formatDMY(parseCalendarDate(p.paymentDate)) : formatDMYTime(new Date(p.createdAt))}
                           {p.note ? ` · ${p.note}` : ''}
                         </p>
                       </div>

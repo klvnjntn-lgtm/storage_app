@@ -1,5 +1,5 @@
 // payments/dto/record-payment.dto.ts
-import { IsPositive, IsOptional, IsEnum, IsString, IsUUID, MaxLength, IsNumber, IsArray, ArrayMinSize, ArrayMaxSize, ValidateNested } from 'class-validator';
+import { IsPositive, IsOptional, Matches, IsEnum, IsString, IsUUID, MaxLength, IsNumber, IsArray, ArrayMinSize, ArrayMaxSize, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
 
@@ -24,6 +24,13 @@ amount: number;
   @IsOptional()
   @IsUUID()
   bankAccountId?: string;
+
+  // The day the money actually moved (YYYY-MM-DD), when it's being typed
+  // in later — a transfer spotted on the bank statement. Left out = today.
+  // Never in the future; the journal entry is dated by it.
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'paymentDate must be a date in YYYY-MM-DD format' })
+  paymentDate?: string;
 }
 
 export class SplitPaymentDto {

@@ -78,6 +78,8 @@ const SKIPPED_MODELS = new Set([
   'PartInterchange',
   'PartWorkshopEvidence',
   'PartSearchTerm',
+  // Replies kept for a day so a repeated request isn't run twice.
+  'IdempotencyRecord',
 ]);
 
 // Columns left out of an export: what belongs to the source install

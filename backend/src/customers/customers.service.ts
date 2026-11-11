@@ -7,13 +7,7 @@ import { manualPinData } from './customer-pin-backfill';
 import { syncCustomerToOpenStops } from './customer-stop-sync';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { CreateCustomerRequestDto } from './dto/create-customer.dto';
-import {
-  addressKey,
-  CustomerDuplicateIndex,
-  nameKey,
-  npwpKey,
-  type DuplicateCandidate,
-} from './customer-duplicates';
+import { CustomerDuplicateIndex, identityKey, type DuplicateCandidate } from './customer-duplicates';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ImportCustomerRowDto } from './dto/import-customers.dto';
 import {
@@ -183,12 +177,20 @@ export class CustomersService {
 // Every customer of the org, indexed for duplicate lookups (see
 // customer-duplicates.ts). Loaded per request: a check must see customers
 // added a moment ago.
-private async duplicateIndex(organizationId: string) {
-  const customers = await this.prisma.customer.findMany({
+private async duplicateIndex(organizationId: string, db: Prisma.TransactionClient | PrismaService = this.prisma) {
+  const customers = await db.customer.findMany({
     where: { organizationId },
     select: { id: true, name: true, address: true, phone: true, npwp: true },
   });
   return new CustomerDuplicateIndex(customers);
+}
+
+// One customer save per organization at a time, held until the transaction
+// ends. A duplicate check followed by an insert isn't safe on its own: two
+// saves of the same customer at once (a double tap, the form and an import)
+// both checked, both found nothing, and both saved.
+private lockCustomerSaves(tx: Prisma.TransactionClient, organizationId: string) {
+  return tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-save:${organizationId}`}))`;
 }
 
 // Exact copies and similar customers for each candidate, in order — what
@@ -198,52 +200,57 @@ async checkDuplicates(organizationId: string, rows: DuplicateCandidate[], exclud
   return rows.map((r) => index.check(r, excludeId));
 }
 
-// An exact copy (same name and address, or same NPWP) is refused. A similar
-// customer only goes in with confirmSimilar — the caller shows the matches
-// and asks first. Both errors carry the matches so the form can list them.
+// An exact copy (see customer-duplicates.ts) is refused. A similar customer
+// only goes in with confirmSimilar — the caller shows the matches and asks
+// first. Both errors carry the matches so the form can list them.
 async create(organizationId: string, dto: CreateCustomerRequestDto) {
   const { confirmSimilar, ...data } = dto;
   await this.assertPriceLevel(organizationId, data.priceLevelId);
-  const { exact, similar } = (await this.duplicateIndex(organizationId)).check(data);
-  if (exact.length > 0) {
-    throw new ConflictException({ message: 'This customer already exists', code: 'CUSTOMER_EXISTS', matches: exact });
-  }
-  if (similar.length > 0 && !confirmSimilar) {
-    throw new ConflictException({
-      message: 'A similar customer already exists — confirm to add this one anyway',
-      code: 'SIMILAR_CUSTOMERS',
-      matches: similar,
+  return this.prisma.$transaction(async (tx) => {
+    await this.lockCustomerSaves(tx, organizationId);
+    const { exact, similar } = (await this.duplicateIndex(organizationId, tx)).check(data);
+    if (exact.length > 0) {
+      throw new ConflictException({ message: 'This customer already exists', code: 'CUSTOMER_EXISTS', matches: exact });
+    }
+    if (similar.length > 0 && !confirmSimilar) {
+      throw new ConflictException({
+        message: 'A similar customer already exists — confirm to add this one anyway',
+        code: 'SIMILAR_CUSTOMERS',
+        matches: similar,
+      });
+    }
+    return tx.customer.create({
+      data: { ...data, organizationId, ...manualPinData(data.latitude, data.longitude) },
     });
-  }
-  return this.prisma.customer.create({
-    data: { ...data, organizationId, ...manualPinData(data.latitude, data.longitude) },
   });
 }
 
 // Bulk create from a spreadsheet. Never updates an existing customer: a row
-// that is an exact copy of one (same NPWP, or same name and address) is
-// skipped and reported, as is a repeat of an earlier row in the file. A row
-// similar to an existing customer is skipped unless it carries
-// confirmSimilar (the import page asks first). A batch's accepted rows are
-// written in one transaction. Because copies are skipped, re-running a file
-// after a failed batch is safe: rows that already went in come back as
-// DUPLICATE_EXISTING. `row` in skipped is the index into `rows`.
+// that is an exact copy of one is skipped and reported, as is a repeat of an
+// earlier row in the file. A row similar to an existing customer (same NPWP
+// included) is skipped unless it carries confirmSimilar (the import page
+// asks first). Rows in one file are only compared for exact repeats: the
+// file is the importer's own list, so two branches in it are both wanted.
+// A batch's accepted rows are written in one transaction. Because copies
+// are skipped, re-running a file after a failed batch is safe: rows that
+// already went in come back as DUPLICATE_EXISTING. `row` in skipped is the
+// index into `rows`.
 async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
   const clean = (s?: string) => s?.trim().replace(/\s+/g, ' ') || undefined;
 
+  return this.prisma.$transaction(async (tx) => {
+  await this.lockCustomerSaves(tx, organizationId);
   const [index, levels] = await Promise.all([
-    this.duplicateIndex(organizationId),
-    this.prisma.priceLevel.findMany({
+    this.duplicateIndex(organizationId, tx),
+    tx.priceLevel.findMany({
       where: { organizationId, archivedAt: null },
       select: { id: true, name: true },
     }),
   ]);
-  const fileNpwp = new Set<string>();
   const fileIdentity = new Set<string>();
   const levelByName = new Map(levels.map((l) => [l.name.trim().toLowerCase(), l.id]));
 
   type Reason =
-    | 'DUPLICATE_NPWP'
     | 'DUPLICATE_EXISTING'
     | 'DUPLICATE_IN_FILE'
     | 'SIMILAR_NOT_CONFIRMED'
@@ -259,12 +266,9 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
     const npwp = clean(r.npwp);
     const skip = (reason: Reason) => skipped.push({ row, name, reason });
 
-    const nKey = npwpKey(npwp);
-    const iKey = `${nameKey(name)}|${addressKey(address)}`;
-    if (nKey && fileNpwp.has(nKey)) return skip('DUPLICATE_IN_FILE');
+    const iKey = identityKey({ name, address, phone });
     if (fileIdentity.has(iKey)) return skip('DUPLICATE_IN_FILE');
     const { exact, similar } = index.check({ name, address, phone, npwp });
-    if (exact.some((m) => m.reason === 'SAME_NPWP')) return skip('DUPLICATE_NPWP');
     if (exact.length > 0) return skip('DUPLICATE_EXISTING');
     if (similar.length > 0 && !r.confirmSimilar) return skip('SIMILAR_NOT_CONFIRMED');
     if ((r.latitude == null) !== (r.longitude == null)) return skip('INCOMPLETE_LOCATION');
@@ -276,7 +280,6 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
       if (!priceLevelId) return skip('UNKNOWN_PRICE_LEVEL');
     }
 
-    if (nKey) fileNpwp.add(nKey);
     fileIdentity.add(iKey);
     data.push({
       organizationId,
@@ -291,25 +294,42 @@ async importMany(organizationId: string, rows: ImportCustomerRowDto[]) {
     });
   });
 
-  if (data.length > 0) {
-    try {
-      await this.prisma.$transaction([this.prisma.customer.createMany({ data })]);
-    } catch (err) {
-      // Someone saved a customer with one of these NPWPs mid-import.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('A customer with one of these NPWPs was just added — run the import again');
-      }
-      throw err;
-    }
-  }
+  if (data.length > 0) await tx.customer.createMany({ data });
 
   return { created: data.length, skipped };
+  });
 }
 
 async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
   const before = await this.get(organizationId, id);
   await this.assertPriceLevel(organizationId, dto.priceLevelId);
+  // Renaming or re-addressing a customer mustn't turn it into a copy of
+  // another one. Only when one of those fields actually changes, and only
+  // for copies this edit creates: a pair that already matched before (old
+  // data) must stay editable, or neither could ever be fixed.
+  const identityChanged =
+    (dto.name !== undefined && dto.name !== before.name) ||
+    (dto.address !== undefined && (dto.address ?? null) !== (before.address ?? null)) ||
+    (dto.phone !== undefined && (dto.phone ?? null) !== (before.phone ?? null));
   const { customer, movedRouteIds } = await this.prisma.$transaction(async (tx) => {
+    if (identityChanged) {
+      await this.lockCustomerSaves(tx, organizationId);
+      const index = await this.duplicateIndex(organizationId, tx);
+      const already = new Set(index.check(before, id).exact.map((m) => m.id));
+      const after = {
+        name: dto.name ?? before.name,
+        address: dto.address !== undefined ? dto.address : before.address,
+        phone: dto.phone !== undefined ? dto.phone : before.phone,
+      };
+      const created = index.check(after, id).exact.filter((m) => !already.has(m.id));
+      if (created.length > 0) {
+        throw new ConflictException({
+          message: 'Another customer already has this name and address',
+          code: 'CUSTOMER_EXISTS',
+          matches: created,
+        });
+      }
+    }
     const customer = await tx.customer.update({
       where: { id, organizationId },
       data: { ...dto, ...manualPinData(dto.latitude, dto.longitude) },

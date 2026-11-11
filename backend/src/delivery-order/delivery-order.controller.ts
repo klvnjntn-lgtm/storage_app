@@ -10,6 +10,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { DeliveryOrderService } from './delivery-order.service';
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
+import { ShipDeliveryOrderDto } from './dto/ship-delivery-order.dto';
 import { RecordDeliveryOrderReturnDto } from './dto/delivery-order-return.dto';
 import { ProofDraftDto, ProofPhotoMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 import { RecordDeliveryOrderProofDto } from './dto/delivery-order-proof.dto'; // adjust path/name to your actual DTO
@@ -92,8 +93,13 @@ export class DeliveryOrderController {
   }
 
   @Post(':id/ship')
-  ship(@CurrentOrg() organizationId: string, @Param('id') id: string, @Req() req) {
-    return this.deliveryOrderService.ship(organizationId, id, req.user.sub);
+  ship(
+    @CurrentOrg() organizationId: string,
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: ShipDeliveryOrderDto,
+  ) {
+    return this.deliveryOrderService.ship(organizationId, id, req.user.sub, dto?.serials ?? []);
   }
 
   // Was implemented on the service but never wired up — the frontend's

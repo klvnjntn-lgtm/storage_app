@@ -7,6 +7,8 @@ import { formatIDR } from '@/lib/format';
 import { apiFetch } from '@/lib/apifetch';
 import { useLanguage } from '@/app/context/LanguageContext';
 import NumberInput from '@/app/components/shared/NumberInput';
+import DatePicker from '@/app/components/shared/DatePicker';
+import { toCalendarDateString } from '@/lib/dates';
 
 type BankAccountOption = { id: string; bankName: string; accountNumber: string; isDefault?: boolean; archivedAt?: string | null };
 type Part = { key: number; amount: number; method: string; bankAccountId: string };
@@ -37,6 +39,10 @@ export function RecordPaymentDialog({
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [defaultBank, setDefaultBank] = useState('');
   const [note, setNote] = useState('');
+  // The day the money moved. Today unless it's being typed in later (a
+  // transfer found on the bank statement); never in the future.
+  const today = toCalendarDateString(new Date());
+  const [paymentDate, setPaymentDate] = useState(today);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -79,6 +85,7 @@ export function RecordPaymentDialog({
     if (parts.some((p) => p.method !== 'CASH' && !p.bankAccountId)) {
       return t('sales.recordPayment.bankAccountRequired');
     }
+    if (!paymentDate || paymentDate > today) return t('sales.recordPayment.dateNotInFuture');
     return null;
   }
 
@@ -95,6 +102,7 @@ export function RecordPaymentDialog({
         amount: p.amount,
         method: p.method,
         note: note || undefined,
+        ...(paymentDate && paymentDate !== today ? { paymentDate } : {}),
         ...(p.method !== 'CASH' ? { bankAccountId: p.bankAccountId } : {}),
       }));
       const res =
@@ -213,6 +221,13 @@ export function RecordPaymentDialog({
         </span>
       )}
 
+      <div className="block">
+        <span className="text-sm">{refund ? t('sales.recordPayment.refundDateLabel') : t('sales.recordPayment.dateLabel')}</span>
+        <DatePicker value={paymentDate} max={today} onChange={(v) => setPaymentDate(v || today)} className="w-full" />
+        {paymentDate !== today && (
+          <span className="block text-xs text-gray-500 mt-0.5">{t('sales.recordPayment.dateHint')}</span>
+        )}
+      </div>
       <label className="block">
         <span className="text-sm">{t('sales.recordPayment.noteLabel')}</span>
         <input value={note} onChange={(e) => setNote(e.target.value)} className="w-full border rounded px-2 py-1" />

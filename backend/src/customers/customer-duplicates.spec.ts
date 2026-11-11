@@ -1,4 +1,4 @@
-import { CustomerDuplicateIndex, nameKey, phoneKey } from './customer-duplicates';
+import { CustomerDuplicateIndex, identityKey, nameKey, phoneKey } from './customer-duplicates';
 
 const c = (id: string, name: string, address: string | null = null, phone: string | null = null, npwp: string | null = null) => ({
   id,
@@ -27,11 +27,42 @@ describe('customer duplicates', () => {
     expect(r.exact.map((m) => [m.id, m.reason])).toEqual([['bumi', 'SAME_NAME_ADDRESS']]);
   });
 
-  it('calls the same NPWP an exact copy, whatever the name', () => {
-    expect(index.check({ name: 'Other name', npwp: '012345678901000' }).exact[0]).toMatchObject({
-      id: 'npwp',
-      reason: 'SAME_NPWP',
+  // Branches of one company share its NPWP since Coretax, so a repeat is
+  // asked about, not refused.
+  it('calls the same NPWP similar, whatever the name', () => {
+    const r = index.check({ name: 'Other name', npwp: '012345678901000' });
+    expect(r.exact).toEqual([]);
+    expect(r.similar[0]).toMatchObject({ id: 'npwp', reason: 'SAME_NPWP' });
+  });
+
+  it('reads the 15- and 16-digit forms of an NPWP as one number', () => {
+    expect(index.check({ name: 'Other name', npwp: '0012345678901000' }).similar[0]).toMatchObject({ id: 'npwp' });
+  });
+
+  it('never matches on an all-zero NPWP', () => {
+    const zeros = new CustomerDuplicateIndex([c('z', 'Walk-in', null, null, '00.000.000.0-000.000')]);
+    expect(zeros.check({ name: 'Somebody else', npwp: '000000000000000' })).toEqual({ exact: [], similar: [] });
+  });
+
+  describe('with no address on either', () => {
+    const people = new CustomerDuplicateIndex([c('budi', 'Budi', null, '0812-1111-1111')]);
+
+    it('calls the same name with another phone similar — two people can share a name', () => {
+      const r = people.check({ name: 'Budi', phone: '0813-2222-2222' });
+      expect(r.exact).toEqual([]);
+      expect(r.similar[0]).toMatchObject({ id: 'budi', reason: 'SAME_NAME' });
     });
+
+    it('calls the same name and phone an exact copy', () => {
+      expect(people.check({ name: 'budi', phone: '+62 812 1111 1111' }).exact[0]).toMatchObject({ id: 'budi' });
+    });
+  });
+
+  it('tells names apart that have no latin letters', () => {
+    const cjk = new CustomerDuplicateIndex([c('zhang', '张三')]);
+    expect(cjk.check({ name: '李四' })).toEqual({ exact: [], similar: [] });
+    expect(cjk.check({ name: '张三' }).similar[0]).toMatchObject({ id: 'zhang', reason: 'SAME_NAME' });
+    expect(identityKey({ name: '张三' })).not.toBe(identityKey({ name: '李四' }));
   });
 
   it('calls the same name at another address similar, not a copy', () => {

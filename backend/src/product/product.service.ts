@@ -2,7 +2,8 @@
 import { Injectable, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventType, Prisma } from '@prisma/client';
-import { applyOpeningCost, recordManualCost } from '../accounting/inventory-costing';
+import { applyOpeningCost, lockProducts, recordManualCost } from '../accounting/inventory-costing';
+import { PostingRulesService } from '../accounting/posting-rules.service';
 import { PlanLimitsService } from '../billing/plan-limits.service';
 import { heldStock, holdKey, offeredStock } from '../stock/stock-holds';
 import { escapeLike } from '../common/text/escape-like';
@@ -15,6 +16,7 @@ export class ProductService {
   constructor(
     private prisma: PrismaService,
     private planLimits: PlanLimitsService,
+    private postingRules: PostingRulesService,
   ) {}
 
   async findOne(organizationId: string, id: string) {
@@ -572,9 +574,19 @@ async update(
   userId?: string,
 ) {
   await this.assertProductOwnership(organizationId, id);
+  // A cost edit writes the product, its cost history and a ledger entry —
+  // all or nothing.
+  if (data.costPrice !== undefined && tx === this.prisma) {
+    return this.prisma.$transaction((inner) => this.update(organizationId, id, data, inner, userId));
+  }
+  if (data.costPrice !== undefined) {
+    // Same lock a receipt or sale takes, so the cost read here is the one
+    // being replaced.
+    await lockProducts(tx as Prisma.TransactionClient, organizationId, [id]);
+  }
   const before =
     data.costPrice !== undefined
-      ? await tx.product.findUniqueOrThrow({ where: { id }, select: { costPrice: true } })
+      ? await tx.product.findUniqueOrThrow({ where: { id }, select: { costPrice: true, sku: true, name: true } })
       : null;
 
   const updateData: Prisma.ProductUpdateInput = {};
@@ -651,13 +663,31 @@ async update(
     // A hand edit overrides the weighted average — logged so the cost
     // history shows where the number came from.
     if (before) {
-      await recordManualCost(tx as Prisma.TransactionClient, {
+      const previousCost = before.costPrice != null ? Number(before.costPrice) : null;
+      const newCost = product.costPrice != null ? Number(product.costPrice) : null;
+      const logged = await recordManualCost(tx as Prisma.TransactionClient, {
         organizationId,
         productId: id,
-        previousCost: before.costPrice != null ? Number(before.costPrice) : null,
-        newCost: product.costPrice != null ? Number(product.costPrice) : null,
+        previousCost,
+        newCost,
         userId,
       });
+      // Stock on the shelf is now worth a different amount; the Inventory
+      // account has to move with it, or it stops matching quantity x cost.
+      if (logged && logged.onHand > 0) {
+        await this.postingRules.postInventoryRevaluation(
+          organizationId,
+          {
+            sourceId: `cost-edit:${id}:${Date.now()}`,
+            date: new Date(),
+            memo: `Cost of ${before.sku ?? before.name} changed by hand: ${previousCost ?? 'none'} → ${newCost ?? 'none'}`,
+            amount: logged.onHand * ((newCost ?? 0) - (previousCost ?? 0)),
+            firstCost: previousCost == null,
+            userId,
+          },
+          tx as Prisma.TransactionClient,
+        );
+      }
     }
     return data.prices?.length ? tx.product.findUniqueOrThrow({ where: { id } }) : product;
   } catch (err: any) {

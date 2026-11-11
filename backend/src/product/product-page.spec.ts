@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlanLimitsModule } from '../billing/plan-limits.module';
+import { AccountingModule } from '../accounting/accounting.module';
 import { ProductService } from './product.service';
 
 // The paged, server-sorted product list (admin products page).
@@ -15,7 +16,7 @@ describe('ProductService.findPage (database)', () => {
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
-      imports: [PrismaModule, PlanLimitsModule],
+      imports: [PrismaModule, PlanLimitsModule, AccountingModule],
       providers: [ProductService],
     }).compile();
     prisma = module.get(PrismaService);

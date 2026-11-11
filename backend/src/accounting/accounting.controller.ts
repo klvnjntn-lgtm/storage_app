@@ -321,6 +321,12 @@ export class AccountingController {
     return this.reports.getTrialBalance(organizationId, asOfDate, branchId); // 400s if branchId is set
   }
 
+  // Inventory account vs what the stock is worth — see the service.
+  @Get('reports/inventory-reconciliation')
+  getInventoryReconciliation(@CurrentOrg() organizationId: string) {
+    return this.reports.getInventoryReconciliation(organizationId);
+  }
+
   @Get('reports/balance-sheet')
   async getBalanceSheet(
     @CurrentOrg() organizationId: string,
@@ -421,6 +427,19 @@ export class AccountingController {
     this.assertAdmin(req);
     const { y, m } = this.parseYearMonth(year, month);
     return this.journal.reopenPeriod(organizationId, y, m);
+  }
+
+  // Permanent — see JournalService.lockPeriod. The business owner's call,
+  // not a branch admin's.
+  @Roles('MASTER')
+  @Post('fiscal-periods/:year/:month/lock')
+  lockPeriod(
+    @CurrentOrg() organizationId: string,
+    @Param('year') year: string,
+    @Param('month') month: string,
+  ) {
+    const { y, m } = this.parseYearMonth(year, month);
+    return this.journal.lockPeriod(organizationId, y, m);
   }
 
   // --- helpers ---

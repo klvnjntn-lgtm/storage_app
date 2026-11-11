@@ -1,12 +1,13 @@
 // app/(app)/sales/delivery-orders/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
 import { Truck, Ban, Printer, Download, PackageCheck, FileText, MapPin, MapPinOff, X } from 'lucide-react';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { apiFetch } from '@/lib/apifetch';
+import { SerialPicker } from '@/app/components/shared/SerialPicker';
 import { DeliveryOrderA4Template } from '@/app/components/delivery-orders/templates/DeliveryOrderA4Template';
 import { toDeliveryOrderView, mapDeliveryOrderToDetail, type DeliveryOrderView } from '@/lib/mappers/delivery-orders-mapper';
 import type { DeliveryOrderDetail } from '@/app/components/delivery-orders/types';
@@ -120,8 +121,46 @@ export default function DeliveryOrderDetailPage() {
     }
   }
 
-  async function handleShip() {
-    if (await runAction('ship', `/delivery-orders/${id}/ship`)) load();
+  // Serial-tracked products on this delivery: the server refuses to ship
+  // until each line's units are named (code SERIALS_REQUIRED, with what
+  // every line still needs). Ask line by line, then send again.
+  type SerialLine = { itemId: string; productId: string; productName: string; locationId: string; required: number };
+  const [serialAsk, setSerialAsk] = useState<{ lines: SerialLine[]; at: number; picked: Record<string, string[]> } | null>(null);
+
+  const serialConfirmed = useRef(false);
+
+  async function shipWith(picked: Record<string, string[]>) {
+    setActionLoading('ship');
+    setError(null);
+    try {
+      const serials = Object.entries(picked).map(([itemId, serialNumbers]) => ({ itemId, serialNumbers }));
+      const res = await apiFetch(`/delivery-orders/${id}/ship`, {
+        method: 'POST',
+        ...(serials.length ? { body: JSON.stringify({ serials }) } : {}),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok) {
+        setSerialAsk(null);
+        load();
+        return;
+      }
+      const lines: SerialLine[] = body?.code === 'SERIALS_REQUIRED' ? (body.lines ?? []).filter((l: SerialLine) => l.required > 0) : [];
+      // Only ask when there's something new to ask; otherwise show the refusal.
+      if (lines.length > 0 && lines.some((l) => (picked[l.itemId]?.length ?? 0) !== l.required)) {
+        setSerialAsk({ lines, at: 0, picked: {} });
+        return;
+      }
+      setSerialAsk(null);
+      setError(body?.message ?? t('sales.deliveryOrderDetail.requestFailed', { status: res.status }));
+    } catch {
+      setError(t('sales.deliveryOrderDetail.couldNotReachServer'));
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function handleShip() {
+    return shipWith({});
   }
 
   async function handleCancel() {
@@ -478,6 +517,30 @@ export default function DeliveryOrderDetailPage() {
           )}
         </div>
       </div>
+    {serialAsk && (
+        <SerialPicker
+          key={serialAsk.lines[serialAsk.at].itemId}
+          productId={serialAsk.lines[serialAsk.at].productId}
+          productName={serialAsk.lines[serialAsk.at].productName}
+          locationId={serialAsk.lines[serialAsk.at].locationId}
+          quantity={serialAsk.lines[serialAsk.at].required}
+          value={[]}
+          onChange={(serials) => {
+            // The picker calls onClose right after this; that one isn't a cancel.
+            serialConfirmed.current = true;
+            const picked = { ...serialAsk.picked, [serialAsk.lines[serialAsk.at].itemId]: serials };
+            if (serialAsk.at + 1 < serialAsk.lines.length) setSerialAsk({ ...serialAsk, at: serialAsk.at + 1, picked });
+            else {
+              setSerialAsk(null);
+              shipWith(picked);
+            }
+          }}
+          onClose={() => {
+            if (serialConfirmed.current) serialConfirmed.current = false;
+            else setSerialAsk(null);
+          }}
+        />
+      )}
     </main>
   );
 }

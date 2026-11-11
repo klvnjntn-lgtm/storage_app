@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { CalendarClock, Lock, LockOpen, Loader2, Info } from 'lucide-react';
+import { CalendarClock, Lock, LockOpen, Loader2, Info, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useAuth } from '@/app/context/AuthContext';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -149,6 +149,45 @@ export default function FiscalPeriodsPage() {
     }
   }
 
+  // Permanent, so only the business owner (MASTER) sees it, and only on a
+  // month that's already closed.
+  const canLock = profile?.role === 'MASTER';
+
+  async function lockPeriods(targets: { year: number; month: number }[], confirmText: string) {
+    if (!(await dialog.confirm(confirmText, { danger: true }))) return;
+    setActionError(null);
+    try {
+      for (const { year, month } of targets) {
+        setActingKey(`${year}-${month}`);
+        const res = await apiFetch(`/accounting/fiscal-periods/${year}/${month}/lock`, { method: 'POST' });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setActionError(body?.message ?? t('accounting.fiscalPeriods.requestFailed', { status: res.status }));
+          break;
+        }
+      }
+      await loadPeriods();
+    } catch {
+      setActionError(t('accounting.fiscalPeriods.couldNotReachServer'));
+    } finally {
+      setActingKey(null);
+    }
+  }
+
+  function handleLock(year: number, month: number) {
+    const label = `${MONTH_NAMES[month - 1]} ${year}`;
+    return lockPeriods([{ year, month }], t('accounting.fiscalPeriods.lockConfirm', { label }));
+  }
+
+  // A whole year at once — what's wanted after the yearly reports go out.
+  // Offered for the most recent past year that still has closed months.
+  const lockableYear = (() => {
+    const thisYear = now().year;
+    const years = [...new Set((periods ?? []).filter((p) => p.status === 'CLOSED' && p.year < thisYear).map((p) => p.year))];
+    return years.length ? Math.max(...years) : null;
+  })();
+  const lockableMonths = (periods ?? []).filter((p) => p.status === 'CLOSED' && p.year === lockableYear);
+
   // Periods only exist once something's been posted into them
   // (getOrCreateOpenFiscalPeriod creates them lazily) — closePeriod's
   // upsert can still create+close a period that's never had activity, so
@@ -232,6 +271,24 @@ export default function FiscalPeriodsPage() {
           </div>
         </div>
 
+        {canLock && lockableYear != null && lockableMonths.length > 0 && (
+          <div className="flex justify-end mb-3">
+            <button
+              onClick={() =>
+                lockPeriods(
+                  lockableMonths,
+                  t('accounting.fiscalPeriods.lockAllConfirm', { count: lockableMonths.length, year: lockableYear }),
+                )
+              }
+              disabled={actingKey != null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border-2 border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 disabled:opacity-60 transition-colors"
+            >
+              <ShieldCheck size={12} strokeWidth={2} />
+              {t('accounting.fiscalPeriods.lockAll', { year: lockableYear })}
+            </button>
+          </div>
+        )}
+
         {loading && <p className="text-sm text-gray-500">{t('accounting.fiscalPeriods.loadingPeriods')}</p>}
 
         {!loading && periods && periods.length === 0 && (
@@ -260,7 +317,7 @@ export default function FiscalPeriodsPage() {
                     )}
                   </div>
 
-                  <div className="shrink-0">
+                  <div className="shrink-0 flex items-center">
                     {p.status === 'OPEN' && (
                       <button
                         onClick={() => handleClose(p.year, p.month)}
@@ -269,6 +326,16 @@ export default function FiscalPeriodsPage() {
                       >
                         {isActing ? <Loader2 size={12} strokeWidth={2} className="animate-spin" /> : <Lock size={12} strokeWidth={2} />}
                         {t('accounting.fiscalPeriods.close')}
+                      </button>
+                    )}
+                    {p.status === 'CLOSED' && canLock && (
+                      <button
+                        onClick={() => handleLock(p.year, p.month)}
+                        disabled={isActing}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-md border-2 border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 disabled:opacity-60 transition-colors"
+                      >
+                        <ShieldCheck size={12} strokeWidth={2} />
+                        {t('accounting.fiscalPeriods.lock')}
                       </button>
                     )}
                     {p.status === 'CLOSED' && (

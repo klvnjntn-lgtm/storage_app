@@ -1559,7 +1559,9 @@ export default function DriverRoutePage() {
                               key={p.id}
                               src={`/api${p.path}`}
                               alt={t('delivery.driver.locationPhotoAlt')}
-                              className="w-full h-full min-h-24 object-cover bg-gray-100 rounded-xl border border-gray-200"
+                              // Fixed 104px = Navigate + Call stacked (2 × 48 + 8 gap), whatever
+                              // the photo's shape; tapping opens it uncropped.
+                              className="w-full h-[104px] object-cover bg-gray-100 rounded-xl border border-gray-200"
                             />
                           ))}
                         </div>

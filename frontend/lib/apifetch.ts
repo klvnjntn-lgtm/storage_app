@@ -37,24 +37,47 @@ export function authReason(message: string): string | null {
 }
 
 // Phones drop off for a moment all the time. Reading is safe to repeat, so a
-// blip shouldn't turn into an empty page. Never a write: it may have landed
-// even though the reply was lost.
-const READ_RETRY_DELAYS_MS = [800, 2000];
+// blip shouldn't turn into an empty page. A write may have landed even
+// though the reply was lost, so it is only repeated when it carries an
+// Idempotency-Key (apiFetch adds one to every write): the server runs the
+// first copy and answers a repeat with that copy's reply, so a retry can
+// never record a payment or a delivery twice.
+const RETRY_DELAYS_MS = [800, 2000];
 const GATEWAY_ERRORS = new Set([502, 503, 504]);
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const isRead = method === "GET" || method === "HEAD";
+  const repeatable = isRead || !!(init.headers as Record<string, string> | undefined)?.["Idempotency-Key"];
   for (let attempt = 0; ; attempt++) {
-    const canRetry = isRead && attempt < READ_RETRY_DELAYS_MS.length;
+    const canRetry = repeatable && attempt < RETRY_DELAYS_MS.length;
     try {
       const res = await fetch(url, init);
-      if (!canRetry || !GATEWAY_ERRORS.has(res.status)) return res;
+      if (!canRetry) return res;
+      // 409 here = the first copy of this write is still running; ask again.
+      const stillRunning =
+        !isRead &&
+        res.status === 409 &&
+        (await res
+          .clone()
+          .json()
+          .then((b) => b?.code === "IDEMPOTENCY_IN_PROGRESS")
+          .catch(() => false));
+      if (!GATEWAY_ERRORS.has(res.status) && !stillRunning) return res;
     } catch (err) {
       // TypeError = the network failed; an abort means the caller gave up.
       if (!canRetry || !(err instanceof TypeError) || init.signal?.aborted) throw err;
     }
-    await new Promise((resolve) => setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]));
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+  }
+}
+
+function newIdempotencyKey(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    // Older WebViews without randomUUID.
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
   }
 }
 
@@ -74,8 +97,12 @@ export async function apiFetch(
 
   // No Authorization header: the session is an httpOnly cookie the browser
   // attaches by itself (same-origin /api). See lib/session.ts.
+  const method = (init?.method ?? "GET").toUpperCase();
+  const isWrite = method !== "GET" && method !== "HEAD";
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    // One key per call, the same across this call's own retries.
+    ...(isWrite ? { "Idempotency-Key": newIdempotencyKey() } : {}),
     ...(init?.headers as Record<string, string> | undefined),
     ...CSRF_HEADERS,
     "X-Device-Id": getDeviceId(),

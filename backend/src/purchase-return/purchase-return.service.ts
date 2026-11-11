@@ -14,7 +14,7 @@ import { StockService } from '../stock/stock.service';
 import { TenantOwnershipService } from '../shared/documents/tenant-ownership.service';
 import { DocumentNumberingService } from '../shared/documents/document-numbering.service';
 import { PostingRulesService } from '../accounting/posting-rules.service';
-import { issueAtCost } from '../accounting/inventory-costing';
+import { issueAtCost, lockProducts } from '../accounting/inventory-costing';
 import { assertSerialCount, normalizeSerials, takeSerials } from '../serials/serial-moves';
 import { CreatePurchaseReturnDto } from './dto/purchase-return.dto';
 
@@ -129,6 +129,7 @@ export class PurchaseReturnService {
       // Same lock as GoodsReceiptService.receive, so a return and a receipt
       // against one PO can't both read stale totals.
       await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${po.id} FOR UPDATE`;
+      await lockProducts(tx, organizationId, po.items.map((i) => i.productId));
 
       const { received, returned } = await this.quantities(po.id, tx);
       for (const [poItemId, qty] of requested) {

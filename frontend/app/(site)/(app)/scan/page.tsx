@@ -93,7 +93,9 @@ function ScanPageInner() {
   const [errorMsg, setErrorMsg] = useState('');
   const [log, setLog] = useState<ScanLogEntry[]>([]);
   // A serial-tracked product scanned in a move: which units, before it's added.
-  const [serialPrompt, setSerialPrompt] = useState<{ barcode: string; product: ScannedProduct; qty: number } | null>(null);
+  // serialCount: how many serials to ask for when that isn't qty — a pick for
+  // a sale only needs the units the invoice didn't already name.
+  const [serialPrompt, setSerialPrompt] = useState<{ barcode: string; product: ScannedProduct; qty: number; serialCount?: number } | null>(null);
   const serialPromptRef = useRef(serialPrompt);
   useEffect(() => { serialPromptRef.current = serialPrompt; }, [serialPrompt]);
 
@@ -219,6 +221,14 @@ function ScanPageInner() {
       });
 
       if (!itemRes.ok) {
+        // Picking serial-tracked units for a sale: the server says how many
+        // serial numbers it still needs — ask for them and send again.
+        const refusal = await itemRes.clone().json().catch(() => null);
+        if (refusal?.code === 'SERIALS_REQUIRED' && refusal.required > 0 && !serialNumbers?.length) {
+          setStatus('idle');
+          setSerialPrompt({ barcode, product, qty, serialCount: refusal.required });
+          return;
+        }
         const msg = await readErrorMessage(itemRes);
         throw new Error(msg || t('scan.failedToAddItem', { status: itemRes.status }));
       }
@@ -709,7 +719,7 @@ function ScanPageInner() {
           // the ones this session picked.
           locationId={effectiveType === 'PICK' ? fromLocationId : undefined}
           sessionId={effectiveType === 'PICK' ? undefined : sessionId ?? undefined}
-          quantity={Math.floor(serialPrompt.qty)}
+          quantity={serialPrompt.serialCount ?? Math.floor(serialPrompt.qty)}
           value={[]}
           onChange={(serials) => submitItem(serialPrompt.barcode, serialPrompt.product, serialPrompt.qty, serials)}
           onClose={() => setSerialPrompt(null)}

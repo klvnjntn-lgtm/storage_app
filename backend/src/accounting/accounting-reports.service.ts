@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountResolverService } from './account-resolver.service';
+import { stockInHand } from './inventory-costing';
 import {
   AccountType,
   InvoiceStatus,
@@ -545,6 +546,8 @@ async getARAging(
   opts: PageParams & { bucket?: AgingBucket; customerId?: string } = {},
 ): Promise<ARAgingReport> {
   const { page, pageSize } = this.normalizePaging(opts, 50, 200);
+  // asOf's calendar day, for comparing against date-only payment dates.
+  const asOfDay = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()));
 
   // Payments made after asOf hadn't happened yet on that date: an invoice
   // paid since then was still owed, so it's included and its balance is
@@ -558,7 +561,7 @@ async getARAging(
         {
           OR: [
             { paymentStatus: { not: PaymentStatus.PAID } },
-            { payments: { some: { createdAt: { gt: asOf } } } },
+            { payments: { some: { OR: [{ createdAt: { gt: asOf } }, { paymentDate: { gt: asOfDay } }] } } },
           ],
         },
       ],
@@ -567,13 +570,19 @@ async getARAging(
       // Only what changed after asOf: rows made since (still live), and rows
       // made by then but voided since.
       payments: {
+        // "Made" = the day the money moved (paymentDate) when one was
+        // recorded, else when the row was typed in — the same date its
+        // journal entry carries.
         where: {
           OR: [
-            { createdAt: { gt: asOf }, voidedAt: null },
-            { createdAt: { lte: asOf }, voidedAt: { gt: asOf } },
+            { voidedAt: null, OR: [{ paymentDate: null, createdAt: { gt: asOf } }, { paymentDate: { gt: asOfDay } }] },
+            {
+              voidedAt: { gt: asOf },
+              OR: [{ paymentDate: null, createdAt: { lte: asOf } }, { paymentDate: { lte: asOfDay } }],
+            },
           ],
         },
-        select: { kind: true, amount: true, createdAt: true },
+        select: { kind: true, amount: true, createdAt: true, paymentDate: true },
       },
       id: true,
       invoiceNumber: true,
@@ -1030,6 +1039,78 @@ async getARAging(
   // ---------------------------------------------------------------------
   // helpers
   // ---------------------------------------------------------------------
+  // Does the Inventory account still hold what the stock is worth?
+  //
+  // The ledger side is the Inventory account's posted balance; the stock
+  // side is every product's quantity (shelves, plus what's on a transfer or
+  // in a move session) x its average cost. They are built by the same
+  // movements and should agree to within rounding. A gap means something
+  // moved stock or cost without the matching entry — the lists returned
+  // with it are the usual causes, so there is somewhere to start looking.
+  // As of now only: quantities and costs aren't kept by date.
+  async getInventoryReconciliation(organizationId: string) {
+    const inventoryAccountId = await this.accounts.resolve(organizationId, SystemAccountKey.INVENTORY);
+    const [ledger, stock, inHand, provisionalLines] = await Promise.all([
+      this.prisma.journalEntryLine.aggregate({
+        where: {
+          accountId: inventoryAccountId,
+          journalEntry: { organizationId, status: JournalEntryStatus.POSTED },
+        },
+        _sum: { debit: true, credit: true },
+      }),
+      this.prisma.stock.groupBy({ by: ['productId'], where: { organizationId }, _sum: { quantity: true } }),
+      stockInHand(this.prisma as unknown as Prisma.TransactionClient, organizationId),
+      this.prisma.invoiceItem.count({
+        where: { costProvisional: true, invoice: { organizationId, status: InvoiceStatus.ISSUED } },
+      }),
+    ]);
+
+    const onHand = new Map<string, number>();
+    for (const row of stock) onHand.set(row.productId, Number(row._sum.quantity ?? 0));
+    for (const [productId, qty] of inHand) onHand.set(productId, (onHand.get(productId) ?? 0) + qty);
+
+    const stocked = [...onHand.entries()].filter(([, qty]) => qty !== 0).map(([id]) => id);
+    const products = stocked.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: stocked }, organizationId },
+          select: { id: true, sku: true, name: true, costPrice: true },
+        })
+      : [];
+
+    let stockValue = 0;
+    const withoutCost: { productId: string; sku: string | null; name: string; onHand: number }[] = [];
+    const negative: { productId: string; sku: string | null; name: string; onHand: number }[] = [];
+    for (const p of products) {
+      const qty = onHand.get(p.id) ?? 0;
+      const row = { productId: p.id, sku: p.sku, name: p.name, onHand: this.round2(qty) };
+      if (qty < 0) negative.push(row);
+      if (p.costPrice == null) withoutCost.push(row);
+      else stockValue += qty * Number(p.costPrice);
+    }
+
+    const ledgerBalance = this.round2(Number(ledger._sum.debit ?? 0) - Number(ledger._sum.credit ?? 0));
+    stockValue = this.round2(stockValue);
+    const difference = this.round2(ledgerBalance - stockValue);
+    const byQty = (a: { onHand: number }, b: { onHand: number }) => Math.abs(b.onHand) - Math.abs(a.onHand);
+    return {
+      asOf: new Date(),
+      ledgerBalance,
+      stockValue,
+      // Positive: the ledger holds more than the stock is worth.
+      difference,
+      // Average costs are kept to 2 decimals, so a few rupiah per product is
+      // rounding, not a fault.
+      inBalance: Math.abs(difference) <= Math.max(1, products.length * 0.5),
+      // Stock that has no cost is worth nothing on the stock side and was
+      // never booked on the ledger side — set a cost to bring it in.
+      productsWithoutCost: { count: withoutCost.length, top: withoutCost.sort(byQty).slice(0, 50) },
+      // Sold below zero: their cost of sales is provisional until the
+      // covering stock arrives and the invoice lines are recosted.
+      productsBelowZero: { count: negative.length, top: negative.sort(byQty).slice(0, 50) },
+      provisionalInvoiceLines: provisionalLines,
+    };
+  }
+
   private assignBucket(daysOverdue: number): AgingBucket {
     if (daysOverdue <= 0) return 'current';
     if (daysOverdue <= 30) return '1-30';
@@ -1066,15 +1147,17 @@ async getARAging(
   // it. Credit moved between invoices counts like a payment in or out.
   private paidAsOf(
     amountPaid: Prisma.Decimal,
-    changes: { kind: PaymentKind; amount: Prisma.Decimal; createdAt: Date }[],
+    changes: { kind: PaymentKind; amount: Prisma.Decimal; createdAt: Date; paymentDate: Date | null }[],
     asOf: Date,
   ) {
+    const asOfDay = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()));
     let paid = Number(amountPaid);
     for (const p of changes) {
       const signed = (p.kind === PaymentKind.PAYMENT || p.kind === PaymentKind.CREDIT_IN || p.kind === PaymentKind.DEPOSIT_IN ? 1 : -1) * Number(p.amount);
       // Made after asOf: take it back out. Voided after asOf: it still
       // counted then, so put it back.
-      paid += p.createdAt > asOf ? -signed : signed;
+      const madeAfter = p.paymentDate ? p.paymentDate > asOfDay : p.createdAt > asOf;
+      paid += madeAfter ? -signed : signed;
     }
     return this.round2(paid);
   }

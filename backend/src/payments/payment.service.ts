@@ -16,6 +16,7 @@ import { JournalService } from '../accounting/journal.service';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { ApplyCreditDto } from './dto/apply-credit.dto';
 import { deriveStatus } from './payment-status.util';
+import { orgToday, parseDateOnly } from '../accounting/business-date';
 
 const EPS = 0.005; // half a cent: amounts are 2dp, so anything smaller is float noise
 
@@ -87,6 +88,17 @@ export class PaymentService {
     return method;
   }
 
+  // dto.paymentDate as a date, or null for "today". The future is refused:
+  // money can be recorded late, never early.
+  private async resolvePaymentDate(organizationId: string, dto: RecordPaymentDto): Promise<Date | null> {
+    if (!dto.paymentDate) return null;
+    const date = parseDateOnly(dto.paymentDate, 'paymentDate');
+    const today = await orgToday(this.prisma, organizationId);
+    if (date > today) throw new BadRequestException('Payment date cannot be in the future');
+    // Today is the default; keeping it null keeps "dated when recorded" rows alike.
+    return date.getTime() === today.getTime() ? null : date;
+  }
+
   // Re-derives amountPaid/paymentStatus after a payment row was added or
   // voided. `delta` is the change to amountPaid.
   private async applyToInvoice(tx: Tx, invoice: MoneyFields & { id: string }, delta: number) {
@@ -140,6 +152,8 @@ export class PaymentService {
     if (parts.length === 0) throw new BadRequestException('At least one payment is required');
     const methods: PaymentMethod[] = [];
     for (const part of parts) methods.push(await this.validateMoneyMovement(organizationId, part, invoiceId));
+    const dates: (Date | null)[] = [];
+    for (const part of parts) dates.push(await this.resolvePaymentDate(organizationId, part));
 
     const updated = await this.serializable(async (tx) => {
       let invoice = await tx.invoice.findFirst({
@@ -179,6 +193,7 @@ export class PaymentService {
             // CASH is never tied to a specific bank account, so this is
             // forced null rather than trusting whatever the caller sent.
             bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+            paymentDate: dates[i],
           },
         });
 
@@ -220,6 +235,7 @@ export class PaymentService {
   // fine; never more than the credit.
   async refund(organizationId: string, invoiceId: string, dto: RecordPaymentDto, userId?: string) {
     const method = await this.validateMoneyMovement(organizationId, dto, invoiceId);
+    const paymentDate = await this.resolvePaymentDate(organizationId, dto);
 
     const updated = await this.serializable(async (tx) => {
       const invoice = await tx.invoice.findFirst({
@@ -247,6 +263,7 @@ export class PaymentService {
           note: dto.note,
           recordedById: userId,
           bankAccountId: method === PaymentMethod.CASH ? null : dto.bankAccountId,
+          paymentDate,
         },
       });
 

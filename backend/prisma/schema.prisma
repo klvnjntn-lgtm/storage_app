@@ -90,7 +90,10 @@ model Customer {
   priceLevel   PriceLevel? @relation(fields: [priceLevelId], references: [id])
 
   @@unique([id, organizationId])
-  @@unique([organizationId, npwp]) // FIX — tax ID must not repeat within an org; nullable, so multiple customers with no NPWP on file are still fine
+  // Not unique: since Coretax a company's branches all carry the head
+  // office's NPWP, and each can be its own customer here. A repeat is asked
+  // about before saving instead (customer-duplicates.ts).
+  @@index([organizationId, npwp])
   @@index([organizationId])
   @@index([organizationId, name])
   @@index([priceLevelId])
@@ -1899,6 +1902,11 @@ model InvoiceItem {
   serialNumbers     String[]            @default([])
   reservedQuantity  Decimal             @default(0) @db.Decimal(12, 2)
   costProvisional   Boolean             @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
+  // How many of the fulfilled units carry that provisional cost: the ones
+  // sold below zero (or all of them, when the product had no cost at all).
+  // A recost corrects only these. Null on lines flagged before this field
+  // existed — see InvoiceService.recostInvoiceItem.
+  provisionalQuantity Decimal?          @db.Decimal(12, 2)
 
   // NEW — per-item discount. Mirrors Invoice.discountType/discountValue
   // (now deprecated at the document level, see below) but scoped per line.
@@ -2017,6 +2025,10 @@ model Payment {
   note          String?
   recordedById  String?
   createdAt     DateTime                 @default(now())
+  // The day the money actually moved, when that isn't the day it was typed
+  // in (a transfer found on the bank statement later). Null = createdAt's
+  // business date. The journal entry is dated by this.
+  paymentDate   DateTime?                @db.Date
   invoice       Invoice                  @relation(fields: [invoiceId], references: [id])
   recordedBy    User?                    @relation(fields: [recordedById], references: [id])
   bankAccountId String?
@@ -3104,6 +3116,26 @@ model SupplierBill {
   @@index([organizationId, purchaseOrderId])
   @@index([organizationId, dueDate])
   @@index([purchaseOrderId])
+}
+
+// A write a client marked with an Idempotency-Key header (see
+// common/idempotency). The first request with a key runs; a repeat of it —
+// a retry after the reply was lost — gets the stored reply instead of
+// running again. Rows are cleared after a day.
+model IdempotencyRecord {
+  id          String    @id @default(cuid())
+  userId      String
+  key         String
+  // method + path + a hash of the body: the same key on a different request
+  // is a client bug, not a retry.
+  fingerprint String
+  statusCode  Int?
+  response    Json?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, key])
+  @@index([createdAt])
 }
 
 // ---- Stock transfers (src/stock-transfer) ------------------------------

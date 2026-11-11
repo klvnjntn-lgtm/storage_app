@@ -70,7 +70,7 @@ export function configureApp(app: NestExpressApplication) {
   app.enableCors({
     origin: getAllowedOrigins(),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Device-Id', 'Idempotency-Key'],
     credentials: true,
   });
 

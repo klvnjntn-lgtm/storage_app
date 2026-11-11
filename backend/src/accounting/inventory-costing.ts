@@ -1,4 +1,4 @@
-import { CostChangeSource, Prisma, StockTransferStatus } from '@prisma/client';
+import { CostChangeSource, EventType, Prisma, SessionType, StockTransferStatus } from '@prisma/client';
 
 // Weighted-average inventory costing.
 //
@@ -26,11 +26,66 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+// Row-locks the products a document is about to cost, in id order.
+//
+// Everything that reads or moves a product's average cost while stock moves
+// takes this lock first — receipts and returns (through lockCostState) and
+// sales (through lockCosts). Without it a sale read the cost, a receipt
+// then changed it, and the sale booked COGS at a cost the receipt had
+// already averaged away; or the receipt averaged against a quantity a sale
+// was in the middle of taking. Either way the Inventory account stopped
+// matching quantity x cost.
+//
+// Id order, and before any Stock row is locked: two documents listing the
+// same products in opposite order used to be able to deadlock.
+export async function lockProducts(tx: Tx, organizationId: string, productIds: (string | null | undefined)[]) {
+  const ids = [...new Set(productIds.filter((id): id is string => !!id))].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw`
+    SELECT id FROM "Product"
+    WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
+    ORDER BY id
+    FOR UPDATE`;
+}
+
+// Stock that belongs to the business but sits in no Stock row right now:
+// on a transfer that has left its source and not yet arrived, or picked in
+// an open move session and not yet put away. Still on hand, at the current
+// cost, for averaging and for valuing the stock.
+export async function stockInHand(tx: Tx, organizationId: string, productId?: string) {
+  const [inTransit, moving] = await Promise.all([
+    tx.stockTransferItem.groupBy({
+      by: ['productId'],
+      where: { ...(productId && { productId }), transfer: { organizationId, status: StockTransferStatus.IN_TRANSIT } },
+      _sum: { quantity: true },
+    }),
+    // PICK rows are negative and MOVE rows positive, so what's still in
+    // hand is minus their sum.
+    tx.event.groupBy({
+      by: ['productId'],
+      where: {
+        organizationId,
+        ...(productId && { productId }),
+        type: { in: [EventType.PICK, EventType.MOVE] },
+        session: { type: SessionType.MOVE, status: 'OPEN' },
+      },
+      _sum: { quantity: true },
+    }),
+  ]);
+  const byProduct = new Map<string, number>();
+  for (const row of inTransit) {
+    byProduct.set(row.productId, (byProduct.get(row.productId) ?? 0) + Number(row._sum.quantity ?? 0));
+  }
+  for (const row of moving) {
+    const held = -Number(row._sum.quantity ?? 0);
+    if (held > 0) byProduct.set(row.productId, (byProduct.get(row.productId) ?? 0) + held);
+  }
+  return byProduct;
+}
+
 // Locks the product row (so two receipts can't both average against the
-// same starting point) and reads its cost plus the stock on hand. Goods on
-// a stock transfer that has left its source but not yet arrived are in no
-// Stock row, but they're still the business's stock at the current cost,
-// so they count as on hand here.
+// same starting point) and reads its cost plus the stock on hand, counting
+// what's in hand outside the Stock rows (see stockInHand).
 async function lockCostState(tx: Tx, organizationId: string, productId: string) {
   await tx.$queryRaw`SELECT id FROM "Product" WHERE id = ${productId} FOR UPDATE`;
   const product = await tx.product.findFirst({
@@ -38,19 +93,16 @@ async function lockCostState(tx: Tx, organizationId: string, productId: string) 
     select: { costPrice: true },
   });
   if (!product) return null;
-  const [stock, inTransit] = await Promise.all([
+  const [stock, inHand] = await Promise.all([
     tx.stock.aggregate({
       where: { productId, organizationId },
       _sum: { quantity: true },
     }),
-    tx.stockTransferItem.aggregate({
-      where: { productId, transfer: { organizationId, status: StockTransferStatus.IN_TRANSIT } },
-      _sum: { quantity: true },
-    }),
+    stockInHand(tx, organizationId, productId),
   ]);
   return {
     previousCost: product.costPrice != null ? Number(product.costPrice) : null,
-    onHand: Number(stock._sum.quantity ?? 0) + Number(inTransit._sum.quantity ?? 0),
+    onHand: Number(stock._sum.quantity ?? 0) + (inHand.get(productId) ?? 0),
   };
 }
 
@@ -196,16 +248,23 @@ export async function applyOpeningCost(
 }
 
 // Logs a hand-edited cost (product create/edit). The edit itself is the
-// caller's; this only records it.
+// caller's; this records it and returns the stock on hand it applies to, so
+// the caller can book the change in value (PostingRulesService.
+// postInventoryRevaluation) — re-pricing stock that's on the shelf moves
+// what the Inventory account should hold.
 export async function recordManualCost(
   tx: Tx | Prisma.TransactionClient,
   params: { organizationId: string; productId: string; previousCost: number | null; newCost: number | null; userId?: string | null },
-) {
-  if (params.previousCost === params.newCost) return;
-  const stock = await tx.stock.aggregate({
-    where: { productId: params.productId, organizationId: params.organizationId },
-    _sum: { quantity: true },
-  });
+): Promise<{ onHand: number } | null> {
+  if (params.previousCost === params.newCost) return null;
+  const [stock, inHand] = await Promise.all([
+    tx.stock.aggregate({
+      where: { productId: params.productId, organizationId: params.organizationId },
+      _sum: { quantity: true },
+    }),
+    stockInHand(tx, params.organizationId, params.productId),
+  ]);
+  const onHand = Number(stock._sum.quantity ?? 0) + (inHand.get(params.productId) ?? 0);
   await tx.productCostHistory.create({
     data: {
       organizationId: params.organizationId,
@@ -213,14 +272,24 @@ export async function recordManualCost(
       source: CostChangeSource.MANUAL,
       previousCost: params.previousCost,
       newCost: params.newCost,
-      quantityBefore: Number(stock._sum.quantity ?? 0),
+      quantityBefore: onHand,
       userId: params.userId ?? null,
     },
   });
+  return { onHand };
 }
 
-// Current cost of each product, read inside the caller's transaction — what
-// a sale books COGS at when its stock leaves.
+// The cost a sale books COGS at as its stock leaves: locks the products
+// (see lockProducts), then reads their current cost. Use this, not
+// currentCosts, wherever stock is about to move.
+export async function lockCosts(tx: Tx, organizationId: string, productIds: (string | null | undefined)[]) {
+  await lockProducts(tx, organizationId, productIds);
+  return currentCosts(tx, organizationId, productIds.filter((id): id is string => !!id));
+}
+
+// Current cost of each product, read inside the caller's transaction without
+// locking — for planning and display. A document that moves stock uses
+// lockCosts.
 export async function currentCosts(tx: Tx, organizationId: string, productIds: string[]) {
   const products = productIds.length
     ? await tx.product.findMany({

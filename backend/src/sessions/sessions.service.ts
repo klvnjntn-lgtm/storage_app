@@ -8,8 +8,8 @@ import { PostingRulesService } from '../accounting/posting-rules.service'; // NE
 import { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { recomputeInvoiceFulfillmentStatus } from '../invoice/fulfillment-status.util';
 import { businessDayBounds, resolveTimezone } from '../accounting/business-date';
-import { blendLineCost, currentCosts, receiveAtCost } from '../accounting/inventory-costing';
-import { assertSerialCount, landSessionSerials, normalizeSerials, takeSerials } from '../serials/serial-moves';
+import { blendLineCost, lockCosts, receiveAtCost } from '../accounting/inventory-costing';
+import { assertSerialCount, landSessionSerials, normalizeSerials, takeSerials, requiredSaleSerials } from '../serials/serial-moves';
 import { isAdminRole } from '../auth/roles';
 
 const RETURN_REASONS = [
@@ -1107,9 +1107,36 @@ await takeSerials(tx, {
   to: 'IN_TRANSIT',
   refs: { sessionId },
 });
+// Picked for a sale: the units leave for good, so their serial numbers are
+// named here unless the invoice named them when it was issued. Without
+// this they stayed "in stock" on the serial list after the shelf was empty.
+if (session.type === SessionType.FULFILLMENT && product.trackSerials) {
+  const required = await requiredSaleSerials(tx, {
+    organizationId,
+    productId,
+    quantity: qty,
+    invoiceId: session.invoiceId,
+  });
+  const saleSerials = normalizeSerials(serialNumbers);
+  if (saleSerials.length !== required) {
+    throw new BadRequestException({
+      message: `Serial numbers are needed for ${product.name}: ${required} unit(s)`,
+      code: 'SERIALS_REQUIRED',
+      required,
+    });
+  }
+  await takeSerials(tx, {
+    organizationId,
+    productId,
+    locationId: fromLocationId!,
+    serials: saleSerials,
+    to: 'SOLD',
+    refs: { invoiceId: session.invoiceId ?? undefined },
+  });
+}
 // COGS at the weighted-average cost now, as the stock leaves.
 const pickCost = session.type === SessionType.FULFILLMENT
-  ? (await currentCosts(tx, organizationId, [productId])).get(productId) ?? null
+  ? (await lockCosts(tx, organizationId, [productId])).get(productId) ?? null
   : null;
 if (session.type === SessionType.FULFILLMENT && session.invoiceId) {
   await this.recordInvoicePick(tx, organizationId, session.invoiceId, productId, qty, pickCost);
