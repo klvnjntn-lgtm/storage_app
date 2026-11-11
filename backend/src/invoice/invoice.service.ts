@@ -74,6 +74,8 @@ export type InvoicePrintView = {
   // The selling branch, for multi-branch businesses (else null); its
   // address/phone are used above when it has them.
   branchName: string | null;
+  // The booked branch, for picking its print design.
+  branchId: string | null;
   // Where it came from (each null when it wasn't converted from one).
   quotation: { id: string; quotationNumber: string | null; status: string } | null;
   salesOrder: { id: string; orderNumber: string | null; status: string } | null;
@@ -1144,6 +1146,8 @@ async issue(
     organizationId: string,
     id: string,
     formatOverride?: string,
+    // A print design to use; none = the branch default for the format.
+    templateId?: string,
   ): Promise<Buffer> {
     try {
       const invoice = await this.getOne(organizationId, id);
@@ -1155,7 +1159,8 @@ async issue(
         organizationId,
       });
       const printUrl =
-        `${process.env.FRONTEND_URL}/print/invoices/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}`;
+        `${process.env.FRONTEND_URL}/print/invoices/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}` +
+        (templateId ? `&templateId=${encodeURIComponent(templateId)}` : '');
 
       // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
       return await withPdfRenderSlot(async () => {
@@ -1174,6 +1179,10 @@ async issue(
             { name: 'prefers-color-scheme', value: 'light' },
           ]);
           await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+          // A print design lays out its pages in the browser; wait for that.
+          await page
+            .waitForFunction("!document.querySelector('[data-print-pending]')", { timeout: 8000 })
+            .catch(() => undefined);
           const pdfBuffer = await page.pdf({
             printBackground: true,
             preferCSSPageSize: true,
@@ -1264,6 +1273,7 @@ async issue(
       businessAddress: (multiBranch ? invoice.branch?.address : null) || invoice.organization.address,
       businessPhone: (multiBranch ? invoice.branch?.phone : null) || invoice.organization.phone,
       branchName: multiBranch ? (invoice.branch?.name ?? null) : null,
+      branchId: invoice.branchId,
       quotation: invoice.quotation ?? null,
       salesOrder: invoice.salesOrder ?? null,
       workOrder: invoice.workOrder ?? null,

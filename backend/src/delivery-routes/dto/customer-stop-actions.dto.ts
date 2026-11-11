@@ -2,6 +2,7 @@
 import { DeliveryPriority } from '@prisma/client';
 import {
   IsDateString,
+  IsIn,
   IsEnum,
   IsLatitude,
   IsLongitude,
@@ -103,4 +104,27 @@ export class MoveStopResultDto {
   @IsNotEmpty()
   @MaxLength(64)
   toStopId: string;
+}
+
+// An admin settles a stop from the office — no photo or GPS. See
+// DeliveryRoutesService.markStopByOffice.
+export class MarkStopByOfficeDto {
+  @IsIn(['DELIVERED', 'FAILED'])
+  result: 'DELIVERED' | 'FAILED';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  receivedBy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+
+  // The admin's own note ("confirmed by phone"), kept apart from receivedBy.
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 }

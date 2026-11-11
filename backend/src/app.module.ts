@@ -49,6 +49,7 @@ import { PerformanceModule } from './performance/performance.module';
 import { TaxExportModule } from './tax-export/tax-export.module';
 import { TaxReportModule } from './tax-report/tax-report.module';
 import { BudgetModule } from './budget/budget.module';
+import { PrintTemplatesModule } from './print-templates/print-templates.module';
 import { BankReconciliationModule } from './bank-reconciliation/bank-reconciliation.module';
 import { CustomerDepositsModule } from './customer-deposits/customer-deposits.module';
 import { SupplierDepositsModule } from './supplier-deposits/supplier-deposits.module';
@@ -141,6 +142,7 @@ import { SerialsModule } from './serials/serials.module';
     TaxExportModule,
     TaxReportModule,
     BudgetModule,
+    PrintTemplatesModule,
     BankReconciliationModule,
     CustomerDepositsModule,
     SupplierDepositsModule,

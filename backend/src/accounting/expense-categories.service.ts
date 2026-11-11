@@ -6,7 +6,9 @@ import { CreateExpenseCategoryDto, UpdateExpenseCategoryDto } from './dto/expens
 // The usual Indonesian small-business expense heads, each with its own ledger account so the
 // profit & loss shows them line by line. Every expense sits in the 5000s: 5000–5899 operating
 // expenses (beban operasional), 5900 and up other expenses (beban lain-lain) — the same split the
-// expenses page groups its categories by. `was` is the code an earlier version used.
+// expenses page groups its categories by. The built-in Penyesuaian Persediaan, Rugi Pelepasan Aset
+// and Beban Tanpa Kategori follow the standard groups at 5400, 5500 and 5600. `was` is the code an
+// earlier version used.
 export const STANDARD_EXPENSE_CATEGORIES: { code: string; was: string; name: string }[] = [
   { code: '5200', was: '6200', name: 'Beban Sewa' },
   { code: '5210', was: '6210', name: 'Beban Listrik, Air & Telepon' },
@@ -27,13 +29,49 @@ export const STANDARD_EXPENSE_CATEGORIES: { code: string; was: string; name: str
   { code: '5950', was: '6950', name: 'Beban Lain-lain' },
 ];
 
-// The built-in expense accounts' codes before everything moved into the 5000s.
-const SYSTEM_EXPENSE_RECODE: { systemKey: SystemAccountKey; was: string; code: string }[] = [
-  { systemKey: SystemAccountKey.SALARY_EXPENSE, was: '6000', code: '5100' },
-  { systemKey: SystemAccountKey.DEPRECIATION_EXPENSE, was: '6100', code: '5110' },
-  { systemKey: SystemAccountKey.UNCATEGORIZED_EXPENSE, was: '6900', code: '5990' },
-  { systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL, was: '6910', code: '5910' },
+// The built-in expense accounts' earlier codes: first the 6000s, then (for the last three) 5900,
+// 5910 and 5990 before they moved up behind the standard 5200/5300 groups.
+const SYSTEM_EXPENSE_RECODE: { systemKey: SystemAccountKey; was: string[]; code: string }[] = [
+  { systemKey: SystemAccountKey.SALARY_EXPENSE, was: ['6000'], code: '5100' },
+  { systemKey: SystemAccountKey.DEPRECIATION_EXPENSE, was: ['6100'], code: '5110' },
+  { systemKey: SystemAccountKey.INVENTORY_ADJUSTMENT, was: ['5900'], code: '5400' },
+  { systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL, was: ['6910', '5910'], code: '5500' },
+  { systemKey: SystemAccountKey.UNCATEGORIZED_EXPENSE, was: ['6900', '5990'], code: '5600' },
 ];
+
+// Moves the built-in and standard expense accounts still on an old code to their current one,
+// sub-accounts (6200.1 → 5200.1) with them. Postings follow account ids, not codes, so nothing
+// already booked changes. A code the business renamed, or a target code already taken, is left alone.
+export async function recodeExpenseAccounts(tx: Prisma.TransactionClient, organizationId: string) {
+  const accounts = await tx.chartOfAccount.findMany({
+    where: { organizationId, type: AccountType.EXPENSE },
+    select: { id: true, code: true, name: true, systemKey: true },
+  });
+  const taken = new Set(accounts.map((a) => a.code));
+  let moved = 0;
+  const move = async (from: string, to: string) => {
+    if (taken.has(to)) return;
+    for (const a of accounts) {
+      if (a.code !== from && !a.code.startsWith(`${from}.`)) continue;
+      const code = to + a.code.slice(from.length);
+      if (taken.has(code)) continue;
+      await tx.chartOfAccount.update({ where: { id: a.id }, data: { code } });
+      taken.delete(a.code);
+      taken.add(code);
+      a.code = code;
+      moved++;
+    }
+  };
+  for (const r of SYSTEM_EXPENSE_RECODE) {
+    const acc = accounts.find((a) => a.systemKey === r.systemKey);
+    if (acc && r.was.includes(acc.code)) await move(acc.code, r.code);
+  }
+  for (const std of STANDARD_EXPENSE_CATEGORIES) {
+    const acc = accounts.find((a) => a.code === std.was && a.name === std.name);
+    if (acc) await move(std.was, std.code);
+  }
+  return moved;
+}
 
 @Injectable()
 export class ExpenseCategoriesService {
@@ -90,7 +128,7 @@ export class ExpenseCategoriesService {
     if (!hasBooks) throw new BadRequestException('Set up the chart of accounts first (Accounting → Setup)');
 
     return this.prisma.$transaction(async (tx) => {
-      const recoded = await this.moveExpensesTo5000s(tx, organizationId);
+      const recoded = await recodeExpenseAccounts(tx, organizationId);
       let created = 0;
       const skipped: string[] = [];
       for (const std of STANDARD_EXPENSE_CATEGORIES) {
@@ -121,40 +159,6 @@ export class ExpenseCategoriesService {
       }
       return { created, skipped, recoded };
     });
-  }
-
-  // Moves the built-in and standard expense accounts still on their old 6000s codes into the 5000s,
-  // sub-accounts (6200.1 → 5200.1) with them. Postings follow account ids, not codes, so nothing
-  // already booked changes. A code the business renamed, or a target code already taken, is left alone.
-  private async moveExpensesTo5000s(tx: Prisma.TransactionClient, organizationId: string) {
-    const accounts = await tx.chartOfAccount.findMany({
-      where: { organizationId, type: AccountType.EXPENSE },
-      select: { id: true, code: true, name: true, systemKey: true },
-    });
-    const taken = new Set(accounts.map((a) => a.code));
-    let moved = 0;
-    const move = async (from: string, to: string) => {
-      if (taken.has(to)) return;
-      for (const a of accounts) {
-        if (a.code !== from && !a.code.startsWith(`${from}.`)) continue;
-        const code = to + a.code.slice(from.length);
-        if (taken.has(code)) continue;
-        await tx.chartOfAccount.update({ where: { id: a.id }, data: { code } });
-        taken.delete(a.code);
-        taken.add(code);
-        a.code = code;
-        moved++;
-      }
-    };
-    for (const r of SYSTEM_EXPENSE_RECODE) {
-      const acc = accounts.find((a) => a.systemKey === r.systemKey);
-      if (acc?.code === r.was) await move(r.was, r.code);
-    }
-    for (const std of STANDARD_EXPENSE_CATEGORIES) {
-      const acc = accounts.find((a) => a.code === std.was && a.name === std.name);
-      if (acc) await move(std.was, std.code);
-    }
-    return moved;
   }
 
   private async assertAccountBelongsToOrg(organizationId: string, accountId: string) {

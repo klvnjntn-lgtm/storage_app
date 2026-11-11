@@ -17,6 +17,7 @@ import { LicenseService } from '../license/license.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { LoginLockout } from './login-lockout';
+import { issueDeviceToken, lockoutKey } from './device-cookie';
 import { platformOwnerEmails } from '../platform/platform-owner.guard';
 import { ModuleKey } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
@@ -60,14 +61,19 @@ export class AuthService {
     private twoFactor: TwoFactorService,
   ) {}
 
+  // deviceToken: the browser's device cookie, if it has one (see
+  // device-cookie.ts) — failures are counted per browser that has signed in
+  // to this account before, so other people's guesses can't lock it out.
   async login(
     email: string,
     password: string,
     deviceId?: string,
     userAgent?: string,
+    deviceToken?: string | null,
   ) {
     const normalizedEmail = email.trim().toLowerCase();
-    this.loginLockout.assertNotLocked(normalizedEmail);
+    const lockKey = lockoutKey(normalizedEmail, deviceToken);
+    this.loginLockout.assertNotLocked(lockKey);
 
     const user = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -84,7 +90,7 @@ export class AuthService {
     // than "wrong password", which let response timing enumerate accounts.
     const valid = await bcrypt.compare(password, user?.password ?? TIMING_DUMMY_HASH);
     if (!user || !user.active || !valid) {
-      this.loginLockout.recordFailure(normalizedEmail);
+      this.loginLockout.recordFailure(lockKey);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -132,25 +138,32 @@ export class AuthService {
 
     // Only a finished login clears the failure count. Clearing it at the
     // password step let a stolen password reset the count between code guesses.
-    this.loginLockout.recordSuccess(normalizedEmail);
-    return this.issueToken(user.id, user.email, user.role, user.organizationId);
+    this.loginLockout.recordSuccess(lockKey);
+    return {
+      ...(await this.issueToken(user.id, user.email, user.role, user.organizationId)),
+      deviceToken: issueDeviceToken(user.email),
+    };
   }
 
-  async completeTwoFactorLogin(mfaToken: string, code: string) {
+  async completeTwoFactorLogin(mfaToken: string, code: string, deviceToken?: string | null) {
     const userId = this.twoFactor.readChallenge(mfaToken);
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.active) throw new UnauthorizedException('Invalid credentials');
     // Same per-account lockout as passwords: a challenge token is good for
     // five minutes, which is plenty of guesses otherwise.
-    this.loginLockout.assertNotLocked(user.email);
+    const lockKey = lockoutKey(user.email, deviceToken);
+    this.loginLockout.assertNotLocked(lockKey);
     try {
       await this.twoFactor.verifyCode(user.id, code);
     } catch (err) {
-      this.loginLockout.recordFailure(user.email);
+      this.loginLockout.recordFailure(lockKey);
       throw err;
     }
-    this.loginLockout.recordSuccess(user.email);
-    return this.issueToken(user.id, user.email, user.role, user.organizationId);
+    this.loginLockout.recordSuccess(lockKey);
+    return {
+      ...(await this.issueToken(user.id, user.email, user.role, user.organizationId)),
+      deviceToken: issueDeviceToken(user.email),
+    };
   }
 
   // Public registration ALWAYS creates a brand new organization, and the
@@ -572,6 +585,8 @@ export class AuthService {
       role,
       organizationId,
       sessionId,
+      // Session renewal (session-renewal.interceptor.ts) stops at 30 days from this.
+      loginAt: Date.now(),
     });
 
     return { accessToken };

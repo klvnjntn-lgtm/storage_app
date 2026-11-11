@@ -1,3 +1,5 @@
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { SessionRenewalInterceptor } from './session-renewal.interceptor';
 // src/auth/auth.module.ts
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
@@ -35,7 +37,14 @@ import { PlanLimitsModule } from '../billing/plan-limits.module';
     }),
   ],
   controllers: [AuthController, TwoFactorController],
-  providers: [AuthService, JwtStrategy, DevicesService, TwoFactorService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    DevicesService,
+    TwoFactorService,
+    // Renews the session cookie of anyone still using it — see the interceptor.
+    { provide: APP_INTERCEPTOR, useClass: SessionRenewalInterceptor },
+  ],
   // DevicesService is exported so DevicesModule's admin-facing controller
   // can reuse this exact instance (see devices/devices.module.ts) rather
   // than duplicating device-approval logic in a second module.

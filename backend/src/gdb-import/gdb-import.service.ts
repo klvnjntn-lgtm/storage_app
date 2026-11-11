@@ -12,10 +12,12 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
-  PurchaseOrderStatus, FulfillmentStatus } from '@prisma/client';
+  PurchaseOrderStatus, FulfillmentStatus, EventType } from '@prisma/client';
 import { LocationService } from 'src/location/location.service';
 import { PlanLimitsService } from '../billing/plan-limits.service';
 import { OpeningBalanceService } from '../accounting/opening-balance.service';
+import { PostingRulesService } from '../accounting/posting-rules.service';
+import { orgToday } from '../accounting/business-date';
 import { ensureDefaultPriceLevel } from '../price-level/default-price-level';
 import { detectInvoiceNumberFormat } from '../shared/documents/invoice-number-format.util';
 // ---------------------------------------------------------------------------
@@ -490,6 +492,7 @@ export class GdbImportService implements OnModuleInit {
     private readonly locationService: LocationService,
     private readonly planLimits: PlanLimitsService,
     private readonly openingBalances: OpeningBalanceService,
+    private readonly postingRules: PostingRulesService,
 ) {}
 
   private readonly tempFiles = new Map<string, TempFileEntry>();
@@ -1206,6 +1209,24 @@ private async importStock(
   let skippedNoProduct = 0;
   const CONCURRENCY = 20;
 
+  // What each product had here before this import, and its cost after the
+  // items step — to book the change in the ledger (below). Accurate's count
+  // replaces ours outright; the difference used to change Stock with no
+  // movement and no ledger entry, so the Inventory account never held the
+  // imported stock at all.
+  const ids = [...new Set(productIdBySku.values())];
+  const [before, costs] = await Promise.all([
+    this.prisma.stock.findMany({
+      where: { organizationId, locationId: defaultLocation.id, productId: { in: ids } },
+      select: { productId: true, quantity: true },
+    }),
+    this.prisma.product.findMany({ where: { organizationId, id: { in: ids } }, select: { id: true, costPrice: true } }),
+  ]);
+  const qtyBefore = new Map(before.map((r) => [r.productId, Number(r.quantity)]));
+  const costOf = new Map(costs.map((p) => [p.id, p.costPrice != null ? Number(p.costPrice) : null]));
+  // Last row wins when a SKU repeats, as the upserts below do.
+  const qtyAfter = new Map<string, number>();
+
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     const chunk = rows.slice(i, i + CONCURRENCY);
     await Promise.all(
@@ -1219,6 +1240,7 @@ private async importStock(
           return;
         }
 
+        qtyAfter.set(productId, Number(row.STOCK ?? 0));
         await this.prisma.stock.upsert({
           where: { productId_locationId: { productId, locationId: defaultLocation.id } },
           create: {
@@ -1233,6 +1255,8 @@ private async importStock(
       }),
     );
   }
+
+  const ledger = await this.bookImportedStock(organizationId, defaultLocation.id, qtyBefore, qtyAfter, costOf);
 
   console.log('[GdbImport] importStock done', {
     written,
@@ -1253,6 +1277,81 @@ private async importStock(
       created: defaultLocation.created,
     },
     warehouseDistribution: Object.fromEntries(warehouseCounts), // informational only
+    ledger,
+  };
+}
+
+// Records what an Accurate import did to stock: a movement per product
+// whose count changed, and one ledger entry for the value — stock that
+// came in against Opening Balance Equity (it's the business's existing
+// stock arriving in the books, not a gain), stock that went down against
+// Inventory Adjustments, the same split a spreadsheet stock import uses.
+// Valued at each product's average cost; a product with no cost moves
+// with no value, as everywhere else (the stock value check lists those).
+private async bookImportedStock(
+  organizationId: string,
+  locationId: string,
+  qtyBefore: Map<string, number>,
+  qtyAfter: Map<string, number>,
+  costOf: Map<string, number | null>,
+) {
+  const runId = randomUUID();
+  let valueIn = 0;
+  let valueOut = 0;
+  const events: Prisma.EventCreateManyInput[] = [];
+  for (const [productId, after] of qtyAfter) {
+    const beforeQty = qtyBefore.get(productId) ?? 0;
+    const delta = Math.round((after - beforeQty) * 100) / 100;
+    if (delta === 0) continue;
+    events.push({
+      type: EventType.IMPORT_REPLACE,
+      productId,
+      toLocationId: locationId,
+      quantity: delta,
+      organizationId,
+      metadata: { source: 'accurate-import', importRunId: runId, beforeQty, afterQty: after },
+    });
+    const cost = costOf.get(productId);
+    if (cost == null) continue;
+    if (delta > 0) valueIn += delta * cost;
+    else valueOut += -delta * cost;
+  }
+  for (let i = 0; i < events.length; i += 1000) {
+    await this.prisma.event.createMany({ data: events.slice(i, i + 1000) });
+  }
+
+  const date = await orgToday(this.prisma, organizationId);
+  const [inEntry, outEntry] = await this.prisma.$transaction(async (tx) => [
+    await this.postingRules.postStockValueChange(
+      organizationId,
+      {
+        sourceId: `accurate-stock:${runId}:in`,
+        date,
+        memo: 'Accurate import: stock brought in',
+        amount: valueIn,
+        locationId,
+        counter: 'OPENING_BALANCE',
+      },
+      tx,
+    ),
+    await this.postingRules.postStockValueChange(
+      organizationId,
+      {
+        sourceId: `accurate-stock:${runId}:out`,
+        date,
+        memo: 'Accurate import: stock counted down',
+        amount: -valueOut,
+        locationId,
+        counter: 'ADJUSTMENT',
+      },
+      tx,
+    ),
+  ]);
+  return {
+    movements: events.length,
+    valueIn: Math.round(valueIn * 100) / 100,
+    valueOut: Math.round(valueOut * 100) / 100,
+    entries: [inEntry?.entryNumber, outEntry?.entryNumber].filter(Boolean),
   };
 }  // -------------------------------------------------------------------------
   // PERSONDATA -> Customer (only rows referenced by ARINV.CUSTOMERID)

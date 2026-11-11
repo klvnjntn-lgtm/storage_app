@@ -8,6 +8,8 @@ import { DeliveryRoutesController } from './delivery-routes.controller';
 import { RouteOptimizerService } from './route-optimizer.service';
 import { RoutePlannerService } from './route-planner.service';
 import { StopProofService } from './stop-proof.service';
+import { StopShareTokenService } from './stop-share-token.service';
+import { PublicStopController } from './public-stop.controller';
 import { OrganizationModulesModule } from '../organization-module/organization-modules.module';
 import { StorageModule } from '../storage/storage.module';
 
@@ -19,12 +21,13 @@ import { StorageModule } from '../storage/storage.module';
     OrganizationModulesModule,
     StorageModule,
   ],
-  controllers: [DeliveryRoutesController],
+  controllers: [DeliveryRoutesController, PublicStopController],
   providers: [
     DeliveryRoutesService,
     RouteOptimizerService,
     RoutePlannerService,
     StopProofService,
+    StopShareTokenService,
     DeliveryReportService,
   ],
   exports: [DeliveryRoutesService],

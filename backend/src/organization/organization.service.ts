@@ -70,6 +70,7 @@ export class OrganizationService {
       this.prisma.organization.findUnique({
         where: { id: orgId },
         select: {
+          name: true,
           fulfillmentMode: true,
           posPricingEnabled: true,
           legalName: true,
@@ -91,6 +92,8 @@ export class OrganizationService {
     return {
       fulfillmentMode: org?.fulfillmentMode ?? FulfillmentMode.PICK_PACK_SHIP,
       posPricingEnabled: org?.posPricingEnabled ?? false,
+      // Shown on print-design previews.
+      name: org?.name ?? null,
       legalName: org?.legalName ?? null,
       npwp: org?.npwp ?? null,
       logoUrl: org?.logoUrl ?? null,

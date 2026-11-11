@@ -21,6 +21,8 @@ import { STOP_DWELL_SECONDS } from './route-optimizer.service';
 import { resolveTimezone, wallTimeOnBusinessDay } from '../accounting/business-date';
 import type { RouteOptimizerService, UnscheduledReason } from './route-optimizer.service';
 import { StopProofService } from './stop-proof.service';
+import { StopShareTokenService } from './stop-share-token.service';
+import { TeamsService } from '../teams/teams.service';
 
 // Team-owned routes and customer stops (stops without a delivery order),
 // against the real database and a temp uploads folder.
@@ -1030,6 +1032,25 @@ describe('Team routes & customer stops', () => {
       [stops[0].id, stops[0].sequence, 'FAILED', 30 * 60],
     ]);
     expect(row.unfinished.map((s) => s.stopId)).toEqual([stops[1].id]);
+    // The way the driver came, in the order they did it, at each stop's pin.
+    const pin = async (id: string) => {
+      const s = await prisma.routeStop.findUniqueOrThrow({ where: { id } });
+      return { latitude: Number(s.destinationLatitude), longitude: Number(s.destinationLongitude) };
+    };
+    expect(row.trail).toEqual([await pin(stops[2].id), await pin(stops[0].id)]);
+  });
+
+  it('gives a new team the least-used map color, and keeps it', async () => {
+    const teams = new TeamsService(prisma);
+    const org = await prisma.organization.create({ data: { name: `Colors ${randomUUID()}` } });
+    const made = [];
+    for (const n of ['B', 'A', 'C']) made.push(await teams.create(org.id, { name: `Team ${n}` }));
+    expect(made.map((t) => t.colorIndex)).toEqual([0, 1, 2]);
+    // Renaming keeps it; a gap left by a deleted team is filled first.
+    await teams.rename(org.id, made[0].id, 'Team Z');
+    expect((await prisma.team.findUniqueOrThrow({ where: { id: made[0].id } })).colorIndex).toBe(0);
+    await prisma.team.delete({ where: { id: made[1].id } });
+    expect((await teams.create(org.id, { name: 'Team D' })).colorIndex).toBe(1);
   });
 
   it("times a rescheduled stop by its own attempt, not the delivery's later failure", async () => {
@@ -1589,6 +1610,54 @@ describe('Team routes & customer stops', () => {
     expect(view.stops.find((s) => s.id === byOffice.id)!.status).toBe('FAILED');
   });
 
+  describe('marking a stop from the office', () => {
+    it('settles customer and DO stops without a photo or GPS, flagged as set by the office', async () => {
+      const route = await mkStartedRoute();
+      const customerStop = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('Office Done Co')).id });
+      const order = await prisma.deliveryOrder.create({
+        data: { organizationId: orgId, customerName: 'Office Fail DO', status: DeliveryOrderStatus.SHIPPED },
+      });
+      const doStop = await routes.addStop(orgId, route.id, { deliveryOrderId: order.id });
+
+      await routes.markStopByOffice(orgId, route.id, customerStop.id, { result: 'DELIVERED', receivedBy: ' Budi ', note: ' Konfirmasi via telepon ' }, admin());
+      const view = await routes.markStopByOffice(orgId, route.id, doStop.id, { result: 'FAILED', reason: 'Toko tutup' }, admin());
+
+      const c = view.stops.find((s) => s.id === customerStop.id)!;
+      expect(c).toMatchObject({ status: 'DELIVERED', receivedBy: 'Budi', officeNote: 'Konfirmasi via telepon', markedByOffice: true, completedLatitude: null });
+      const d = view.stops.find((s) => s.id === doStop.id)!;
+      expect(d).toMatchObject({ status: 'FAILED', failureReason: 'Toko tutup', markedByOffice: true });
+      expect((await prisma.deliveryOrder.findUniqueOrThrow({ where: { id: order.id } })).status).toBe(
+        DeliveryOrderStatus.FAILED,
+      );
+
+      // Already settled: no second result on top.
+      await expect(
+        routes.markStopByOffice(orgId, route.id, customerStop.id, { result: 'FAILED' }, admin()),
+      ).rejects.toThrow(/already resolved/);
+
+      // Shown in monitoring, but never as where the driver was.
+      const { routeDate } = await prisma.route.findUniqueOrThrow({ where: { id: route.id } });
+      const date = routeDate.toISOString().slice(0, 10);
+      const row = (await routes.monitoringByTeam(orgId, date)).find((r) => r.routeId === route.id)!;
+      expect(row.timeline.map((e) => [e.stopId, e.markedByOffice, e.durationSeconds])).toEqual(
+        expect.arrayContaining([
+          [customerStop.id, true, null],
+          [doStop.id, true, null],
+        ]),
+      );
+      expect(row.lastStop).toBeNull();
+      expect(row.trail).toEqual([]);
+    });
+
+    it('drops the flag when the stop is reset', async () => {
+      const route = await mkStartedRoute();
+      const stop = await routes.addStop(orgId, route.id, { customerId: (await mkCustomer('Office Reset Co')).id });
+      await routes.markStopByOffice(orgId, route.id, stop.id, { result: 'DELIVERED' }, admin());
+      const view = await proofs.resetStop(orgId, route.id, stop.id, admin());
+      expect(view.stops.find((s) => s.id === stop.id)).toMatchObject({ status: 'PENDING', markedByOffice: false });
+    });
+  });
+
   it("gives a location set in the office to the customer's stops still to be driven", async () => {
     const customer = await mkCustomer('Pinned Later', false);
     const route = await mkRoute();
@@ -1936,5 +2005,74 @@ describe('Team routes & customer stops', () => {
         routeId: to.id,
       }),
     ).rejects.toThrow(/Only a failed stop/);
+  });
+  it('share link: only for stops with landmark photos, public view leaves out POD and phone', async () => {
+    const route = await mkRoute();
+    const withPhotos = await mkCustomer('Share Photos');
+    await prisma.customer.update({ where: { id: withPhotos.id }, data: { phone: '0812000111' } });
+    const without = await mkCustomer('Share None');
+    await routes.addStop(orgId, route.id, { customerId: withPhotos.id });
+    await routes.addStop(orgId, route.id, { customerId: without.id });
+    const landmark = await prisma.customerLocationPhoto.create({
+      data: {
+        organizationId: orgId,
+        customerId: withPhotos.id,
+        storageKey: `customer-locations/${orgId}/${withPhotos.id}/x.webp`,
+      },
+    });
+    try {
+      const view = await routes.getRoute(orgId, route.id);
+      const [a, b] = view.stops;
+      expect(a.shareToken).toEqual(expect.any(String));
+      expect(b.shareToken).toBeNull();
+      // Same link on a reload.
+      expect((await routes.getRoute(orgId, route.id)).stops[0].shareToken).toBe(a.shareToken);
+
+      // Give the stop a proof photo: the public page still never shows it.
+      await prisma.routeStop.update({
+        where: { id: a.id },
+        data: { proofPhotoKey: 'stop-proofs/secret.webp' },
+      });
+      const pub = await routes.publicStopView(a.shareToken!);
+      expect(pub).toMatchObject({
+        label: 'Share Photos',
+        address: 'Share Photos street',
+        deliveryNotes: 'Blue gate',
+      });
+      expect(pub.photos).toHaveLength(1);
+      expect(pub.photos[0].path).toContain(encodeURIComponent(landmark.storageKey));
+      const json = JSON.stringify(pub);
+      expect(json).not.toContain('stop-proofs');
+      expect(json).not.toContain('0812000111');
+
+      // Tampered, wrong-format and expired tokens all 404.
+      const [id, exp, sig] = a.shareToken!.split('.');
+      await expect(routes.publicStopView(`${id}.${Number(exp) + 3600}.${sig}`)).rejects.toThrow(NotFoundException);
+      await expect(routes.publicStopView(`${b.id}.${exp}.${sig}`)).rejects.toThrow(NotFoundException);
+      await expect(routes.publicStopView('nonsense')).rejects.toThrow(NotFoundException);
+      const tokens = new StopShareTokenService();
+      const old = tokens.sign(a.id, new Date(Date.UTC(2020, 0, 1)));
+      jest.useFakeTimers({ now: Date.now() + 3 * 24 * 3600 * 1000, doNotFake: ['nextTick', 'setImmediate'] });
+      try {
+        expect(tokens.verify(old)).toBeNull();
+      } finally {
+        jest.useRealTimers();
+      }
+
+      // Deleting the stop kills the link.
+      await routes.removeStop(orgId, route.id, a.id);
+      await expect(routes.publicStopView(a.shareToken!)).rejects.toThrow(NotFoundException);
+    } finally {
+      await prisma.customerLocationPhoto.delete({ where: { id: landmark.id } });
+    }
+  });
+
+  it('share link expiry: through the day after the route, at least a day from now', () => {
+    const tokens = new StopShareTokenService();
+    const now = Date.UTC(2031, 0, 10, 5);
+    // Route in the future: route day + 2 days.
+    expect(tokens.expiryFor(new Date(Date.UTC(2031, 0, 20)), now)).toBe(Date.UTC(2031, 0, 22) / 1000);
+    // Old route: a day from now, rounded up to the hour.
+    expect(tokens.expiryFor(new Date(Date.UTC(2030, 0, 1)), now + 60_000)).toBe((now + 3600_000 + 24 * 3600_000) / 1000);
   });
 });

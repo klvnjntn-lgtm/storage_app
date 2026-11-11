@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PrintTemplatesModule } from '../print-templates/print-templates.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SharedDocumentsModule } from '../shared/documents/shared-documents.module';
 import { SalesQuotationService } from './sales-quotation.service';
@@ -12,7 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { PublicQuotationController } from './public-quotation.controller';
 
 @Module({
-  imports: [PrismaModule, SharedDocumentsModule, PrintModule, BankAccountModule, OrganizationModulesModule, NotificationsModule],
+  imports: [PrintTemplatesModule, PrismaModule, SharedDocumentsModule, PrintModule, BankAccountModule, OrganizationModulesModule, NotificationsModule],
   controllers: [SalesQuotationController, SalesQuotationPrintController, PublicQuotationController],
   providers: [SalesQuotationService, BankAccountResolverService],
   exports: [SalesQuotationService],

@@ -521,6 +521,16 @@ export class OrgTransferService {
         );
       }
 
+      // The export never carries these (see STRIPPED_FIELDS), so a file
+      // that does was made by hand: drop them, so a crafted file can't
+      // grant itself a plan, paid months or seats, or platform access.
+      // The target install's defaults apply instead.
+      for (const [model, fields] of Object.entries(STRIPPED_FIELDS)) {
+        for (const row of rows.get(model) ?? []) {
+          for (const field of fields) delete row[field];
+        }
+      }
+
       const orgs = rows.get('Organization') ?? [];
       if (orgs.length !== 1)
         throw new BadRequestException(

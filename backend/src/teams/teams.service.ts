@@ -4,6 +4,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 
+// How many team colors the maps have (TEAM_COLORS in the frontend's teamColors.ts).
+export const TEAM_COLOR_COUNT = 8;
+
 @Injectable()
 export class TeamsService {
   constructor(private prisma: PrismaService) {}
@@ -22,8 +25,18 @@ export class TeamsService {
   }
 
   async create(organizationId: string, dto: CreateTeamDto) {
+    // The least-used map color, so teams don't share one until there are
+    // more teams than colors. Lowest index on a tie.
+    const used = await this.prisma.team.groupBy({
+      by: ['colorIndex'],
+      where: { organizationId },
+      _count: { _all: true },
+    });
+    const uses = (i: number) => used.find((u) => u.colorIndex === i)?._count._all ?? 0;
+    let colorIndex = 0;
+    for (let i = 1; i < TEAM_COLOR_COUNT; i++) if (uses(i) < uses(colorIndex)) colorIndex = i;
     try {
-      return await this.prisma.team.create({ data: { organizationId, name: dto.name } });
+      return await this.prisma.team.create({ data: { organizationId, name: dto.name, colorIndex } });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestException(`A team named "${dto.name}" already exists`);

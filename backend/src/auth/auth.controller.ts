@@ -20,6 +20,7 @@ import {
   readSessionCookie,
   setSessionCookie,
 } from './session-cookie';
+import { DEVICE_COOKIE, readCookie, setDeviceCookie } from './device-cookie';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { InviteDto } from './dto/invite.dto';
@@ -91,11 +92,13 @@ export class AuthController {
       dto.password,
       deviceId,
       req.headers['user-agent'],
+      readCookie(req, DEVICE_COOKIE),
     );
     if ('mfaRequired' in result) {
       return { mfaRequired: true, mfaToken: result.mfaToken };
     }
     setSessionCookie(req, res, result.accessToken);
+    setDeviceCookie(req, res, result.deviceToken);
     return { ok: true };
   }
 
@@ -109,8 +112,13 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken } = await this.authService.completeTwoFactorLogin(dto.mfaToken, dto.code);
+    const { accessToken, deviceToken } = await this.authService.completeTwoFactorLogin(
+      dto.mfaToken,
+      dto.code,
+      readCookie(req, DEVICE_COOKIE),
+    );
     setSessionCookie(req, res, accessToken);
+    setDeviceCookie(req, res, deviceToken);
     return { ok: true };
   }
 

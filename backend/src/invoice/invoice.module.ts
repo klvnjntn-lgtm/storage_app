@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PrintTemplatesModule } from '../print-templates/print-templates.module';
 import { InvoiceController } from './invoice.controller';
 import { InvoicePrintController } from './invoice-print.controller';
 import { InvoiceNumberingController } from './invoice-numbering.controller';
@@ -17,7 +18,7 @@ import { PlanLimitsModule } from '../billing/plan-limits.module';
 import { ApprovalsModule } from '../approvals/approvals.module';
 
 @Module({
-  imports: [
+  imports: [PrintTemplatesModule, 
     StockModule,
     PrismaModule,
     GuardsModule,

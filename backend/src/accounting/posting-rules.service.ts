@@ -1064,10 +1064,38 @@ export class PostingRulesService {
     },
     tx?: Prisma.TransactionClient,
   ) {
-    const db = this.db(tx);
     if (params.unitCost == null || params.qtyDelta === 0) return null;
+    return this.postStockValueChange(
+      organizationId,
+      {
+        sourceId: params.sourceId,
+        date: params.date,
+        memo: params.memo,
+        amount: (params.qtyDelta > 0 ? 1 : -1) * Math.abs(params.qtyDelta) * params.unitCost,
+        locationId: params.locationId,
+        counter: params.counter,
+      },
+      tx,
+    );
+  }
 
-    const amount = this.round2(Math.abs(params.qtyDelta) * params.unitCost);
+  // Stock worth `amount` more (positive) or less (negative), against the
+  // same two counter accounts as postStockAdjustment — for a movement that
+  // spans many products and is booked as one total (the Accurate import).
+  async postStockValueChange(
+    organizationId: string,
+    params: {
+      sourceId: string;
+      date: Date;
+      memo: string;
+      amount: number;
+      locationId?: string | null;
+      counter: 'ADJUSTMENT' | 'OPENING_BALANCE';
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = this.db(tx);
+    const amount = this.round2(Math.abs(params.amount));
     if (amount <= 0) return null;
 
     const [inventory, counterAccount] = await Promise.all([
@@ -1082,7 +1110,7 @@ export class PostingRulesService {
     ]);
 
     const locationId = params.locationId ?? undefined;
-    const increase = params.qtyDelta > 0;
+    const increase = params.amount > 0;
 
     return this.journal.postEntry(
       organizationId,

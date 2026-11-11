@@ -55,7 +55,8 @@ export function configureApp(app: NestExpressApplication) {
   // split client-side. Registered before Nest's own parser (100kb), which
   // then skips the already-parsed body. Every other route keeps the default.
   // The CSV order import's confirm step is the same: it posts back every
-  // parsed row of a file the preview step already accepted (10MB).
+  // parsed row of a file the preview step already accepted (10MB). So does the
+  // reorder-settings spreadsheet, one row per product.
   //
   // Wrapped in a named function on purpose: Nest skips registering its own
   // global JSON parser if any middleware in the stack is named "jsonParser"
@@ -63,7 +64,7 @@ export function configureApp(app: NestExpressApplication) {
   // function with exactly that name — mounting it directly here silently
   // turned off JSON parsing for every other route.
   const largeJsonParser = json({ limit: '10mb' });
-  app.use(['/stock/import', '/integrations/import/confirm'], function largeJsonBody(req, res, next) {
+  app.use(['/stock/import', '/integrations/import/confirm', '/reorder/import'], function largeJsonBody(req, res, next) {
     largeJsonParser(req, res, next);
   });
 

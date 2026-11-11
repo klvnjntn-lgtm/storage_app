@@ -725,9 +725,12 @@ async getARAging(
   async getAPAging(
     organizationId: string,
     asOf: Date,
-    opts: PageParams & { bucket?: AgingBucket; supplierId?: string } = {},
+    // all: every line on one page, for a caller that lists them all (the Pelunasan page).
+    opts: PageParams & { bucket?: AgingBucket; supplierId?: string; all?: boolean } = {},
   ): Promise<APAgingReport> {
-    const { page, pageSize } = this.normalizePaging(opts, 50, 200);
+    const paging = this.normalizePaging(opts, 50, 200);
+    const page = opts.all ? 1 : paging.page;
+    let pageSize = paging.pageSize;
 
     const apAccountId = await this.accounts.resolve(organizationId, SystemAccountKey.ACCOUNTS_PAYABLE);
 
@@ -911,6 +914,7 @@ async getARAging(
       .filter((l) => (opts.supplierId ? l.supplierId === opts.supplierId : true))
       .sort((a, b) => b.daysOverdue - a.daysOverdue || b.outstanding - a.outstanding);
 
+    if (opts.all) pageSize = Math.max(1, filtered.length);
     const lines = filtered.slice((page - 1) * pageSize, page * pageSize);
 
     return {

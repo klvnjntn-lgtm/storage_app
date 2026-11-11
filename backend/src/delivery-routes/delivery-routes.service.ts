@@ -42,6 +42,7 @@ import { highPriorityFirst, priorityInversions } from './priority-order';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
 import { backfillCustomerPin, releaseCustomerPin } from '../customers/customer-pin-backfill';
+import { StopShareTokenService } from './stop-share-token.service';
 import {
   RescheduleCustomerStopDto,
   UpdateCustomerStopDetailsDto,
@@ -126,6 +127,8 @@ export const stopSelect = {
   failureReason: true,
   failureLatitude: true,
   failureLongitude: true,
+  markedByOfficeAt: true,
+  officeNote: true,
   deliveryOrder: {
     select: {
       id: true,
@@ -166,6 +169,7 @@ type StopRow = Prisma.RouteStopGetPayload<{ select: typeof stopSelect }>;
 export const teamSelect = {
   id: true,
   name: true,
+  colorIndex: true,
   members: {
     where: { role: 'DRIVER', active: true, removedAt: null },
     select: { id: true, email: true, displayName: true },
@@ -177,6 +181,7 @@ type TeamRow = Prisma.TeamGetPayload<{ select: typeof teamSelect }>;
 export const presentTeam = (team: TeamRow) => ({
   id: team.id,
   name: team.name,
+  colorIndex: team.colorIndex,
   driver: team.members[0] ?? null,
 });
 
@@ -326,6 +331,7 @@ export class DeliveryRoutesService {
     private notifications: NotificationsService,
     private modules: OrganizationModulesService,
     private signer: SignedFileUrlService,
+    private shareTokens: StopShareTokenService,
   ) {}
 
   // Delivery status is the source of truth (spec's own rule) — a stop's
@@ -444,6 +450,9 @@ export class DeliveryRoutesService {
       failureReason: d ? d.failureReason : stop.failureReason,
       failureLatitude: d ? d.failureLatitude : stop.failureLatitude,
       failureLongitude: d ? d.failureLongitude : stop.failureLongitude,
+      // An admin set this result from the office, not the driver on site.
+      markedByOffice: stop.markedByOfficeAt != null,
+      officeNote: stop.officeNote,
       deliveryOrder: d ? deliveryOrder : null,
     };
   }
@@ -525,13 +534,18 @@ export class DeliveryRoutesService {
 
   // One team = one route per day — a second non-cancelled route for the
   // same team and date is refused.
+  //
+  // Call inside the transaction that writes the route, after lockTeam: a
+  // check on its own let a double-tapped "create" (or two people planning
+  // the same team) both pass and both create.
   private async assertTeamFreeOnDate(
     organizationId: string,
     teamId: string,
     routeDate: Date,
     exceptRouteId?: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    const existing = await this.prisma.route.findFirst({
+    const existing = await db.route.findFirst({
       where: {
         organizationId,
         teamId,
@@ -744,15 +758,18 @@ export class DeliveryRoutesService {
   ) {
     await this.assertTeam(organizationId, dto.teamId);
     const routeDate = new Date(`${dto.routeDate}T00:00:00.000Z`);
-    await this.assertTeamFreeOnDate(organizationId, dto.teamId, routeDate);
-    const route = await this.prisma.route.create({
-      data: {
-        organizationId,
-        teamId: dto.teamId,
-        routeDate,
-        name: dto.name,
-        createdByUserId,
-      },
+    const route = await this.prisma.$transaction(async (tx) => {
+      await lockTeam(tx, dto.teamId);
+      await this.assertTeamFreeOnDate(organizationId, dto.teamId, routeDate, undefined, tx);
+      return tx.route.create({
+        data: {
+          organizationId,
+          teamId: dto.teamId,
+          routeDate,
+          name: dto.name,
+          createdByUserId,
+        },
+      });
     });
     await this.recordHistory(
       route.id,
@@ -808,14 +825,67 @@ export class DeliveryRoutesService {
     // is real, only that it isn't theirs.
     if (!route) throw new NotFoundException('Route not found');
 
-    const stops = await this.withCustomerInfo(
-      organizationId,
-      route.stops.map((stop) => this.presentStop(stop)),
-    );
+    const stops = (
+      await this.withCustomerInfo(
+        organizationId,
+        route.stops.map((stop) => this.presentStop(stop)),
+      )
+    ).map((stop) => ({
+      ...stop,
+      // For the stop's Copy button: a public page with the customer's
+      // landmark photos (see PublicStopController). Only when there are
+      // photos to show — otherwise the copied text says it all.
+      shareToken: stop.customerInfo?.locationPhotos.length
+        ? this.shareTokens.sign(stop.id, route.routeDate)
+        : null,
+    }));
     const currentStop = stops.find((stop) => stop.status === 'PENDING') ?? null;
     const startPoint = await this.getStartPoint(organizationId);
 
     return { ...route, team: presentTeam(route.team), stops, currentStop, startPoint };
+  }
+
+  // The public stop page (/stop/<token>). Only what a driver or helper
+  // needs to find the place: no proof-of-delivery photos, no phone number,
+  // no delivery result. Same 404 for a bad, expired or deleted-stop token.
+  async publicStopView(token: string) {
+    const stopId = this.shareTokens.verify(token);
+    const row = stopId
+      ? await this.prisma.routeStop.findUnique({
+          where: { id: stopId },
+          select: {
+            ...stopSelect,
+            route: {
+              select: {
+                organizationId: true,
+                routeDate: true,
+                organization: { select: { name: true } },
+              },
+            },
+          },
+        })
+      : null;
+    if (!row) throw new NotFoundException('This link is invalid or has expired');
+
+    const { route, ...stopRow } = row;
+    const [stop] = await this.withCustomerInfo(route.organizationId, [
+      this.presentStop(stopRow),
+    ]);
+    return {
+      businessName: route.organization.name,
+      routeDate: route.routeDate,
+      label: stop.label,
+      customerName: stop.customerName,
+      addressLabel: stop.addressLabel,
+      address: stop.address,
+      latitude: stop.destinationLatitude,
+      longitude: stop.destinationLongitude,
+      deliveryNotes: stop.customerInfo?.deliveryNotes ?? null,
+      photos: (stop.customerInfo?.locationPhotos ?? []).map((p) => ({
+        id: p.id,
+        path: p.path,
+      })),
+    };
   }
 
   async updateRoute(
@@ -829,19 +899,21 @@ export class DeliveryRoutesService {
     });
     if (!route) throw new NotFoundException('Route not found');
     const teamChanged = dto.teamId != null && dto.teamId !== route.teamId;
-    if (teamChanged) {
-      await this.assertTeam(organizationId, dto.teamId!);
-      await this.assertTeamFreeOnDate(
-        organizationId,
-        dto.teamId!,
-        route.routeDate,
-        id,
-      );
-    }
+    if (teamChanged) await this.assertTeam(organizationId, dto.teamId!);
+    // Bringing a cancelled route back counts as a new one for that day too.
+    const revived =
+      route.status === RouteStatus.CANCELLED && dto.status != null && dto.status !== RouteStatus.CANCELLED;
 
-    const updated = await this.prisma.route.update({
-      where: { id },
-      data: { name: dto.name, status: dto.status, teamId: dto.teamId },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (teamChanged || revived) {
+        const teamId = dto.teamId ?? route.teamId;
+        await lockTeam(tx, teamId);
+        await this.assertTeamFreeOnDate(organizationId, teamId, route.routeDate, id, tx);
+      }
+      return tx.route.update({
+        where: { id },
+        data: { name: dto.name, status: dto.status, teamId: dto.teamId },
+      });
     });
     if (teamChanged) {
       // DRIVER_CHANGED keeps its name for existing history rows; from/to
@@ -1855,6 +1927,8 @@ export class DeliveryRoutesService {
           where: { id: stopId },
           data: {
             ...(d ? {} : { ...emptyProof, completedByUserId: null }),
+            markedByOfficeAt: null,
+            officeNote: null,
             // It's a live stop again, so its alerts can fire again.
             atRiskNotifiedAt: null,
             lateNotifiedAt: null,
@@ -2010,6 +2084,8 @@ export class DeliveryRoutesService {
             failureLatitude: s.failureLatitude,
             failureLongitude: s.failureLongitude,
             failurePhotoKey: s.failurePhotoKey,
+            markedByOfficeAt: s.markedByOfficeAt,
+            officeNote: s.officeNote,
           });
           const empty = Object.fromEntries(Object.keys(result(from)).map((k) => [k, null]));
 
@@ -2296,6 +2372,108 @@ export class DeliveryRoutesService {
       `Delivery failed: ${stop.customerName ?? stopId}`,
       { link: `/delivery/routes/${routeId}`, payload: { routeId, stopId } },
     );
+    return this.getRoute(organizationId, routeId, requester);
+  }
+
+  // An admin settles a stop from the office, for when the driver couldn't
+  // (dead phone, no signal, paper proof). No photo or GPS needed. Works on
+  // both stop kinds: a DO stop's result goes on its DO as usual. The stop
+  // is flagged so every screen can say the office set it.
+  async markStopByOffice(
+    organizationId: string,
+    routeId: string,
+    stopId: string,
+    params: { result: 'DELIVERED' | 'FAILED'; receivedBy?: string; reason?: string; note?: string },
+    requester: Requester,
+  ) {
+    const stop = await this.prisma.routeStop.findFirst({
+      where: { id: stopId, routeId, route: { organizationId } },
+      select: {
+        id: true,
+        routeId: true,
+        sequence: true,
+        customerName: true,
+        supersededAt: true,
+        signedAt: true,
+        failedAt: true,
+        proofPhotoKey: true,
+        route: { select: { status: true } },
+        deliveryOrder: {
+          select: {
+            id: true,
+            status: true,
+            signedAt: true,
+            proofPhotoKey: true,
+            customerName: true,
+            doNumber: true,
+          },
+        },
+      },
+    });
+    if (!stop) throw new NotFoundException('Stop not found');
+    if (stop.route.status === RouteStatus.CANCELLED) {
+      throw new BadRequestException('This route was cancelled');
+    }
+    if (this.stopStatus(stop) !== 'PENDING') {
+      throw new BadRequestException('This stop is already resolved');
+    }
+    const at = new Date();
+    const receivedBy = params.receivedBy?.trim() || null;
+    const reason = params.reason?.trim() || null;
+    const officeNote = params.note?.trim() || null;
+    const d = stop.deliveryOrder;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (d) {
+        // Same claims as the DO's own proof/failure: only a shipped,
+        // not-yet-signed DO.
+        const claim = await tx.deliveryOrder.updateMany({
+          where: { id: d.id, organizationId, status: DeliveryOrderStatus.SHIPPED, signedAt: null },
+          data:
+            params.result === 'DELIVERED'
+              ? { receivedBy, signedAt: at }
+              : {
+                  status: DeliveryOrderStatus.FAILED,
+                  failedAt: at,
+                  failureReason: reason,
+                  ...movePhotoToFailure(d.proofPhotoKey),
+                },
+        });
+        if (claim.count === 0) throw new BadRequestException('This stop is already resolved');
+        await tx.routeStop.update({ where: { id: stopId }, data: { markedByOfficeAt: at, officeNote } });
+        return;
+      }
+      const claim = await tx.routeStop.updateMany({
+        where: { id: stopId, signedAt: null, failedAt: null },
+        data: {
+          completedByUserId: requester.sub,
+          markedByOfficeAt: at,
+          officeNote,
+          ...(params.result === 'DELIVERED'
+            ? { receivedBy, signedAt: at, pendingReceivedBy: null }
+            : { failedAt: at, failureReason: reason, ...movePhotoToFailure(stop.proofPhotoKey) }),
+        },
+      });
+      if (claim.count === 0) throw new BadRequestException('This stop is already resolved');
+    });
+
+    try {
+      await this.recalculateEtasAfter(stop, at);
+    } catch {
+      // best-effort, same as the driver's path
+    }
+    if (params.result === 'FAILED') {
+      try {
+        await this.notifications.notifyOrgStaff(
+          organizationId,
+          'DELIVERY_FAILED',
+          `Delivery failed (set by office): ${d ? (d.customerName ?? d.doNumber ?? stopId) : (stop.customerName ?? stopId)}`,
+          { link: `/delivery/routes/${routeId}`, payload: { routeId, stopId } },
+        );
+      } catch {
+        // the result is saved; a notification hiccup mustn't undo the reply
+      }
+    }
     return this.getRoute(organizationId, routeId, requester);
   }
 
@@ -2860,7 +3038,9 @@ export class DeliveryRoutesService {
       .map((stop) => ({ stop, at: stop.status === 'DELIVERED' ? stop.signedAt : failedBy(stop.failedAt, supersededAt.get(stop.id) ?? null) }))
       .filter((r): r is { stop: (typeof stops)[number]; at: Date } => r.at != null)
       .sort((a, b) => b.at.getTime() - a.at.getTime());
-    const last = resolved[0];
+    // Office-set results say nothing about where the driver was or how long
+    // a stop took: skip them for the position and the durations.
+    const last = resolved.find((r) => !r.stop.markedByOffice);
 
     const lastStop = last
       ? {
@@ -2889,9 +3069,27 @@ export class DeliveryRoutesService {
         }
       : null;
 
+    // The way the driver has come so far, for a line on the monitoring map:
+    // each stop they finished, in the order they finished it, at the GPS fix
+    // taken there (else the stop's pin). Office-set results are left out —
+    // the driver wasn't there.
+    const trail = resolved
+      .filter((r) => !r.stop.markedByOffice)
+      .reverse()
+      .map(({ stop }) =>
+        latLng(
+          stop.status === 'DELIVERED'
+            ? [stop.completedLatitude, stop.completedLongitude]
+            : [stop.failureLatitude, stop.failureLongitude],
+          [stop.destinationLatitude, stop.destinationLongitude],
+        ),
+      )
+      .filter((p): p is { latitude: number; longitude: number } => p.latitude != null && p.longitude != null);
+
     return {
       lastStop,
       nextStop,
+      trail,
       plannedDepartureAt: route.plannedDepartureAt,
       // What's left, in route order, for the monitoring page.
       unfinished: stops
@@ -2907,17 +3105,30 @@ export class DeliveryRoutesService {
           // Photo sent, Done never tapped: the driver may well have been there.
           unconfirmed: stop.hasProofPhoto,
         })),
-      timeline: completionTimeline(
-        resolved.map(({ stop, at }) => ({
+      timeline: (() => {
+        const entry = ({ stop, at }: (typeof resolved)[number]) => ({
           stopId: stop.id,
           sequence: stop.sequence,
           label: stop.label,
           status: stop.status,
           failureReason: stop.status === 'FAILED' ? stop.failureReason : null,
+          // The note an admin left when marking it delivered from the office.
+          note: stop.status === 'DELIVERED' ? stop.officeNote : null,
+          receivedBy: stop.status === 'DELIVERED' ? stop.receivedBy : null,
+          markedByOffice: stop.markedByOffice,
           at,
-        })),
-        route.plannedDepartureAt,
-      ),
+        });
+        const byDriver = completionTimeline(
+          resolved.filter((r) => !r.stop.markedByOffice).map(entry),
+          route.plannedDepartureAt,
+        );
+        const byOffice = resolved
+          .filter((r) => r.stop.markedByOffice)
+          .map((r) => ({ ...entry(r), durationSeconds: null }));
+        return [...byDriver, ...byOffice].sort(
+          (a, b) => a.at.getTime() - b.at.getTime() || a.sequence - b.sequence,
+        );
+      })(),
       // Best guess at the driver's position right now.
       position:
         lastStop?.latitude != null && lastStop.longitude != null
@@ -2977,6 +3188,12 @@ function failedBy(failedAt: Date | null, supersededAt: Date | null) {
 
 // Serializes changes to one route's stop order: the two-phase renumbering would
 // otherwise collide with another one on @@unique([routeId, sequence]).
+// Serializes route creation for one team, so "one route per team per day"
+// holds under concurrent requests (see assertTeamFreeOnDate).
+function lockTeam(tx: Prisma.TransactionClient, teamId: string) {
+  return tx.$queryRaw`SELECT 1 FROM "Team" WHERE "id" = ${teamId} FOR UPDATE`;
+}
+
 function lockRoute(tx: Prisma.TransactionClient, routeId: string) {
   return tx.$queryRaw`SELECT 1 FROM "Route" WHERE "id" = ${routeId} FOR UPDATE`;
 }

@@ -620,6 +620,12 @@ export class DeliveryOrderService {
       },
     });
 
+    // Recorded the normal way now, so no longer an office-set result.
+    await this.prisma.routeStop.updateMany({
+      where: { activeDeliveryOrderId: id, markedByOfficeAt: { not: null } },
+      data: { markedByOfficeAt: null, officeNote: null },
+    });
+
     // Best-effort, like the ETA recalc below — a first pin for an unmapped
     // customer address is a bonus, never a reason to fail the delivery.
     try {

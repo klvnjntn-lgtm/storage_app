@@ -6,6 +6,7 @@ import { OrgGuard } from '../auth/guards/org.guard';
 import { ModuleGuard } from '../auth/guards/module.guard';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { WorkOrdersService } from './work-orders.service';
+import { PrintTemplatesService } from '../print-templates/print-templates.service';
 import { BranchRecord } from '../auth/guards/branch-record.guard';
 import { bookingBranchId, filterBranchId } from '../auth/branch-scope';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -29,7 +30,10 @@ import {
 @BranchRecord('workOrder')
 @Controller('work-orders')
 export class WorkOrdersController {
-  constructor(private readonly workOrders: WorkOrdersService) {}
+  constructor(
+    private readonly workOrders: WorkOrdersService,
+    private readonly printTemplates: PrintTemplatesService,
+  ) {}
 
   // Readable by every member (unlike /organization/settings), so the nav
   // and vehicle pages can tell whether to offer work orders.
@@ -61,8 +65,10 @@ export class WorkOrdersController {
     @Query('vehicleId') vehicleId?: string,
     @Query('branchId') branchId?: string,
     @Query('mechanicId') mechanicId?: string,
+    @Query('unbilled') unbilled?: string,
   ) {
     return this.workOrders.list(orgId, {
+      unbilled: unbilled === '1' || unbilled === 'true',
       status,
       q,
       vehicleId,
@@ -71,9 +77,18 @@ export class WorkOrdersController {
     });
   }
 
+  // With the print design to use: the one picked, else the branch default.
   @Get(':id/print')
-  printView(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    return this.workOrders.printView(orgId, id);
+  async printView(@CurrentOrg() orgId: string, @Param('id') id: string, @Query('templateId') templateId?: string) {
+    const view = await this.workOrders.printView(orgId, id);
+    const printTemplate = await this.printTemplates.resolve(
+      orgId,
+      'WORK_ORDER',
+      view.workOrder.branchId,
+      ['A4', 'A5'],
+      templateId,
+    );
+    return { ...view, printTemplate };
   }
 
   @Get(':id')

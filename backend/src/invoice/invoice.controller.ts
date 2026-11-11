@@ -229,8 +229,9 @@ export class InvoiceController {
     @Param('id') id: string,
     @Query('format') format: string | undefined,
     @Res() res: Response,
+    @Query('templateId') templateId?: string,
   ) {
-    const pdf = await this.invoiceService.renderPdf(organizationId, id, format);
+    const pdf = await this.invoiceService.renderPdf(organizationId, id, format, templateId);
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment; filename="invoice.pdf"',

@@ -62,6 +62,7 @@ type RouteSummary = {
 type PlanTeam = {
   id: string;
   name: string;
+  colorIndex: number;
   driver: { id: string; email: string; displayName: string | null } | null;
 };
 
@@ -149,6 +150,7 @@ export class RoutePlannerService {
       select: {
         id: true,
         name: true,
+        colorIndex: true,
         members: {
           where: { role: 'DRIVER', active: true, removedAt: null },
           select: { id: true, email: true, displayName: true },
@@ -157,7 +159,7 @@ export class RoutePlannerService {
       },
       orderBy: { name: 'asc' },
     });
-    return teams.map((t) => ({ id: t.id, name: t.name, driver: t.members[0] ?? null }));
+    return teams.map((t) => ({ id: t.id, name: t.name, colorIndex: t.colorIndex, driver: t.members[0] ?? null }));
   }
 
   // Deliveries still to be sent: packed, or shipped but not yet signed for.

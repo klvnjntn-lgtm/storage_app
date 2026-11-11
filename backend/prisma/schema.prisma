@@ -299,6 +299,7 @@ model Organization {
   customerAddresses            CustomerAddress[]
   accountBudgets               AccountBudget[]
   bankStatementLines           BankStatementLine[]
+  printTemplates               PrintTemplate[]
   customerDeposits             CustomerDeposit[]
   supplierDeposits             SupplierDeposit[]
   customerLocationPhotos       CustomerLocationPhoto[]
@@ -544,31 +545,31 @@ model Supplier {
 }
 
 model SupplierPayment {
-  id              String                   @id @default(uuid())
-  organizationId  String
-  purchaseOrderId String
-  amount          Decimal                  @db.Decimal(12, 2)
-  method          PaymentMethod            @default(TRANSFER)
-  paidAt          DateTime                 @default(now())
-  note            String?
-  recordedById    String?
-  createdAt       DateTime                 @default(now())
-  bankAccountId   String?
-  bankAccount     OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
-  organization    Organization             @relation(fields: [organizationId], references: [id])
-  purchaseOrder   PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
-  recordedBy      User?                    @relation(fields: [recordedById], references: [id])
+  id                String                   @id @default(uuid())
+  organizationId    String
+  purchaseOrderId   String
+  amount            Decimal                  @db.Decimal(12, 2)
+  method            PaymentMethod            @default(TRANSFER)
+  paidAt            DateTime                 @default(now())
+  note              String?
+  recordedById      String?
+  createdAt         DateTime                 @default(now())
+  bankAccountId     String?
+  bankAccount       OrganizationBankAccount? @relation(fields: [bankAccountId], references: [id])
+  organization      Organization             @relation(fields: [organizationId], references: [id])
+  purchaseOrder     PurchaseOrder            @relation(fields: [purchaseOrderId], references: [id])
+  recordedBy        User?                    @relation(fields: [recordedById], references: [id])
   // Accurate source row, set by the GDB import: "APINVCHQ:<INVCHQID>" for a
   // supplier payment, "APINV:<APINVOICEID>" for money paid at purchase.
-  externalId      String?
+  externalId        String?
   // Voided (journal entry reversed), kept for the history like invoice and
   // expense payments; reads filter voidedAt: null.
-  voidedAt        DateTime?
-  voidedById      String?
-  voidReason      String?
+  voidedAt          DateTime?
+  voidedById        String?
+  voidReason        String?
   // Set when this was paid from a down payment rather than with new money.
   supplierDepositId String?
-  supplierDeposit   SupplierDeposit? @relation(fields: [supplierDepositId], references: [id])
+  supplierDeposit   SupplierDeposit?         @relation(fields: [supplierDepositId], references: [id])
 
   @@unique([organizationId, externalId])
   @@index([purchaseOrderId])
@@ -641,6 +642,24 @@ model Brand {
   @@unique([organizationId, name])
 }
 
+// A branch's own reorder point for a product, in place of the product's
+// business-wide one (src/reorder). Compared against that branch's stock only.
+model ProductReorderSetting {
+  id              String   @id @default(uuid())
+  organizationId  String
+  productId       String
+  branchId        String
+  reorderPoint    Decimal  @db.Decimal(12, 2)
+  reorderQuantity Decimal? @db.Decimal(12, 2)
+  updatedAt       DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, branchId])
+  @@index([organizationId, branchId])
+}
+
 model Product {
   id                  String               @id @default(uuid())
   workOrderItems      WorkOrderItem[]
@@ -683,20 +702,22 @@ model Product {
   // what caused it — see inventory-costing.ts.
   costHistory        ProductCostHistory[]
 
-  // Reorder (src/reorder): when on-hand across all locations falls to
-  // reorderPoint or below, the product is "low" and a PO for
-  // reorderQuantity is suggested from preferredSupplier. Null = not watched.
-  reorderPoint        Decimal?             @db.Decimal(12, 2)
-  reorderQuantity     Decimal?             @db.Decimal(12, 2)
+  // Reorder (src/reorder): when on-hand falls to reorderPoint or below, the
+  // product is "low" and a PO for reorderQuantity is suggested from
+  // preferredSupplier. Null = not watched. These are the business-wide
+  // figures and every branch's default; reorderSettings override them per branch.
+  reorderPoint        Decimal?                @db.Decimal(12, 2)
+  reorderQuantity     Decimal?                @db.Decimal(12, 2)
   preferredSupplierId String?
-  preferredSupplier   Supplier?            @relation(fields: [preferredSupplierId], references: [id])
+  preferredSupplier   Supplier?               @relation(fields: [preferredSupplierId], references: [id])
+  reorderSettings     ProductReorderSetting[]
   // Batch/expiry tracking (src/batches): goods receipts ask for a batch
   // number and expiry date for this product.
-  trackBatches        Boolean              @default(false)
+  trackBatches        Boolean                 @default(false)
   batches             ProductBatch[]
   // Serial-number tracking (src/serials): every unit is a ProductSerial,
   // entered at goods receipt and picked by number when sold.
-  trackSerials        Boolean              @default(false)
+  trackSerials        Boolean                 @default(false)
   serials             ProductSerial[]
   purchaseReturnItems PurchaseReturnItem[]
   stockTransferItems  StockTransferItem[]
@@ -1495,6 +1516,12 @@ model RouteStop {
   // from proofPhotoKey when the failure is recorded, so a rescheduled
   // delivery doesn't start out with it as its proof.
   failurePhotoKey      String?
+  // Set when an admin marked the result from the office (no photo or GPS
+  // needed) instead of the driver. On DO stops too; the result itself is
+  // on the DO. Cleared by a reset, moves with a moved result.
+  markedByOfficeAt     DateTime?
+  // The admin's note when marking it from the office ("confirmed by phone").
+  officeNote           String?
 
   route               Route            @relation(fields: [routeId], references: [id])
   deliveryOrder       DeliveryOrder?   @relation("RouteStopDeliveryOrder", fields: [deliveryOrderId], references: [id], onDelete: Restrict)
@@ -1517,6 +1544,10 @@ model Team {
   id             String   @id @default(cuid())
   organizationId String
   name           String
+  // The team's color on maps (index into the frontend's TEAM_COLORS), kept
+  // on the team so it never changes with the date shown, a rename, or teams
+  // being added. Picked once at creation: the least-used color.
+  colorIndex     Int      @default(0)
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
@@ -1565,26 +1596,26 @@ enum DiscountType {
 }
 
 model OrganizationBankAccount {
-  id                 String              @id @default(uuid())
-  organizationId     String
-  bankName           String
-  accountNumber      String
-  accountName        String
-  chartAccount       ChartOfAccount? // inverse of the relation above
-  payments           Payment[] // NEW
-  expenses           Expense[] // NEW
-  expensePayments    ExpensePayment[]
-  supplierPayments   SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
-  fixedAssetPayments FixedAssetPayment[]
+  id                   String                @id @default(uuid())
+  organizationId       String
+  bankName             String
+  accountNumber        String
+  accountName          String
+  chartAccount         ChartOfAccount? // inverse of the relation above
+  payments             Payment[] // NEW
+  expenses             Expense[] // NEW
+  expensePayments      ExpensePayment[]
+  supplierPayments     SupplierPayment[] // NEW (in addition to the relation already declared on SupplierPayment below)
+  fixedAssetPayments   FixedAssetPayment[]
   amortizationPayments AmortizationPayment[]
-  statementLines     BankStatementLine[]
-  customerDeposits   CustomerDeposit[]
-  supplierDeposits   SupplierDeposit[]
-  payrolls           Payroll[] // NEW
+  statementLines       BankStatementLine[]
+  customerDeposits     CustomerDeposit[]
+  supplierDeposits     SupplierDeposit[]
+  payrolls             Payroll[] // NEW
   // Null = shared by every branch; else only offered on that branch's
   // documents.
-  branchId           String?
-  branch             Branch?             @relation(fields: [branchId], references: [id])
+  branchId             String?
+  branch               Branch?               @relation(fields: [branchId], references: [id])
 
   isDefault       Boolean          @default(false)
   createdAt       DateTime         @default(now())
@@ -1886,27 +1917,27 @@ model InvoiceActivityEvent {
 }
 
 model InvoiceItem {
-  id                Int                 @id @default(autoincrement())
-  invoiceId         String
+  id                  Int                 @id @default(autoincrement())
+  invoiceId           String
   // The quotation line this was invoiced straight from (not through a sales order) — see SalesOrderItem.
-  quotationItemId   String?
-  quotationItem     SalesQuotationItem? @relation("QuotationItemInvoiced", fields: [quotationItemId], references: [id], onDelete: SetNull)
-  productId         String?
-  quantity          Decimal             @db.Decimal(12, 2)
-  unit              String?
-  unitPrice         Decimal             @db.Decimal(12, 2)
-  unitCost          Decimal?            @db.Decimal(12, 2)
-  lineTotal         Decimal             @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
-  fulfilledQuantity Decimal             @default(0) @db.Decimal(12, 2)
+  quotationItemId     String?
+  quotationItem       SalesQuotationItem? @relation("QuotationItemInvoiced", fields: [quotationItemId], references: [id], onDelete: SetNull)
+  productId           String?
+  quantity            Decimal             @db.Decimal(12, 2)
+  unit                String?
+  unitPrice           Decimal             @db.Decimal(12, 2)
+  unitCost            Decimal?            @db.Decimal(12, 2)
+  lineTotal           Decimal             @db.Decimal(12, 2) // gross: quantity × unitPrice — UNCHANGED meaning, still pre-discount
+  fulfilledQuantity   Decimal             @default(0) @db.Decimal(12, 2)
   // Serial-tracked products: the units sold on this line (ProductSerial).
-  serialNumbers     String[]            @default([])
-  reservedQuantity  Decimal             @default(0) @db.Decimal(12, 2)
-  costProvisional   Boolean             @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
+  serialNumbers       String[]            @default([])
+  reservedQuantity    Decimal             @default(0) @db.Decimal(12, 2)
+  costProvisional     Boolean             @default(false) // true when unitCost was booked while this line oversold stock; the line's COGS may need revisiting once real cost is known
   // How many of the fulfilled units carry that provisional cost: the ones
   // sold below zero (or all of them, when the product had no cost at all).
   // A recost corrects only these. Null on lines flagged before this field
   // existed — see InvoiceService.recostInvoiceItem.
-  provisionalQuantity Decimal?          @db.Decimal(12, 2)
+  provisionalQuantity Decimal?            @db.Decimal(12, 2)
 
   // NEW — per-item discount. Mirrors Invoice.discountType/discountValue
   // (now deprecated at the document level, see below) but scoped per line.
@@ -2046,8 +2077,8 @@ model Payment {
   // positive): PAYMENT and CREDIT_IN add, REFUND and CREDIT_OUT subtract.
   // A credit application is a CREDIT_OUT on the invoice holding the credit
   // plus a CREDIT_IN on the one it pays, linked to each other.
-  kind            PaymentKind @default(PAYMENT)
-  linkedPaymentId String?
+  kind              PaymentKind      @default(PAYMENT)
+  linkedPaymentId   String?
   customerDepositId String?
   customerDeposit   CustomerDeposit? @relation(fields: [customerDepositId], references: [id])
 
@@ -2165,6 +2196,9 @@ enum NotificationType {
   // The customer answered a quotation through its link.
   QUOTATION_APPROVED
   QUOTATION_DECLINED
+  // Jobs finished a day or more ago with no issued invoice: parts used,
+  // not billed, and still held in stock (see WorkOrdersService.remindUnbilled).
+  WORK_ORDER_UNBILLED
 }
 
 // A browser/device a DRIVER has logged in from. `deviceId` is a
@@ -2896,9 +2930,9 @@ model JournalEntryLine {
   branchId       String?
   branch         Branch? @relation(fields: [branchId], references: [id])
 
-  journalEntry JournalEntry   @relation(fields: [journalEntryId], references: [id])
-  account      ChartOfAccount @relation(fields: [accountId], references: [id])
-  location     Location?      @relation(fields: [locationId], references: [id])
+  journalEntry   JournalEntry             @relation(fields: [journalEntryId], references: [id])
+  account        ChartOfAccount           @relation(fields: [accountId], references: [id])
+  location       Location?                @relation(fields: [locationId], references: [id])
   reconciliation BankReconciliationMatch?
 
   @@index([journalEntryId])
@@ -3649,23 +3683,25 @@ model Branch {
   archivedAt     DateTime?
   createdAt      DateTime  @default(now())
 
-  organization    Organization              @relation(fields: [organizationId], references: [id])
-  locations       Location[]
-  invoices        Invoice[]
-  expenses        Expense[]
-  fixedAssets     FixedAsset[]
-  amortizations   Amortization[]
-  journalLines    JournalEntryLine[]
-  workOrders      WorkOrder[]
-  users           User[]
+  organization     Organization              @relation(fields: [organizationId], references: [id])
+  locations        Location[]
+  invoices         Invoice[]
+  expenses         Expense[]
+  fixedAssets      FixedAsset[]
+  amortizations    Amortization[]
+  journalLines     JournalEntryLine[]
+  workOrders       WorkOrder[]
+  users            User[]
   customerDeposits CustomerDeposit[]
   supplierDeposits SupplierDeposit[]
-  bankAccounts    OrganizationBankAccount[]
-  employees       Employee[]
-  salesQuotations SalesQuotation[]
-  salesOrders     SalesOrder[]
-  deliveryOrders  DeliveryOrder[]
-  purchaseOrders  PurchaseOrder[]
+  bankAccounts     OrganizationBankAccount[]
+  employees        Employee[]
+  salesQuotations  SalesQuotation[]
+  salesOrders      SalesOrder[]
+  deliveryOrders   DeliveryOrder[]
+  purchaseOrders   PurchaseOrder[]
+  printTemplates   PrintTemplate[]
+  reorderSettings  ProductReorderSetting[]
 
   @@index([organizationId])
 }
@@ -3802,4 +3838,35 @@ model SupplierDeposit {
   @@unique([organizationId, depositNumber])
   @@index([organizationId, supplierId])
   @@index([organizationId, date])
+}
+
+// ---- Print templates (src/print-templates) ------------------------------
+// A branch's own designs for printed documents, drawn in the free-form
+// template designer (Settings → Print designs). Several per document type,
+// picked when printing; at most one default per document type and paper
+// size, which is what prints when nobody picks (PDFs sent by WhatsApp or
+// email too). layout is the designer's JSON (see layout-validator.ts).
+
+enum PrintDocType {
+  INVOICE
+  QUOTATION
+  WORK_ORDER
+}
+
+model PrintTemplate {
+  id             String       @id @default(uuid())
+  organizationId String
+  branchId       String
+  docType        PrintDocType
+  name           String
+  paperSize      String // A4 | A5
+  isDefault      Boolean      @default(false)
+  layout         Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  branch       Branch       @relation(fields: [branchId], references: [id])
+
+  @@index([organizationId, branchId, docType])
 }

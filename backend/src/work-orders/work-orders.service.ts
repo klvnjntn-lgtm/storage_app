@@ -1,5 +1,9 @@
 import { randomBytes } from 'crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { CRON_TIMEZONE } from '../common/cron-timezone';
+import { NotificationsService } from '../notifications/notifications.service';
+import { ADMIN_ROLES } from '../auth/roles';
 import {
   InvoiceFormat,
   InvoiceStatus,
@@ -85,6 +89,16 @@ function withInvoiced(wo: WorkOrderDetail) {
   return { ...wo, invoicedId: live?.id ?? null, idleDays: holdsParts && idle >= IDLE_FLAG_DAYS ? idle : null };
 }
 
+// Done, and no issued invoice yet. Its parts were fitted but never billed —
+// and they never leave stock, since a work order's parts only come off the
+// shelf when its invoice is issued (they stay held until then).
+const UNBILLED: Prisma.WorkOrderWhereInput = {
+  status: WorkOrderStatus.DONE,
+  invoices: { none: { status: InvoiceStatus.ISSUED } },
+};
+// A job finished this long ago without an invoice gets a reminder.
+const UNBILLED_REMINDER_DAYS = 1;
+
 // What the workshop board shows: jobs being worked on first, then waiting for parts, then queued.
 const BOARD_STATUSES: WorkOrderStatus[] = [
   WorkOrderStatus.IN_PROGRESS,
@@ -116,7 +130,10 @@ export class WorkOrdersService {
     private modules: OrganizationModulesService,
     private purchaseOrders: PurchaseOrderService,
     private goodsReceipts: GoodsReceiptService,
+    private notifications: NotificationsService,
   ) {}
+
+  private readonly logger = new Logger(WorkOrdersService.name);
 
   async isEnabled(organizationId: string): Promise<boolean> {
     const org = await this.prisma.organization.findUnique({
@@ -159,7 +176,15 @@ export class WorkOrdersService {
 
   async list(
     organizationId: string,
-    filters: { status?: string; q?: string; vehicleId?: string; branchId?: string; mechanicId?: string },
+    filters: {
+      status?: string;
+      q?: string;
+      vehicleId?: string;
+      branchId?: string;
+      mechanicId?: string;
+      // Finished with no issued invoice: the parts were used but not billed.
+      unbilled?: boolean;
+    },
   ) {
     await this.assertEnabled(organizationId);
     const status =
@@ -175,6 +200,7 @@ export class WorkOrdersService {
         ...(filters.vehicleId && { vehicleId: filters.vehicleId }),
         ...(filters.branchId && { branchId: filters.branchId }),
         ...(filters.mechanicId && { mechanicId: filters.mechanicId }),
+        ...(filters.unbilled && UNBILLED),
         ...(q && {
           OR: [
             { number: { contains: escapeLike(q), mode: 'insensitive' } },
@@ -191,6 +217,41 @@ export class WorkOrdersService {
       include: DETAIL_INCLUDE,
     });
     return rows.map(withInvoiced);
+  }
+
+  // Each morning: one notification per business to its admins, when it has
+  // jobs finished a day or more ago that were never invoiced. Repeats daily
+  // until they are (or are cancelled), like the other stock reminders.
+  @Cron(CronExpression.EVERY_DAY_AT_9AM, { timeZone: CRON_TIMEZONE })
+  async remindUnbilled() {
+    const cutoff = new Date(Date.now() - UNBILLED_REMINDER_DAYS * 86_400_000);
+    const byOrg = await this.prisma.workOrder.groupBy({
+      by: ['organizationId'],
+      where: { ...UNBILLED, completedAt: { lte: cutoff } },
+      _count: { _all: true },
+    });
+    for (const { organizationId, _count } of byOrg) {
+      try {
+        if (!(await this.isEnabled(organizationId))) continue;
+        const admins = await this.prisma.user.findMany({
+          where: { organizationId, role: { in: [...ADMIN_ROLES] }, active: true, removedAt: null },
+          select: { id: true },
+        });
+        const n = _count._all;
+        await this.notifications.createMany(
+          organizationId,
+          admins.map((a) => a.id),
+          'WORK_ORDER_UNBILLED',
+          `${n} finished job${n > 1 ? 's' : ''} not invoiced yet`,
+          {
+            body: 'Their parts were used but not billed, and still count as in stock until the invoice is issued.',
+            link: '/workshop/work-orders?filter=UNBILLED',
+          },
+        );
+      } catch (err) {
+        this.logger.error(`Unbilled work order reminder failed for ${organizationId}`, err as Error);
+      }
+    }
   }
 
   async getOne(organizationId: string, id: string) {

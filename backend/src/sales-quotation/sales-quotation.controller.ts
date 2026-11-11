@@ -154,8 +154,9 @@ export class SalesQuotationController {
     @CurrentOrg() organizationId: string,
     @Param('id') id: string,
     @Res() res: Response,
+    @Query('templateId') templateId?: string,
   ) {
-    const buffer = await this.quotationService.renderPdf(organizationId, id);
+    const buffer = await this.quotationService.renderPdf(organizationId, id, undefined, templateId);
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="quotation-${id}.pdf"`,

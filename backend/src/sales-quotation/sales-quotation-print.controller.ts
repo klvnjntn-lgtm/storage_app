@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/commo
 import { SalesQuotationService } from './sales-quotation.service';
 import { Public } from '../auth/decorators/public.decorator';
 import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decorator';
+import { PrintTemplatesService } from '../print-templates/print-templates.service';
 
 // Deliberately NOT behind JwtAuthGuard/OrgGuard/ModuleGuard — same
 // reasoning as InvoicePrintController. See verifyDocumentToken's doc
@@ -10,13 +11,28 @@ import { SkipLicenseCheck } from '../license/decorators/skip-license-check.decor
 @SkipLicenseCheck()
 @Controller('print/quotations')
 export class SalesQuotationPrintController {
-  constructor(private quotationService: SalesQuotationService) {}
+  constructor(
+    private quotationService: SalesQuotationService,
+    private printTemplates: PrintTemplatesService,
+  ) {}
 
   @Get(':id')
-  async getPrintData(@Param('id') id: string, @Query('token') token: string) {
+  async getPrintData(
+    @Param('id') id: string,
+    @Query('token') token: string,
+    @Query('templateId') templateId: string | undefined,
+  ) {
     if (!token) throw new ForbiddenException('Missing print token');
 
     const payload = this.quotationService.verifyPrintToken(token, id);
-    return this.quotationService.getPrintView(payload.organizationId, id);
+    const view = await this.quotationService.getPrintView(payload.organizationId, id);
+    const printTemplate = await this.printTemplates.resolve(
+      payload.organizationId,
+      'QUOTATION',
+      view.branchId,
+      ['A4', 'A5'],
+      templateId,
+    );
+    return { ...view, printTemplate };
   }
 }

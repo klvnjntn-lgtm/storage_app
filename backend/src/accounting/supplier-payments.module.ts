@@ -5,10 +5,11 @@ import { OrganizationModulesModule } from '../organization-module/organization-m
 import { AccountingModule } from '../accounting/accounting.module';
 import { SupplierPaymentsService } from './supplier-payments.service';
 import { SupplierPaymentsController } from './supplier-payments.controller';
+import { SettlementsController } from './settlements.controller';
 
 @Module({
   imports: [PrismaModule, GuardsModule, OrganizationModulesModule, AccountingModule],
-  controllers: [SupplierPaymentsController],
+  controllers: [SupplierPaymentsController, SettlementsController],
   providers: [SupplierPaymentsService],
   exports: [SupplierPaymentsService],
 })

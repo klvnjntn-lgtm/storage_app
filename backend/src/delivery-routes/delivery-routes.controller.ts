@@ -44,6 +44,7 @@ import {
   UpdateCustomerStopDetailsDto,
   ApplyStopAddressDto,
   MoveStopResultDto,
+  MarkStopByOfficeDto,
 } from './dto/customer-stop-actions.dto';
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import { ProofDraftDto, ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
@@ -580,6 +581,26 @@ export class DeliveryRoutesController {
     @Body() dto: MoveStopResultDto,
   ) {
     return this.stopProof.moveResult(organizationId, routeId, stopId, dto.toStopId, req.user);
+  }
+
+  // Admin only: settles either stop kind from the office, no photo or GPS.
+  @Post(':id/stops/:stopId/office-result')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  markStopByOffice(
+    @CurrentOrg() organizationId: string,
+    @Param('id') routeId: string,
+    @Param('stopId') stopId: string,
+    @Req() req,
+    @Body() dto: MarkStopByOfficeDto,
+  ) {
+    return this.deliveryRoutesService.markStopByOffice(
+      organizationId,
+      routeId,
+      stopId,
+      dto,
+      req.user,
+    );
   }
 
   @Post(':id/stops/:stopId/failure')

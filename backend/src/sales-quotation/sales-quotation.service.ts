@@ -65,6 +65,8 @@ const EDITABLE_STATUSES: SalesQuotationStatus[] = [
 
 export type QuotationPrintView = {
   id: string;
+  // The booked branch, for picking its print design.
+  branchId: string | null;
   quotationNumber: string | null;
   // Workshops: the car quoted for, its odometer at quoting and the complaint.
   vehiclePlateNumber: string | null;
@@ -1293,6 +1295,7 @@ export class SalesQuotationService {
 
     return {
       id: quotation.id,
+      branchId: quotation.branchId,
       quotationNumber: quotation.quotationNumber,
       vehiclePlateNumber: quotation.vehicle?.plateNumber ?? null,
       vehicleModel: quotation.vehicle?.vehicleModel ?? null,
@@ -1358,6 +1361,8 @@ export class SalesQuotationService {
     organizationId: string,
     id: string,
     formatOverride?: string,
+    // A print design to use; none = the branch default.
+    templateId?: string,
   ): Promise<Buffer> {
     try {
       const printView = await this.getPrintView(organizationId, id);
@@ -1369,7 +1374,8 @@ export class SalesQuotationService {
         organizationId,
       });
       const printUrl =
-        `${process.env.FRONTEND_URL}/print/quotations/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}`;
+        `${process.env.FRONTEND_URL}/print/quotations/${encodeURIComponent(id)}?format=${encodeURIComponent(format)}&token=${printToken}` +
+        (templateId ? `&templateId=${encodeURIComponent(templateId)}` : '');
 
       // Capped — each render is a whole Chromium (see pdf-render-limiter.ts).
       return await withPdfRenderSlot(async () => {
@@ -1384,6 +1390,10 @@ export class SalesQuotationService {
             { name: 'prefers-color-scheme', value: 'light' },
           ]);
           await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+          // A print design lays out its pages in the browser; wait for that.
+          await page
+            .waitForFunction("!document.querySelector('[data-print-pending]')", { timeout: 8000 })
+            .catch(() => undefined);
           const pdfBuffer = await page.pdf({
             printBackground: true,
             preferCSSPageSize: true,

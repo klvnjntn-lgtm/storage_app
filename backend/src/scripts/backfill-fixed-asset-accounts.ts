@@ -26,7 +26,7 @@ const NEW_ACCOUNTS: { code: string; name: string; type: AccountType; normalBalan
   { code: '2400', name: 'Fixed Asset Payable', type: AccountType.LIABILITY, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.FIXED_ASSET_PAYABLE },
   { code: '5110', name: 'Depreciation Expense', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.DEPRECIATION_EXPENSE },
   { code: '4900', name: 'Gain on Disposal of Assets', type: AccountType.REVENUE, normalBalance: NormalBalance.CREDIT, systemKey: SystemAccountKey.GAIN_ON_ASSET_DISPOSAL },
-  { code: '5910', name: 'Loss on Disposal of Assets', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL },
+  { code: '5500', name: 'Loss on Disposal of Assets', type: AccountType.EXPENSE, normalBalance: NormalBalance.DEBIT, systemKey: SystemAccountKey.LOSS_ON_ASSET_DISPOSAL },
 ];
 
 async function backfillFixedAssetAccounts() {
