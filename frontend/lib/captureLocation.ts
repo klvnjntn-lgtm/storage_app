@@ -3,7 +3,9 @@
 // device, never from a photo's EXIF. accuracy (metres) goes along so the
 // backend and the UI can judge how much to trust it.
 
-export type Fix = { latitude?: number; longitude?: number; accuracy?: number };
+// at: when the reading arrived (ms since epoch). The server compares it with
+// the photo's time to decide whether the reading may place the customer.
+export type Fix = { latitude?: number; longitude?: number; accuracy?: number; at?: number };
 
 // How long to wait for a GPS reading when one is wanted. Any accuracy will
 // do — a weak reading beats none.
@@ -26,9 +28,14 @@ export function captureLocation(capMs: number = GPS_WAIT_MS): Promise<Fix> {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           accuracy: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : undefined,
+          // Not pos.timestamp: older iOS Safari reports it on another clock.
+          // maximumAge 0 means the reading is fresh when it arrives.
+          at: Date.now(),
         }),
       () => resolve({}),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      // The browser's own timeout matches the cap: a shorter one ended the
+      // wait (with nothing) well before GPS_WAIT_MS on a weak signal.
+      { enableHighAccuracy: true, timeout: capMs, maximumAge: 0 },
     );
   });
 }

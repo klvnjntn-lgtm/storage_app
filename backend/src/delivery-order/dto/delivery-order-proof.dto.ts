@@ -43,6 +43,11 @@ export class RecordDeliveryOrderProofDto {
   @Min(0)
   completedAccuracy?: number;
 
+  // When the phone took that reading (see PIN_FIX_WINDOW_MS).
+  @IsOptional()
+  @IsDateString()
+  completedLocationAt?: string;
+
   // The proof photo is uploaded separately via
   // POST /delivery-orders/:id/proof-photo (private storage), not here.
 }

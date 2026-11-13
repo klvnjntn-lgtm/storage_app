@@ -32,7 +32,7 @@ import { useLanguage } from '@/app/context/LanguageContext';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useGpsWatch, type GpsStatus, type GpsFix } from '@/lib/hooks/useGpsWatch';
 import { shrinkPhotoVariants } from '@/lib/shrinkPhoto';
-import { GPS_WAIT_MS, captureLocation, photoStampLines, type Fix } from '@/lib/captureLocation';
+import { GPS_WAIT_MS, captureLocation, locationProblem, photoStampLines, type Fix } from '@/lib/captureLocation';
 import { DRAFT_MAX_AGE_MS, deleteDraft, listDrafts, saveDraft } from '@/lib/driverDrafts';
 import { useDialog } from '@/app/components/shared/DialogProvider';
 import PhotoZoom from '@/app/components/shared/PhotoZoom';
@@ -163,6 +163,10 @@ function stopEndpoints(routeId: string, stop: Stop) {
 // can just tap again — whatever already reached the server stays there.
 const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// A GPS reading within this of the photo counts as taken where the photo
+// was; only such a reading may place the customer (PIN_FIX_WINDOW_MS on the
+// server, which makes the call).
+const PHOTO_FIX_WINDOW_MS = 6_000;
 function timeoutSignal(ms: number): AbortSignal {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), ms);
@@ -192,6 +196,7 @@ async function uploadProofPhoto(
     formData.append('latitude', String(meta.fix.latitude));
     formData.append('longitude', String(meta.fix.longitude));
     if (meta.fix.accuracy != null) formData.append('accuracy', String(meta.fix.accuracy));
+    if (meta.fix.at != null) formData.append('locationAt', new Date(meta.fix.at).toISOString());
   }
   if (meta.receivedBy?.trim()) formData.append('receivedBy', meta.receivedBy.trim());
   const res = await fetch(`/api${path}`, {
@@ -818,24 +823,39 @@ export default function DriverRoutePage() {
   // Location can't work at all here, so no photo can be taken.
   const gpsBlocked = gps.status === 'denied' || gps.status === 'insecure' || gps.status === 'unsupported';
 
-  // Best warm reading if there is one, else ask the phone — and keep
-  // checking the warm watch meanwhile, since on a weak signal it often
-  // lands a reading before the one-off request answers. {} after capMs.
+  // The warm reading if it's from the last PHOTO_FIX_WINDOW_MS, else wait
+  // for a new one — from the watch or a one-off request, whichever lands
+  // first (on a weak signal the watch often wins). {} after capMs.
+  // A reading that arrives late, or the older warm one used when nothing
+  // else came, still records where the delivery happened; its time (at)
+  // tells the server it can't move the customer's pin.
   async function takeFix(capMs = GPS_WAIT_MS): Promise<Fix> {
-    const warm = () => {
+    const warm = (maxAgeMs: number): Fix | null => {
       const f = gps.bestFix();
-      return f ? { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy } : null;
+      return f && Date.now() - f.at <= maxAgeMs
+        ? { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy, at: f.at }
+        : null;
     };
-    const now = warm();
+    const now = warm(PHOTO_FIX_WINDOW_MS);
     if (now) return now;
     let poll: ReturnType<typeof setInterval> | undefined;
     const fromWatch = new Promise<Fix>((resolve) => {
       poll = setInterval(() => {
-        const f = warm();
+        const f = warm(PHOTO_FIX_WINDOW_MS);
         if (f) resolve(f);
       }, 1000);
     });
-    const once = captureLocation(capMs).then((f) => (f.latitude != null ? f : warm() ?? f));
+    const deadline = Date.now() + capMs;
+    const once = captureLocation(capMs).then(async (f) => {
+      if (f.latitude != null) return f;
+      // The one-off request gave up early (no signal yet): the watch may
+      // still land a reading before the cap, unless location is refused.
+      const left = deadline - Date.now();
+      if (left > 0 && (await locationProblem()) == null) {
+        await new Promise((r) => setTimeout(r, left));
+      }
+      return warm(Infinity) ?? f;
+    });
     try {
       return await Promise.race([fromWatch, once]);
     } finally {
@@ -899,7 +919,7 @@ export default function DriverRoutePage() {
       void saveDraft(stopId, {
         photo: small,
         landmark,
-        photoFix: { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy },
+        photoFix: { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy, at: fix.at },
         photoTakenAt: takenAt.toISOString(),
       });
       // Sent straight away rather than on Done, so a delivery the driver
@@ -1244,7 +1264,8 @@ export default function DriverRoutePage() {
       // reading to hand (no photo, or one sent before this phone kept
       // drafts) — and a delivery always needs one.
       const shotFix = photoFix[key];
-      const { latitude, longitude, accuracy } = shotFix?.latitude != null ? shotFix : await takeFix();
+      const { latitude, longitude, accuracy, at } = shotFix?.latitude != null ? shotFix : await takeFix();
+      const locationAt = at != null ? new Date(at).toISOString() : undefined;
       if (latitude == null || longitude == null) {
         setStopError(key, t('delivery.driver.deliveryNeedsGps'));
         return;
@@ -1271,8 +1292,9 @@ export default function DriverRoutePage() {
                 completedLatitude: latitude,
                 completedLongitude: longitude,
                 completedAccuracy: accuracy,
+                completedLocationAt: locationAt,
               }
-            : { receivedBy, signedAt, latitude, longitude, accuracy },
+            : { receivedBy, signedAt, latitude, longitude, accuracy, locationAt },
         ),
         signal: timeoutSignal(REQUEST_TIMEOUT_MS),
       });

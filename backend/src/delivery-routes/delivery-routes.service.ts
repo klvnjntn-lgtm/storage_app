@@ -12,6 +12,7 @@ import {
   assertDriverFailureReason,
   assertDriverLocation,
   driverSignedAt,
+  onServerClock,
   movePhotoToFailure,
 } from './driver-proof';
 import {
@@ -41,7 +42,8 @@ import { completionTimeline } from './completion-timeline';
 import { highPriorityFirst, priorityInversions } from './priority-order';
 import { SetRouteStartDto } from './dto/set-route-start.dto';
 import { OptimizeRouteDto } from './dto/optimize-route.dto';
-import { backfillCustomerPin, releaseCustomerPin } from '../customers/customer-pin-backfill';
+import { backfillCustomerPin, fixIsTimely, releaseCustomerPin } from '../customers/customer-pin-backfill';
+import { StartOffRoadError } from '../routing/osrm.service';
 import { StopShareTokenService } from './stop-share-token.service';
 import {
   RescheduleCustomerStopDto,
@@ -118,11 +120,13 @@ export const stopSelect = {
   proofPhotoLatitude: true,
   proofPhotoLongitude: true,
   proofPhotoAccuracy: true,
+  proofPhotoLocationAt: true,
   pendingReceivedBy: true,
   failurePhotoKey: true,
   completedLatitude: true,
   completedLongitude: true,
   completedAccuracy: true,
+  completedLocationAt: true,
   failedAt: true,
   failureReason: true,
   failureLatitude: true,
@@ -1059,17 +1063,24 @@ export class DeliveryRoutesService {
       (firstPin
         ? { latitude: firstPin.lat, longitude: firstPin.lng, source: 'DEPOT' as const }
         : { latitude: 0, longitude: 0, source: 'DEPOT' as const }); // no pins: nothing gets routed
-    let { routes, unassigned } = await solveFrom(position);
-    // No road out of the driver's last spot makes every stop look unreachable,
-    // which says nothing about the stops: order them from the depot instead.
-    if (
-      start &&
-      position.source === 'LAST_STOP' &&
-      unassigned.length === jobs.length &&
-      unassigned.every((u) => u.reason === 'UNREACHABLE')
-    ) {
-      ({ routes, unassigned } = await solveFrom(start));
+    // No road out of the driver's last spot (a GPS fix far off the road) says
+    // nothing about the stops: order them from the depot instead.
+    const fromLastStop = !!start && position.source === 'LAST_STOP';
+    let solved: Awaited<ReturnType<typeof solveFrom>> | null = null;
+    try {
+      solved = await solveFrom(position);
+    } catch (err) {
+      if (!(err instanceof StartOffRoadError) || !fromLastStop) throw err;
     }
+    if (
+      fromLastStop &&
+      (!solved ||
+        (solved.unassigned.length === jobs.length &&
+          solved.unassigned.every((u) => u.reason === 'UNREACHABLE')))
+    ) {
+      solved = await solveFrom(start);
+    }
+    const { routes, unassigned } = solved!;
     const ordered = routes.get(route.teamId)!;
 
     const highestResolvedSequence = route.stops
@@ -1371,6 +1382,12 @@ export class DeliveryRoutesService {
     } catch (err) {
       this.logger.warn(`Could not refresh ETAs for route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // For the route planner: a reused route keeps its customer stops after the
+  // planned ones, and their legs and ETAs still describe the old trip.
+  async refreshRouteEtas(routeId: string) {
+    await this.refreshEtas(routeId);
   }
 
   // Which late/at-risk alerts a new ETA re-arms. One still true stays
@@ -1823,6 +1840,7 @@ export class DeliveryRoutesService {
         proofPhotoLatitude: true,
         proofPhotoLongitude: true,
         proofPhotoAccuracy: true,
+        proofPhotoLocationAt: true,
         failurePhotoKey: true,
         route: {
           select: {
@@ -1897,10 +1915,12 @@ export class DeliveryRoutesService {
           proofPhotoLatitude: null,
           proofPhotoLongitude: null,
           proofPhotoAccuracy: null,
+          proofPhotoLocationAt: null,
           pendingReceivedBy: null,
           completedLatitude: null,
           completedLongitude: null,
           completedAccuracy: null,
+          completedLocationAt: null,
           failedAt: null,
           failureReason: null,
           failureLatitude: null,
@@ -2074,11 +2094,13 @@ export class DeliveryRoutesService {
             proofPhotoLatitude: s.proofPhotoLatitude,
             proofPhotoLongitude: s.proofPhotoLongitude,
             proofPhotoAccuracy: s.proofPhotoAccuracy,
+            proofPhotoLocationAt: s.proofPhotoLocationAt,
             pendingReceivedBy: s.pendingReceivedBy,
             completedByUserId: s.completedByUserId,
             completedLatitude: s.completedLatitude,
             completedLongitude: s.completedLongitude,
             completedAccuracy: s.completedAccuracy,
+            completedLocationAt: s.completedLocationAt,
             failedAt: s.failedAt,
             failureReason: s.failureReason,
             failureLatitude: s.failureLatitude,
@@ -2192,6 +2214,8 @@ export class DeliveryRoutesService {
           latitude: Number(src.completedLatitude),
           longitude: Number(src.completedLongitude),
           accuracy: src.completedAccuracy ?? undefined,
+          timely: fixIsTimely(src.completedLocationAt, src.proofPhotoTakenAt),
+          deliveredAt: src.signedAt ?? undefined,
         });
       } catch (err) {
         this.logger.warn(`Could not pin stop ${dst.id} from moved result: ${err instanceof Error ? err.message : String(err)}`);
@@ -2249,6 +2273,7 @@ export class DeliveryRoutesService {
       latitude?: number;
       longitude?: number;
       accuracy?: number;
+      locationAt?: string;
     },
     requester: Requester,
   ) {
@@ -2265,17 +2290,22 @@ export class DeliveryRoutesService {
     if (!stop.proofPhotoKey) {
       throw new BadRequestException('Take a proof photo before completing the stop');
     }
-    // What the phone sends, else what came with the photo — the delivery
-    // happened where and when the photo was taken.
-    if (params.latitude == null && stop.proofPhotoLatitude != null) {
+    // The delivery happened where and when the photo was taken. A driver's
+    // delivery always takes the reading that came with the photo: the phone
+    // only sends its own when it lost that one, and then it's a reading from
+    // wherever Done was tapped. Office staff may send a location on purpose.
+    const isDriver = requester.role === 'DRIVER';
+    const fromPhoto =
+      stop.proofPhotoLatitude != null && (isDriver || params.latitude == null);
+    if (fromPhoto) {
       params = {
         ...params,
         latitude: Number(stop.proofPhotoLatitude),
         longitude: Number(stop.proofPhotoLongitude),
         accuracy: stop.proofPhotoAccuracy ?? undefined,
+        locationAt: stop.proofPhotoLocationAt?.toISOString(),
       };
     }
-    const isDriver = requester.role === 'DRIVER';
     if (isDriver) assertDriverLocation(params.latitude, params.longitude);
     const requested = params.signedAt
       ? new Date(params.signedAt)
@@ -2283,6 +2313,14 @@ export class DeliveryRoutesService {
     const signedAt = isDriver
       ? driverSignedAt(requested, routeDayStart(stop.route))
       : (requested ?? new Date());
+    // Stored photo times are on the server's clock already; a reading sent
+    // now is on the phone's, moved like the signing time was.
+    const locationAt = !params.locationAt
+      ? undefined
+      : fromPhoto || !isDriver
+        ? params.locationAt
+        : onServerClock(new Date(params.locationAt), requested, signedAt).toISOString();
+    params = { ...params, locationAt };
     const claim = await this.prisma.routeStop.updateMany({
       where: { id: stopId, signedAt: null, failedAt: null },
       data: {
@@ -2293,6 +2331,8 @@ export class DeliveryRoutesService {
         completedLongitude: params.longitude ?? null,
         completedAccuracy:
           params.latitude != null ? (params.accuracy ?? null) : null,
+        completedLocationAt:
+          params.latitude != null && params.locationAt ? new Date(params.locationAt) : null,
       },
     });
     if (claim.count === 0) {
@@ -2307,6 +2347,8 @@ export class DeliveryRoutesService {
         latitude: params.latitude,
         longitude: params.longitude,
         accuracy: params.accuracy,
+        timely: fixIsTimely(params.locationAt, fromPhoto ? stop.proofPhotoTakenAt : signedAt),
+        deliveredAt: signedAt,
       });
     } catch {
       // best-effort, same as the DO path

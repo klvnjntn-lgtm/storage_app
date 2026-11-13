@@ -1,5 +1,5 @@
 // src/routing/osrm.service.ts
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 
 export type LatLng = { lat: number; lng: number };
 
@@ -62,6 +62,19 @@ const MAX_SNAP_METERS = 1000;
 const ON_ROAD_METERS = 50;
 const OFF_ROAD_SPEED_MPS = 15 / 3.6;
 const OFF_ROAD_DETOUR = 1.3;
+
+// The start point (points[0] of table()) is too far from any road, or on a
+// road with no connection to anywhere else (meters null). Without this every
+// stop looked unreachable, which blamed the stops.
+export class StartOffRoadError extends BadRequestException {
+  constructor(public readonly meters: number | null) {
+    super(
+      meters != null
+        ? `The start point is ${Math.round(meters)} m from the nearest road — move it onto a road, then optimize again`
+        : 'No road leads from the start point to any stop — move it onto a through road, then optimize again',
+    );
+  }
+}
 
 // Indices (into the points passed to table()) that have no road route to
 // or from the others, or sit too far from any road.
@@ -158,7 +171,12 @@ export class OsrmService {
     // points[0] is always the depot/start: a point with no road to or from
     // it is the unreachable one. A leftover gap between two otherwise
     // reachable stops flags both.
+    const startSnap = body.sources?.[0]?.distance ?? 0;
+    if (startSnap > MAX_SNAP_METERS) throw new StartOffRoadError(startSnap);
     const d = body.durations;
+    if (d.length > 1 && d[0].every((v, j) => j === 0 || v == null)) {
+      throw new StartOffRoadError(null);
+    }
     const unreachable = new Set<number>();
     body.sources?.forEach((src, j) => {
       if (j > 0 && src.distance > MAX_SNAP_METERS) unreachable.add(j);

@@ -41,6 +41,11 @@ export class RecordCustomerStopProofDto {
   @IsNumber()
   @Min(0)
   accuracy?: number;
+
+  // When the phone took that reading (see PIN_FIX_WINDOW_MS).
+  @IsOptional()
+  @IsDateString()
+  locationAt?: string;
 }
 
 export class RecordCustomerStopFailureDto {

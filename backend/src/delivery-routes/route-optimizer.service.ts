@@ -130,6 +130,10 @@ export class RouteOptimizerService {
     const day = DAY_OF_WEEK_BY_UTC_DAY[dateOnly.getUTCDay()];
 
     const now = new Date();
+    // A departure already gone (the route page re-sends the old plan's time,
+    // or a preview saved later) would give ETAs in the past, and every stop
+    // would look late at once and set off the late alerts.
+    if (departureAt && departureAt < now) departureAt = now;
     const defaultStart = wallTimeOnBusinessDay(dateOnly, DEFAULT_DAY_START, tz);
     const fallbackDeparture =
       departureAt ?? new Date(Math.max(now.getTime(), defaultStart.getTime()));

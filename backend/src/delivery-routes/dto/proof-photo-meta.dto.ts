@@ -34,6 +34,11 @@ export class PhotoCaptureMetaDto {
   @IsNumber()
   @Min(0)
   accuracy?: number;
+
+  // When the phone took that reading — not always the moment of the photo.
+  @IsOptional()
+  @IsDateString()
+  locationAt?: string;
 }
 
 // A proof photo (DO and customer stops) also carries the receiver name

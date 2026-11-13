@@ -7,6 +7,7 @@ import {
 import {
   assertDriverFailureReason,
   assertDriverLocation,
+  onServerClock,
   driverSignedAt,
   movePhotoToFailure,
 } from '../delivery-routes/driver-proof';
@@ -31,7 +32,7 @@ import {
 import { CreateDeliveryOrderDto } from './dto/delivery-order.dto';
 import { DeliveryRoutesService } from '../delivery-routes/delivery-routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { backfillCustomerPin } from '../customers/customer-pin-backfill';
+import { backfillCustomerPin, fixIsTimely } from '../customers/customer-pin-backfill';
 import { currentCosts, lockCosts, lockProducts, receiveAtCost } from '../accounting/inventory-costing';
 import { normalizeSerials, requiredSaleSerials, takeSerials } from '../serials/serial-moves';
 
@@ -564,6 +565,7 @@ export class DeliveryOrderService {
       completedLatitude?: number;
       completedLongitude?: number;
       completedAccuracy?: number;
+      completedLocationAt?: Date;
     },
     requester?: { sub: string; role: string },
   ) {
@@ -582,18 +584,22 @@ export class DeliveryOrderService {
     // driver-proof.ts). Office staff can record what they like. Either
     // way, what came with the proof photo fills in what wasn't sent — the
     // delivery happened where and when the photo was taken.
-    if (
-      params.completedLatitude == null &&
-      deliveryOrder.proofPhotoLatitude != null
-    ) {
+    // A driver's delivery always takes the photo's reading when there is
+    // one: the phone only sends its own when it lost that one, and then it's
+    // from wherever Done was tapped (see recordCustomerStopProof).
+    const isDriver = requester?.role === 'DRIVER';
+    const fromPhoto =
+      deliveryOrder.proofPhotoLatitude != null &&
+      (isDriver || params.completedLatitude == null);
+    if (fromPhoto) {
       params = {
         ...params,
         completedLatitude: Number(deliveryOrder.proofPhotoLatitude),
         completedLongitude: Number(deliveryOrder.proofPhotoLongitude),
         completedAccuracy: deliveryOrder.proofPhotoAccuracy ?? undefined,
+        completedLocationAt: deliveryOrder.proofPhotoLocationAt ?? undefined,
       };
     }
-    const isDriver = requester?.role === 'DRIVER';
     if (isDriver) {
       assertDriverLocation(params.completedLatitude, params.completedLongitude);
     }
@@ -601,6 +607,18 @@ export class DeliveryOrderService {
     const signedAt = isDriver
       ? driverSignedAt(params.signedAt ?? photoAt, deliveryOrder.shippedAt)
       : (params.signedAt ?? deliveryOrder.signedAt ?? photoAt ?? new Date());
+    // A reading sent now is on the phone's clock; move it like the signing
+    // time was. The photo's stored one is on the server's already.
+    if (isDriver && !fromPhoto && params.completedLocationAt) {
+      params = {
+        ...params,
+        completedLocationAt: onServerClock(
+          params.completedLocationAt,
+          params.signedAt ?? photoAt,
+          signedAt,
+        ),
+      };
+    }
     const updated = await this.prisma.deliveryOrder.update({
       where: { id },
       data: {
@@ -617,6 +635,10 @@ export class DeliveryOrderService {
           params.completedLatitude != null
             ? (params.completedAccuracy ?? null)
             : deliveryOrder.completedAccuracy,
+        completedLocationAt:
+          params.completedLatitude != null
+            ? (params.completedLocationAt ?? null)
+            : deliveryOrder.completedLocationAt,
       },
     });
 
@@ -636,6 +658,12 @@ export class DeliveryOrderService {
         latitude: params.completedLatitude,
         longitude: params.completedLongitude,
         accuracy: params.completedAccuracy,
+        // No photo: the reading was taken at Done, which is signedAt.
+        timely: fixIsTimely(
+          params.completedLocationAt,
+          fromPhoto ? deliveryOrder.proofPhotoTakenAt : signedAt,
+        ),
+        deliveredAt: signedAt,
       });
     } catch {
       // ignore

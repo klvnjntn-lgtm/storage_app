@@ -538,7 +538,7 @@ export class RoutePlannerService {
         where: { routeId: { in: affectedIds }, activeDeliveryOrderId: { in: takenOff } },
       });
 
-      const saved: { routeId: string; teamId: string; created: boolean }[] = [];
+      const saved: { routeId: string; teamId: string; created: boolean; keptStops: number }[] = [];
       for (const p of planned) {
         let routeId = ctx.targetRouteIdByTeam.get(p.teamId) ?? null;
         const created = routeId == null;
@@ -590,7 +590,7 @@ export class RoutePlannerService {
             data: { sequence: p.stops.length + i + 1 },
           });
         }
-        saved.push({ routeId, teamId: p.teamId, created });
+        saved.push({ routeId, teamId: p.teamId, created, keptStops: kept.length });
       }
 
       // Close the gaps left in routes that kept some stops (two-phase, same
@@ -620,8 +620,12 @@ export class RoutePlannerService {
 
     // A customer stop kept on a reused route may be HIGH. Best-effort: the plan
     // has already saved.
+    // Customer stops kept after the planned ones weren't part of the plan, so
+    // their legs and ETAs are the old trip's: work them out again from the
+    // new order (applyPriorityOrder does that already if it moved anything).
     for (const r of result) {
-      await this.routes.applyPriorityOrder(organizationId, r.routeId, userId);
+      const moved = await this.routes.applyPriorityOrder(organizationId, r.routeId, userId);
+      if (!moved && r.keptStops > 0) await this.routes.refreshRouteEtas(r.routeId);
     }
 
     // History + notifications after commit, best-effort like elsewhere.

@@ -88,6 +88,17 @@ export function assertDriverFailureReason(
   }
 }
 
+// A time from the phone's clock, moved by however much the phone's photo
+// time was pulled back (driverSignedAt clamps a clock running ahead to now).
+// Both times then stay on one clock, so the gap between the GPS reading and
+// the photo (fixIsTimely) is the one the phone saw — else a phone a few
+// seconds fast never gets a reading counted as timely.
+export function onServerClock(phoneTime: Date, phoneRaw: Date | undefined, stored: Date): Date {
+  if (!phoneRaw || Number.isNaN(phoneRaw.getTime())) return phoneTime;
+  const pulledBack = phoneRaw.getTime() - stored.getTime();
+  return pulledBack > 0 ? new Date(phoneTime.getTime() - pulledBack) : phoneTime;
+}
+
 // What a proof photo upload stores besides the photo: when and where it
 // was taken (GPS required from a driver), and the receiver name if one
 // came along. Same columns on DeliveryOrder and RouteStop.
@@ -97,22 +108,27 @@ export function photoCaptureData(
     latitude?: number;
     longitude?: number;
     accuracy?: number;
+    locationAt?: string;
     receivedBy?: string;
   },
   isDriver: boolean,
   notBefore?: Date | null,
+  now = new Date(),
 ) {
   if (isDriver) assertDriverLocation(meta.latitude, meta.longitude);
   const requested = meta.takenAt ? new Date(meta.takenAt) : undefined;
   const hasFix = meta.latitude != null && meta.longitude != null;
   const name = meta.receivedBy?.trim();
+  const takenAt = isDriver
+    ? driverSignedAt(requested, notBefore, now)
+    : (requested ?? now);
   return {
-    proofPhotoTakenAt: isDriver
-      ? driverSignedAt(requested, notBefore)
-      : (requested ?? new Date()),
+    proofPhotoTakenAt: takenAt,
     proofPhotoLatitude: hasFix ? meta.latitude : null,
     proofPhotoLongitude: hasFix ? meta.longitude : null,
     proofPhotoAccuracy: hasFix ? (meta.accuracy ?? null) : null,
+    proofPhotoLocationAt:
+      hasFix && meta.locationAt ? onServerClock(new Date(meta.locationAt), requested, takenAt) : null,
     ...(name ? { pendingReceivedBy: name } : {}),
   };
 }
@@ -129,6 +145,7 @@ export function movePhotoToFailure(proofPhotoKey: string | null) {
     proofPhotoLatitude: null,
     proofPhotoLongitude: null,
     proofPhotoAccuracy: null,
+    proofPhotoLocationAt: null,
     pendingReceivedBy: null,
   };
 }

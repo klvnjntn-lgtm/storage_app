@@ -7,7 +7,8 @@
 // Best-effort throughout: private mode or blocked storage just means the
 // draft lives only as long as the page, as it used to.
 
-export type DraftFix = { latitude: number; longitude: number; accuracy?: number };
+// at: when the phone took the reading (ms), not always the photo's moment.
+export type DraftFix = { latitude: number; longitude: number; accuracy?: number; at?: number };
 
 export type StopDraft = {
   stopId: string;

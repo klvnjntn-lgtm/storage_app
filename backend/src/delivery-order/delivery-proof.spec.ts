@@ -423,7 +423,7 @@ describe('Delivery proof photos', () => {
 
     // Weak fix: kept on the delivery and still becomes the pin, flagged by its accuracy.
     const vague = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
-      completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 500,
+      completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 500, completedLocationAt: new Date(),
     });
     expect(Number(vague.completedLatitude)).toBeCloseTo(-6.3);
     expect(vague.completedAccuracy).toBe(500);
@@ -434,7 +434,7 @@ describe('Delivery proof photos', () => {
 
     // Better fix: replaces the weak GPS pin.
     await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
-      completedLatitude: -6.2, completedLongitude: 106.8, completedAccuracy: 12,
+      completedLatitude: -6.2, completedLongitude: 106.8, completedAccuracy: 12, completedLocationAt: new Date(),
     });
     pin = await pinOf(customer.id);
     expect(Number(pin.latitude)).toBeCloseTo(-6.2);
@@ -443,13 +443,22 @@ describe('Delivery proof photos', () => {
 
     // Worse fix: the better GPS pin stays.
     await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
-      completedLatitude: -6.4, completedLongitude: 106.4, completedAccuracy: 40,
+      completedLatitude: -6.4, completedLongitude: 106.4, completedAccuracy: 40, completedLocationAt: new Date(),
     });
+    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.2);
+
+    // A reading taken well after the delivery (the driver had moved on) is
+    // kept on the delivery but never moves the pin, however tight.
+    const late = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+      completedLatitude: -6.5, completedLongitude: 106.5, completedAccuracy: 3,
+      completedLocationAt: new Date(Date.now() + 25_000),
+    });
+    expect(Number(late.completedLatitude)).toBeCloseTo(-6.5);
     expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.2);
 
     // A manual pin never moves, even for a tighter fix.
     const later = await deliverTo(pinned.id, 'Jl. A', {
-      completedLatitude: -6.9, completedLongitude: 106.9, completedAccuracy: 5,
+      completedLatitude: -6.9, completedLongitude: 106.9, completedAccuracy: 5, completedLocationAt: new Date(),
     });
     expect(Number(later.completedLatitude)).toBeCloseTo(-6.9);
     expect(Number((await pinOf(pinned.id)).latitude)).toBeCloseTo(-6.1);

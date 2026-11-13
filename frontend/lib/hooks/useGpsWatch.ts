@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pickFix } from '../pickFix';
 
 export type GpsFix = { latitude: number; longitude: number; accuracy?: number; at: number };
 
@@ -14,8 +15,9 @@ const FRESH_MS = 20_000;
 
 // Keeps GPS warm while `enabled`, so tapping Mark delivered uses a fix the
 // phone has been refining for a while instead of a cold first answer
-// (often a coarse WiFi/cell estimate). bestFix() returns the most
-// accurate reading from the last FRESH_MS, or null if there is none.
+// (often a coarse WiFi/cell estimate). bestFix() returns the reading for
+// where the driver is now from the last FRESH_MS (see pickFix), or null if
+// there is none.
 // Environments where location can never work, known without asking.
 function blockedEnvironment(): GpsStatus | null {
   if (typeof window === 'undefined') return null;
@@ -35,11 +37,7 @@ export function useGpsWatch(enabled: boolean) {
   const bestFix = useCallback((): GpsFix | null => {
     const cutoff = Date.now() - FRESH_MS;
     fixes.current = fixes.current.filter((f) => f.at >= cutoff);
-    let pick: GpsFix | null = null;
-    for (const f of fixes.current) {
-      if (!pick || (f.accuracy ?? Infinity) < (pick.accuracy ?? Infinity)) pick = f;
-    }
-    return pick;
+    return pickFix(fixes.current);
   }, []);
 
   useEffect(() => {

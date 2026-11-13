@@ -58,13 +58,31 @@ model Customer {
   // as DeliveryOrder.destinationLatitude), copied onto a new DeliveryOrder
   // at creation time; that individual shipment's own pin can still
   // override it (job site, branch, third party — see that field's comment).
-  latitude    Decimal?   @db.Decimal(9, 6)
-  longitude   Decimal?   @db.Decimal(9, 6)
+  latitude               Decimal?   @db.Decimal(9, 6)
+  longitude              Decimal?   @db.Decimal(9, 6)
   // Where the pin came from — see PinSource. pinAccuracy is the driver's
   // GPS accuracy in metres (GPS pins only); pinSetAt is when it was set.
-  pinSource   PinSource?
-  pinAccuracy Float?
-  pinSetAt    DateTime?
+  pinSource              PinSource?
+  pinAccuracy            Float?
+  pinSetAt               DateTime?
+  // A GPS pin to replace with the next delivery's fix even if that one
+  // reports a looser accuracy (see backfillCustomerPin). Set on GPS pins
+  // taken while the driver app could pick a reading from up to 20s
+  // before the photo (20261112000000_pin_recheck); any new pin clears it.
+  pinRecheck             Boolean    @default(false)
+  // Deliveries whose GPS agreed with this pin, the one that set it included.
+  // At PIN_SETTLED_COUNT the pin stops moving for a fix elsewhere.
+  pinConfirmations       Int        @default(0)
+  // A spot other deliveries keep reporting instead of this pin. At
+  // PIN_OUTVOTE_COUNT agreeing deliveries it replaces an unsettled pin
+  // (see nextPin); a delivery that agrees with the pin clears it.
+  pinChallengerLatitude  Decimal?   @db.Decimal(9, 6)
+  pinChallengerLongitude Decimal?   @db.Decimal(9, 6)
+  pinChallengerCount     Int        @default(0)
+  // When a delivery last counted as a confirmation or a vote for this pin.
+  // Further deliveries within PIN_VISIT_GAP_MS are the same visit (several
+  // delivery orders at one stop) and don't count again (see nextPin).
+  pinVotedAt             DateTime?
 
   // DELIVERY_DMS — directions for the driver ("gate behind the mosque,
   // ring the bell twice"), shown on every route stop for this customer
@@ -105,19 +123,25 @@ model Customer {
 // onto that DO (snapshot — editing the saved address later doesn't move
 // already-created shipments).
 model CustomerAddress {
-  id             String     @id @default(cuid())
-  organizationId String
-  customerId     String
-  label          String
-  address        String?
-  latitude       Decimal?   @db.Decimal(9, 6)
-  longitude      Decimal?   @db.Decimal(9, 6)
+  id                     String     @id @default(cuid())
+  organizationId         String
+  customerId             String
+  label                  String
+  address                String?
+  latitude               Decimal?   @db.Decimal(9, 6)
+  longitude              Decimal?   @db.Decimal(9, 6)
   // Same meaning as on Customer.
-  pinSource      PinSource?
-  pinAccuracy    Float?
-  pinSetAt       DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  pinSource              PinSource?
+  pinAccuracy            Float?
+  pinSetAt               DateTime?
+  pinRecheck             Boolean    @default(false)
+  pinConfirmations       Int        @default(0)
+  pinChallengerLatitude  Decimal?   @db.Decimal(9, 6)
+  pinChallengerLongitude Decimal?   @db.Decimal(9, 6)
+  pinChallengerCount     Int        @default(0)
+  pinVotedAt             DateTime?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
@@ -1296,21 +1320,24 @@ model DeliveryOrder {
   // recordProofOfDelivery()/recordFailedDelivery() from navigator.geolocation
   // at the moment the driver taps the button; never updated afterward and
   // never polled. Decimal(9,6) gives ~11cm precision, standard for lat/lng.
-  completedLatitude  Decimal?  @db.Decimal(9, 6)
-  completedLongitude Decimal?  @db.Decimal(9, 6)
+  completedLatitude   Decimal?  @db.Decimal(9, 6)
+  completedLongitude  Decimal?  @db.Decimal(9, 6)
   // Reported accuracy radius (metres) of that GPS fix, from
   // GeolocationCoordinates.accuracy — null when the device gave none.
   // signedAt is the capture time. Drives whether the fix is good enough
   // to become the customer's first pin (see customer-pin-backfill.ts).
-  completedAccuracy  Float?
-  failedAt           DateTime?
-  failureReason      String?
-  failureLatitude    Decimal?  @db.Decimal(9, 6)
-  failureLongitude   Decimal?  @db.Decimal(9, 6)
+  completedAccuracy   Float?
+  // When that GPS reading was taken. Only a reading within
+  // PIN_FIX_WINDOW_MS of the proof photo may move the customer's pin.
+  completedLocationAt DateTime?
+  failedAt            DateTime?
+  failureReason       String?
+  failureLatitude     Decimal?  @db.Decimal(9, 6)
+  failureLongitude    Decimal?  @db.Decimal(9, 6)
   // Photo taken at a failed attempt (closed shop, locked gate). Moved here
   // from proofPhotoKey when the failure is recorded, so a rescheduled
   // delivery doesn't start out with it as its proof.
-  failurePhotoKey    String?
+  failurePhotoKey     String?
 
   // NEW — the delivery destination pin, set by clicking a point on a map
   // (no geocoding service exists). Planning data, correctable any time —
@@ -1337,22 +1364,25 @@ model DeliveryOrder {
   // through the media library (POST /media) and referenced here as a
   // plain public URL. No longer written; still read for old deliveries.
   // MediaService refuses to delete or recompress assets referenced here.
-  proofPhotoUrl       String?
+  proofPhotoUrl        String?
   // Private delivery-proof photo, as a FileStorage key
   // ("delivery-proofs/<orgId>/<doId>/<uuid>.webp") — never a public URL.
   // Uploaded via POST /delivery-orders/:id/proof-photo and viewed through a
   // short-lived signed link. Kept apart from the media library: no
   // recompression, not deletable from the gallery. proofPhotoUrl above is
   // the legacy field from when proofs went through the media library.
-  proofPhotoKey       String?
+  proofPhotoKey        String?
   // Sent with the proof photo, before the driver taps Done: when and where
   // it was taken, and the receiver name typed so far. Lets the office see
   // a delivery the driver never confirmed; Done falls back to them.
-  proofPhotoTakenAt   DateTime?
-  proofPhotoLatitude  Decimal?  @db.Decimal(9, 6)
-  proofPhotoLongitude Decimal?  @db.Decimal(9, 6)
-  proofPhotoAccuracy  Float?
-  pendingReceivedBy   String?
+  proofPhotoTakenAt    DateTime?
+  proofPhotoLatitude   Decimal?  @db.Decimal(9, 6)
+  proofPhotoLongitude  Decimal?  @db.Decimal(9, 6)
+  proofPhotoAccuracy   Float?
+  // When the phone took that GPS reading, which can be before or after the
+  // photo (see PIN_FIX_WINDOW_MS) — null from a phone too old to say.
+  proofPhotoLocationAt DateTime?
+  pendingReceivedBy    String?
 
   // NEW — set by rescheduleDelivery() when a FAILED delivery is put back
   // into SHIPPED status for re-attempt. failedAt/failureReason are kept
@@ -1503,11 +1533,13 @@ model RouteStop {
   proofPhotoLatitude   Decimal?         @db.Decimal(9, 6)
   proofPhotoLongitude  Decimal?         @db.Decimal(9, 6)
   proofPhotoAccuracy   Float?
+  proofPhotoLocationAt DateTime? // same meaning as the DO field
   pendingReceivedBy    String?
   completedByUserId    String?
   completedLatitude    Decimal?         @db.Decimal(9, 6)
   completedLongitude   Decimal?         @db.Decimal(9, 6)
   completedAccuracy    Float? // metres — same meaning as the DO field
+  completedLocationAt  DateTime? // same meaning as the DO field
   failedAt             DateTime?
   failureReason        String?
   failureLatitude      Decimal?         @db.Decimal(9, 6)

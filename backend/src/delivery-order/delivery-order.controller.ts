@@ -122,6 +122,7 @@ export class DeliveryOrderController {
         completedLatitude: dto.completedLatitude,
         completedLongitude: dto.completedLongitude,
         completedAccuracy: dto.completedAccuracy,
+        completedLocationAt: dto.completedLocationAt ? new Date(dto.completedLocationAt) : undefined,
       },
       req.user,
     );
