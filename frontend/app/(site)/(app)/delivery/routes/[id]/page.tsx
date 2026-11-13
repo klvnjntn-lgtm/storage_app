@@ -83,6 +83,10 @@ type Stop = {
   completedLatitude: string | null;
   completedLongitude: string | null;
   completedAccuracy: number | null;
+  // Delivered: how far from the pin the driver recorded it; far = worth a look.
+  offPin: { meters: number; far: boolean } | null;
+  // The driver finished it with no GPS reading.
+  deliveredWithoutGps: boolean;
   failureReason: string | null;
   // An admin set this result from the office, not the driver on site.
   markedByOffice: boolean;
@@ -249,6 +253,8 @@ export default function DeliveryRouteDetailPage() {
   const [restoringOrder, setRestoringOrder] = useState(false);
   // Stops the last optimize couldn't fit (kept at the end of the route).
   const [unscheduled, setUnscheduled] = useState<{ stopId: string; label: string; reason: UnscheduledReason }[]>([]);
+  // Stops the last optimize routed but whose pin is much further out than the rest.
+  const [farStops, setFarStops] = useState<{ stopId: string; label: string; meters: number }[]>([]);
   // Stop shown on the route map (from clicking its card); nonce re-triggers
   // the fly-to when the same card is clicked again.
   const [mapFocus, setMapFocus] = useState<{ stopId: string; nonce: number } | null>(null);
@@ -764,6 +770,7 @@ export default function DeliveryRouteDetailPage() {
         return;
       }
       setUnscheduled(body?.unscheduled ?? []);
+      setFarStops(body?.farStops ?? []);
       await load(true);
     } catch {
       setError(t('delivery.routeDetail.couldNotReachServer'));
@@ -955,6 +962,19 @@ export default function DeliveryRouteDetailPage() {
               {unscheduled.map((u) => (
                 <li key={u.stopId}>
                   {u.label} — {t(`delivery.plan.reason.${u.reason}`)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {farStops.length > 0 && (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 text-sm rounded-md px-3 py-2">
+            <p className="font-semibold">{t('delivery.farPin.routeTitle')}</p>
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {farStops.map((f) => (
+                <li key={f.stopId}>
+                  {t('delivery.farPin.item', { label: f.label, km: Math.round(f.meters / 1000) })}
                 </li>
               ))}
             </ul>
@@ -1264,6 +1284,16 @@ export default function DeliveryRouteDetailPage() {
                     {stop.status === 'DELIVERED' && (
                       <div className="flex items-center gap-2 flex-wrap">
                         <DeliveryFixBadge accuracy={stop.completedLatitude ? stop.completedAccuracy : null} />
+                        {stop.deliveredWithoutGps && (
+                          <span className="text-xs font-medium rounded-md border border-amber-300 bg-amber-50 text-amber-800 px-1.5 py-0.5">
+                            {t('delivery.offPin.noGps')}
+                          </span>
+                        )}
+                        {stop.offPin?.far && (
+                          <span className="text-xs font-medium rounded-md border border-amber-300 bg-amber-50 text-amber-800 px-1.5 py-0.5">
+                            {t('delivery.offPin.badge', { m: stop.offPin.meters.toLocaleString() })}
+                          </span>
+                        )}
                       </div>
                     )}
                     {stop.status === 'DELIVERED' && stop.hasProofPhoto && (
@@ -1815,7 +1845,7 @@ export default function DeliveryRouteDetailPage() {
               pickedPosition={pickedPosition}
               onPick={(lat, lng) => setPickedPosition({ lat, lng })}
             />
-            <CoordinateInputs value={pickedPosition} onChange={setPickedPosition} />
+            <CoordinateInputs value={pickedPosition} onChange={setPickedPosition} checkFar={!pickingStart} />
             {!pickedPosition && <p className="text-xs text-gray-500">{t('delivery.routeDetail.noLocationSet')}</p>}
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button

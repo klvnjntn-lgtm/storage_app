@@ -380,7 +380,7 @@ describe('Team routes & customer stops', () => {
     ).rejects.toThrow(/already resolved/);
   });
 
-  it("needs a driver's GPS, and dates the delivery from the photo", async () => {
+  it("dates the delivery from the photo, and lets a driver finish without GPS, flagged", async () => {
     const route = await mkStartedRoute();
     const stop = await routes.addStop(orgId, route.id, {
       customerId: (await mkCustomer('Late Done Co')).id,
@@ -390,9 +390,6 @@ describe('Team routes & customer stops', () => {
     const at = (ms: number) => new Date(Date.now() + ms).toISOString();
     const gps = { latitude: 1.1, longitude: 104.1 };
 
-    await expect(
-      routes.recordCustomerStopProof(orgId, route.id, stop.id, { receivedBy: 'Ani' }, driver()),
-    ).rejects.toThrow(/GPS location is required/);
     await expect(
       routes.recordCustomerStopProof(
         orgId,
@@ -414,6 +411,20 @@ describe('Team routes & customer stops', () => {
     );
     const saved = await prisma.routeStop.findUniqueOrThrow({ where: { id: stop.id } });
     expect(saved.signedAt?.toISOString()).toBe(photoAt);
+    expect(saved.deliveredWithoutGps).toBe(false);
+
+    // No GPS on the phone at all: saved, and flagged for the office.
+    const blind = await routes.addStop(orgId, route.id, {
+      customerId: (await mkCustomer('Basement Co')).id,
+    });
+    await proofs.uploadPhoto(orgId, route.id, blind.id, photo, driver(), {});
+    await routes.recordCustomerStopProof(orgId, route.id, blind.id, { receivedBy: 'Ani' }, driver());
+    const flagged = await prisma.routeStop.findUniqueOrThrow({ where: { id: blind.id } });
+    expect(flagged.signedAt).not.toBeNull();
+    expect(flagged.completedLatitude).toBeNull();
+    expect(flagged.deliveredWithoutGps).toBe(true);
+    const view = (await routes.getRoute(orgId, route.id)).stops.find((s) => s.id === blind.id)!;
+    expect(view.deliveredWithoutGps).toBe(true);
   });
 
   it('keeps what came with the photo for the office, and Done falls back to it', async () => {
@@ -422,9 +433,8 @@ describe('Team routes & customer stops', () => {
       customerId: (await mkCustomer('Forgot Done Co')).id,
     });
 
-    await expect(
-      proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {}),
-    ).rejects.toThrow(/GPS location is required/);
+    // A photo with no GPS is kept too (the delivery is flagged on Done).
+    await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {});
 
     const takenAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     await proofs.uploadPhoto(orgId, route.id, stop.id, photo, driver(), {
@@ -534,6 +544,7 @@ describe('Team routes & customer stops', () => {
           ]),
         ),
         unassigned: unassigned(input.jobs.map((j) => j.key)),
+        far: [],
       }));
     };
 
@@ -658,6 +669,7 @@ describe('Team routes & customer stops', () => {
           ]),
         ),
         unassigned: [],
+        far: [],
       }));
     const mkThree = async () => {
       const route = await mkStartedRoute();
@@ -1471,6 +1483,7 @@ describe('Team routes & customer stops', () => {
           ],
         ]),
         unassigned: [],
+        far: [],
       }));
       const schedule = spySchedule();
       schedule.mockClear();

@@ -17,6 +17,9 @@ export type VroomVehicle = {
   // [earliest start, latest end] of the driver's working hours. Omitted =
   // unrestricted. No end location: a route ends at its last delivery.
   timeWindow?: [number, number];
+  // Fixed breaks, [start, end] in the same seconds: VROOM always schedules
+  // them, so each must fit inside timeWindow.
+  breaks?: { start: number; end: number }[];
 };
 
 export type VroomJob = {
@@ -60,6 +63,15 @@ export class VroomService {
         profile: 'car',
         start_index: v.startIndex,
         ...(v.timeWindow ? { time_window: v.timeWindow } : {}),
+        ...(v.breaks?.length
+          ? {
+              breaks: v.breaks.map((b, i) => ({
+                id: i + 1,
+                time_windows: [[b.start, b.start]],
+                service: b.end - b.start,
+              })),
+            }
+          : {}),
       })),
       jobs: input.jobs.map((j) => ({
         id: j.id,

@@ -17,7 +17,13 @@ import { LicenseService } from '../license/license.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { LoginLockout } from './login-lockout';
-import { issueDeviceToken, lockoutKey } from './device-cookie';
+import { deviceIdFor, issueDeviceToken, lockoutKey } from './device-cookie';
+import {
+  assertOrgEmailVerified,
+  emailVerificationEnforced,
+  EmailVerificationService,
+} from './email-verification';
+import { noticeContext, sendSecurityNotice } from './security-notice';
 import { platformOwnerEmails } from '../platform/platform-owner.guard';
 import { ModuleKey } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
@@ -59,7 +65,24 @@ export class AuthService {
     private billing: BillingService,
     private planLimits: PlanLimitsService,
     private twoFactor: TwoFactorService,
+    private emailVerification: EmailVerificationService,
   ) {}
+
+  // A finished sign-in from a browser that hasn't signed in to this
+  // account before (no valid device cookie for it) — tell the owner. Only
+  // to verified addresses: an unverified one may not be theirs, and
+  // mailing made-up addresses on every sign-in hurts deliverability.
+  private notifyIfNewDevice(
+    user: { email: string; emailVerifiedAt: Date | null; organization: { timezone: string | null } | null },
+    deviceToken: string | null | undefined,
+    userAgent?: string,
+  ) {
+    if (!user.emailVerifiedAt || deviceIdFor(deviceToken, user.email)) return;
+    sendSecurityNotice(this.mailer, user.email, 'New sign-in to your WareSys account', [
+      `Your WareSys account (${user.email}) was just signed in to from a browser or device it hasn't used before.`,
+      ...noticeContext(resolveTimezone(user.organization), userAgent),
+    ]);
+  }
 
   // deviceToken: the browser's device cookie, if it has one (see
   // device-cookie.ts) — failures are counted per browser that has signed in
@@ -139,15 +162,24 @@ export class AuthService {
     // Only a finished login clears the failure count. Clearing it at the
     // password step let a stolen password reset the count between code guesses.
     this.loginLockout.recordSuccess(lockKey);
+    this.notifyIfNewDevice(user, deviceToken, userAgent);
     return {
       ...(await this.issueToken(user.id, user.email, user.role, user.organizationId)),
       deviceToken: issueDeviceToken(user.email),
     };
   }
 
-  async completeTwoFactorLogin(mfaToken: string, code: string, deviceToken?: string | null) {
+  async completeTwoFactorLogin(
+    mfaToken: string,
+    code: string,
+    deviceToken?: string | null,
+    userAgent?: string,
+  ) {
     const userId = this.twoFactor.readChallenge(mfaToken);
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { organization: { select: { timezone: true } } },
+    });
     if (!user || !user.active) throw new UnauthorizedException('Invalid credentials');
     // Same per-account lockout as passwords: a challenge token is good for
     // five minutes, which is plenty of guesses otherwise.
@@ -160,6 +192,7 @@ export class AuthService {
       throw err;
     }
     this.loginLockout.recordSuccess(lockKey);
+    this.notifyIfNewDevice(user, deviceToken, userAgent);
     return {
       ...(await this.issueToken(user.id, user.email, user.role, user.organizationId)),
       deviceToken: issueDeviceToken(user.email),
@@ -236,7 +269,26 @@ export class AuthService {
     if (selfServe) await this.billing.startTrial(org.id);
 
     const user = org.users[0];
-    return this.issueToken(user.id, user.email, user.role, user.organizationId);
+
+    // Send the verification code straight away so it's waiting in the
+    // inbox when the app's banner asks for it. In the background: a slow
+    // or failing mail server must not fail the sign-up, and the banner has
+    // a resend button.
+    if (emailVerificationEnforced(this.mailer)) {
+      this.emailVerification.sendCode(user.id).catch((err) =>
+        this.logger.error(
+          `Failed to send the sign-up verification code to ${user.email}`,
+          err instanceof Error ? err.stack : err,
+        ),
+      );
+    }
+
+    return {
+      ...(await this.issueToken(user.id, user.email, user.role, user.organizationId)),
+      // This browser now counts as the account's own, so the first sign-in
+      // after registering doesn't raise a "new device" alert.
+      deviceToken: issueDeviceToken(user.email),
+    };
   }
 
   // The only supported way to add a user to an EXISTING org. Requires
@@ -258,6 +310,7 @@ export class AuthService {
       throw new ForbiddenException('Only a master account can invite another master');
     }
     if (role === 'MECHANIC') await assertNoOtherMechanicAccount(this.prisma, inviterOrgId);
+    await assertOrgEmailVerified(this.prisma, this.mailer, inviterOrgId);
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -444,6 +497,10 @@ export class AuthService {
       },
     });
 
+    sendSecurityNotice(this.mailer, user.email, 'Your WareSys password was changed', [
+      `The password for your WareSys account (${user.email}) was just changed, and every device was signed out.`,
+    ]);
+
     return { message: 'Password changed. Please sign in again.' };
   }
 
@@ -534,6 +591,10 @@ export class AuthService {
       },
     });
 
+    sendSecurityNotice(this.mailer, user.email, 'Your WareSys password was reset', [
+      `The password for your WareSys account (${user.email}) was just reset with a "forgot password" link, and every device was signed out.`,
+    ]);
+
     return { message: 'Password has been reset' };
   }
 
@@ -607,6 +668,7 @@ export class AuthService {
         active: true,
         removedAt: true,
         isPlatformOwner: true,
+        emailVerifiedAt: true,
         organization: {
           select: {
             id: true,
@@ -620,7 +682,7 @@ export class AuthService {
       },
     });
     if (!user) return null;
-    const { active, removedAt, isPlatformOwner, ...profile } = user;
+    const { active, removedAt, isPlatformOwner, emailVerifiedAt, ...profile } = user;
     // Only decides whether the app shows the console link; the console's
     // own routes re-check everything (PlatformOwnerGuard).
     const platformOwner =
@@ -633,7 +695,15 @@ export class AuthService {
     const branch = branchId
       ? await this.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true } })
       : null;
-    return { ...profile, platformOwner, branch };
+    return {
+      ...profile,
+      platformOwner,
+      branch,
+      emailVerified: !!emailVerifiedAt,
+      // Whether the app should ask for verification at all (no SMTP or the
+      // desktop app = never; see email-verification.ts).
+      emailVerificationEnforced: emailVerificationEnforced(this.mailer),
+    };
   }
 
   async updateAvatar(userId: string, avatarUrl: string | null | undefined) {

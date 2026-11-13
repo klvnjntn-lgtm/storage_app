@@ -15,6 +15,10 @@ type Profile = {
   };
   // Shows the platform console link; the console's routes re-check.
   platformOwner?: boolean;
+  // Email ownership (EmailVerifyBanner). Enforced is false where the
+  // server can't send email or is the single-business desktop app.
+  emailVerified?: boolean;
+  emailVerificationEnforced?: boolean;
   [key: string]: unknown;
 };
 

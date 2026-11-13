@@ -894,15 +894,17 @@ export default function DriverRoutePage() {
     try {
       const takenAt = new Date();
       const fix = await takeFix();
-      if (fix.latitude == null || fix.longitude == null) {
+      // No reading (basement, mall): the photo is kept and the delivery can
+      // still be finished; the office sees it was saved without a location.
+      const hasFix = fix.latitude != null && fix.longitude != null;
+      if (!hasFix) {
         setPhotoGpsFailedFor(stopId);
         reportDriverEvent({
           kind: 'photo-no-gps',
           stopId,
-          message: t('delivery.driver.photoNeedsGps'),
+          message: t('delivery.driver.photoNoGpsKept'),
           detail: `gps=${gps.status}`,
         });
-        return;
       }
       // No landmark photo for this customer yet (or only one this delivery
       // filled in): also make a copy without the date/GPS stamp to become it.
@@ -919,7 +921,9 @@ export default function DriverRoutePage() {
       void saveDraft(stopId, {
         photo: small,
         landmark,
-        photoFix: { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy, at: fix.at },
+        photoFix: hasFix
+          ? { latitude: fix.latitude!, longitude: fix.longitude!, accuracy: fix.accuracy, at: fix.at }
+          : undefined,
         photoTakenAt: takenAt.toISOString(),
       });
       // Sent straight away rather than on Done, so a delivery the driver
@@ -1262,13 +1266,13 @@ export default function DriverRoutePage() {
       // Placed and timed where and when the photo was taken, however much
       // later Done is tapped. A fresh reading only when there's no photo
       // reading to hand (no photo, or one sent before this phone kept
-      // drafts) — and a delivery always needs one.
+      // drafts, or none came with it). Still none: the delivery goes through
+      // without a location, flagged for the office.
       const shotFix = photoFix[key];
       const { latitude, longitude, accuracy, at } = shotFix?.latitude != null ? shotFix : await takeFix();
       const locationAt = at != null ? new Date(at).toISOString() : undefined;
       if (latitude == null || longitude == null) {
-        setStopError(key, t('delivery.driver.deliveryNeedsGps'));
-        return;
+        reportDriverEvent({ kind: 'delivered-no-gps', stopId: key, detail: `gps=${gps.status}` });
       }
       const signedAt = photoTakenAt[key] ?? new Date().toISOString();
 
@@ -1676,9 +1680,9 @@ export default function DriverRoutePage() {
                         <p className="text-sm text-amber-700">{t('delivery.driver.photoQueued')}</p>
                       )}
                       {photoGpsFailedFor === doId && (
-                        <p className="flex items-start gap-1.5 text-sm font-medium text-red-700">
+                        <p className="flex items-start gap-1.5 text-sm font-medium text-amber-700">
                           <LocateOff size={16} className="shrink-0 mt-0.5" />
-                          {t('delivery.driver.photoNeedsGps')}
+                          {t('delivery.driver.photoNoGpsKept')}
                         </p>
                       )}
                       {uploadingPhotoFor === doId && (

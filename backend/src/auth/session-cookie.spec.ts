@@ -30,7 +30,7 @@ describe('session cookie (e2e)', () => {
       .overrideProvider(LicenseService)
       .useValue({ isValid: () => true, getStatus: () => ({ valid: true }), getEdition: () => 'cloud', onModuleInit: async () => {} })
       .overrideProvider(MailerService)
-      .useValue({ onModuleInit: async () => {}, sendPasswordReset: jest.fn(), sendChangePasswordOtp: jest.fn() })
+      .useValue({ onModuleInit: async () => {}, isConfigured: () => false, sendPasswordReset: jest.fn(), sendChangePasswordOtp: jest.fn() })
       .compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
     configureApp(app as NestExpressApplication); // same parsers/pipes/headers as main.ts

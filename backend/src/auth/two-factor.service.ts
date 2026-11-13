@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -12,6 +13,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { generateTotpSecret, otpauthUrl, verifyTotp } from './totp';
 import { open, seal } from './secret-box';
 import { isAdminRole } from './roles';
+import { MailerService } from './mailer/mailer.service';
+import { sendSecurityNotice } from './security-notice';
 
 const RECOVERY_CODE_COUNT = 10;
 const CHALLENGE_TTL = '5m';
@@ -34,7 +37,20 @@ export class TwoFactorService {
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
+    // Optional so tests that build the service by hand needn't supply one.
+    @Optional() private mailer?: MailerService,
   ) {}
+
+  private notify(userId: string, subject: string, line: string) {
+    if (!this.mailer) return;
+    const mailer = this.mailer;
+    void this.prisma.user
+      .findUnique({ where: { id: userId }, select: { email: true } })
+      .then((u) => {
+        if (u) sendSecurityNotice(mailer, u.email, subject, [line.replace('{email}', u.email)]);
+      })
+      .catch(() => undefined);
+  }
 
   async status(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
@@ -101,6 +117,11 @@ export class TwoFactorService {
         totpRecoveryCodes: codes.map(hashCode),
       },
     });
+    this.notify(
+      userId,
+      'Two-factor sign-in turned on for your WareSys account',
+      'Two-factor sign-in was just turned on for your WareSys account ({email}). Signing in now also needs a code from your authenticator app.',
+    );
     return { recoveryCodes: codes };
   }
 
@@ -127,6 +148,11 @@ export class TwoFactorService {
       where: { id: userId },
       data: { totpSecret: null, totpEnabledAt: null, totpRecoveryCodes: [] },
     });
+    this.notify(
+      userId,
+      'Two-factor sign-in turned off for your WareSys account',
+      'Two-factor sign-in was just turned off for your WareSys account ({email}). Signing in now needs only the password.',
+    );
     return { enabled: false };
   }
 

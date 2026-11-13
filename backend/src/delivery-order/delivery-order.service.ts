@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   assertDriverFailureReason,
-  assertDriverLocation,
+  deliveredWithoutGps,
   onServerClock,
   driverSignedAt,
   movePhotoToFailure,
@@ -600,9 +600,6 @@ export class DeliveryOrderService {
         completedLocationAt: deliveryOrder.proofPhotoLocationAt ?? undefined,
       };
     }
-    if (isDriver) {
-      assertDriverLocation(params.completedLatitude, params.completedLongitude);
-    }
     const photoAt = deliveryOrder.proofPhotoTakenAt ?? undefined;
     const signedAt = isDriver
       ? driverSignedAt(params.signedAt ?? photoAt, deliveryOrder.shippedAt)
@@ -639,6 +636,11 @@ export class DeliveryOrderService {
           params.completedLatitude != null
             ? (params.completedLocationAt ?? null)
             : deliveryOrder.completedLocationAt,
+        deliveredWithoutGps: deliveredWithoutGps(
+          isDriver,
+          params.completedLatitude ?? deliveryOrder.completedLatitude,
+          params.completedLongitude ?? deliveryOrder.completedLongitude,
+        ),
       },
     });
 

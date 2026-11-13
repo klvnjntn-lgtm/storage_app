@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { PlanBanner, PlanLimitToast } from '@/app/components/billing/PlanBanner';
+import { EmailVerifyBanner } from '@/app/components/shared/EmailVerifyBanner';
 import {
   ArrowLeftRight,
   HandCoins,
@@ -1384,6 +1385,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 min-w-0 pb-[var(--app-bottom-nav-h)] md:pb-[env(safe-area-inset-bottom)]">
+          <EmailVerifyBanner />
           {profile && <PlanBanner isAdmin={isAdminRole(profile.role)} />}
           {desktopBlocked ? null : children}
           {profile && <PlanLimitToast isAdmin={isAdminRole(profile.role)} />}

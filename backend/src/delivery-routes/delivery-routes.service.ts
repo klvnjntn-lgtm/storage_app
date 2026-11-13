@@ -10,7 +10,7 @@ import {
 import {
   assertDriverCatchUpWindow,
   assertDriverFailureReason,
-  assertDriverLocation,
+  deliveredWithoutGps,
   driverSignedAt,
   onServerClock,
   movePhotoToFailure,
@@ -27,10 +27,14 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  DEFAULT_TIMING,
   RouteOptimizerService,
-  STOP_DWELL_SECONDS,
+  addWorkingTime,
+  type DriverBreak,
+  type TripTiming,
   type UnscheduledReason,
 } from './route-optimizer.service';
+import { offPin } from './off-pin';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrganizationModulesService } from '../organization-module/organization-modules.service';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
@@ -127,6 +131,7 @@ export const stopSelect = {
   completedLongitude: true,
   completedAccuracy: true,
   completedLocationAt: true,
+  deliveredWithoutGps: true,
   failedAt: true,
   failureReason: true,
   failureLatitude: true,
@@ -145,6 +150,7 @@ export const stopSelect = {
       completedLatitude: true,
       completedLongitude: true,
       completedAccuracy: true,
+      deliveredWithoutGps: true,
       failedAt: true,
       failureReason: true,
       failureLatitude: true,
@@ -450,6 +456,21 @@ export class DeliveryRoutesService {
       completedLatitude: d ? d.completedLatitude : stop.completedLatitude,
       completedLongitude: d ? d.completedLongitude : stop.completedLongitude,
       completedAccuracy: d ? d.completedAccuracy : stop.completedAccuracy,
+      // The driver finished it with no GPS reading: flagged for the office.
+      deliveredWithoutGps:
+        status === 'DELIVERED' && stop.markedByOfficeAt == null && (d ? d.deliveredWithoutGps : stop.deliveredWithoutGps),
+      // How far from the pin the driver recorded the delivery (see off-pin.ts).
+      offPin:
+        status === 'DELIVERED'
+          ? offPin({
+              completedLatitude: d ? d.completedLatitude : stop.completedLatitude,
+              completedLongitude: d ? d.completedLongitude : stop.completedLongitude,
+              completedAccuracy: d ? d.completedAccuracy : stop.completedAccuracy,
+              destinationLatitude: target.destinationLatitude,
+              destinationLongitude: target.destinationLongitude,
+              markedByOffice: stop.markedByOfficeAt != null,
+            })
+          : null,
       failedAt: d ? d.failedAt : stop.failedAt,
       failureReason: d ? d.failureReason : stop.failureReason,
       failureLatitude: d ? d.failureLatitude : stop.failureLatitude,
@@ -1013,7 +1034,7 @@ export class DeliveryRoutesService {
     // A stop with no pin can't be placed, but it shouldn't hold up the others: it
     // stays at the end of its priority group and is reported in `unscheduled`.
     if (pendingStops.length === 0) {
-      return { ...(await this.getRoute(organizationId, routeId)), unscheduled: [] };
+      return { ...(await this.getRoute(organizationId, routeId)), unscheduled: [], farStops: [] };
     }
 
     const now = new Date();
@@ -1042,8 +1063,10 @@ export class DeliveryRoutesService {
           key: route.teamId,
           availableFrom: availability.availableFrom,
           availableUntil: availability.offDuty ? null : availability.availableUntil,
+          breaks: availability.breaks,
         }
       : { key: route.teamId, availableFrom: now, availableUntil: null };
+    const timing = await this.optimizer.timing(organizationId);
 
     const jobs = pendingStops
       .map(optimizerJob)
@@ -1055,6 +1078,7 @@ export class DeliveryRoutesService {
         vehicles: [vehicle],
         jobs,
         keepUnassigned: true,
+        timing,
       });
     // Order only, with no start point and nothing done yet: from the first pin.
     const firstPin = jobs.find((job) => job.location)?.location;
@@ -1080,7 +1104,7 @@ export class DeliveryRoutesService {
     ) {
       solved = await solveFrom(start);
     }
-    const { routes, unassigned } = solved!;
+    const { routes, unassigned, far } = solved!;
     const ordered = routes.get(route.teamId)!;
 
     const highestResolvedSequence = route.stops
@@ -1161,7 +1185,13 @@ export class DeliveryRoutesService {
         reason: u.reason,
       };
     });
-    return { ...(await this.getRoute(organizationId, routeId)), unscheduled };
+    // Pins worth a second look: routed, but much further out than the rest.
+    const farStops = far.map((f) => ({
+      stopId: f.key,
+      label: stopLabel(stopById.get(f.key)!),
+      meters: f.meters,
+    }));
+    return { ...(await this.getRoute(organizationId, routeId)), unscheduled, farStops };
   }
 
   // Undoes optimize(): every stop back where it was before the first one,
@@ -1299,24 +1329,49 @@ export class DeliveryRoutesService {
       await this.refreshEtas(resolvedStop.routeId, resolvedAt);
       return;
     }
-    await this.walkCachedLegs(pending, resolvedAt);
+    const route = await this.prisma.route.findUnique({
+      where: { id: resolvedStop.routeId },
+      select: { organizationId: true, teamId: true, routeDate: true },
+    });
+    if (!route) return;
+    await this.walkCachedLegs(pending, resolvedAt, await this.routeClock(route));
+  }
+
+  // The business's trip timing and the driver's breaks still ahead on the
+  // route's day — what every ETA on it is worked out with.
+  private async routeClock(route: { organizationId: string; teamId: string; routeDate: Date }) {
+    const [timing, availability] = await Promise.all([
+      this.optimizer.timing(route.organizationId),
+      this.teamAvailability(route.organizationId, [route.teamId], route.routeDate.toISOString().slice(0, 10)),
+    ]);
+    return { timing, breaks: availability.get(route.teamId)?.breaks ?? [] };
   }
 
   // ETAs from the cached legs, starting at `from`. A stop with no leg (no pin)
-  // is passed over, keeping the stops after it up to date.
-  private async walkCachedLegs(pending: StopRow[], from: Date) {
-    let t = from.getTime();
+  // is passed over, keeping the stops after it up to date. The cached legs
+  // already carry the travel factor they were planned with.
+  private async walkCachedLegs(
+    pending: StopRow[],
+    from: Date,
+    clock: { timing: TripTiming; breaks: DriverBreak[] } = { timing: DEFAULT_TIMING, breaks: [] },
+  ) {
+    const breaks = clock.breaks
+      .map((b) => ({ start: b.start.getTime(), end: b.end.getTime() }))
+      .sort((a, b) => a.start - b.start);
+    let t = addWorkingTime(from.getTime(), 0, breaks);
     for (const stop of pending) {
       if (stop.travelSecondsFromPrevious == null) continue;
       const { deliveryWindowStart, deliveryWindowEnd } = stopTarget(stop);
-      t += stop.travelSecondsFromPrevious * 1000;
-      if (deliveryWindowStart && deliveryWindowStart.getTime() > t) t = deliveryWindowStart.getTime();
+      t = addWorkingTime(t, stop.travelSecondsFromPrevious * 1000, breaks);
+      if (deliveryWindowStart && deliveryWindowStart.getTime() > t) {
+        t = addWorkingTime(deliveryWindowStart.getTime(), 0, breaks);
+      }
       const plannedEta = new Date(t);
       await this.prisma.routeStop.update({
         where: { id: stop.id },
         data: { plannedEta, ...this.rearmedAlerts(plannedEta, deliveryWindowEnd) },
       });
-      t += STOP_DWELL_SECONDS * 1000;
+      t = addWorkingTime(t, clock.timing.dwellSeconds * 1000, breaks);
     }
   }
 
@@ -1330,12 +1385,15 @@ export class DeliveryRoutesService {
         where: { id: routeId },
         select: {
           organizationId: true,
+          teamId: true,
+          routeDate: true,
           status: true,
           plannedDepartureAt: true,
           stops: { select: stopSelect, orderBy: { sequence: 'asc' } },
         },
       });
       if (!route || route.status === RouteStatus.COMPLETED || route.status === RouteStatus.CANCELLED) return;
+      const clock = await this.routeClock(route);
       const pending = route.stops.filter((s) => this.stopStatus(s) === 'PENDING');
       if (!pending.some((s) => s.plannedEta)) return;
 
@@ -1357,6 +1415,7 @@ export class DeliveryRoutesService {
               { lat: position.latitude, lng: position.longitude },
               departAt,
               jobs,
+              clock,
             )
           ).map((s) => [s.key, s]),
         );
@@ -1377,7 +1436,7 @@ export class DeliveryRoutesService {
         );
       } catch (err) {
         this.logger.warn(`Using cached legs for route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
-        await this.walkCachedLegs(pending, departAt);
+        await this.walkCachedLegs(pending, departAt, clock);
       }
     } catch (err) {
       this.logger.warn(`Could not refresh ETAs for route ${routeId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -1921,6 +1980,7 @@ export class DeliveryRoutesService {
           completedLongitude: null,
           completedAccuracy: null,
           completedLocationAt: null,
+          deliveredWithoutGps: false,
           failedAt: null,
           failureReason: null,
           failureLatitude: null,
@@ -2101,6 +2161,7 @@ export class DeliveryRoutesService {
             completedLongitude: s.completedLongitude,
             completedAccuracy: s.completedAccuracy,
             completedLocationAt: s.completedLocationAt,
+            deliveredWithoutGps: s.deliveredWithoutGps,
             failedAt: s.failedAt,
             failureReason: s.failureReason,
             failureLatitude: s.failureLatitude,
@@ -2109,7 +2170,10 @@ export class DeliveryRoutesService {
             markedByOfficeAt: s.markedByOfficeAt,
             officeNote: s.officeNote,
           });
-          const empty = Object.fromEntries(Object.keys(result(from)).map((k) => [k, null]));
+          const empty = {
+            ...Object.fromEntries(Object.keys(result(from)).map((k) => [k, null])),
+            deliveredWithoutGps: false,
+          };
 
           // Location photos first, while each still says which proof it came from.
           const pair = [from.id, to.id];
@@ -2306,7 +2370,6 @@ export class DeliveryRoutesService {
         locationAt: stop.proofPhotoLocationAt?.toISOString(),
       };
     }
-    if (isDriver) assertDriverLocation(params.latitude, params.longitude);
     const requested = params.signedAt
       ? new Date(params.signedAt)
       : (stop.proofPhotoTakenAt ?? undefined);
@@ -2333,6 +2396,7 @@ export class DeliveryRoutesService {
           params.latitude != null ? (params.accuracy ?? null) : null,
         completedLocationAt:
           params.latitude != null && params.locationAt ? new Date(params.locationAt) : null,
+        deliveredWithoutGps: deliveredWithoutGps(isDriver, params.latitude, params.longitude),
       },
     });
     if (claim.count === 0) {

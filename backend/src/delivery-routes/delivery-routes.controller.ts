@@ -49,6 +49,8 @@ import {
 import { MAX_PHOTO_UPLOAD_BYTES } from '../storage/private-photo';
 import { ProofDraftDto, ProofPhotoMetaDto } from './dto/proof-photo-meta.dto';
 import { DriverEventDto } from './dto/driver-event.dto';
+import { UpdateTripTimingDto } from './dto/trip-timing.dto';
+import { TripTimingService } from './trip-timing';
 import {
   ApplyRoutePlanDto,
   PlanCandidatesQueryDto,
@@ -66,6 +68,7 @@ export class DeliveryRoutesController {
     private readonly routePlanner: RoutePlannerService,
     private readonly stopProof: StopProofService,
     private readonly report: DeliveryReportService,
+    private readonly tripTiming: TripTimingService,
   ) {}
 
   @Post()
@@ -113,6 +116,29 @@ export class DeliveryRoutesController {
     @Body() dto: SetRouteStartDto,
   ) {
     return this.deliveryRoutesService.setStartPoint(organizationId, dto);
+  }
+
+  // Trip timing: road-time factor and minutes per stop, every ETA's basis.
+  @Get('timing')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  getTiming(@CurrentOrg() organizationId: string) {
+    return this.tripTiming.get(organizationId);
+  }
+
+  // What the business's own past deliveries suggest (reads OSRM per route).
+  @Get('timing/suggestion')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  suggestTiming(@CurrentOrg() organizationId: string) {
+    return this.tripTiming.suggest(organizationId);
+  }
+
+  @Put('timing')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'USER')
+  setTiming(@CurrentOrg() organizationId: string, @Body() dto: UpdateTripTimingDto) {
+    return this.tripTiming.set(organizationId, dto);
   }
 
   // Driver's own routes — MUST stay declared above the :id routes below,

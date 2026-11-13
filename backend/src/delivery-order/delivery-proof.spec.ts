@@ -421,31 +421,38 @@ describe('Delivery proof photos', () => {
     };
     const pinOf = (id: string) => prisma.customer.findUniqueOrThrow({ where: { id } });
 
-    // Weak fix: kept on the delivery and still becomes the pin, flagged by its accuracy.
-    const vague = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+    // A cell-tower guess: kept on the delivery, but never placed as the pin.
+    const guess = await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
       completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 500, completedLocationAt: new Date(),
     });
-    expect(Number(vague.completedLatitude)).toBeCloseTo(-6.3);
-    expect(vague.completedAccuracy).toBe(500);
+    expect(Number(guess.completedLatitude)).toBeCloseTo(-6.3);
+    expect(guess.completedAccuracy).toBe(500);
     let pin = await pinOf(customer.id);
-    expect(Number(pin.latitude)).toBeCloseTo(-6.3);
-    expect(pin.pinSource).toBe('GPS');
-    expect(pin.pinAccuracy).toBe(500);
+    expect(pin.latitude).toBeNull();
 
-    // Better fix: replaces the weak GPS pin.
+    // Weak fix: still becomes the pin, flagged by its accuracy.
     await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
-      completedLatitude: -6.2, completedLongitude: 106.8, completedAccuracy: 12, completedLocationAt: new Date(),
+      completedLatitude: -6.3, completedLongitude: 106.3, completedAccuracy: 200, completedLocationAt: new Date(),
     });
     pin = await pinOf(customer.id);
-    expect(Number(pin.latitude)).toBeCloseTo(-6.2);
-    expect(Number(pin.longitude)).toBeCloseTo(106.8);
+    expect(Number(pin.latitude)).toBeCloseTo(-6.3);
+    expect(pin.pinSource).toBe('GPS');
+    expect(pin.pinAccuracy).toBe(200);
+
+    // Better fix inside the weak pin's circle: replaces it.
+    await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
+      completedLatitude: -6.3015, completedLongitude: 106.3, completedAccuracy: 12, completedLocationAt: new Date(),
+    });
+    pin = await pinOf(customer.id);
+    expect(Number(pin.latitude)).toBeCloseTo(-6.3015, 4);
+    expect(Number(pin.longitude)).toBeCloseTo(106.3);
     expect(pin.pinAccuracy).toBe(12);
 
-    // Worse fix: the better GPS pin stays.
+    // Worse fix elsewhere: the better GPS pin stays.
     await deliverTo(customer.id, 'Komplek XYZ Blok B No. 6', {
       completedLatitude: -6.4, completedLongitude: 106.4, completedAccuracy: 40, completedLocationAt: new Date(),
     });
-    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.2);
+    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.3015, 4);
 
     // A reading taken well after the delivery (the driver had moved on) is
     // kept on the delivery but never moves the pin, however tight.
@@ -454,7 +461,7 @@ describe('Delivery proof photos', () => {
       completedLocationAt: new Date(Date.now() + 25_000),
     });
     expect(Number(late.completedLatitude)).toBeCloseTo(-6.5);
-    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.2);
+    expect(Number((await pinOf(customer.id)).latitude)).toBeCloseTo(-6.3015, 4);
 
     // A manual pin never moves, even for a tighter fix.
     const later = await deliverTo(pinned.id, 'Jl. A', {

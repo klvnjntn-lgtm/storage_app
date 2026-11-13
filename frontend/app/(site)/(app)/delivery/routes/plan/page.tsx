@@ -261,7 +261,7 @@ function RoutePlanInner() {
               onPick={(lat, lng) => setDepot({ lat, lng })}
             />
             <div className="mt-2">
-              <CoordinateInputs value={depot} onChange={setDepot} />
+              <CoordinateInputs value={depot} onChange={setDepot} checkFar={false} />
             </div>
           </div>
         </div>
@@ -489,6 +489,21 @@ function RoutePlanInner() {
                       {u.label}
                       {u.priority === 'HIGH' && ` (${t('delivery.routeDetail.priorityHigh')})`} —{' '}
                       {t(`delivery.plan.reason.${u.reason}`)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {(preview.farPins?.length ?? 0) > 0 && (
+              <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3 sm:p-4">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> {t('delivery.farPin.routeTitle')}
+                </p>
+                <ul className="mt-1 list-disc pl-5 text-xs space-y-0.5">
+                  {preview.farPins!.map((f) => (
+                    <li key={f.deliveryOrderId}>
+                      {t('delivery.farPin.item', { label: f.label, km: Math.round(f.meters / 1000) })}
                     </li>
                   ))}
                 </ul>

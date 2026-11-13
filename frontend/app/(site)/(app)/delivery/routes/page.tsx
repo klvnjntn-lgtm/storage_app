@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Truck, Plus, UserPlus, Users, UserCog, Trash2, Sparkles } from 'lucide-react';
+import { Truck, Plus, UserPlus, Users, UserCog, Trash2, Sparkles, Timer } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { useConfirmPastDates } from '@/lib/hooks/useConfirmPastDates';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -14,6 +14,7 @@ import TeamPicker, { compareTeamNames, teamLabel, toPickerTeam, type PickerTeam 
 import { toCalendarDateString } from '@/lib/dates';
 import { useSyncQueryParams } from '@/lib/useQuerySync';
 import { isAdminRole } from '@/lib/roles';
+import TripTimingPanel from '@/app/components/delivery/TripTimingPanel';
 
 // Optimize button is hidden for now; set to true to show it again.
 const SHOW_OPTIMIZE = false;
@@ -93,6 +94,7 @@ function DeliveryRoutesPageInner() {
   const [creatingRoute, setCreatingRoute] = useState(false);
 
   const [showInvite, setShowInvite] = useState(false);
+  const [showTiming, setShowTiming] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [inviting, setInviting] = useState(false);
@@ -327,7 +329,7 @@ function DeliveryRoutesPageInner() {
           <div className="border-t border-blue-500/10 px-3 sm:px-4 py-3 flex flex-col-reverse sm:flex-row sm:items-center gap-2">
             {/* Drivers, teams and invites are admin-only (the backend refuses staff). */}
             {isAdmin && (
-              <div className="grid grid-cols-3 sm:flex gap-2">
+              <div className="grid grid-cols-2 sm:flex gap-2">
                 <button data-tour="dlv-routes-drivers" onClick={() => router.push('/delivery/drivers')} className={actionBtn}>
                   <UserCog size={14} className="shrink-0" />
                   {t('delivery.driversAdmin.title')}
@@ -339,6 +341,10 @@ function DeliveryRoutesPageInner() {
                 <button data-tour="dlv-routes-invite" onClick={() => setShowInvite((v) => !v)} aria-pressed={showInvite} className={`${actionBtn} ${showInvite ? 'bg-blue-50 border-blue-500/40 text-blue-700' : ''}`}>
                   <UserPlus size={14} className="shrink-0" />
                   {t('delivery.routes.inviteDriver')}
+                </button>
+                <button onClick={() => setShowTiming((v) => !v)} aria-pressed={showTiming} className={`${actionBtn} ${showTiming ? 'bg-blue-50 border-blue-500/40 text-blue-700' : ''}`}>
+                  <Timer size={14} className="shrink-0" />
+                  {t('delivery.trip.button')}
                 </button>
               </div>
             )}
@@ -436,6 +442,8 @@ function DeliveryRoutesPageInner() {
             })}
           </div>
         )}
+
+        {isAdmin && showTiming && <TripTimingPanel />}
 
         {isAdmin && showInvite && (
           <div className="border border-blue-500/15 rounded-xl p-3 sm:p-4 bg-white shadow-sm grid grid-cols-1 sm:flex sm:flex-wrap sm:items-end gap-3">

@@ -266,22 +266,28 @@ model Organization {
   logoUrl                     String?
   purchaseOrderActivityEvents PurchaseOrderActivityEvent[]
 
-  npwp                   String?
-  taxEnabled             Boolean  @default(false)
-  taxName                String?
-  taxPercentage          Decimal? @db.Decimal(5, 2)
+  npwp                     String?
+  taxEnabled               Boolean  @default(false)
+  taxName                  String?
+  taxPercentage            Decimal? @db.Decimal(5, 2)
   // Printed on the Laporan Pajak for the tax admin; null = not answered yet.
-  pricesIncludePpn       Boolean?
-  address                String?
-  phone                  String?
+  pricesIncludePpn         Boolean?
+  address                  String?
+  phone                    String?
   // IANA name (e.g. "Asia/Jakarta"). Drives which calendar day/fiscal
   // period a journal entry posts into (business-date.ts) — was a single
   // global ACCOUNTING_TIMEZONE env var before; now per-org.
-  timezone               String   @default("Asia/Jakarta")
+  timezone                 String   @default("Asia/Jakarta")
   // DELIVERY_DMS — where every route leaves from (warehouse/depot). One
   // per business, set once from the routes pages; optimizing needs it.
-  deliveryStartLatitude  Decimal? @db.Decimal(9, 6)
-  deliveryStartLongitude Decimal? @db.Decimal(9, 6)
+  deliveryStartLatitude    Decimal? @db.Decimal(9, 6)
+  deliveryStartLongitude   Decimal? @db.Decimal(9, 6)
+  // How the business's real trips compare with the road data: OSRM's travel
+  // times are multiplied by deliveryTravelTimeFactor (traffic, lights,
+  // parking), and every stop takes deliveryStopMinutes (unloading, payment).
+  // Suggested from past deliveries on the routes page (trip-timing.ts).
+  deliveryTravelTimeFactor Float    @default(1)
+  deliveryStopMinutes      Int      @default(5)
 
   // Platform billing/admin (see src/platform). Set only from the platform
   // console, never by the org's own users. suspendedAt blocks every API
@@ -378,6 +384,14 @@ model User {
   changePasswordOtpExpires  DateTime?
   changePasswordOtpAttempts Int       @default(0)
   pendingPasswordHash       String?
+
+  // Email ownership, proved with an emailed 6-digit code
+  // (auth/email-verification.ts). Null = not verified yet. Accounts that
+  // existed before verification shipped were backfilled as verified.
+  emailVerifiedAt        DateTime?
+  emailVerifyOtpHash     String?
+  emailVerifyOtpExpires  DateTime?
+  emailVerifyOtpAttempts Int       @default(0)
 
   role   Role    @default(USER)
   active Boolean @default(true)
@@ -1330,6 +1344,9 @@ model DeliveryOrder {
   // When that GPS reading was taken. Only a reading within
   // PIN_FIX_WINDOW_MS of the proof photo may move the customer's pin.
   completedLocationAt DateTime?
+  // The driver finished the delivery with no GPS reading (basement, mall):
+  // allowed, but flagged for the office to check.
+  deliveredWithoutGps Boolean   @default(false)
   failedAt            DateTime?
   failureReason       String?
   failureLatitude     Decimal?  @db.Decimal(9, 6)
@@ -1540,6 +1557,7 @@ model RouteStop {
   completedLongitude   Decimal?         @db.Decimal(9, 6)
   completedAccuracy    Float? // metres — same meaning as the DO field
   completedLocationAt  DateTime? // same meaning as the DO field
+  deliveredWithoutGps  Boolean          @default(false) // same meaning as the DO field
   failedAt             DateTime?
   failureReason        String?
   failureLatitude      Decimal?         @db.Decimal(9, 6)

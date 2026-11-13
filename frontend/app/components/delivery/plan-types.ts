@@ -66,6 +66,8 @@ export type PlanPreview = {
     reason: UnscheduledReason;
     currentRouteId: string | null;
   }[];
+  // Planned, but much further out than the rest: worth checking the pin.
+  farPins?: { deliveryOrderId: string; label: string; meters: number }[];
   removedDeliveryOrderIds: string[];
   cancelledRouteIds: string[];
   expectedVersions: Record<string, number>;

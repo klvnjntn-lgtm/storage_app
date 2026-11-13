@@ -35,11 +35,15 @@ import { AllowSuspendedOrg } from './decorators/allow-suspended-org.decorator';
 import { SkipLicenseCheck } from 'src/license/decorators/skip-license-check.decorator';
 import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 import { TwoFactorLoginDto } from './dto/two-factor.dto';
+import { EmailVerificationService } from './email-verification';
 
 @NoApiKey()
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly emailVerification: EmailVerificationService,
+  ) {}
 
   // Always creates a brand-new organization with the caller as its
   // first ADMIN. Deliberately does NOT accept an organizationId or role
@@ -58,7 +62,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken } = await this.authService.register(
+    const { accessToken, deviceToken } = await this.authService.register(
       dto.email,
       dto.password,
       dto.organizationName,
@@ -66,6 +70,7 @@ export class AuthController {
     // The token goes into an httpOnly cookie only — never into the
     // response body, where page script could read it (session-cookie.ts).
     setSessionCookie(req, res, accessToken);
+    setDeviceCookie(req, res, deviceToken);
     return { ok: true };
   }
 
@@ -116,6 +121,7 @@ export class AuthController {
       dto.mfaToken,
       dto.code,
       readCookie(req, DEVICE_COOKIE),
+      req.headers['user-agent'],
     );
     setSessionCookie(req, res, accessToken);
     setDeviceCookie(req, res, deviceToken);
@@ -222,6 +228,27 @@ export class AuthController {
     await this.authService.logoutToken(readSessionCookie(req) ?? bearer ?? null);
     clearSessionCookie(req, res);
     return { message: 'Logged out' };
+  }
+
+  // Email verification (email-verification.ts). Sending is throttled hard:
+  // each call is an outbound email.
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @UseGuards(AuthGuard('jwt'))
+  @AllowSuspendedOrg()
+  @Post('verify-email/send')
+  sendEmailVerification(@CurrentUser() user: { sub: string }) {
+    return this.emailVerification.sendCode(user.sub);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(AuthGuard('jwt'))
+  @AllowSuspendedOrg()
+  @Post('verify-email/confirm')
+  confirmEmailVerification(
+    @CurrentUser() user: { sub: string },
+    @Body('code') code: string,
+  ) {
+    return this.emailVerification.confirm(user.sub, String(code ?? '').trim());
   }
 
   // Step 1 of 2 — validates current/new password and emails a one-time

@@ -13,6 +13,7 @@ import { JwtStrategy, getJwtSecret } from './jwt.strategy';
 import { MailerModule } from './mailer/mailer.module';
 import { DevicesService } from './devices.service';
 import { TwoFactorService } from './two-factor.service';
+import { EmailVerificationService } from './email-verification';
 import { TwoFactorController } from './two-factor.controller';
 import { BillingModule } from '../billing/billing.module';
 import { PlanLimitsModule } from '../billing/plan-limits.module';
@@ -42,6 +43,7 @@ import { PlanLimitsModule } from '../billing/plan-limits.module';
     JwtStrategy,
     DevicesService,
     TwoFactorService,
+    EmailVerificationService,
     // Renews the session cookie of anyone still using it — see the interceptor.
     { provide: APP_INTERCEPTOR, useClass: SessionRenewalInterceptor },
   ],

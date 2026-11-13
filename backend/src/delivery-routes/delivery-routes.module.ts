@@ -12,6 +12,7 @@ import { StopShareTokenService } from './stop-share-token.service';
 import { PublicStopController } from './public-stop.controller';
 import { OrganizationModulesModule } from '../organization-module/organization-modules.module';
 import { StorageModule } from '../storage/storage.module';
+import { TripTimingService } from './trip-timing';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { StorageModule } from '../storage/storage.module';
     StopProofService,
     StopShareTokenService,
     DeliveryReportService,
+    TripTimingService,
   ],
   exports: [DeliveryRoutesService],
 })

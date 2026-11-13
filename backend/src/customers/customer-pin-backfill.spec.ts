@@ -1,6 +1,8 @@
 import { PinSource } from '@prisma/client';
 import {
+  MAX_PIN_ACCURACY_METERS,
   PIN_FIX_WINDOW_MS,
+  PIN_JUMP_METERS,
   PIN_OUTVOTE_COUNT,
   PIN_VISIT_GAP_MS,
   PIN_SETTLED_COUNT,
@@ -150,8 +152,8 @@ describe('backfillCustomerPin', () => {
     const prisma = makePrisma(
       {
         address: base.deliveryAddress,
-        latitude: -6.1,
-        longitude: 106.7,
+        latitude: -6.2018,
+        longitude: 106.8,
         pinSource: PinSource.GPS,
         pinAccuracy: 30,
         pinConfirmations: 1,
@@ -163,7 +165,7 @@ describe('backfillCustomerPin', () => {
     expect(prisma.routeStop.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: ['s1'] },
-        OR: [{ destinationLatitude: null }, { destinationLatitude: -6.1, destinationLongitude: 106.7 }],
+        OR: [{ destinationLatitude: null }, { destinationLatitude: -6.2018, destinationLongitude: 106.8 }],
       },
       data: { destinationLatitude: -6.2, destinationLongitude: 106.8 },
     });
@@ -430,5 +432,32 @@ describe('nextPin — a confirmed pin', () => {
       pinChallengerCount: 1,
       pinVotedAt: expect.any(Date),
     });
+  });
+});
+
+describe('nextPin — readings too vague or too far off', () => {
+  const empty = pinAt({ latitude: null, longitude: null, pinSource: null, pinAccuracy: null, pinConfirmations: 0 });
+
+  it('never places a pin from a reading vaguer than MAX_PIN_ACCURACY_METERS, even an empty one', () => {
+    expect(nextPin(empty, fixAt(0, MAX_PIN_ACCURACY_METERS + 1), true)).toBeNull();
+    expect(nextPin(empty, fixAt(0, 1500), false)).toBeNull();
+    expect(nextPin(pinAt({ pinRecheck: true, pinConfirmations: 0 }), fixAt(0, 800), true)).toBeNull();
+    expect(nextPin(empty, fixAt(0, MAX_PIN_ACCURACY_METERS), true)).toMatchObject({ pinConfirmations: 0 });
+  });
+
+  it('does not let one tighter reading move an unconfirmed pin further than PIN_JUMP_METERS', () => {
+    const far = PIN_JUMP_METERS + 200;
+    expect(nextPin(pinAt({ pinAccuracy: 20 }), fixAt(far, 5), true)).toEqual({
+      pinChallengerLatitude: fixAt(far, 5).latitude,
+      pinChallengerLongitude: 106.8,
+      pinChallengerCount: 1,
+      pinVotedAt: expect.any(Date),
+    });
+    expect(nextPin(pinAt({ pinAccuracy: 20 }), fixAt(PIN_JUMP_METERS - 20, 5), true)).toMatchObject({ pinAccuracy: 5 });
+  });
+
+  it('still lets a tight reading replace a vague pin within that pin\'s own accuracy', () => {
+    expect(nextPin(pinAt({ pinAccuracy: 200, pinConfirmations: 0 }), fixAt(180, 10), true)).toMatchObject({ pinAccuracy: 10 });
+    expect(nextPin(pinAt({ pinAccuracy: 200, pinConfirmations: 0 }), fixAt(400, 10), true)).toMatchObject({ pinChallengerCount: 1 });
   });
 });

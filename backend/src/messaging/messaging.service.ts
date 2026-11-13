@@ -18,6 +18,7 @@ import {
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from '../auth/mailer/mailer.service';
+import { assertOrgEmailVerified } from '../auth/email-verification';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BillingService } from '../billing/billing.service';
 import { InvoiceService } from '../invoice/invoice.service';
@@ -624,6 +625,9 @@ export class MessagingService implements OnModuleInit {
       throw new ServiceUnavailableException(
         'Email is not set up on this server.',
       );
+    // A business that never proved its owner's address can't email
+    // outsiders from our servers (see email-verification.ts).
+    await assertOrgEmailVerified(this.prisma, this.mailer, msg.organizationId);
     const email = msg.email!;
     try {
       await this.mailer.send({

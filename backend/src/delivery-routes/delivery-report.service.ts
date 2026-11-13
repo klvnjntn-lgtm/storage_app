@@ -10,6 +10,7 @@ import {
   stopTarget,
   teamSelect,
 } from './delivery-routes.service';
+import { offPin } from './off-pin';
 
 // A wide range is fine (one query per table), but cap it so a typo'd year
 // can't scan the org's whole history.
@@ -23,8 +24,9 @@ const MAX_PAGE_SIZE = 100;
 const DAY_MS = 86_400_000;
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
-// Stops someone has to look at: not delivered yet (or never), and failed
-// ones — flagged when nobody has rescheduled them.
+// Stops someone has to look at: not delivered yet (or never), failed ones —
+// flagged when nobody has rescheduled them — deliveries the driver recorded
+// far from the stop's pin (see off-pin.ts), and ones finished with no GPS.
 type AttentionRow = {
   stopId: string;
   routeId: string;
@@ -44,6 +46,8 @@ type AttentionRow = {
   failedAt: Date | null;
   reason: string | null;
   needsReschedule: boolean;
+  // Delivered: how far from the pin the driver recorded it, in metres.
+  offPinMeters: number | null;
 };
 
 export type AttentionQuery = {
@@ -136,6 +140,8 @@ export class DeliveryReportService {
     const totals = { stops: 0, delivered: 0, failed: 0, notDone: 0, timed: 0, onTime: 0 };
     const pendingRows: AttentionRow[] = [];
     const failedRows: AttentionRow[] = [];
+    const offPinRows: AttentionRow[] = [];
+    const noGpsRows: AttentionRow[] = [];
 
     for (const route of routes) {
       const date = isoDay(route.routeDate);
@@ -183,6 +189,7 @@ export class DeliveryReportService {
           // A rescheduled failure is marked superseded (customer stop: a new
           // stop elsewhere; DO: back on a route) — the rest still need it.
           needsReschedule: stop.supersededAt == null,
+          offPinMeters: null,
         });
         const custKey = target.customerId ?? `name:${(target.customerName ?? '').trim().toLowerCase()}`;
         const cust =
@@ -199,6 +206,18 @@ export class DeliveryReportService {
           wd.delivered++;
           if (bucket) bucket.delivered++;
           if (d) deliveredDoIds.push(d.id);
+          const off = offPin({
+            completedLatitude: d ? d.completedLatitude : stop.completedLatitude,
+            completedLongitude: d ? d.completedLongitude : stop.completedLongitude,
+            completedAccuracy: d ? d.completedAccuracy : stop.completedAccuracy,
+            destinationLatitude: target.destinationLatitude,
+            destinationLongitude: target.destinationLongitude,
+            markedByOffice: stop.markedByOfficeAt != null,
+          });
+          if (off?.far) offPinRows.push({ ...row(), missed: false, offPinMeters: off.meters });
+          if (stop.markedByOfficeAt == null && (d ? d.deliveredWithoutGps : stop.deliveredWithoutGps)) {
+            noGpsRows.push({ ...row(), missed: false });
+          }
           // On time = signed before the customer's window closed, or (no
           // window) within the grace of the planned ETA.
           const signedAt = d ? d.signedAt : stop.signedAt;
@@ -252,7 +271,7 @@ export class DeliveryReportService {
       }
     }
 
-    return { totals, daily, weekdays, teams, customers, reasons, deliveredDoIds, pendingRows, failedRows };
+    return { totals, daily, weekdays, teams, customers, reasons, deliveredDoIds, pendingRows, failedRows, offPinRows, noGpsRows };
   }
 
   async report(organizationId: string, from: string, to: string) {
@@ -347,6 +366,8 @@ export class DeliveryReportService {
         photoNotConfirmed: cur.pendingRows.filter((p) => p.photoTaken).length,
         failedTotal: cur.failedRows.length,
         needsReschedule: cur.failedRows.filter((f) => f.needsReschedule).length,
+        offPin: cur.offPinRows.length,
+        noGps: cur.noGpsRows.length,
       },
       itemsEnabled,
       topItems,
@@ -354,25 +375,27 @@ export class DeliveryReportService {
   }
 
   // One page of the "needs attention" list, filtered.
-  //  kind:  pending (default) | failed
+  //  kind:  pending (default) | failed | offPin | noGps
   //  state: pending → missed | open | photo; failed → toReschedule | rescheduled
   //  sort:  newest (default) | oldest — failed always puts to-reschedule first
   //  q:     customer, DO number, address, team or failure reason
   async attention(organizationId: string, from: string, to: string, query: AttentionQuery) {
     const { start, end } = this.range(from, to);
-    const kind = query.kind === 'failed' ? 'failed' : 'pending';
+    const kind = (['failed', 'offPin', 'noGps'] as const).find((k) => k === query.kind) ?? 'pending';
     const page = Math.max(1, Number.parseInt(query.page ?? '', 10) || 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Number.parseInt(query.pageSize ?? '', 10) || 10));
     const needle = query.q?.trim().toLowerCase();
 
-    const { pendingRows, failedRows } = await this.collect(organizationId, start, end);
-    let rows = kind === 'pending' ? pendingRows : failedRows;
+    const { pendingRows, failedRows, offPinRows, noGpsRows } = await this.collect(organizationId, start, end);
+    let rows = { pending: pendingRows, failed: failedRows, offPin: offPinRows, noGps: noGpsRows }[kind];
 
     if (query.teamId) rows = rows.filter((r) => r.team.id === query.teamId);
     const stateFilter: Record<string, (r: AttentionRow) => boolean> =
       kind === 'pending'
         ? { missed: (r) => r.missed, photo: (r) => r.photoTaken, open: (r) => !r.missed && !r.photoTaken }
-        : { toReschedule: (r) => r.needsReschedule, rescheduled: (r) => !r.needsReschedule };
+        : kind === 'failed'
+          ? { toReschedule: (r) => r.needsReschedule, rescheduled: (r) => !r.needsReschedule }
+          : {};
     const byState = query.state ? stateFilter[query.state] : undefined;
     if (byState) rows = rows.filter(byState);
     if (needle) {

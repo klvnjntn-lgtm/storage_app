@@ -1,5 +1,6 @@
 // src/delivery-routes/driver-proof.ts
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   resolveTimezone,
   todayBusinessDate,
@@ -64,16 +65,15 @@ export function assertDriverCatchUpWindow(
   }
 }
 
-// A driver's delivery is placed by GPS; a weak reading is fine, none isn't.
-export function assertDriverLocation(
-  latitude: number | undefined | null,
-  longitude: number | undefined | null,
+// A driver's delivery is placed by GPS when the phone has a reading. With
+// none (basement, mall, a phone that won't answer) it still goes through,
+// marked deliveredWithoutGps so the office can check it.
+export function deliveredWithoutGps(
+  isDriver: boolean,
+  latitude: number | Prisma.Decimal | undefined | null,
+  longitude: number | Prisma.Decimal | undefined | null,
 ) {
-  if (latitude == null || longitude == null) {
-    throw new BadRequestException(
-      'A GPS location is required to record a delivery',
-    );
-  }
+  return isDriver && (latitude == null || longitude == null);
 }
 
 // A driver's failed visit says why (shop closed, nobody home) — without
@@ -100,8 +100,8 @@ export function onServerClock(phoneTime: Date, phoneRaw: Date | undefined, store
 }
 
 // What a proof photo upload stores besides the photo: when and where it
-// was taken (GPS required from a driver), and the receiver name if one
-// came along. Same columns on DeliveryOrder and RouteStop.
+// was taken (where, if the phone had a reading), and the receiver name if
+// one came along. Same columns on DeliveryOrder and RouteStop.
 export function photoCaptureData(
   meta: {
     takenAt?: string;
@@ -115,7 +115,6 @@ export function photoCaptureData(
   notBefore?: Date | null,
   now = new Date(),
 ) {
-  if (isDriver) assertDriverLocation(meta.latitude, meta.longitude);
   const requested = meta.takenAt ? new Date(meta.takenAt) : undefined;
   const hasFix = meta.latitude != null && meta.longitude != null;
   const name = meta.receivedBy?.trim();

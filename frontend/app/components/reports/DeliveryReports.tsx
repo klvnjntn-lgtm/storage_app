@@ -104,6 +104,10 @@ type Report = {
     photoNotConfirmed: number;
     failedTotal: number;
     needsReschedule: number;
+    // Delivered, but recorded far from the stop's pin.
+    offPin?: number;
+    // Delivered by the driver with no GPS location.
+    noGps?: number;
   };
 };
 // Mirrors DeliveryReportService.attention().
@@ -123,9 +127,11 @@ type AttentionRow = {
   failedAt: string | null;
   reason: string | null;
   needsReschedule: boolean;
+  offPinMeters: number | null;
 };
+type AttentionKind = 'pending' | 'failed' | 'offPin' | 'noGps';
 type AttentionPage = {
-  kind: 'pending' | 'failed';
+  kind: AttentionKind;
   total: number;
   page: number;
   pageSize: number;
@@ -297,7 +303,7 @@ function AttentionPanel({
   onReschedule: (target: RescheduleTarget) => void;
 }) {
   const { t } = useLanguage();
-  const [kind, setKind] = useState<'pending' | 'failed'>(counts.needsReschedule > 0 ? 'failed' : 'pending');
+  const [kind, setKind] = useState<AttentionKind>(counts.needsReschedule > 0 ? 'failed' : 'pending');
   const [teamId, setTeamId] = useState('');
   const [state, setState] = useState('');
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
@@ -369,7 +375,9 @@ function AttentionPanel({
     setPage(1);
   };
   const states =
-    kind === 'pending'
+    kind === 'offPin' || kind === 'noGps'
+      ? []
+      : kind === 'pending'
       ? [
           {
             value: 'missed',
@@ -413,6 +421,24 @@ function AttentionPanel({
             })
           : null,
     },
+    ...((counts.offPin ?? 0) > 0
+      ? [
+          {
+            key: 'offPin' as const,
+            label: t('delivery.reports.attention.tabOffPin', { count: counts.offPin ?? 0 }),
+            note: null,
+          },
+        ]
+      : []),
+    ...((counts.noGps ?? 0) > 0
+      ? [
+          {
+            key: 'noGps' as const,
+            label: t('delivery.reports.attention.tabNoGps', { count: counts.noGps ?? 0 }),
+            note: null,
+          },
+        ]
+      : []),
   ];
   // Rows only match the tab once the fetch for it lands.
   const rows = data && data.kind === kind ? data.rows : [];
@@ -486,6 +512,7 @@ function AttentionPanel({
             setPage(1);
           }}
           aria-label={t('delivery.reports.attention.allStates')}
+          hidden={states.length === 0}
           className={`${FIELD} cursor-pointer`}
         >
           <option value="">{t('delivery.reports.attention.allStates')}</option>
@@ -529,7 +556,15 @@ function AttentionPanel({
           </div>
         ) : (
           <p className="text-sm text-(--c-muted)">
-            {t(kind === 'pending' ? 'delivery.reports.attention.nonePending' : 'delivery.reports.attention.noneFailed')}
+            {t(
+              kind === 'pending'
+                ? 'delivery.reports.attention.nonePending'
+                : kind === 'failed'
+                  ? 'delivery.reports.attention.noneFailed'
+                  : kind === 'offPin'
+                    ? 'delivery.reports.attention.noneOffPin'
+                    : 'delivery.reports.attention.noneNoGps',
+            )}
           </p>
         )
       ) : (
@@ -557,6 +592,14 @@ function AttentionPanel({
                     {row.address && <> · {row.address}</>}
                   </div>
                   {kind === 'failed' && row.reason && <div className="text-xs text-(--c-red) line-clamp-2">{row.reason}</div>}
+                  {kind === 'noGps' && (
+                    <div className="text-xs text-(--c-amber)">{t('delivery.reports.attention.noGpsRow')}</div>
+                  )}
+                  {kind === 'offPin' && row.offPinMeters != null && (
+                    <div className="text-xs text-(--c-amber)">
+                      {t('delivery.reports.attention.offPinRow', { m: row.offPinMeters.toLocaleString() })}
+                    </div>
+                  )}
                 </div>
                 <div className="col-start-2 sm:col-start-auto flex flex-wrap items-center gap-1.5 sm:justify-end">
                   {kind === 'pending' &&

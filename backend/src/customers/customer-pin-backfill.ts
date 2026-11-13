@@ -7,6 +7,16 @@ import { PrismaService } from '../prisma/prisma.service';
 // flagged as weak — a 50m+ circle in a dense kampung could be the wrong
 // street. Matches WEAK_PIN_ACCURACY_M on the frontend.
 export const WEAK_PIN_ACCURACY_METERS = 50;
+// A reading vaguer than this (a cell-tower or Wi-Fi guess) never places a
+// pin, not even an empty one: a pin a kilometre out sends the driver to the
+// wrong street, where no pin at least shows the office one is missing. The
+// delivery still records where it happened.
+export const MAX_PIN_ACCURACY_METERS = 250;
+// One tighter reading may move a pin that isn't confirmed yet by at most
+// this much (or the pin's own accuracy, if vaguer): a single reading further
+// off is more likely the wrong place — the depot, the next customer — than a
+// better pin. Further moves need PIN_OUTVOTE_COUNT agreeing deliveries.
+export const PIN_JUMP_METERS = 300;
 
 // A delivery order still to be delivered, so still free to follow the customer.
 export const openDeliveryOrderWhere = {
@@ -94,6 +104,7 @@ const noChallenger = {
 
 // What a delivery's GPS fix does to an address's pin, or null to leave it.
 // `timely`: the reading was taken within PIN_FIX_WINDOW_MS of the photo.
+// - a reading vaguer than MAX_PIN_ACCURACY_METERS does nothing;
 // - a reading that isn't timely only fills an empty pin, marked for recheck
 //   so the next timely reading replaces it; it never touches a pin;
 // - no pin: the fix becomes it, however weak (a weak one is flagged to the
@@ -108,12 +119,14 @@ const noChallenger = {
 //   at PIN_OUTVOTE_COUNT agreeing votes that spot becomes the pin, settled.
 //   Short of that, a fix strictly more accurate than the pin replaces it,
 //   keeping the votes its spot already had — but only while the pin has at
-//   most one confirmation: once two visits agree on it, one tight reading
-//   elsewhere is more likely the back gate than a better pin.
+//   most one confirmation (once two visits agree on it, one tight reading
+//   elsewhere is more likely the back gate than a better pin), and only
+//   within PIN_JUMP_METERS (or the pin's own accuracy, if vaguer).
 // `deliveredAt`: when the delivery happened. Only the first delivery of a
 // visit (PIN_VISIT_GAP_MS) counts as a confirmation or a vote; the rest of
 // that visit can still move the pin onto a tighter reading of the same spot.
 export function nextPin(current: PinState, fix: Fix, timely: boolean, deliveredAt: Date = new Date()) {
+  if (!(fix.accuracy <= MAX_PIN_ACCURACY_METERS)) return null;
   const weak = fix.accuracy > WEAK_PIN_ACCURACY_METERS;
   const place = {
     latitude: fix.latitude,
@@ -152,7 +165,10 @@ export function nextPin(current: PinState, fix: Fix, timely: boolean, deliveredA
   if (current.pinConfirmations >= PIN_SETTLED_COUNT) return null;
   // The visit that already counted for the pin doesn't also vote against it.
   if (sameVisit) return null;
-  const mayReplace = tighter && current.pinConfirmations <= 1;
+  const mayReplace =
+    tighter &&
+    current.pinConfirmations <= 1 &&
+    apart <= Math.max(PIN_JUMP_METERS, current.pinAccuracy ?? Infinity);
   if (weak) return mayReplace ? { ...at, pinConfirmations: 0, pinVotedAt: null } : null;
 
   const challenger =

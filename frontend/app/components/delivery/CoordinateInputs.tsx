@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LocateFixed } from 'lucide-react';
 import { useLanguage } from '@/app/context/LanguageContext';
 import GoogleMapsLink from '@/app/components/delivery/GoogleMapsLink';
 import { gpsQuality } from '@/app/components/delivery/PinStatus';
 import { captureLocation, noFixMessage } from '@/lib/captureLocation';
+import { apiFetch } from '@/lib/apifetch';
 
 type Position = { lat: number; lng: number };
 
@@ -27,6 +28,37 @@ const isValidLng = (n: number) => Number.isFinite(n) && n >= -180 && n <= 180;
 
 const GPS_TONE = { GOOD: 'text-green-700', OK: 'text-amber-700', WEAK: 'text-red-700' } as const;
 
+// Pasted text that is a link rather than numbers: a Google Maps link, long or
+// short, copied from the app or sent on WhatsApp. The server reads it (short
+// links have to be followed to Google).
+const looksLikeLink = (text: string) => /https?:\/\/|goo\.gl\/|google\.[a-z.]+\/maps/i.test(text);
+
+// A pin further than this in a straight line from the business's start point
+// is most likely a typo or the wrong town; worth a second look.
+const FAR_FROM_START_KM = 60;
+
+function kmBetween(a: Position, b: Position) {
+  const rad = Math.PI / 180;
+  const h =
+    Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+// The start point, fetched once per page load for every input on the page.
+// Null when unset or unreadable (no delivery module): no warning then.
+let startPointRequest: Promise<Position | null> | null = null;
+function loadStartPoint(): Promise<Position | null> {
+  startPointRequest ??= apiFetch('/delivery-routes/start-point')
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const body = await res.json().catch(() => null);
+      return body?.latitude != null ? { lat: Number(body.latitude), lng: Number(body.longitude) } : null;
+    })
+    .catch(() => null);
+  return startPointRequest;
+}
+
 // Manual latitude/longitude entry that stays in sync with the map picker:
 // a map click fills the fields, and valid typed values move the map marker.
 // "Use my current location" fills them from this device's GPS, the same
@@ -35,12 +67,27 @@ export default function CoordinateInputs({
   value,
   onChange,
   showMapsLink = true,
+  checkFar = true,
 }: {
   value: Position | null;
   onChange: (pos: Position | null) => void;
   showMapsLink?: boolean;
+  // Off where the start point itself is being set.
+  checkFar?: boolean;
 }) {
   const { t } = useLanguage();
+  const [resolving, setResolving] = useState(false);
+  const [linkNote, setLinkNote] = useState<{ tone: 'warn' | 'error'; text: string } | null>(null);
+  const [start, setStart] = useState<Position | null>(null);
+  useEffect(() => {
+    if (!checkFar) return;
+    let alive = true;
+    void loadStartPoint().then((p) => alive && setStart(p));
+    return () => {
+      alive = false;
+    };
+  }, [checkFar]);
+  const farKm = checkFar && start && value ? kmBetween(start, value) : 0;
   const [locating, setLocating] = useState(false);
   // Accuracy of the GPS reading now in the fields; cleared once they change.
   const [gpsAccuracy, setGpsAccuracy] = useState<{ pos: Position; m: number | null } | null>(null);
@@ -81,7 +128,37 @@ export default function CoordinateInputs({
     }
   }
 
+  async function fillFromLink(link: string) {
+    setResolving(true);
+    setLinkNote(null);
+    try {
+      const res = await apiFetch(`/maps/resolve-link?url=${encodeURIComponent(link.trim())}`);
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.latitude == null) {
+        const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
+        setLinkNote({ tone: 'error', text: message || t('delivery.mapsLink.failed') });
+        return;
+      }
+      const pos = { lat: Number(body.latitude), lng: Number(body.longitude) };
+      setLatText(fmt(pos.lat));
+      setLngText(fmt(pos.lng));
+      setGpsAccuracy(null);
+      if (!body.exact) setLinkNote({ tone: 'warn', text: t('delivery.mapsLink.notExact') });
+      onChange(pos);
+    } catch {
+      setLinkNote({ tone: 'error', text: t('delivery.mapsLink.failed') });
+    } finally {
+      setResolving(false);
+    }
+  }
+
   function update(nextLat: string, nextLng: string) {
+    setLinkNote(null);
+    const link = [nextLat, nextLng].find(looksLikeLink);
+    if (link) {
+      void fillFromLink(link);
+      return;
+    }
     // Pasting "lat, lng" into either field fills both.
     const pair = parsePair(nextLat) ?? parsePair(nextLng);
     if (pair && (nextLat.includes(',') || nextLng.includes(','))) {
@@ -154,6 +231,13 @@ export default function CoordinateInputs({
         )}
       </div>
       {gpsError && <p className="text-xs text-red-600">{gpsError}</p>}
+      {resolving && <p className="text-xs text-gray-600">{t('delivery.mapsLink.resolving')}</p>}
+      {linkNote && (
+        <p className={`text-xs ${linkNote.tone === 'error' ? 'text-red-600' : 'text-amber-700'}`}>{linkNote.text}</p>
+      )}
+      {farKm > FAR_FROM_START_KM && (
+        <p className="text-xs font-medium text-amber-700">{t('delivery.farPin.warning', { km: Math.round(farKm) })}</p>
+      )}
       {showMapsLink && value && <GoogleMapsLink lat={value.lat} lng={value.lng} />}
     </div>
   );

@@ -371,15 +371,17 @@ export class RoutePlannerService {
 
     // Teams whose driver has hours configured but none on this day aren't planned.
     const onDuty = dto.teamIds.filter((id) => !ctx.availability.get(id)!.offDuty);
-    const { routes, unassigned } = onDuty.length
+    const { routes, unassigned, far } = onDuty.length
       ? await this.optimizer.optimize({
           depot: { lat: dto.depot.latitude, lng: dto.depot.longitude },
           vehicles: onDuty.map((id) => ({
             key: id,
             availableFrom: ctx.availability.get(id)!.availableFrom,
             availableUntil: ctx.availability.get(id)!.availableUntil,
+            breaks: ctx.availability.get(id)!.breaks,
           })),
           jobs: ctx.deliveryOrders.map((o) => this.toJob(o)),
+          timing: await this.optimizer.timing(organizationId),
         })
       : {
           routes: new Map(),
@@ -387,6 +389,7 @@ export class RoutePlannerService {
             key: o.id,
             reason: (o.destinationLatitude == null ? 'NO_PIN' : 'NO_TIME') as UnscheduledReason,
           })),
+          far: [],
         };
 
     const orderById = new Map(ctx.deliveryOrders.map((o) => [o.id, o]));
@@ -445,6 +448,12 @@ export class RoutePlannerService {
           currentRouteId: currentRouteOf(o),
         };
       }),
+      // Planned, but much further out than the rest: worth checking the pin.
+      farPins: far.map((f) => ({
+        deliveryOrderId: f.key,
+        label: label(orderById.get(f.key)!),
+        meters: f.meters,
+      })),
       removedDeliveryOrderIds: ctx.removedDeliveryOrderIds,
       cancelledRouteIds: this.leftoverRoutes(
         ctx,
@@ -489,6 +498,7 @@ export class RoutePlannerService {
     }
 
     const depot = { lat: dto.depot.latitude, lng: dto.depot.longitude };
+    const timing = await this.optimizer.timing(organizationId);
     // The planner's depot is the business's start point — a change here is
     // a change for every route.
     await this.routes.setStartPoint(organizationId, dto.depot);
@@ -496,14 +506,14 @@ export class RoutePlannerService {
       dto.routes
         .filter((r) => r.deliveryOrderIds.length > 0)
         .map(async (r) => {
-          const departAt = ctx.availability.get(r.teamId)!.availableFrom;
+          const { availableFrom: departAt, breaks } = ctx.availability.get(r.teamId)!;
           // The client sends the previewed order; a priority may have changed since.
           const ids = highPriorityFirst(r.deliveryOrderIds, (id) => orderById.get(id)!.priority);
           const jobs = ids.map((id) => {
             const job = this.toJob(orderById.get(id)!);
             return { ...job, location: job.location! };
           });
-          const stops = await this.optimizer.scheduleFixedOrder(depot, departAt, jobs);
+          const stops = await this.optimizer.scheduleFixedOrder(depot, departAt, jobs, { timing, breaks });
           return { teamId: r.teamId, departAt, stops };
         }),
     );

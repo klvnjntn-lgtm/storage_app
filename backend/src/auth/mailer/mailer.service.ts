@@ -1,6 +1,15 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 @Injectable()
 export class MailerService implements OnModuleInit {
   private readonly logger = new Logger(MailerService.name);
@@ -149,6 +158,60 @@ export class MailerService implements OnModuleInit {
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
       this.logger.log(`Change-password OTP email preview: ${previewUrl}`);
+    }
+
+    return info;
+  }
+
+  // Proves the address belongs to whoever signed up with it
+  // (auth/email-verification.ts).
+  async sendEmailVerificationCode(toEmail: string, code: string) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+
+    const info = await this.transporter.sendMail({
+      from: this.fromAddress,
+      to: toEmail,
+      subject: 'Verify your WareSys email address',
+      text: `Your WareSys verification code is: ${code}\n\nThis code expires in 10 minutes. If you didn't create a WareSys account, you can safely ignore this email.`,
+      html: `
+        <p>Enter this code in WareSys to verify your email address:</p>
+        <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+        <p>This code expires in 10 minutes. If you didn't create a WareSys account, you can safely ignore this email.</p>
+      `,
+    });
+
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      this.logger.log(`Email verification code preview: ${previewUrl}`);
+    }
+
+    return info;
+  }
+
+  // "Something changed on your account" alerts (password changed, two-factor
+  // switched off, a sign-in from a new browser). They tell the owner after
+  // the fact, so a takeover doesn't go unnoticed. lines are plain text and
+  // are escaped for the HTML part.
+  async sendSecurityNotice(toEmail: string, subject: string, lines: string[]) {
+    if (!this.transporter) {
+      throw new Error('Mailer is not configured/available.');
+    }
+    const footer =
+      "If this was you, you don't need to do anything. If it wasn't, reset your password now and turn on two-factor sign-in.";
+
+    const info = await this.transporter.sendMail({
+      from: this.fromAddress,
+      to: toEmail,
+      subject,
+      text: [...lines, '', footer].join('\n'),
+      html: [...lines, footer].map((l) => `<p>${escapeHtml(l)}</p>`).join('\n'),
+    });
+
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      this.logger.log(`Security notice preview: ${previewUrl}`);
     }
 
     return info;

@@ -15,7 +15,7 @@ import {
 } from '../storage/file-storage.interface';
 import { SignedFileUrlService } from '../storage/signed-file-url.service';
 import { encodePrivatePhoto } from '../storage/private-photo';
-import { WEAK_PIN_ACCURACY_METERS, fillOpenStopPins } from './customer-pin-backfill';
+import { MAX_PIN_ACCURACY_METERS, WEAK_PIN_ACCURACY_METERS, fillOpenStopPins } from './customer-pin-backfill';
 import type { PhotoCaptureMetaDto } from '../delivery-routes/dto/proof-photo-meta.dto';
 
 export const MAX_LOCATION_PHOTOS = 2;
@@ -96,8 +96,9 @@ export class CustomerLocationService {
     // photo was taken at their place. Saved as a GPS pin with its accuracy,
     // like a driver's fix (customer-pin-backfill): a weak one is flagged to
     // the office and a later, tighter driver fix still replaces it. Only
-    // when empty, checked in the UPDATE so a pin set meanwhile wins.
-    if (hasFix) {
+    // when empty, checked in the UPDATE so a pin set meanwhile wins. Not
+    // from a reading vaguer than MAX_PIN_ACCURACY_METERS (a cell-tower guess).
+    if (hasFix && !(meta.accuracy != null && meta.accuracy > MAX_PIN_ACCURACY_METERS)) {
       const counts = meta.accuracy != null && meta.accuracy <= WEAK_PIN_ACCURACY_METERS;
       const { count: pinned } = await this.prisma.customer.updateMany({
         where: { id: customerId, organizationId, latitude: null },

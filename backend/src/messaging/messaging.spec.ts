@@ -108,6 +108,17 @@ describe('Messaging (database)', () => {
         enabled: true,
       },
     });
+    // A verified owner: unverified businesses can't email outsiders
+    // (auth/email-verification.ts).
+    await prisma.user.create({
+      data: {
+        email: `msg-owner-${randomUUID()}@example.com`,
+        password: 'x',
+        role: 'MASTER',
+        organizationId: orgId,
+        emailVerifiedAt: new Date(),
+      },
+    });
     adminId = (
       await prisma.user.create({
         data: {
@@ -169,6 +180,20 @@ describe('Messaging (database)', () => {
     expect(mail.to).toBe('budi@example.com');
     expect(mail.subject).toContain(inv.invoiceNumber!);
     expect(mail.attachments).toHaveLength(1);
+  });
+
+  it("won't email outsiders until the business owner's address is verified", async () => {
+    const inv = await issuedInvoice(14);
+    await prisma.user.updateMany({ where: { organizationId: orgId, role: 'MASTER' }, data: { emailVerifiedAt: null } });
+    const before = sent.length;
+    try {
+      await expect(
+        messaging.sendInvoice(orgId, adminId, inv.id, { channel: MessageChannel.EMAIL }),
+      ).rejects.toThrow(/Verify the business owner's email/);
+      expect(sent.length).toBe(before);
+    } finally {
+      await prisma.user.updateMany({ where: { organizationId: orgId, role: 'MASTER' }, data: { emailVerifiedAt: new Date() } });
+    }
   });
 
   it('refuses WhatsApp without balance, then charges per message after a top-up', async () => {
