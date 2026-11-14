@@ -67,7 +67,23 @@ function toneStyle(tone: 'overdue' | 'soon' | 'upcoming' | 'done') {
   }
 }
 
-export default function VehicleRemindersSection() {
+// Due by date or by km, whichever comes first: a car past its km target is
+// overdue even if the date is months away, and one within 500 km is due soon.
+export function reminderUrgency(r: Reminder): 'overdue' | 'soon' | 'upcoming' | 'done' {
+  if (r.status !== 'PENDING') return 'done';
+  const d = daysBetween(new Date(r.dueDate), new Date());
+  if (r.dueByKm || d < 0) return 'overdue';
+  if (d <= DUE_SOON_DAYS || (r.kmToGo != null && r.kmToGo <= DUE_SOON_KM)) return 'soon';
+  return 'upcoming';
+}
+
+// only="attention": just the overdue and due-soon groups (the Reminders
+// page's "Needs action" tab). onChange: after a reminder is completed,
+// snoozed or deleted, so the page can refresh its counts.
+export default function VehicleRemindersSection({
+  only,
+  onChange,
+}: { only?: 'attention'; onChange?: () => void } = {}) {
   const dialog = useDialog();
   const router = useRouter();
   const { t } = useLanguage();
@@ -136,7 +152,10 @@ export default function VehicleRemindersSection() {
     setBusyId(id);
     try {
       const res = await apiFetch(`/reminders/${id}/complete`, { method: 'PATCH' });
-      if (res.ok) load();
+      if (res.ok) {
+        load();
+        onChange?.();
+      }
     } finally {
       setBusyId(null);
     }
@@ -155,6 +174,7 @@ export default function VehicleRemindersSection() {
         setSnoozingId(null);
         setSnoozeDate('');
         load();
+        onChange?.();
       }
     } finally {
       setBusyId(null);
@@ -174,24 +194,20 @@ export default function VehicleRemindersSection() {
     setBusyId(id);
     try {
       const res = await apiFetch(`/reminders/${id}`, { method: 'DELETE' });
-      if (res.ok) setReminders((prev) => prev.filter((r) => r.id !== id));
+      if (res.ok) {
+        setReminders((prev) => prev.filter((r) => r.id !== id));
+        onChange?.();
+      }
     } finally {
       setBusyId(null);
     }
   }
 
-  const pending = reminders.filter((r) => r.status === 'PENDING');
   const completed = reminders.filter((r) => r.status === 'COMPLETED');
-
-  // A reminder is due by date or by km, whichever comes first: a car past its km target is overdue
-  // even if the date is months away, and one within 500 km is due soon.
-  const overdue = pending.filter((r) => r.dueByKm || daysBetween(new Date(r.dueDate), new Date()) < 0);
-  const dueSoon = pending.filter((r) => {
-    if (overdue.includes(r)) return false;
-    const d = daysBetween(new Date(r.dueDate), new Date());
-    return (d >= 0 && d <= DUE_SOON_DAYS) || (r.kmToGo != null && r.kmToGo <= DUE_SOON_KM);
-  });
-  const upcoming = pending.filter((r) => !overdue.includes(r) && !dueSoon.includes(r));
+  const overdue = reminders.filter((r) => reminderUrgency(r) === 'overdue');
+  const dueSoon = reminders.filter((r) => reminderUrgency(r) === 'soon');
+  const upcoming = reminders.filter((r) => reminderUrgency(r) === 'upcoming');
+  const shown = only === 'attention' ? overdue.length + dueSoon.length : reminders.length;
 
   // Plain render helpers, not components: defined inside the page, a
   // component would be a new type every render and remount — closing the
@@ -325,22 +341,19 @@ export default function VehicleRemindersSection() {
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-gray-800 mb-3">{t('delivery.reminders.serviceReminders')}</h2>
       {loading && <p className="text-sm text-gray-500">{t('workshop.reminders.loading')}</p>}
       {error && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">{error}</p>
       )}
 
-      {!loading && reminders.length === 0 && !error && (
-        <p className="text-sm text-gray-400">
-          {t('workshop.reminders.empty')}
-        </p>
+      {!loading && shown === 0 && !error && only !== 'attention' && (
+        <p className="text-sm text-gray-400">{t('workshop.reminders.empty')}</p>
       )}
 
       {renderSection(t('workshop.reminders.overdueSection'), overdue)}
       {renderSection(t('workshop.reminders.dueSoonSection'), dueSoon)}
-      {renderSection(t('workshop.reminders.upcomingSection'), upcoming)}
-      {renderSection(t('workshop.reminders.completedSection'), completed)}
+      {only !== 'attention' && renderSection(t('workshop.reminders.upcomingSection'), upcoming)}
+      {only !== 'attention' && renderSection(t('workshop.reminders.completedSection'), completed)}
     </section>
   );
 }

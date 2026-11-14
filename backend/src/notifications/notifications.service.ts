@@ -10,6 +10,25 @@ export type CreateNotificationOptions = {
   link?: string;
 };
 
+// Groups for the Reminders page's filter (frontend app/(site)/(app)/reminders).
+// A new NotificationType must be added to one of these to be filterable.
+export const NOTIFICATION_CATEGORIES: Record<string, NotificationType[]> = {
+  delivery: [
+    'DELIVERY_ASSIGNED', 'ROUTE_REASSIGNED', 'ROUTE_REOPTIMIZED', 'DELIVERY_FAILED',
+    'DELIVERY_AT_RISK', 'DELIVERY_LATE', 'ROUTE_STOPS_CHANGED',
+  ],
+  workshop: [
+    'WORK_ORDER_APPROVED', 'WORK_ORDER_DECLINED', 'WORK_ORDER_UNBILLED',
+    'QUOTATION_APPROVED', 'QUOTATION_DECLINED', 'APPROVAL_REQUESTED', 'APPROVAL_DECIDED',
+  ],
+  stock: ['LOW_STOCK', 'BATCH_EXPIRING'],
+  account: [
+    'DEVICE_PENDING_APPROVAL', 'DEVICE_APPROVED', 'DEVICE_REJECTED', 'DEVICE_REVOKED',
+    'DEVICE_BLOCKED_ATTEMPT', 'ACCOUNT_LOCKED', 'ACCOUNT_UNLOCKED',
+    'BILLING_PAYMENT_RECEIVED', 'PLAN_EXPIRING', 'WA_BALANCE_LOW',
+  ],
+};
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -117,7 +136,7 @@ export class NotificationsService {
   async listMine(
     organizationId: string,
     userId: string,
-    opts: { page?: number; pageSize?: number; unreadOnly?: boolean } = {},
+    opts: { page?: number; pageSize?: number; unreadOnly?: boolean; category?: string } = {},
   ) {
     // `||`, not `??`: a malformed query value arrives as NaN (see media.service).
     const page = Math.max(1, opts.page || 1);
@@ -126,6 +145,10 @@ export class NotificationsService {
       organizationId,
       userId,
       ...(opts.unreadOnly ? { readAt: null } : {}),
+      // Unknown categories are ignored rather than matching nothing.
+      ...(opts.category && NOTIFICATION_CATEGORIES[opts.category]
+        ? { type: { in: NOTIFICATION_CATEGORIES[opts.category] } }
+        : {}),
     };
     const [data, total] = await Promise.all([
       this.prisma.notification.findMany({

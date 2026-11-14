@@ -70,11 +70,13 @@ export class NotificationsController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('unreadOnly') unreadOnly?: string,
+    @Query('category') category?: string,
   ) {
     return this.notificationsService.listMine(organizationId, user.sub, {
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
       unreadOnly: unreadOnly === 'true',
+      category,
     });
   }
 

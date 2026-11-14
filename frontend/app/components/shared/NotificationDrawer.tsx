@@ -184,7 +184,7 @@ export default function NotificationDrawer({
                 key={n.id}
                 onClick={() => handleNotificationClick(n)}
                 className={`text-left border rounded-xl p-2.5 shadow-sm hover:border-blue-500/40 hover:bg-blue-50/40 transition-colors ${
-                  n.readAt ? 'border-gray-200 bg-white/60' : 'border-blue-500/15 bg-white'
+                  n.readAt ? 'border-gray-300 bg-gray-200/70 text-gray-600' : 'border-blue-500/15 bg-white'
                 }`}
               >
                 <div className="flex items-center gap-1.5 flex-wrap mb-1">
