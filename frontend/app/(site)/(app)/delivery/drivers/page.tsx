@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { display } from '@/lib/fonts';
-import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban, Pencil, RotateCcw } from 'lucide-react';
+import { Users, Lock, Unlock, Smartphone, Clock, Plus, Trash2, Check, X, Ban, Pencil, RotateCcw, KeyRound } from 'lucide-react';
 import { apiFetch } from '@/lib/apifetch';
 import { DEVICES_CHANGED_EVENT } from '@/lib/hooks/usePendingDevices';
 import { useLanguage } from '@/app/context/LanguageContext';
@@ -90,6 +90,12 @@ export default function DriversAdminPage() {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
 
+  // Driver logins aren't real inboxes, so admins set the password here
+  // (PATCH /users/:id/password) instead of a reset email.
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
   // Admins and office staff: staff handle drivers' phones; locking,
   // renaming and access hours are admin-only (hidden below for staff).
   const isAdmin = isAdminRole(user?.role);
@@ -108,32 +114,45 @@ export default function DriversAdminPage() {
     if (res.ok) setPending(await res.json());
   }
 
-  // One phone per driver: approving this one signs them out of the phone
-  // they use now. Say which, and let the person back out.
-  async function confirmApprove(driverId: string, driverName: string, deviceId: string): Promise<boolean> {
+  // The driver already has an approved phone: ask whether this one is added
+  // next to it or replaces it (replacing signs them out there). The same
+  // phone can show up twice (another browser, the home-screen app), so
+  // keeping both is listed first. null = the person backed out.
+  async function confirmApprove(
+    driverId: string,
+    driverName: string,
+    deviceId: string,
+  ): Promise<{ replaceOthers: boolean } | null> {
     const res = await apiFetch(`/users/${driverId}/devices`);
-    if (!res.ok) return true; // the server still does the right thing
+    if (!res.ok) return { replaceOthers: false };
     const current = ((await res.json()) as Device[]).filter((d) => d.status === 'APPROVED' && d.id !== deviceId);
-    if (current.length === 0) return true;
+    if (current.length === 0) return { replaceOthers: false };
     const phone = current[0];
-    return dialog.confirm(
+    const choice = await dialog.choose(
       t('delivery.driversAdmin.confirmReplace', {
         name: driverName,
         phone: shortDevice(phone.userAgent) || phone.deviceId,
         seen: formatDMYTime(new Date(phone.lastSeenAt)),
       }),
-      { confirmLabel: t('delivery.driversAdmin.approve') },
+      [
+        { value: 'keep', label: t('delivery.driversAdmin.approveKeepBoth'), hint: t('delivery.driversAdmin.approveKeepBothHint') },
+        { value: 'replace', label: t('delivery.driversAdmin.approveReplaceOld'), hint: t('delivery.driversAdmin.approveReplaceOldHint') },
+      ],
     );
+    return choice === null ? null : { replaceOthers: choice === 'replace' };
   }
 
   async function handlePendingAction(device: PendingDevice, action: 'approve' | 'reject') {
-    if (action === 'approve' && !(await confirmApprove(device.user.id, device.user.displayName || device.user.email, device.id))) {
-      return;
+    let body: string | undefined;
+    if (action === 'approve') {
+      const choice = await confirmApprove(device.user.id, device.user.displayName || device.user.email, device.id);
+      if (!choice) return;
+      body = JSON.stringify(choice);
     }
     setDeviceBusyId(device.id);
     setError(null);
     try {
-      const res = await apiFetch(`/devices/${device.id}/${action}`, { method: 'PATCH' });
+      const res = await apiFetch(`/devices/${device.id}/${action}`, { method: 'PATCH', body });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('delivery.driversAdmin.requestFailed', { status: res.status }));
@@ -263,20 +282,25 @@ export default function DriversAdminPage() {
       return;
     }
     setExpandedId(driver.id);
+    setPasswordDraft('');
+    setPasswordSaved(false);
     setDevices([]);
     setWindows([]);
     await Promise.all([loadDevices(driver.id), isAdmin ? loadSchedule(driver.id) : Promise.resolve()]);
   }
 
   async function handleDeviceAction(driverId: string, deviceId: string, action: 'approve' | 'reject' | 'revoke') {
+    let body: string | undefined;
     if (action === 'approve') {
       const driver = drivers.find((d) => d.id === driverId);
-      if (!(await confirmApprove(driverId, driver ? driverLabel(driver) : '', deviceId))) return;
+      const choice = await confirmApprove(driverId, driver ? driverLabel(driver) : '', deviceId);
+      if (!choice) return;
+      body = JSON.stringify(choice);
     }
     setDeviceBusyId(deviceId);
     setError(null);
     try {
-      const res = await apiFetch(`/devices/${deviceId}/${action}`, { method: 'PATCH' });
+      const res = await apiFetch(`/devices/${deviceId}/${action}`, { method: 'PATCH', body });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? t('delivery.driversAdmin.requestFailed', { status: res.status }));
@@ -289,6 +313,30 @@ export default function DriversAdminPage() {
       setError(t('delivery.driversAdmin.couldNotReachServer'));
     } finally {
       setDeviceBusyId(null);
+    }
+  }
+
+  async function savePassword(driverId: string) {
+    setSavingPassword(true);
+    setPasswordSaved(false);
+    setError(null);
+    try {
+      const res = await apiFetch(`/users/${driverId}/password`, {
+        method: 'PATCH',
+        body: JSON.stringify({ password: passwordDraft }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const msg = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+        setError(msg ?? t('delivery.driversAdmin.requestFailed', { status: res.status }));
+        return;
+      }
+      setPasswordDraft('');
+      setPasswordSaved(true);
+    } catch {
+      setError(t('delivery.driversAdmin.couldNotReachServer'));
+    } finally {
+      setSavingPassword(false);
     }
   }
 
@@ -572,6 +620,50 @@ export default function DriversAdminPage() {
                     ))}
                   </div>
                 </div>
+
+                {isAdmin && (
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 mb-1">
+                    <KeyRound size={13} />
+                    {t('delivery.driversAdmin.passwordTitle')}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mb-2">
+                    {t('delivery.driversAdmin.passwordHint', { login: driver.email })}
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      savePassword(driver.id);
+                    }}
+                    className="flex flex-col sm:flex-row sm:items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      required
+                      minLength={8}
+                      maxLength={128}
+                      autoComplete="off"
+                      value={passwordDraft}
+                      onChange={(e) => {
+                        setPasswordDraft(e.target.value);
+                        setPasswordSaved(false);
+                      }}
+                      placeholder={t('delivery.driversAdmin.newPasswordPlaceholder')}
+                      className="w-full sm:w-64 border border-gray-300 rounded px-2 py-2 sm:py-1 text-base sm:text-xs bg-white"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingPassword || passwordDraft.length < 8}
+                      className="text-xs font-medium bg-blue-600 text-white rounded px-3 py-2 sm:py-1 disabled:opacity-50 shrink-0"
+                    >
+                      {savingPassword ? t('delivery.driversAdmin.saving') : t('delivery.driversAdmin.setPassword')}
+                    </button>
+                  </form>
+                  {passwordSaved && (
+                    <p className="text-[11px] font-medium text-green-700 mt-1.5">{t('delivery.driversAdmin.passwordSaved')}</p>
+                  )}
+                </div>
+                )}
 
                 {/* Access hours stay admin-only (backend AccessControlController). */}
                 {isAdmin && (

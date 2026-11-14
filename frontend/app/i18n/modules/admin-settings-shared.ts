@@ -20,6 +20,10 @@ export const adminSettingsShared = {
         emailLabel: 'Email',
         passwordLabel: 'Temporary password',
         passwordPlaceholder: 'At least 8 characters',
+        loginIdLabel: 'Login ID',
+        loginIdPlaceholder: 'e.g. driver1@yourcompany.id',
+        loginIdHint: "Doesn't need to be a real inbox. You set and change the driver's password on the Drivers page.",
+        driverPasswordLabel: 'Password',
         roleLabel: 'Role',
         role: { MASTER: 'Master', ADMIN: 'Branch admin', USER: 'Staff', DRIVER: 'Driver', MECHANIC: 'Mechanic (shop PC)' },
         mechanics: {
@@ -639,6 +643,10 @@ export const adminSettingsShared = {
         emailLabel: 'Email',
         passwordLabel: 'Kata sandi sementara',
         passwordPlaceholder: 'Minimal 8 karakter',
+        loginIdLabel: 'ID login',
+        loginIdPlaceholder: 'mis. driver1@perusahaan.id',
+        loginIdHint: 'Tidak perlu email sungguhan. Kata sandi driver diatur dan diganti di halaman Driver.',
+        driverPasswordLabel: 'Kata sandi',
         roleLabel: 'Peran',
         role: { MASTER: 'Master', ADMIN: 'Admin cabang', USER: 'Staf', DRIVER: 'Driver', MECHANIC: 'Mekanik (PC bengkel)' },
         mechanics: {

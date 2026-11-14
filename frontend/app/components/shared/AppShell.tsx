@@ -474,7 +474,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // A group the user hasn't toggled is open when they're on one of its
   // routes; once toggled, their choice sticks across navigation.
   const onPage = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-  // A page with its own sidebar row (Reminders, at /workshop/reminders) isn't also in the group its URL sits under.
+  // A page with its own sidebar row (Reminders, at /reminders) isn't also in the group its URL sits under.
   const ownRow = (href: string) => topLevelHrefs.some((h) => h !== href && h.startsWith(`${href}/`) && onPage(h));
   const inGroup = (item: NavItem) =>
     !ownRow(item.href) && (onPage(item.href) || !!item.children?.some((c) => onPage(c.href)));
@@ -671,8 +671,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ...(hasInvoicePos && hasAccounting && isAdminRole(profile?.role) ? [accountingItem] : []),
         ...(hasWorkshopRms ? [workshopItem] : []),
         ...(hasDelivery ? [deliveryItem] : []),
-        // Its own row rather than under Workshop. The page still needs WORKSHOP_RMS (/reminders is gated to it).
-        ...(hasWorkshopRms ? [{ href: '/workshop/reminders', label: t('nav.items.reminders'), icon: Bell }] : []),
+        // One row for every module: /reminders holds vehicle service reminders and delivery alerts.
+        ...(hasDelivery || hasWorkshopRms ? [{ href: '/reminders', label: t('nav.items.reminders'), icon: Bell }] : []),
         // Margins and rankings from the invoices — everyone in Sales, not just the books' admins.
         ...(hasInvoicePos ? [{ href: '/reports/sales', label: t('nav.items.salesReports'), icon: ChartColumnIncreasing }] : []),
         // Mechanics (Workshop, admins) and drivers (Delivery) as tabs of one page.
@@ -869,6 +869,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <NotificationDrawer
         enabled={hasWorkshopRms || hasDelivery}
         remindersEnabled={hasWorkshopRms}
+        viewAllHref={hasDelivery || hasWorkshopRms ? '/reminders' : null}
         pendingDevices={pendingDevices}
       />
 

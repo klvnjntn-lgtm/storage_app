@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type { Request, Response } from 'express';
 import { getJwtSecret } from './jwt.strategy';
 
@@ -64,6 +64,49 @@ export function readCookie(req: Pick<Request, 'headers'>, name: string): string 
     }
   }
   return null;
+}
+
+// The driver phone id (devices.service.ts), kept by the server as well as
+// in the browser's localStorage. Browsers clear script storage on their own
+// (Safari after a week without a visit, "clean up" apps, storage pressure),
+// and every clear made an approved phone look new: the driver was told to
+// ask the office again. A first-party httpOnly cookie set by the server
+// outlives those clears, so it is read first and the header only seeds it.
+// Not a secret and not signed: the id was always client-supplied, and
+// approval only trusts an id the office approved.
+export const PHONE_COOKIE = 'waresys_phone';
+const PHONE_MAX_AGE_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+const PHONE_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+
+function validPhoneId(value: unknown): string | null {
+  return typeof value === 'string' && PHONE_ID_PATTERN.test(value) ? value : null;
+}
+
+// Cookie first, then the X-Device-Id header, then the login body; a new id
+// when there is none, so a browser that can't keep localStorage still gets
+// one (and waits for approval like any new phone).
+export function resolvePhoneId(req: Pick<Request, 'headers'>, bodyId?: string): string {
+  return (
+    validPhoneId(readCookie(req, PHONE_COOKIE)) ??
+    validPhoneId(req.headers['x-device-id']) ??
+    validPhoneId(bodyId) ??
+    randomUUID()
+  );
+}
+
+// The id the request's phone is known by, without minting one.
+export function requestPhoneId(req: Pick<Request, 'headers'>): string | null {
+  return validPhoneId(readCookie(req, PHONE_COOKIE)) ?? validPhoneId(req.headers['x-device-id']);
+}
+
+export function setPhoneCookie(req: Request, res: Response, phoneId: string) {
+  res.cookie(PHONE_COOKIE, phoneId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.secure,
+    path: '/',
+    maxAge: PHONE_MAX_AGE_MS,
+  });
 }
 
 // One cookie per browser: signing in to another account replaces it, which

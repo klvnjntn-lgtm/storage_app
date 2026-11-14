@@ -166,7 +166,7 @@ export const pageTours: Record<string, PageTourConfig> = {
   rmsReminders: {
     module: 'rms',
     title: 'tour.pages.rmsReminders.title',
-    path: '/workshop/reminders',
+    path: '/reminders',
     steps: [
       s('rmsReminders', 'intro'),
       s('rmsReminders', 'card', 'rem-card', 'bottom'),

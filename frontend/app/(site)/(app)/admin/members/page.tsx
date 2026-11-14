@@ -263,19 +263,26 @@ export default function MembersPage() {
           >
             <label className="block">
               <span className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-                {t('admin.members.emailLabel')}
+                {inviteRole === 'DRIVER' ? t('admin.members.loginIdLabel') : t('admin.members.emailLabel')}
               </span>
+              {/* A driver's login is an ID in email form, not an inbox they
+                  read: the admin sets their password on the Drivers page. */}
               <input
                 type="email"
                 required
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder={inviteRole === 'DRIVER' ? t('admin.members.loginIdPlaceholder') : undefined}
+                autoComplete="off"
                 className="w-full border border-gray-300 rounded-md px-2.5 py-2 sm:py-1.5 text-base sm:text-sm"
               />
+              {inviteRole === 'DRIVER' && (
+                <span className="block text-[11px] text-gray-500 mt-1">{t('admin.members.loginIdHint')}</span>
+              )}
             </label>
             <label className="block">
               <span className="block text-[11px] font-semibold text-blue-900/50 uppercase tracking-wide mb-1">
-                {t('admin.members.passwordLabel')}
+                {inviteRole === 'DRIVER' ? t('admin.members.driverPasswordLabel') : t('admin.members.passwordLabel')}
               </span>
               <input
                 type="text"

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -16,6 +17,7 @@ import {
   type JwtPayload,
 } from '../auth/decorators/current-user.decorator';
 import { DevicesService } from '../auth/devices.service';
+import { ApproveDeviceDto } from './dto/approve-device.dto';
 
 // Office staff (USER) handle drivers' phones too — approving one is
 // day-to-day dispatch work, not account administration.
@@ -47,8 +49,9 @@ export class DevicesController {
     @CurrentOrg() organizationId: string,
     @CurrentUser() admin: JwtPayload,
     @Param('id') id: string,
+    @Body() dto: ApproveDeviceDto,
   ) {
-    return this.devicesService.approve(organizationId, id, admin.sub);
+    return this.devicesService.approve(organizationId, id, admin.sub, dto.replaceOthers === true);
   }
 
   @Patch('devices/:id/reject')

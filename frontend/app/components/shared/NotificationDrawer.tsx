@@ -27,10 +27,13 @@ function daysUntil(dueDate: string) {
 export default function NotificationDrawer({
   enabled,
   remindersEnabled,
+  viewAllHref = null,
   pendingDevices = [],
 }: {
   enabled: boolean;
   remindersEnabled: boolean;
+  // The full Reminders page (/reminders).
+  viewAllHref?: string | null;
   pendingDevices?: PendingDevice[];
 }) {
   const router = useRouter();
@@ -220,11 +223,11 @@ export default function NotificationDrawer({
             })}
           </div>
 
-          {remindersEnabled && (
+          {viewAllHref && (
             <button
               onClick={() => {
                 setOpen(false);
-                router.push('/workshop/reminders');
+                router.push(viewAllHref);
               }}
               className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-blue-500/20 text-blue-700 font-semibold bg-white hover:bg-blue-50 transition-colors"
             >

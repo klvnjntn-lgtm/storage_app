@@ -182,6 +182,48 @@ describe('member and device guards (database)', () => {
     await prisma.device.deleteMany({ where: { userId: driverId } });
   });
 
+  it('adds an approved phone next to the old one unless the office replaces it', async () => {
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-old')).toBe('OK');
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-new')).toBe('PENDING');
+    const second = await prisma.device.findFirstOrThrow({ where: { userId: driverId, deviceId: 'phone-new' } });
+    await prisma.user.update({ where: { id: driverId }, data: { currentSessionId: 'live' } });
+
+    await devices.approve(orgId, second.id, adminId);
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-old')).toBe('OK');
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-new')).toBe('OK');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: driverId } })).currentSessionId).toBe('live');
+
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-third')).toBe('PENDING');
+    const third = await prisma.device.findFirstOrThrow({ where: { userId: driverId, deviceId: 'phone-third' } });
+    await devices.approve(orgId, third.id, adminId, true);
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-third')).toBe('OK');
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-old')).toBe('REJECTED');
+    expect(await devices.registerOrCheck(orgId, driverId, 'phone-new')).toBe('REJECTED');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: driverId } })).currentSessionId).toBeNull();
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+  });
+
+  it('survives the same new phone signing in twice at once', async () => {
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+    expect(
+      await Promise.all([
+        devices.registerOrCheck(orgId, driverId, 'phone-x'),
+        devices.registerOrCheck(orgId, driverId, 'phone-x'),
+      ]),
+    ).toEqual(['OK', 'OK']);
+    const notifySpy = notifications.notifyOrgStaff as jest.Mock;
+    notifySpy.mockClear();
+    expect(
+      await Promise.all([
+        devices.registerOrCheck(orgId, driverId, 'phone-y'),
+        devices.registerOrCheck(orgId, driverId, 'phone-y'),
+      ]),
+    ).toEqual(['PENDING', 'PENDING']);
+    expect(notifySpy.mock.calls.filter((c) => c[1] === 'DEVICE_PENDING_APPROVAL')).toHaveLength(1);
+    await prisma.device.deleteMany({ where: { userId: driverId } });
+  });
+
   it('auto-approves only a driver’s very first device, so a revoke sticks', async () => {
     expect(await devices.registerOrCheck(orgId, driverId, 'phone-1')).toBe('OK');
     const first = await prisma.device.findFirstOrThrow({ where: { userId: driverId, deviceId: 'phone-1' } });

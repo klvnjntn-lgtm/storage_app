@@ -2252,9 +2252,11 @@ enum NotificationType {
 }
 
 // A browser/device a DRIVER has logged in from. `deviceId` is a
-// client-generated UUID persisted in localStorage (see frontend apifetch),
+// client-generated UUID persisted in localStorage (see frontend apifetch)
+// and in the server-set `waresys_phone` cookie (auth/device-cookie.ts),
 // not this row's own id — it's how the same physical device is recognized
-// across logins. First device for a driver auto-approves so onboarding
+// across logins. A driver may have several APPROVED rows; approving only
+// retires the others when the office chooses to replace them. First device for a driver auto-approves so onboarding
 // isn't blocked; any later device starts PENDING and blocks login until an
 // admin approves it (see AuthService.login).
 model Device {

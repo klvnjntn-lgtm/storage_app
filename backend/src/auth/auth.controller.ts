@@ -20,7 +20,13 @@ import {
   readSessionCookie,
   setSessionCookie,
 } from './session-cookie';
-import { DEVICE_COOKIE, readCookie, setDeviceCookie } from './device-cookie';
+import {
+  DEVICE_COOKIE,
+  readCookie,
+  resolvePhoneId,
+  setDeviceCookie,
+  setPhoneCookie,
+} from './device-cookie';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { InviteDto } from './dto/invite.dto';
@@ -85,13 +91,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // Header takes precedence over the DTO field so every authenticated
-    // and unauthenticated call sends the device id the same way (see
-    // frontend/lib/apifetch.ts).
-    const headerDeviceId = req.headers['x-device-id'];
-    const deviceId =
-      (typeof headerDeviceId === 'string' ? headerDeviceId : undefined) ??
-      dto.deviceId;
+    // The phone id for driver device approval (see device-cookie.ts). Set
+    // before signing in, so a phone refused as new keeps the same id when
+    // it retries instead of making another pending request each time.
+    const deviceId = resolvePhoneId(req, dto.deviceId);
+    setPhoneCookie(req, res, deviceId);
     const result = await this.authService.login(
       dto.email,
       dto.password,

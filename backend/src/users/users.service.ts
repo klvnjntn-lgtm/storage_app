@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { User } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureDefaultBranch } from '../branches/resolve-branch';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -176,6 +177,37 @@ export class UsersService {
       data: { displayName: displayName?.trim() || null },
       select: { id: true, email: true, displayName: true },
     });
+  }
+
+  // Driver logins are an ID in email form, not a mailbox the driver reads,
+  // so there is no reset-by-email for them (AuthService.forgotPassword /
+  // requestPasswordChange refuse drivers): a MASTER or ADMIN sets the
+  // password here instead. Ends the driver's session, like any password change.
+  async setDriverPassword(
+    organizationId: string,
+    actor: MemberActor,
+    userId: string,
+    password: string,
+  ) {
+    const user = await this.getManageable(organizationId, actor, userId);
+    if (user.role !== 'DRIVER') {
+      throw new BadRequestException("Only a driver's password can be set here");
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashed,
+        currentSessionId: null,
+        resetToken: null,
+        resetTokenExpires: null,
+        changePasswordOtpHash: null,
+        changePasswordOtpExpires: null,
+        changePasswordOtpAttempts: 0,
+        pendingPasswordHash: null,
+      },
+    });
+    return { id: userId, passwordChanged: true };
   }
 
   // Changes a member's role. The role is re-read from the database on every

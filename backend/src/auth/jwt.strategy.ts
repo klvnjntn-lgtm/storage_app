@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveTimezone } from '../accounting/business-date';
 import { isWithinAccessWindow } from './access-schedule.util';
 import { DevicesService } from './devices.service';
+import { requestPhoneId } from './device-cookie';
 import { describeCsrfRefusal, hasCsrfHeader, readSessionCookie } from './session-cookie';
 import { isAdminRole } from './roles';
 import { effectiveBranchId } from './branch-scope';
@@ -102,7 +103,25 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User is inactive.');
     }
 
+    // A driver past their access hours is told so, ahead of the session
+    // check: the every-minute sweep (AccessControlService.enforceAccessHours)
+    // clears their session, and the session check alone would then blame
+    // "another device".
+    if (
+      user.role === 'DRIVER' &&
+      user.accessSchedules.length > 0 &&
+      !isWithinAccessWindow(user.accessSchedules, new Date(), resolveTimezone(user.organization))
+    ) {
+      throw new UnauthorizedException('Outside allowed access hours.');
+    }
+
     if (user.currentSessionId !== payload.sessionId) {
+      // No session at all: it was ended (logout, a password change, the
+      // office revoking or replacing the phone), not taken over by a newer
+      // sign-in.
+      if (!user.currentSessionId) {
+        throw new UnauthorizedException('Your session has ended. Please sign in again.');
+      }
       throw new UnauthorizedException('You have logged in on another device.');
     }
 
@@ -122,24 +141,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
-    // Device/access-hours restrictions only apply to DRIVER accounts — see
-    // devices.service.ts and access-schedule.util.ts for the rationale
-    // (field driver phones, not office ADMIN/USER desktop logins).
     if (user.role === 'DRIVER') {
-      if (user.accessSchedules.length > 0) {
-        const tz = resolveTimezone(user.organization);
-        if (!isWithinAccessWindow(user.accessSchedules, new Date(), tz)) {
-          throw new UnauthorizedException('Outside allowed access hours.');
-        }
-      }
-
       // Best-effort freshness touch, not an enforcement point — device
       // approval/revocation is enforced at login time and via revoke()
       // (which nulls currentSessionId), not by re-checking the header here.
-      const deviceId = req.headers['x-device-id'];
-      if (typeof deviceId === 'string' && deviceId) {
-        void this.devices.touchLastSeen(user.id, deviceId);
-      }
+      const deviceId = requestPhoneId(req);
+      if (deviceId) void this.devices.touchLastSeen(user.id, deviceId);
     }
 
     // Best-effort, like the device touch above: one write per user every

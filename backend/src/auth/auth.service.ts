@@ -386,6 +386,11 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
+    // The code goes by email, and a driver's login isn't a real mailbox.
+    if (user.role === 'DRIVER') {
+      throw new ForbiddenException('Ask your admin to change your password');
+    }
+
     const valid = await bcrypt.compare(currentPassword, user.password);
     if (!valid) {
       throw new UnauthorizedException('Current password is incorrect');
@@ -530,7 +535,10 @@ export class AuthService {
         'If an account exists for that email, a reset link is on its way.',
     };
 
-    if (!user || !user.active) {
+    // A driver's login is an ID, not a mailbox they read — their admin
+    // sets the password (UsersService.setDriverPassword). Same response,
+    // so this still doesn't reveal which logins exist.
+    if (!user || !user.active || user.role === 'DRIVER') {
       return genericResponse;
     }
 

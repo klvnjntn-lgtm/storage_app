@@ -30,7 +30,7 @@ export default function WorkshopHome() {
     {
       title: t('workshop.overview.remindersCardTitle'),
       description: t('workshop.overview.remindersCardDescription'),
-      href: '/workshop/reminders',
+      href: '/reminders',
       icon: Bell,
       gradient: 'from-amber-500 to-orange-700',
     },

@@ -14,7 +14,7 @@ export function getDeviceId(): string {
   try {
     let id = localStorage.getItem("deviceId");
     if (!id) {
-      id = crypto.randomUUID();
+      id = randomId();
       localStorage.setItem("deviceId", id);
     }
     return id;
@@ -72,13 +72,20 @@ async function fetchWithRetry(url: string, init: RequestInit): Promise<Response>
   }
 }
 
-function newIdempotencyKey(): string {
+// Function declaration (hoisted): getDeviceId above uses it too. A phone
+// without randomUUID used to get no device id at all, and a driver on one
+// could never sign in with device approval on.
+function randomId(): string {
   try {
     return crypto.randomUUID();
   } catch {
     // Older WebViews without randomUUID.
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
   }
+}
+
+function newIdempotencyKey(): string {
+  return randomId();
 }
 
 // fetch() has no timeout of its own, so a dying signal can leave a request

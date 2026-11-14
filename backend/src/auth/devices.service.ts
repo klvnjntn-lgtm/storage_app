@@ -60,22 +60,34 @@ export class DevicesService {
       where: { userId },
     });
 
+    // createMany + skipDuplicates: a double-tapped sign-in sends this phone
+    // twice at once, and the second insert used to fail on the unique
+    // (userId, deviceId) and show the driver a server error.
     if (knownDevices === 0) {
-      await this.prisma.device.create({
-        data: {
-          userId,
-          deviceId,
-          userAgent,
-          status: 'APPROVED',
-          approvedAt: new Date(),
-        },
+      await this.prisma.device.createMany({
+        data: [
+          {
+            userId,
+            deviceId,
+            userAgent,
+            status: 'APPROVED',
+            approvedAt: new Date(),
+          },
+        ],
+        skipDuplicates: true,
       });
       return 'OK';
     }
 
-    await this.prisma.device.create({
-      data: { userId, deviceId, userAgent, status: 'PENDING' },
+    const created = await this.prisma.device.createMany({
+      data: [{ userId, deviceId, userAgent, status: 'PENDING' }],
+      skipDuplicates: true,
     });
+    // The twin request made the row: answer from it, and don't tell the
+    // office twice.
+    if (created.count === 0) {
+      return this.registerOrCheck(organizationId, userId, deviceId, userAgent);
+    }
     await this.notifications.notifyOrgStaff(
       organizationId,
       'DEVICE_PENDING_APPROVAL',
@@ -150,22 +162,36 @@ export class DevicesService {
     return device;
   }
 
-  // One phone per driver: approving a new device retires the driver's
-  // other approved ones (REVOKED) and ends whatever session is live, so
-  // the old phone is signed out and can't come back without approval.
-  async approve(organizationId: string, deviceId: string, adminId: string) {
+  // Approving adds the phone to the driver's approved ones. Retiring the
+  // others is the office's choice (replaceOthers), not automatic: the same
+  // phone can show up under a second id (another browser, the home-screen
+  // app on iPhone), and approving that used to block the one the driver
+  // was still using. Replacing revokes the others and ends the live
+  // session, so the old phone is signed out until approved again.
+  async approve(
+    organizationId: string,
+    deviceId: string,
+    adminId: string,
+    replaceOthers = false,
+  ) {
     const device = await this.getOrgScopedDevice(organizationId, deviceId);
+    const approveThis = this.prisma.device.update({
+      where: { id: device.id },
+      // Any status: a rejected or revoked phone can be approved again.
+      data: {
+        status: 'APPROVED',
+        approvedAt: new Date(),
+        approvedByUserId: adminId,
+        lastBlockedAttemptAt: null,
+      },
+    });
+    if (!replaceOthers) {
+      const updated = await approveThis;
+      await this.notifyApproved(organizationId, device.userId);
+      return updated;
+    }
     const [updated, replaced] = await this.prisma.$transaction([
-      this.prisma.device.update({
-        where: { id: device.id },
-        // Any status: a rejected or revoked phone can be approved again.
-        data: {
-          status: 'APPROVED',
-          approvedAt: new Date(),
-          approvedByUserId: adminId,
-          lastBlockedAttemptAt: null,
-        },
-      }),
+      approveThis,
       this.prisma.device.updateMany({
         where: { userId: device.userId, status: 'APPROVED', id: { not: device.id } },
         data: { status: 'REVOKED' },
@@ -177,13 +203,17 @@ export class DevicesService {
         data: { currentSessionId: null },
       });
     }
-    await this.notifications.create(
+    await this.notifyApproved(organizationId, device.userId);
+    return updated;
+  }
+
+  private notifyApproved(organizationId: string, userId: string) {
+    return this.notifications.create(
       organizationId,
-      device.userId,
+      userId,
       'DEVICE_APPROVED',
       'Your device was approved',
     );
-    return updated;
   }
 
   async reject(organizationId: string, deviceId: string) {

@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import { Body, Controller, Delete, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrgGuard } from '../auth/guards/org.guard';
@@ -11,6 +12,7 @@ import { SetActiveDto } from './dto/set-active.dto';
 import { SetDisplayNameDto } from './dto/set-display-name.dto';
 import { SetRoleDto } from './dto/set-role.dto';
 import { SetBranchDto } from './dto/set-branch.dto';
+import { SetPasswordDto } from './dto/set-password.dto';
 
 @UseGuards(JwtAuthGuard, OrgGuard, RolesGuard)
 @Roles('ADMIN')
@@ -83,5 +85,18 @@ export class UsersController {
       id,
       dto.displayName ?? null,
     );
+  }
+
+  // Drivers only — see UsersService.setDriverPassword. ADMIN here also
+  // admits MASTER (RolesGuard).
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Patch(':id/password')
+  setDriverPassword(
+    @CurrentOrg() organizationId: string,
+    @CurrentUser() user: MemberActor,
+    @Param('id') id: string,
+    @Body() dto: SetPasswordDto,
+  ) {
+    return this.usersService.setDriverPassword(organizationId, user, id, dto.password);
   }
 }
